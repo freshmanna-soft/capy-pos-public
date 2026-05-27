@@ -45,3 +45,7 @@ Thumbs.db
 
 *storybook.log
 storybook-static
+
+# generated
+/test-results
+/playwright-report

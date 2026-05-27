@@ -240,8 +240,13 @@ export class SQLiteProductRepository implements IProductRepository {
       row.description,
       row.imageUrl,
       row.barcode,
+      row.emoji,
       new Date(row.createdAt),
-      new Date(row.updatedAt)
+      new Date(row.updatedAt),
+      row.createdBy,
+      row.updatedBy,
+      row.deletedAt ? new Date(row.deletedAt) : undefined,
+      row.deletedBy
     );
   }
 

@@ -1,11 +1,14 @@
+import { SoftDeletableEntity } from './base.entity';
+
 /**
  * Product Entity
  * Represents a product in the inventory system
+ * Extends SoftDeletableEntity for common functionality
  * Follows SOLID principles - Single Responsibility
  */
-export class Product {
+export class Product extends SoftDeletableEntity {
   constructor(
-    public readonly id: string,
+    id: string,
     public name: string,
     public price: number,
     public sku: string,
@@ -14,9 +17,15 @@ export class Product {
     public description?: string,
     public imageUrl?: string,
     public barcode?: string,
-    public createdAt: Date = new Date(),
-    public updatedAt: Date = new Date()
+    public emoji?: string,
+    createdAt: Date = new Date(),
+    updatedAt: Date = new Date(),
+    createdBy?: string,
+    updatedBy?: string,
+    deletedAt?: Date,
+    deletedBy?: string
   ) {
+    super(id, createdAt, updatedAt, createdBy, updatedBy, deletedAt, deletedBy);
     this.validate();
   }
 
@@ -24,10 +33,7 @@ export class Product {
    * Validates product data
    * @throws Error if validation fails
    */
-  private validate(): void {
-    if (!this.id || this.id.trim() === '') {
-      throw new Error('Product ID is required');
-    }
+  protected validate(): void {
     if (!this.name || this.name.trim() === '') {
       throw new Error('Product name is required');
     }
@@ -47,13 +53,13 @@ export class Product {
    * @param quantity - Amount to add (positive) or remove (negative)
    * @throws Error if resulting stock would be negative
    */
-  updateStock(quantity: number): void {
+  updateStock(quantity: number, updatedBy?: string): void {
     const newStock = this.stock + quantity;
     if (newStock < 0) {
       throw new Error('Insufficient stock');
     }
     this.stock = newStock;
-    this.updatedAt = new Date();
+    this.touch(updatedBy);
   }
 
   /**
@@ -76,18 +82,18 @@ export class Product {
    * @param newPrice - New price value
    * @throws Error if price is negative
    */
-  updatePrice(newPrice: number): void {
+  updatePrice(newPrice: number, updatedBy?: string): void {
     if (newPrice < 0) {
       throw new Error('Price cannot be negative');
     }
     this.price = newPrice;
-    this.updatedAt = new Date();
+    this.touch(updatedBy);
   }
 
   /**
    * Creates a copy of the product
    */
-  clone(): Product {
+  override clone(): Product {
     return new Product(
       this.id,
       this.name,
@@ -98,17 +104,22 @@ export class Product {
       this.description,
       this.imageUrl,
       this.barcode,
+      this.emoji,
       this.createdAt,
-      this.updatedAt
+      this.updatedAt,
+      this.createdBy,
+      this.updatedBy,
+      this.deletedAt,
+      this.deletedBy
     );
   }
 
   /**
    * Converts product to plain object
    */
-  toJSON(): Record<string, any> {
+  override toJSON(): Record<string, any> {
     return {
-      id: this.id,
+      ...super.toJSON(),
       name: this.name,
       price: this.price,
       sku: this.sku,
@@ -116,9 +127,7 @@ export class Product {
       stock: this.stock,
       description: this.description,
       imageUrl: this.imageUrl,
-      barcode: this.barcode,
-      createdAt: this.createdAt.toISOString(),
-      updatedAt: this.updatedAt.toISOString()
+      barcode: this.barcode
     };
   }
 
@@ -136,8 +145,13 @@ export class Product {
       data.description,
       data.imageUrl,
       data.barcode,
-      new Date(data.createdAt),
-      new Date(data.updatedAt)
+      data.emoji,
+      data.createdAt ? new Date(data.createdAt) : new Date(),
+      data.updatedAt ? new Date(data.updatedAt) : new Date(),
+      data.createdBy,
+      data.updatedBy,
+      data.deletedAt ? new Date(data.deletedAt) : undefined,
+      data.deletedBy
     );
   }
 }
