@@ -1,95 +1,110 @@
 import { Injectable } from '@angular/core';
 import { IProductRepository } from '../../domain/interfaces/product.repository.interface';
 import { Product } from '../../domain/entities/product.entity';
-import Database from 'better-sqlite3';
+import { BaseSQLiteRepository } from './base-sqlite.repository';
+import { DatabaseService } from '../sqlite/database.service';
 
 /**
  * SQLite Product Repository Implementation
- * Implements IProductRepository for local SQLite database
- * Follows Dependency Inversion Principle (SOLID)
+ * 
+ * Implements IProductRepository for local SQLite database using sql.js.
+ * Extends BaseSQLiteRepository for common CRUD operations.
+ * Follows Dependency Inversion Principle (SOLID).
+ * 
+ * @class SQLiteProductRepository
+ * @extends BaseSQLiteRepository<Product>
+ * @implements IProductRepository
  */
-@Injectable({
-  providedIn: 'root'
-})
-export class SQLiteProductRepository implements IProductRepository {
-  private db: Database.Database;
+@Injectable({ providedIn: 'root' })
+export class SQLiteProductRepository 
+  extends BaseSQLiteRepository<Product> 
+  implements IProductRepository 
+{
+  protected readonly tableName = 'products';
 
-  constructor() {
-    // Initialize SQLite database
-    this.db = new Database('capy-pos.db');
-    this.initializeDatabase();
+  constructor(db: DatabaseService) {
+    super(db);
   }
 
   /**
-   * Initializes database schema
+   * Find products by category
    */
-  private initializeDatabase(): void {
-    const createTableSQL = `
-      CREATE TABLE IF NOT EXISTS products (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        price REAL NOT NULL,
-        sku TEXT UNIQUE NOT NULL,
-        category TEXT NOT NULL,
-        stock INTEGER NOT NULL DEFAULT 0,
-        description TEXT,
-        imageUrl TEXT,
-        barcode TEXT,
-        createdAt TEXT NOT NULL,
-        updatedAt TEXT NOT NULL
-      )
+  async findByCategory(category: string): Promise<Product[]> {
+    const sql = `
+      SELECT * FROM ${this.tableName} 
+      WHERE category = ? AND deleted_at IS NULL 
+      ORDER BY name
+    `;
+    const rows = this.db.query(sql, [category]);
+    return rows.map(row => this.mapToEntity(row));
+  }
+
+  /**
+   * Search products by name, SKU, or barcode
+   */
+  async search(query: string): Promise<Product[]> {
+    const { where, params } = this.buildSearchWhere(
+      ['name', 'sku', 'barcode'],
+      query
+    );
+    const sql = `
+      SELECT * FROM ${this.tableName} 
+      WHERE ${where} AND deleted_at IS NULL 
+      ORDER BY name
+    `;
+    const rows = this.db.query(sql, params);
+    return rows.map(row => this.mapToEntity(row));
+  }
+
+  /**
+   * Find products with low stock
+   */
+  async findLowStock(threshold: number = 10): Promise<Product[]> {
+    const sql = `
+      SELECT * FROM ${this.tableName} 
+      WHERE stock <= ? AND deleted_at IS NULL 
+      ORDER BY stock ASC
+    `;
+    const rows = this.db.query(sql, [threshold]);
+    return rows.map(row => this.mapToEntity(row));
+  }
+
+  /**
+   * Map database row to Product entity
+   */
+  protected mapToEntity(row: any): Product {
+    return new Product(
+      row.id,
+      row.name,
+      row.price,
+      row.sku,
+      row.category,
+      row.stock,
+      row.description || undefined,
+      row.image_url || undefined,
+      row.barcode || undefined,
+      row.emoji || undefined,
+      new Date(row.created_at),
+      new Date(row.updated_at),
+      row.created_by || undefined,
+      row.updated_by || undefined,
+      row.deleted_at ? new Date(row.deleted_at) : undefined,
+      row.deleted_by || undefined
+    );
+  }
+
+  /**
+   * Build INSERT query for Product
+   */
+  protected buildInsertQuery(product: Product): { sql: string; params: any[] } {
+    const sql = `
+      INSERT INTO ${this.tableName} (
+        id, name, price, sku, category, stock, description, 
+        image_url, barcode, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     
-    this.db.exec(createTableSQL);
-    
-    // Create indexes for better performance
-    this.db.exec('CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)');
-    this.db.exec('CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku)');
-    this.db.exec('CREATE INDEX IF NOT EXISTS idx_products_stock ON products(stock)');
-  }
-
-  async findAll(): Promise<Product[]> {
-    const stmt = this.db.prepare('SELECT * FROM products ORDER BY name');
-    const rows = stmt.all();
-    return rows.map(row => this.mapToEntity(row));
-  }
-
-  async findById(id: string): Promise<Product | null> {
-    const stmt = this.db.prepare('SELECT * FROM products WHERE id = ?');
-    const row = stmt.get(id);
-    return row ? this.mapToEntity(row) : null;
-  }
-
-  async findByCategory(category: string): Promise<Product[]> {
-    const stmt = this.db.prepare('SELECT * FROM products WHERE category = ? ORDER BY name');
-    const rows = stmt.all(category);
-    return rows.map(row => this.mapToEntity(row));
-  }
-
-  async search(query: string): Promise<Product[]> {
-    const searchPattern = `%${query}%`;
-    const stmt = this.db.prepare(`
-      SELECT * FROM products 
-      WHERE name LIKE ? OR sku LIKE ? OR barcode LIKE ?
-      ORDER BY name
-    `);
-    const rows = stmt.all(searchPattern, searchPattern, searchPattern);
-    return rows.map(row => this.mapToEntity(row));
-  }
-
-  async findLowStock(threshold: number = 10): Promise<Product[]> {
-    const stmt = this.db.prepare('SELECT * FROM products WHERE stock <= ? ORDER BY stock ASC');
-    const rows = stmt.all(threshold);
-    return rows.map(row => this.mapToEntity(row));
-  }
-
-  async create(product: Product): Promise<Product> {
-    const stmt = this.db.prepare(`
-      INSERT INTO products (id, name, price, sku, category, stock, description, imageUrl, barcode, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    
-    stmt.run(
+    const params = [
       product.id,
       product.name,
       product.price,
@@ -101,160 +116,92 @@ export class SQLiteProductRepository implements IProductRepository {
       product.barcode || null,
       product.createdAt.toISOString(),
       product.updatedAt.toISOString()
-    );
-    
-    return product;
+    ];
+
+    return { sql, params };
   }
 
-  async update(id: string, productData: Partial<Product>): Promise<Product> {
-    const existing = await this.findById(id);
-    if (!existing) {
-      throw new Error(`Product with ID ${id} not found`);
-    }
-
+  /**
+   * Build UPDATE query for Product
+   */
+  protected buildUpdateQuery(id: string, data: Partial<Product>): { sql: string; params: any[] } {
     const updates: string[] = [];
-    const values: any[] = [];
+    const params: any[] = [];
 
-    if (productData.name !== undefined) {
+    if (data.name !== undefined) {
       updates.push('name = ?');
-      values.push(productData.name);
+      params.push(data.name);
     }
-    if (productData.price !== undefined) {
+    if (data.price !== undefined) {
       updates.push('price = ?');
-      values.push(productData.price);
+      params.push(data.price);
     }
-    if (productData.sku !== undefined) {
+    if (data.sku !== undefined) {
       updates.push('sku = ?');
-      values.push(productData.sku);
+      params.push(data.sku);
     }
-    if (productData.category !== undefined) {
+    if (data.category !== undefined) {
       updates.push('category = ?');
-      values.push(productData.category);
+      params.push(data.category);
     }
-    if (productData.stock !== undefined) {
+    if (data.stock !== undefined) {
       updates.push('stock = ?');
-      values.push(productData.stock);
+      params.push(data.stock);
     }
-    if (productData.description !== undefined) {
+    if (data.description !== undefined) {
       updates.push('description = ?');
-      values.push(productData.description);
+      params.push(data.description);
     }
-    if (productData.imageUrl !== undefined) {
-      updates.push('imageUrl = ?');
-      values.push(productData.imageUrl);
+    if (data.imageUrl !== undefined) {
+      updates.push('image_url = ?');
+      params.push(data.imageUrl);
     }
-    if (productData.barcode !== undefined) {
+    if (data.barcode !== undefined) {
       updates.push('barcode = ?');
-      values.push(productData.barcode);
+      params.push(data.barcode);
     }
 
-    updates.push('updatedAt = ?');
-    values.push(new Date().toISOString());
-    values.push(id);
+    updates.push('updated_at = ?');
+    params.push(new Date().toISOString());
+    params.push(id);
 
-    const stmt = this.db.prepare(`
-      UPDATE products SET ${updates.join(', ')} WHERE id = ?
-    `);
-    
-    stmt.run(...values);
-    
-    return (await this.findById(id))!;
-  }
-
-  async delete(id: string): Promise<void> {
-    const stmt = this.db.prepare('DELETE FROM products WHERE id = ?');
-    stmt.run(id);
-  }
-
-  async exists(id: string): Promise<boolean> {
-    const stmt = this.db.prepare('SELECT COUNT(*) as count FROM products WHERE id = ?');
-    const result = stmt.get(id) as { count: number };
-    return result.count > 0;
-  }
-
-  async count(): Promise<number> {
-    const stmt = this.db.prepare('SELECT COUNT(*) as count FROM products');
-    const result = stmt.get() as { count: number };
-    return result.count;
-  }
-
-  async bulkCreate(products: Product[]): Promise<Product[]> {
-    const stmt = this.db.prepare(`
-      INSERT INTO products (id, name, price, sku, category, stock, description, imageUrl, barcode, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const transaction = this.db.transaction((products: Product[]) => {
-      for (const product of products) {
-        stmt.run(
-          product.id,
-          product.name,
-          product.price,
-          product.sku,
-          product.category,
-          product.stock,
-          product.description || null,
-          product.imageUrl || null,
-          product.barcode || null,
-          product.createdAt.toISOString(),
-          product.updatedAt.toISOString()
-        );
-      }
-    });
-
-    transaction(products);
-    return products;
-  }
-
-  async bulkUpdate(updates: Array<{ id: string; data: Partial<Product> }>): Promise<Product[]> {
-    const transaction = this.db.transaction(async (updates: Array<{ id: string; data: Partial<Product> }>) => {
-      for (const update of updates) {
-        await this.update(update.id, update.data);
-      }
-    });
-
-    transaction(updates);
-    
-    const updatedProducts: Product[] = [];
-    for (const update of updates) {
-      const product = await this.findById(update.id);
-      if (product) {
-        updatedProducts.push(product);
-      }
-    }
-    
-    return updatedProducts;
+    const sql = `UPDATE ${this.tableName} SET ${updates.join(', ')} WHERE id = ?`;
+    return { sql, params };
   }
 
   /**
-   * Maps database row to Product entity
+   * Find active products (stub - not implemented for SQLite)
    */
-  private mapToEntity(row: any): Product {
-    return new Product(
-      row.id,
-      row.name,
-      row.price,
-      row.sku,
-      row.category,
-      row.stock,
-      row.description,
-      row.imageUrl,
-      row.barcode,
-      row.emoji,
-      new Date(row.createdAt),
-      new Date(row.updatedAt),
-      row.createdBy,
-      row.updatedBy,
-      row.deletedAt ? new Date(row.deletedAt) : undefined,
-      row.deletedBy
-    );
+  async findActive(): Promise<Product[]> {
+    throw new Error('Method not implemented - use DexieProductRepository instead');
   }
 
   /**
-   * Closes database connection
+   * Update product stock (stub - not implemented for SQLite)
    */
-  close(): void {
-    this.db.close();
+  async updateStock(productId: string, quantity: number): Promise<Product> {
+    throw new Error('Method not implemented - use DexieProductRepository instead');
+  }
+
+  /**
+   * Adjust product stock (stub - not implemented for SQLite)
+   */
+  async adjustStock(productId: string, adjustment: number): Promise<Product> {
+    throw new Error('Method not implemented - use DexieProductRepository instead');
+  }
+
+  /**
+   * Update product price (stub - not implemented for SQLite)
+   */
+  async updatePrice(productId: string, price: number, cost?: number): Promise<Product> {
+    throw new Error('Method not implemented - use DexieProductRepository instead');
+  }
+
+  /**
+   * Get all categories (stub - not implemented for SQLite)
+   */
+  async getCategories(): Promise<string[]> {
+    throw new Error('Method not implemented - use DexieProductRepository instead');
   }
 }
 

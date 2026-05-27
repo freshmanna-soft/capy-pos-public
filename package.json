@@ -32,8 +32,11 @@
     "@angular/material": "^21.2.12",
     "@angular/platform-browser": "^21.2.0",
     "@angular/router": "^21.2.0",
+    "@types/sql.js": "^1.4.11",
     "better-sqlite3": "^12.10.0",
+    "dexie": "^4.4.2",
     "rxjs": "~7.8.0",
+    "sql.js": "^1.14.1",
     "tslib": "^2.3.0"
   },
   "devDependencies": {

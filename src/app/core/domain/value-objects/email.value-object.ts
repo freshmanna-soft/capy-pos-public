@@ -34,13 +34,13 @@ export class Email extends BaseValueObject<Email> implements IValueObject<Email>
    * Validate email format
    */
   private validateEmail(value: string): void {
-    if (!value || typeof value !== 'string') {
+    if (value === null || value === undefined || typeof value !== 'string') {
       throw new Error('Email must be a non-empty string');
     }
 
     const trimmed = value.trim();
     if (trimmed.length === 0) {
-      throw new Error('Email must be a non-empty string');
+      throw new Error('Email cannot be empty');
     }
 
     if (trimmed.length > 254) {

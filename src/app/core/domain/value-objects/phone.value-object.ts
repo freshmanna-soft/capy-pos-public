@@ -59,7 +59,7 @@ export class Phone extends BaseValueObject<Phone> implements IValueObject<Phone>
    * Validate phone number format
    */
   private validatePhone(value: string): void {
-    if (!value || typeof value !== 'string') {
+    if (value === null || value === undefined || typeof value !== 'string') {
       throw new Error('Phone number must be a non-empty string');
     }
 
@@ -122,11 +122,20 @@ export class Phone extends BaseValueObject<Phone> implements IValueObject<Phone>
     // Most countries: +XX (2 digits)
     // Some countries: +XXX (3 digits)
     
-    // Try 1-digit country code first (US/Canada)
-    if (normalized.startsWith('+1') && normalized.length >= 12) {
+    // Special case: US/Canada +1 with exactly 10 digits after
+    if (normalized.startsWith('+1') && normalized.length === 12) {
       return {
         countryCode: '+1',
         number: normalized.substring(2)
+      };
+    }
+    
+    // Try 3-digit country code (for numbers like +123 with 10+ digits after)
+    if (normalized.length >= 14) {
+      const threeDigitCode = normalized.substring(0, 4); // +XXX
+      return {
+        countryCode: threeDigitCode,
+        number: normalized.substring(4)
       };
     }
     
@@ -136,15 +145,6 @@ export class Phone extends BaseValueObject<Phone> implements IValueObject<Phone>
       return {
         countryCode: twoDigitCode,
         number: normalized.substring(3)
-      };
-    }
-    
-    // Try 3-digit country code
-    if (normalized.length >= 13) {
-      const threeDigitCode = normalized.substring(0, 4); // +XXX
-      return {
-        countryCode: threeDigitCode,
-        number: normalized.substring(4)
       };
     }
     
