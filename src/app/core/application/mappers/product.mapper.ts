@@ -78,6 +78,10 @@ export class ProductMapper extends BaseMapper<
       dto.imageUrl,
       dto.barcode,
       dto.emoji,
+      10, // lowStockThreshold - default value
+      20, // reorderQuantity - default value
+      0,  // cost - default value
+      true, // isActive - default value
       new Date(dto.createdAt),
       new Date(dto.updatedAt),
       dto.createdBy,

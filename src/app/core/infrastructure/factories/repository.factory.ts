@@ -1,8 +1,12 @@
 import { Injectable, InjectionToken } from '@angular/core';
 import { IProductRepository } from '../../domain/interfaces/product.repository.interface';
 import { ICustomerRepository } from '../../domain/interfaces/customer.repository.interface';
+import { ITransactionRepository } from '../../domain/interfaces/transaction.repository.interface';
+import { IPaymentRepository } from '../../domain/interfaces/payment.repository.interface';
 import { DexieProductRepository } from '../repositories/dexie-product.repository';
 import { DexieCustomerRepository } from '../repositories/dexie-customer.repository';
+import { DexieTransactionRepository } from '../repositories/dexie-transaction.repository';
+import { DexiePaymentRepository } from '../repositories/dexie-payment.repository';
 
 /**
  * Repository Type Enum
@@ -28,6 +32,8 @@ export interface RepositoryConfig {
  */
 export const PRODUCT_REPOSITORY = new InjectionToken<IProductRepository>('PRODUCT_REPOSITORY');
 export const CUSTOMER_REPOSITORY = new InjectionToken<ICustomerRepository>('CUSTOMER_REPOSITORY');
+export const TRANSACTION_REPOSITORY = new InjectionToken<ITransactionRepository>('TRANSACTION_REPOSITORY');
+export const PAYMENT_REPOSITORY = new InjectionToken<IPaymentRepository>('PAYMENT_REPOSITORY');
 export const REPOSITORY_CONFIG = new InjectionToken<RepositoryConfig>('REPOSITORY_CONFIG');
 
 /**
@@ -49,7 +55,9 @@ export const REPOSITORY_CONFIG = new InjectionToken<RepositoryConfig>('REPOSITOR
 export class RepositoryFactory {
   constructor(
     private dexieProductRepo: DexieProductRepository,
-    private dexieCustomerRepo: DexieCustomerRepository
+    private dexieCustomerRepo: DexieCustomerRepository,
+    private dexieTransactionRepo: DexieTransactionRepository,
+    private dexiePaymentRepo: DexiePaymentRepository
   ) {}
 
   /**
@@ -91,6 +99,46 @@ export class RepositoryFactory {
         throw new Error(`Unknown repository type: ${config.type}`);
     }
   }
+
+  /**
+   * Create Transaction Repository based on configuration
+   * @param config - Repository configuration
+   * @returns Transaction repository implementation
+   */
+  createTransactionRepository(config: RepositoryConfig): ITransactionRepository {
+    switch (config.type) {
+      case RepositoryType.LOCAL:
+        return this.dexieTransactionRepo;
+      
+      case RepositoryType.API:
+        // Future: Return API implementation
+        // return new ApiTransactionRepository(config.apiBaseUrl);
+        throw new Error('API repository not yet implemented');
+      
+      default:
+        throw new Error(`Unknown repository type: ${config.type}`);
+    }
+  }
+
+  /**
+   * Create Payment Repository based on configuration
+   * @param config - Repository configuration
+   * @returns Payment repository implementation
+   */
+  createPaymentRepository(config: RepositoryConfig): IPaymentRepository {
+    switch (config.type) {
+      case RepositoryType.LOCAL:
+        return this.dexiePaymentRepo;
+      
+      case RepositoryType.API:
+        // Future: Return API implementation
+        // return new ApiPaymentRepository(config.apiBaseUrl);
+        throw new Error('API repository not yet implemented');
+      
+      default:
+        throw new Error(`Unknown repository type: ${config.type}`);
+    }
+  }
 }
 
 /**
@@ -116,6 +164,26 @@ export function customerRepositoryFactory(
   config: RepositoryConfig
 ): ICustomerRepository {
   return factory.createCustomerRepository(config);
+}
+
+/**
+ * Transaction Repository Provider Factory
+ */
+export function transactionRepositoryFactory(
+  factory: RepositoryFactory,
+  config: RepositoryConfig
+): ITransactionRepository {
+  return factory.createTransactionRepository(config);
+}
+
+/**
+ * Payment Repository Provider Factory
+ */
+export function paymentRepositoryFactory(
+  factory: RepositoryFactory,
+  config: RepositoryConfig
+): IPaymentRepository {
+  return factory.createPaymentRepository(config);
 }
 
 /**
@@ -157,6 +225,20 @@ export const REPOSITORY_PROVIDERS = [
   {
     provide: CUSTOMER_REPOSITORY,
     useFactory: customerRepositoryFactory,
+    deps: [RepositoryFactory, REPOSITORY_CONFIG]
+  },
+  
+  // Provide Transaction Repository
+  {
+    provide: TRANSACTION_REPOSITORY,
+    useFactory: transactionRepositoryFactory,
+    deps: [RepositoryFactory, REPOSITORY_CONFIG]
+  },
+  
+  // Provide Payment Repository
+  {
+    provide: PAYMENT_REPOSITORY,
+    useFactory: paymentRepositoryFactory,
     deps: [RepositoryFactory, REPOSITORY_CONFIG]
   }
 ];

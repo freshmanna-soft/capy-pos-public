@@ -84,6 +84,66 @@ export class ApiProductRepository implements IProductRepository {
     }
   }
 
+  async findActive(): Promise<Product[]> {
+    try {
+      const response = await firstValueFrom(
+        this.http.get<any[]>(`${this.apiUrl}/active`)
+      );
+      return response.map(data => this.mapToEntity(data));
+    } catch (error) {
+      console.error('Error fetching active products:', error);
+      throw new Error('Failed to fetch active products from API');
+    }
+  }
+
+  async updateStock(productId: string, quantity: number): Promise<Product> {
+    try {
+      const response = await firstValueFrom(
+        this.http.patch<any>(`${this.apiUrl}/${productId}/stock`, { quantity })
+      );
+      return this.mapToEntity(response);
+    } catch (error) {
+      console.error(`Error updating stock for product ${productId}:`, error);
+      throw new Error(`Failed to update stock for product ${productId} via API`);
+    }
+  }
+
+  async adjustStock(productId: string, adjustment: number): Promise<Product> {
+    try {
+      const response = await firstValueFrom(
+        this.http.patch<any>(`${this.apiUrl}/${productId}/adjust-stock`, { adjustment })
+      );
+      return this.mapToEntity(response);
+    } catch (error) {
+      console.error(`Error adjusting stock for product ${productId}:`, error);
+      throw new Error(`Failed to adjust stock for product ${productId} via API`);
+    }
+  }
+
+  async updatePrice(productId: string, price: number, cost?: number): Promise<Product> {
+    try {
+      const response = await firstValueFrom(
+        this.http.patch<any>(`${this.apiUrl}/${productId}/price`, { price, cost })
+      );
+      return this.mapToEntity(response);
+    } catch (error) {
+      console.error(`Error updating price for product ${productId}:`, error);
+      throw new Error(`Failed to update price for product ${productId} via API`);
+    }
+  }
+
+  async getCategories(): Promise<string[]> {
+    try {
+      const response = await firstValueFrom(
+        this.http.get<string[]>(`${this.apiUrl}/categories`)
+      );
+      return response;
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      throw new Error('Failed to fetch categories from API');
+    }
+  }
+
   async create(product: Product): Promise<Product> {
     try {
       const response = await firstValueFrom(

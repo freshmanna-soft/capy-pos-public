@@ -84,6 +84,10 @@ export class SQLiteProductRepository
       row.image_url || undefined,
       row.barcode || undefined,
       row.emoji || undefined,
+      10, // lowStockThreshold - default value
+      20, // reorderQuantity - default value
+      0,  // cost - default value
+      true, // isActive - default value
       new Date(row.created_at),
       new Date(row.updated_at),
       row.created_by || undefined,

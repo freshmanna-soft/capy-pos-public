@@ -53,15 +53,22 @@ export interface ICustomerDB {
 
 export interface ITransactionDB {
   id: string;
-  transactionNumber: string;
   customerId?: string;
+  items: string; // JSON string of ITransactionItem[]
   subtotal: number;
-  tax: number;
-  discount: number;
+  taxRate: number;
+  taxAmount: number;
+  discountAmount: number;
   total: number;
   status: string;
-  paymentStatus: string;
+  type: string;
+  refundedAmount: number;
+  paymentIds: string; // JSON string of string[]
+  receiptNumber?: string;
   notes?: string;
+  completedAt?: Date;
+  cancelledAt?: Date;
+  cancellationReason?: string;
   createdAt: Date;
   updatedAt: Date;
   createdBy?: string;
@@ -86,12 +93,18 @@ export interface ITransactionItemDB {
 
 export interface IPaymentDB {
   id: string;
-  transactionId: string;
+  orderId: string; // Maps to transactionId in Payment entity
   amount: number;
   method: string;
   status: string;
-  reference?: string;
-  notes?: string;
+  currency: string;
+  refundedAmount: number;
+  completedAt?: Date;
+  failureReason?: string;
+  transactionId?: string; // Payment gateway transaction ID
+  cardLast4?: string;
+  cardBrand?: string;
+  receiptNumber?: string;
   createdAt: Date;
   updatedAt: Date;
   createdBy?: string;
@@ -199,13 +212,13 @@ export class DexieDatabase extends Dexie {
       customers: 'id, email, phone, status, tier, [status+tier], deletedAt',
       
       // Transactions table with indexes
-      transactions: 'id, transactionNumber, customerId, status, paymentStatus, createdAt, deletedAt',
+      transactions: 'id, customerId, status, type, createdAt, completedAt, cancelledAt, deletedAt',
       
       // Transaction items table with indexes
       transactionItems: 'id, transactionId, productId, [transactionId+productId]',
       
       // Payments table with indexes
-      payments: 'id, transactionId, method, status, createdAt',
+      payments: 'id, orderId, method, status, createdAt, completedAt',
       
       // Stock reservations table with indexes
       stockReservations: 'id, productId, status, expiresAt, [productId+status]',
@@ -242,16 +255,16 @@ export class DexieDatabase extends Dexie {
       await this.products.bulkAdd([
         {
           id: '1',
-          name: 'Espresso',
-          description: 'Rich and bold espresso shot',
-          sku: 'BEV-ESP-001',
+          name: 'Coffee',
+          description: 'Fresh brewed coffee',
+          sku: 'BEV-COF-001',
           barcode: '1234567890123',
           category: 'Beverages',
-          price: 3.50,
-          cost: 1.20,
-          quantity: 100,
-          minStockLevel: 20,
-          maxStockLevel: 200,
+          price: 2.50,
+          cost: 0.80,
+          quantity: 150,
+          minStockLevel: 30,
+          maxStockLevel: 300,
           unit: 'cup',
           taxRate: 0.08,
           isActive: true,

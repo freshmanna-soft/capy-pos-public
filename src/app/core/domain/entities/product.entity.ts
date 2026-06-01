@@ -18,6 +18,10 @@ export class Product extends SoftDeletableEntity {
     public imageUrl?: string,
     public barcode?: string,
     public emoji?: string,
+    public lowStockThreshold: number = 10,
+    public reorderQuantity: number = 20,
+    public cost: number = 0,
+    public isActive: boolean = true,
     createdAt: Date = new Date(),
     updatedAt: Date = new Date(),
     createdBy?: string,
@@ -105,6 +109,10 @@ export class Product extends SoftDeletableEntity {
       this.imageUrl,
       this.barcode,
       this.emoji,
+      this.lowStockThreshold,
+      this.reorderQuantity,
+      this.cost,
+      this.isActive,
       this.createdAt,
       this.updatedAt,
       this.createdBy,
@@ -127,7 +135,12 @@ export class Product extends SoftDeletableEntity {
       stock: this.stock,
       description: this.description,
       imageUrl: this.imageUrl,
-      barcode: this.barcode
+      barcode: this.barcode,
+      emoji: this.emoji,
+      lowStockThreshold: this.lowStockThreshold,
+      reorderQuantity: this.reorderQuantity,
+      cost: this.cost,
+      isActive: this.isActive
     };
   }
 
@@ -146,6 +159,10 @@ export class Product extends SoftDeletableEntity {
       data.imageUrl,
       data.barcode,
       data.emoji,
+      data.lowStockThreshold ?? 10,
+      data.reorderQuantity ?? 20,
+      data.cost ?? 0,
+      data.isActive ?? true,
       data.createdAt ? new Date(data.createdAt) : new Date(),
       data.updatedAt ? new Date(data.updatedAt) : new Date(),
       data.createdBy,

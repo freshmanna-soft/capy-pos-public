@@ -1,6 +1,7 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Inject } from '@angular/core';
 import { Product } from '../../domain/entities/product.entity';
-import { ProductRepositoryService } from '../../infrastructure/factories/repository.factory';
+import { IProductRepository } from '../../domain/interfaces/product.repository.interface';
+import { PRODUCT_REPOSITORY } from '../../infrastructure/factories/repository.factory';
 
 /**
  * Get Products Use Case
@@ -12,15 +13,16 @@ import { ProductRepositoryService } from '../../infrastructure/factories/reposit
   providedIn: 'root'
 })
 export class GetProductsUseCase {
-  constructor(private repositoryService: ProductRepositoryService) {}
+  constructor(
+    @Inject(PRODUCT_REPOSITORY) private repository: IProductRepository
+  ) {}
 
   /**
    * Executes the use case to get all products
    * @returns Promise resolving to array of products
    */
   async execute(): Promise<Product[]> {
-    const repository = this.repositoryService.getRepository();
-    return await repository.findAll();
+    return await this.repository.findAll();
   }
 
   /**
@@ -29,8 +31,7 @@ export class GetProductsUseCase {
    * @returns Promise resolving to array of products
    */
   async byCategory(category: string): Promise<Product[]> {
-    const repository = this.repositoryService.getRepository();
-    return await repository.findByCategory(category);
+    return await this.repository.findByCategory(category);
   }
 
   /**
@@ -39,8 +40,7 @@ export class GetProductsUseCase {
    * @returns Promise resolving to array of matching products
    */
   async search(query: string): Promise<Product[]> {
-    const repository = this.repositoryService.getRepository();
-    return await repository.search(query);
+    return await this.repository.search(query);
   }
 
   /**
@@ -49,8 +49,7 @@ export class GetProductsUseCase {
    * @returns Promise resolving to array of low-stock products
    */
   async lowStock(threshold?: number): Promise<Product[]> {
-    const repository = this.repositoryService.getRepository();
-    return await repository.findLowStock(threshold);
+    return await this.repository.findLowStock(threshold);
   }
 }
 

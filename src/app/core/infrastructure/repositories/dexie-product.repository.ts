@@ -34,11 +34,15 @@ export class DexieProductRepository
       record.imageUrl,
       record.barcode,
       undefined, // emoji not in DB
-      record.createdAt,
-      record.updatedAt,
+      10, // lowStockThreshold - default value
+      20, // reorderQuantity - default value
+      0,  // cost - default value
+      true, // isActive - default value
+      new Date(record.createdAt),
+      new Date(record.updatedAt),
       record.createdBy,
       record.updatedBy,
-      record.deletedAt,
+      record.deletedAt ? new Date(record.deletedAt) : undefined,
       record.deletedBy
     );
   }
