@@ -13,7 +13,9 @@ describe('AuditLogService', () => {
 
   afterEach(async () => {
     // Clean up database after each test
-    await service.clearAll();
+    if (service) {
+      await service.clearAll();
+    }
   });
 
   it('should be created', () => {

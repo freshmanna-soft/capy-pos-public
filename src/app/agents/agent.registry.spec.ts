@@ -7,6 +7,34 @@ import { PaymentAgent } from './payment/infrastructure/payment.agent';
 import { AnalyticsAgent } from './analytics/infrastructure/analytics.agent';
 import { CustomerAgent } from './customer/infrastructure/customer.agent';
 import { IntegrationAgent } from './integration/infrastructure/integration.agent';
+import { IProductRepository } from '../core/domain/interfaces/product.repository.interface';
+import { ITransactionRepository } from '../core/domain/interfaces/transaction.repository.interface';
+import { IPaymentRepository } from '../core/domain/interfaces/payment.repository.interface';
+import { PAYMENT_REPOSITORY } from '../core/infrastructure/factories/repository.factory';
+import { AuditLogService } from '../core/infrastructure/audit/audit-log.service';
+import { EventBusService } from '../core/infrastructure/messaging/event-bus.service';
+
+// Mock repositories
+const mockProductRepository: Partial<IProductRepository> = {
+  findAll: vi.fn().mockResolvedValue([]),
+  findById: vi.fn().mockResolvedValue(null),
+  findLowStock: vi.fn().mockResolvedValue([]),
+  updateStock: vi.fn().mockResolvedValue(undefined),
+  adjustStock: vi.fn().mockResolvedValue(undefined),
+};
+
+const mockTransactionRepository: Partial<ITransactionRepository> = {
+  findAll: vi.fn().mockResolvedValue([]),
+  findById: vi.fn().mockResolvedValue(null),
+  findByDateRange: vi.fn().mockResolvedValue([]),
+  count: vi.fn().mockResolvedValue(0),
+};
+
+const mockPaymentRepository: Partial<IPaymentRepository> = {
+  findAll: vi.fn().mockResolvedValue([]),
+  findById: vi.fn().mockResolvedValue(null),
+  findByTransactionId: vi.fn().mockResolvedValue([]),
+};
 
 describe('AgentRegistry', () => {
   let registry: AgentRegistry;
@@ -20,13 +48,58 @@ describe('AgentRegistry', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       providers: [
-        AgentRegistry,
+        AuditLogService,
+        EventBusService,
+        // Provide mock repositories with string-based tokens (for InventoryAgent, SalesAgent)
+        {
+          provide: 'IProductRepository',
+          useValue: mockProductRepository
+        },
+        {
+          provide: 'ITransactionRepository',
+          useValue: mockTransactionRepository
+        },
+        // Provide mock repository with InjectionToken (for PaymentAgent)
+        {
+          provide: PAYMENT_REPOSITORY,
+          useValue: mockPaymentRepository
+        },
+        // Provide agents explicitly
         InventoryAgent,
         SalesAgent,
         PaymentAgent,
         AnalyticsAgent,
         CustomerAgent,
-        IntegrationAgent
+        IntegrationAgent,
+        // Provide AgentRegistry with explicit factory
+        {
+          provide: AgentRegistry,
+          useFactory: (
+            inventory: InventoryAgent,
+            sales: SalesAgent,
+            payment: PaymentAgent,
+            analytics: AnalyticsAgent,
+            customer: CustomerAgent,
+            integration: IntegrationAgent
+          ) => {
+            return new AgentRegistry(
+              inventory,
+              sales,
+              payment,
+              analytics,
+              customer,
+              integration
+            );
+          },
+          deps: [
+            InventoryAgent,
+            SalesAgent,
+            PaymentAgent,
+            AnalyticsAgent,
+            CustomerAgent,
+            IntegrationAgent
+          ]
+        }
       ]
     });
 
@@ -40,7 +113,9 @@ describe('AgentRegistry', () => {
   });
 
   afterEach(async () => {
-    await registry.stopAll();
+    if (registry) {
+      await registry.stopAll();
+    }
   });
 
   describe('Agent Registration', () => {
@@ -52,7 +127,7 @@ describe('AgentRegistry', () => {
     it('should get agent by ID', () => {
       const agent = registry.getAgent('inventory-agent');
       expect(agent).toBeDefined();
-      expect(agent?.name).toBe('InventoryAgent');
+      expect(agent?.name).toBe('Inventory Agent');
     });
 
     it('should return undefined for non-existent agent', () => {
@@ -154,7 +229,7 @@ describe('AgentRegistry', () => {
     it('should find specific agent by name', () => {
       const agents = registry.findAgentsByName('Inventory');
       expect(agents.length).toBe(1);
-      expect(agents[0].name).toBe('InventoryAgent');
+      expect(agents[0].name).toBe('Inventory Agent');
     });
 
     it('should return empty array for no matches', () => {

@@ -33,6 +33,9 @@ import { Product } from '../../../../core/domain/entities/product.entity';
             {{ category }}
           </button>
         </div>
+        
+        <!-- Add New Product Button -->
+        <button class="add-product-button" (click)="onAddNewProduct()">Add New Product</button>
       </div>
       
       <!-- Product Grid -->
@@ -193,6 +196,10 @@ export class ProductGridComponent {
 
   onProductClick(product: Product): void {
     this.productClick.emit(product);
+  }
+
+  onAddNewProduct(): void {
+    // Add logic for adding a new product
   }
 
   trackByProductId(index: number, product: Product): string {

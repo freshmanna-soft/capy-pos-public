@@ -43,6 +43,17 @@ import { DexieDatabase } from '../../core/infrastructure/database/dexie-database
           <div class="header-actions">
             <button 
               class="header-btn"
+              data-testid="add-product-btn"
+              (click)="handleAddProduct()"
+              aria-label="Add product">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                  d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+              Add Product
+            </button>
+            <button 
+              class="header-btn"
               data-testid="new-transaction-btn"
               (click)="startNewTransaction()"
               aria-label="Start new transaction">
@@ -284,9 +295,16 @@ export class PosTerminalComponent implements OnInit {
 
     // Clear the cart
     this.shoppingCart.clearCart();
+  
+  }
 
-    // Show feedback
-    console.log('New transaction started');
+  /**
+   * Handles adding a product to the cart
+   */
+  handleAddProduct(): void {
+    // This would typically trigger the product selection flow
+    // For now, we'll just log that it was called
+    console.log('Add Product button clicked');
   }
 }
 

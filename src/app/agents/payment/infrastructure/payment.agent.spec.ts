@@ -1,21 +1,61 @@
 import { TestBed } from '@angular/core/testing';
 import { PaymentAgent } from './payment.agent';
-import { PaymentMethod, PaymentStatus } from '../../../core/domain/entities/payment.entity';
+import { PaymentMethod, PaymentStatus, Payment } from '../../../core/domain/entities/payment.entity';
 import { AgentStatus } from '../../base/base-agent.interface';
+import { PAYMENT_REPOSITORY } from '../../../core/infrastructure/factories/repository.factory';
+import { AuditLogService } from '../../../core/infrastructure/audit/audit-log.service';
+import { IPaymentRepository } from '../../../core/domain/interfaces/payment.repository.interface';
+
+// Mock payment repository
+const mockPaymentRepository: Partial<IPaymentRepository> = {
+  findAll: vi.fn().mockResolvedValue([]),
+  findById: vi.fn().mockResolvedValue(null),
+  findByTransactionId: vi.fn().mockResolvedValue([]),
+  findByStatus: vi.fn().mockResolvedValue([]),
+  findByMethod: vi.fn().mockResolvedValue([]),
+  findByDateRange: vi.fn().mockResolvedValue([]),
+  findByCustomerId: vi.fn().mockResolvedValue([]),
+  create: vi.fn().mockImplementation((payment: Payment) => Promise.resolve(payment)),
+  update: vi.fn().mockImplementation((id: string, payment: Payment) => Promise.resolve(payment)),
+  delete: vi.fn().mockResolvedValue(undefined),
+};
 
 describe('PaymentAgent', () => {
   let agent: PaymentAgent;
+  let auditLogService: AuditLogService;
 
   beforeEach(() => {
+    // Reset mocks
+    vi.clearAllMocks();
+    
+    // Reset TestBed to ensure clean state
+    TestBed.resetTestingModule();
+    
     TestBed.configureTestingModule({
-      providers: [PaymentAgent]
+      providers: [
+        AuditLogService,
+        {
+          provide: PAYMENT_REPOSITORY,
+          useValue: mockPaymentRepository
+        }
+      ]
     });
-    agent = TestBed.inject(PaymentAgent);
+    
+    // Get AuditLogService instance
+    auditLogService = TestBed.inject(AuditLogService);
+    
+    // Manually create PaymentAgent with injected dependencies
+    // This ensures proper dependency injection
+    agent = new PaymentAgent(mockPaymentRepository as IPaymentRepository, auditLogService);
   });
 
   afterEach(async () => {
     if (agent.status !== AgentStatus.IDLE) {
       await agent.stop();
+    }
+    // Clean up audit log database
+    if (auditLogService) {
+      await auditLogService.clearAll();
     }
   });
 
@@ -60,7 +100,7 @@ describe('PaymentAgent', () => {
         cardNumber: '4532015112830366',
         cardholderName: 'John Doe',
         expiryMonth: 12,
-        expiryYear: 2025,
+        expiryYear: new Date().getFullYear() + 1,
         cvv: '123'
       };
 

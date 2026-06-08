@@ -389,11 +389,20 @@ describe('RetryService', () => {
     it('should clear specific operation stats', async () => {
       const fn = async () => 'success';
 
+      // Execute operations to generate stats
       await service.execute('op1', fn);
       await service.execute('op2', fn);
 
+      // Verify both have stats before clearing
+      const statsBefore1 = service.getStats('op1') as any;
+      const statsBefore2 = service.getStats('op2') as any;
+      expect(statsBefore1.totalAttempts).toBeGreaterThan(0);
+      expect(statsBefore2.totalAttempts).toBeGreaterThan(0);
+
+      // Clear only op1
       service.clearStats('op1');
 
+      // Verify op1 is cleared but op2 is not
       const stats1 = service.getStats('op1') as any;
       const stats2 = service.getStats('op2') as any;
 

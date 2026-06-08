@@ -12,7 +12,9 @@ describe('CircuitBreakerService', () => {
   });
 
   afterEach(() => {
-    service.clear();
+    if (service) {
+      service.clear();
+    }
   });
 
   it('should be created', () => {

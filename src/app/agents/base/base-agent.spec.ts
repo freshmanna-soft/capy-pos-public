@@ -139,7 +139,7 @@ describe('BaseAgent', () => {
       expect(response.error).toContain('id');
     });
 
-    it('should emit message to subscribers', (done: any) => {
+    it('should emit message to subscribers', async () => {
       const message: IAgentMessage = {
         id: 'msg-1',
         type: 'TEST',
@@ -147,12 +147,15 @@ describe('BaseAgent', () => {
         timestamp: new Date()
       };
 
-      agent.subscribe().subscribe((emittedMessage) => {
-        expect(emittedMessage).toEqual(message);
-        done();
+      const emittedPromise = new Promise<IAgentMessage>((resolve) => {
+        agent.subscribe().subscribe((emittedMessage) => {
+          resolve(emittedMessage);
+        });
       });
 
-      agent.processMessage(message);
+      await agent.processMessage(message);
+      const emittedMessage = await emittedPromise;
+      expect(emittedMessage).toEqual(message);
     });
 
     it('should update status during processing', async () => {
@@ -207,19 +210,23 @@ describe('BaseAgent', () => {
   });
 
   describe('Status Observable', () => {
-    it('should emit status changes', (done: any) => {
+    it('should emit status changes', async () => {
       const statuses: AgentStatus[] = [];
       
-      agent.status$.subscribe(status => {
-        statuses.push(status);
-        if (statuses.length === 2) {
-          expect(statuses[0]).toBe(AgentStatus.IDLE);
-          expect(statuses[1]).toBe(AgentStatus.PROCESSING);
-          done();
-        }
+      const statusPromise = new Promise<void>((resolve) => {
+        agent.status$.subscribe(status => {
+          statuses.push(status);
+          if (statuses.length === 2) {
+            resolve();
+          }
+        });
       });
 
-      agent.initialize();
+      await agent.initialize();
+      await statusPromise;
+      
+      expect(statuses[0]).toBe(AgentStatus.IDLE);
+      expect(statuses[1]).toBe(AgentStatus.PROCESSING);
     });
   });
 });
