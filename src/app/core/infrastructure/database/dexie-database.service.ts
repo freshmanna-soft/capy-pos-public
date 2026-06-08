@@ -342,6 +342,24 @@ export class DexieDatabase extends Dexie {
           isActive: true,
           createdAt: new Date(),
           updatedAt: new Date()
+        },
+        {
+          id: '6',
+          name: 'Seasonal Blend',
+          description: 'Limited edition seasonal coffee blend - currently unavailable',
+          sku: 'BEV-SEA-001',
+          barcode: '1234567890128',
+          category: 'Beverages',
+          price: 5.50,
+          cost: 2.50,
+          quantity: 0,
+          minStockLevel: 10,
+          maxStockLevel: 50,
+          unit: 'cup',
+          taxRate: 0.08,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date()
         }
       ]);
 
