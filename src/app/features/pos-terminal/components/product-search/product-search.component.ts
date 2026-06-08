@@ -1,4 +1,4 @@
-import { Component, Output, EventEmitter, signal, inject, ChangeDetectionStrategy } from '@angular/core';
+import { Component, Output, EventEmitter, signal, inject, ChangeDetectionStrategy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, catchError, of, from } from 'rxjs';
@@ -23,6 +23,26 @@ import { Product } from '../../../../core/domain/entities/product.entity';
   imports: [CommonModule],
   template: `
     <div class="product-search-container">
+      <!-- Category Filter -->
+      <div class="category-filter" data-testid="category-filter">
+        <button
+          class="category-chip"
+          [class.active]="selectedCategory() === null"
+          (click)="onCategorySelect(null)"
+          data-testid="category-all">
+          All
+        </button>
+        @for (category of categories(); track category) {
+          <button
+            class="category-chip"
+            [class.active]="selectedCategory() === category"
+            (click)="onCategorySelect(category)"
+            [attr.data-testid]="'category-' + category">
+            {{ category }}
+          </button>
+        }
+      </div>
+
       <!-- Search Input - Reusing InputComponent -->
       <div class="search-input-wrapper">
         <input
@@ -137,6 +157,38 @@ import { Product } from '../../../../core/domain/entities/product.entity';
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     }
 
+    .category-filter {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .category-chip {
+      padding: 0.375rem 0.875rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      border: 1px solid #d1d5db;
+      border-radius: 9999px;
+      background: white;
+      color: #374151;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .category-chip:hover {
+      border-color: #667eea;
+      color: #667eea;
+    }
+
+    .category-chip.active {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-color: transparent;
+    }
+
     .search-input-wrapper {
       @apply relative flex items-center gap-2 mb-4;
     }
@@ -246,7 +298,7 @@ import { Product } from '../../../../core/domain/entities/product.entity';
     }
   `]
 })
-export class ProductSearchComponent {
+export class ProductSearchComponent implements OnInit {
   private productService = inject(ProductService);
   
   // Signals for reactive state
@@ -256,12 +308,22 @@ export class ProductSearchComponent {
   error = signal<string | null>(null);
   highlightedIndex = signal<number>(-1);
   selectedCategory = signal<string | null>(null);
+  categories = signal<string[]>([]);
 
   // Output events
   @Output() productSelected = new EventEmitter<Product>();
 
   // Search subject for debouncing
   private searchSubject = new Subject<string>();
+
+  async ngOnInit() {
+    try {
+      const cats = await this.productService.getCategories();
+      this.categories.set(cats);
+    } catch (err) {
+      console.error('Failed to load categories:', err);
+    }
+  }
 
   constructor() {
     // Setup debounced search with automatic cleanup
@@ -392,12 +454,32 @@ export class ProductSearchComponent {
 
   /**
    * Select category filter
+   * Filters results by category or shows all when null
    */
   onCategorySelect(category: string | null): void {
     this.selectedCategory.set(category);
-    const query = this.searchQuery();
-    if (query.length >= 2) {
-      this.searchSubject.next(query);
+    
+    if (category) {
+      // Load products by category
+      this.isLoading.set(true);
+      from(this.productService.getProductsByCategory(category)).pipe(
+        catchError(err => {
+          this.error.set(err.message || 'Unable to filter by category');
+          return of([]);
+        })
+      ).subscribe(results => {
+        this.searchResults.set(results);
+        this.isLoading.set(false);
+        this.highlightedIndex.set(-1);
+      });
+    } else {
+      // If there's a search query, re-search without category filter
+      const query = this.searchQuery();
+      if (query.length >= 2) {
+        this.searchSubject.next(query);
+      } else {
+        this.searchResults.set([]);
+      }
     }
   }
 }

@@ -1,0 +1,3 @@
+FROM gemma
+PARAMETER num_ctx 8192
+PARAMETER num_predict 1024

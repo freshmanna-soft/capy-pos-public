@@ -1,7 +1,8 @@
-import { Component, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, computed, ChangeDetectionStrategy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Product } from '../../../../core/domain/entities/product.entity';
 import { CartService } from '../../../../core/application/services/cart.service';
+import { CartTotalsComponent } from '../cart-totals/cart-totals.component';
 
 /**
  * Shopping Cart Component
@@ -28,7 +29,7 @@ import { CartService } from '../../../../core/application/services/cart.service'
 @Component({
   selector: 'app-shopping-cart',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, CartTotalsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="shopping-cart" data-testid="shopping-cart">
@@ -123,47 +124,26 @@ import { CartService } from '../../../../core/application/services/cart.service'
           }
         </div>
 
-        <!-- Cart Summary -->
-        <div class="cart-summary" data-testid="cart-summary">
-          <div class="summary-row">
-            <span class="summary-label">Subtotal:</span>
-            <span class="summary-value" data-testid="cart-subtotal">
-              {{ '$' + cartService.subtotal().toFixed(2) }}
-            </span>
-          </div>
+        <!-- Cart Totals (delegated to CartTotalsComponent) -->
+        <app-cart-totals data-testid="cart-summary" />
 
-          <div class="summary-row">
-            <span class="summary-label">Tax ({{ cartService.taxRate() * 100 }}%):</span>
-            <span class="summary-value" data-testid="cart-tax">
-              {{ '$' + cartService.tax().toFixed(2) }}
-            </span>
-          </div>
+        <!-- Action Buttons -->
+        <div class="cart-actions" data-testid="cart-actions">
+          <button
+            class="clear-btn"
+            data-testid="clear-cart-btn"
+            (click)="clearCart()"
+            aria-label="Clear cart">
+            Clear Cart
+          </button>
 
-          <div class="summary-row total-row">
-            <span class="summary-label">Total:</span>
-            <span class="summary-value" data-testid="cart-total">
-              {{ '$' + cartService.total().toFixed(2) }}
-            </span>
-          </div>
-
-          <!-- Action Buttons -->
-          <div class="cart-actions">
-            <button
-              class="clear-btn"
-              data-testid="clear-cart-btn"
-              (click)="clearCart()"
-              aria-label="Clear cart">
-              Clear Cart
-            </button>
-
-            <button
-              class="checkout-btn"
-              data-testid="checkout-btn"
-              (click)="handleCheckout()"
-              aria-label="Proceed to checkout">
-              Checkout
-            </button>
-          </div>
+          <button
+            class="checkout-btn"
+            data-testid="checkout-btn"
+            (click)="handleCheckout()"
+            aria-label="Proceed to checkout">
+            Checkout
+          </button>
         </div>
       }
     </div>
@@ -386,36 +366,6 @@ import { CartService } from '../../../../core/application/services/cart.service'
       height: 1.25rem;
     }
 
-    .cart-summary {
-      padding: 1.5rem;
-      border-top: 2px solid #e5e7eb;
-      background: #f9fafb;
-    }
-
-    .summary-row {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 0.75rem;
-      font-size: 0.875rem;
-    }
-
-    .summary-row.total-row {
-      margin-top: 0.75rem;
-      padding-top: 0.75rem;
-      border-top: 1px solid #d1d5db;
-      font-size: 1.125rem;
-      font-weight: 700;
-    }
-
-    .summary-label {
-      color: #6b7280;
-    }
-
-    .summary-value {
-      font-weight: 600;
-      color: #111827;
-    }
-
     .cart-actions {
       display: flex;
       gap: 0.75rem;
@@ -475,7 +425,7 @@ import { CartService } from '../../../../core/application/services/cart.service'
   `]
 })
 export class ShoppingCartComponent {
-  constructor(public cartService: CartService) {}
+  public cartService = inject(CartService);
 
   /**
    * Public method to add a product to the cart.

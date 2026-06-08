@@ -104,9 +104,7 @@ export class RetryService {
         const result = await fn();
         
         // Update stats on success
-        if (attempt > 1) {
-          this.updateStats(operationName, attempt, true);
-        }
+        this.updateStats(operationName, attempt, true);
         
         return result;
       } catch (error) {
