@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { CheckoutComponent, PaymentMethod, PaymentResult } from './checkout.component';
 import { CartService } from '../../../../core/application/services/cart.service';
 import { ProcessCashPaymentUseCase } from '../../../../core/application/use-cases/process-cash-payment.use-case';
+import { ProcessCardPaymentUseCase } from '../../../../core/application/use-cases/process-card-payment.use-case';
 import { CalculateCartTotalsUseCase } from '../../../../core/application/use-cases/calculate-cart-totals.use-case';
 import { signal } from '@angular/core';
 
@@ -27,6 +28,7 @@ describe('CheckoutComponent', () => {
   let fixture: ComponentFixture<CheckoutComponent>;
   let mockCartService: Partial<CartService>;
   let mockCashPaymentUseCase: Partial<ProcessCashPaymentUseCase>;
+  let mockCardPaymentUseCase: Partial<ProcessCardPaymentUseCase>;
   let mockCartTotals: Partial<CalculateCartTotalsUseCase>;
 
   const mockValidation = signal({ isValid: false, error: null as string | null });
@@ -36,6 +38,22 @@ describe('CheckoutComponent', () => {
   const mockAmountTendered = signal(0);
   const mockIsProcessing = signal(false);
 
+  // Card payment mock signals
+  const mockCardValidation = signal({ isValid: false, fields: {
+    cardNumber: { isValid: false, error: null as string | null },
+    expiry: { isValid: false, error: null as string | null },
+    cvv: { isValid: false, error: null as string | null },
+  }});
+  const mockFieldValidation = signal({
+    cardNumber: { isValid: false, error: null as string | null },
+    expiry: { isValid: false, error: null as string | null },
+    cvv: { isValid: false, error: null as string | null },
+  });
+  const mockCardBrand = signal<string>('unknown');
+  const mockLast4 = signal('');
+  const mockAmountToCharge = signal(108.5);
+  const mockCardIsProcessing = signal(false);
+
   beforeEach(async () => {
     mockValidation.set({ isValid: false, error: null });
     mockAmountDue.set(108.5);
@@ -43,6 +61,20 @@ describe('CheckoutComponent', () => {
     mockQuickAmounts.set([109, 114, 119, 129]);
     mockAmountTendered.set(0);
     mockIsProcessing.set(false);
+    mockCardValidation.set({ isValid: false, fields: {
+      cardNumber: { isValid: false, error: null },
+      expiry: { isValid: false, error: null },
+      cvv: { isValid: false, error: null },
+    }});
+    mockFieldValidation.set({
+      cardNumber: { isValid: false, error: null },
+      expiry: { isValid: false, error: null },
+      cvv: { isValid: false, error: null },
+    });
+    mockCardBrand.set('unknown');
+    mockLast4.set('');
+    mockAmountToCharge.set(108.5);
+    mockCardIsProcessing.set(false);
 
     mockCartService = {
       subtotal: signal(100),
@@ -107,6 +139,67 @@ describe('CheckoutComponent', () => {
       }),
     } as unknown as Partial<ProcessCashPaymentUseCase>;
 
+    mockCardPaymentUseCase = {
+      validation: mockCardValidation,
+      fieldValidation: mockFieldValidation,
+      cardBrand: mockCardBrand,
+      last4: mockLast4,
+      amountToCharge: mockAmountToCharge,
+      isProcessing: mockCardIsProcessing,
+      cardNumber: signal(''),
+      expiry: signal(''),
+      cvv: signal(''),
+      setCardNumber: vi.fn((value: string) => {
+        const digits = value.replace(/\D/g, '');
+        if (digits.startsWith('4')) mockCardBrand.set('visa');
+        else if (/^5[1-5]/.test(digits)) mockCardBrand.set('mastercard');
+        else mockCardBrand.set('unknown');
+        if (digits.length >= 4) mockLast4.set(digits.slice(-4));
+      }),
+      setExpiry: vi.fn(),
+      setCvv: vi.fn(),
+      reset: vi.fn(() => {
+        mockCardValidation.set({ isValid: false, fields: {
+          cardNumber: { isValid: false, error: null },
+          expiry: { isValid: false, error: null },
+          cvv: { isValid: false, error: null },
+        }});
+        mockFieldValidation.set({
+          cardNumber: { isValid: false, error: null },
+          expiry: { isValid: false, error: null },
+          cvv: { isValid: false, error: null },
+        });
+        mockCardBrand.set('unknown');
+        mockLast4.set('');
+        mockCardIsProcessing.set(false);
+      }),
+      execute: vi.fn(() => {
+        if (mockCardValidation().isValid) {
+          mockCardIsProcessing.set(true);
+          return {
+            success: true,
+            transactionId: `TXN-CARD-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 8)}`.toUpperCase(),
+            amount: 108.5,
+            last4: mockLast4(),
+            cardBrand: mockCardBrand(),
+            timestamp: new Date(),
+          };
+        }
+        return {
+          success: false,
+          transactionId: '',
+          amount: 108.5,
+          last4: mockLast4(),
+          cardBrand: mockCardBrand(),
+          timestamp: new Date(),
+          error: 'Card validation failed',
+        };
+      }),
+      completeProcessing: vi.fn(() => {
+        mockCardIsProcessing.set(false);
+      }),
+    } as unknown as Partial<ProcessCardPaymentUseCase>;
+
     mockCartTotals = {
       totals: signal({
         subtotal: 100,
@@ -125,6 +218,7 @@ describe('CheckoutComponent', () => {
       providers: [
         { provide: CartService, useValue: mockCartService },
         { provide: ProcessCashPaymentUseCase, useValue: mockCashPaymentUseCase },
+        { provide: ProcessCardPaymentUseCase, useValue: mockCardPaymentUseCase },
         { provide: CalculateCartTotalsUseCase, useValue: mockCartTotals },
       ],
     }).compileComponents();
@@ -350,18 +444,57 @@ describe('CheckoutComponent', () => {
       expect(el.querySelector('[data-testid="card-payment"]')).toBeTruthy();
     });
 
-    it('should disable confirm when card details are incomplete', () => {
-      component.cardNumber = '1234';
-      component.cardExpiry = '12';
-      component.cardCvv = '1';
+    it('should disable confirm when card validation is invalid', () => {
+      // Default state: validation is invalid
       expect(component.canConfirmCard()).toBe(false);
     });
 
-    it('should enable confirm when card details are complete', () => {
-      component.cardNumber = '4111111111111111';
-      component.cardExpiry = '12/25';
-      component.cardCvv = '123';
+    it('should enable confirm when card validation is valid', () => {
+      mockCardValidation.set({ isValid: true, fields: {
+        cardNumber: { isValid: true, error: null },
+        expiry: { isValid: true, error: null },
+        cvv: { isValid: true, error: null },
+      }});
       expect(component.canConfirmCard()).toBe(true);
+    });
+
+    it('should call setCardNumber on use case when card number changes', () => {
+      component.onCardNumberChange('4111111111111111');
+      expect(mockCardPaymentUseCase.setCardNumber).toHaveBeenCalledWith('4111111111111111');
+    });
+
+    it('should call setExpiry on use case when expiry changes', () => {
+      component.onCardExpiryChange('12/30');
+      expect(mockCardPaymentUseCase.setExpiry).toHaveBeenCalledWith('12/30');
+    });
+
+    it('should call setCvv on use case when CVV changes', () => {
+      component.onCardCvvChange('123');
+      expect(mockCardPaymentUseCase.setCvv).toHaveBeenCalledWith('123');
+    });
+
+    it('should display amount to charge from use case', () => {
+      const el = fixture.nativeElement;
+      const amountEl = el.querySelector('.amount-value');
+      expect(amountEl.textContent).toContain('108.50');
+    });
+
+    it('should call execute on card use case when confirming card payment', () => {
+      vi.useFakeTimers();
+      mockCardValidation.set({ isValid: true, fields: {
+        cardNumber: { isValid: true, error: null },
+        expiry: { isValid: true, error: null },
+        cvv: { isValid: true, error: null },
+      }});
+      component.confirmPayment();
+      expect(mockCardPaymentUseCase.execute).toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it('should not proceed if card validation fails on execute', () => {
+      // validation is invalid (default)
+      component.confirmPayment();
+      expect(component.step()).not.toBe('processing');
     });
 
     it('should go back to select step', () => {
@@ -425,9 +558,12 @@ describe('CheckoutComponent', () => {
     it('should generate unique transaction IDs for card payments', () => {
       component.selectMethod('card');
       component.proceedToDetails();
-      component.cardNumber = '4111111111111111';
-      component.cardExpiry = '12/25';
-      component.cardCvv = '123';
+      // Set card validation to valid via mock
+      mockCardValidation.set({ isValid: true, fields: {
+        cardNumber: { isValid: true, error: null },
+        expiry: { isValid: true, error: null },
+        cvv: { isValid: true, error: null },
+      }});
 
       const ids = new Set<string>();
       for (let i = 0; i < 10; i++) {

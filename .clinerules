@@ -37,6 +37,35 @@ A ticket/story is **NOT considered done** until ALL of the following criteria ar
 
 ## 🔄 Workflow Rules
 
+### 🪝 Prior Hook (MANDATORY — Execute BEFORE any work begins)
+
+> ⚠️ **CRITICAL**: When picking up ANY story/ticket, you MUST execute this hook FIRST before writing any code. This ensures traceability, prevents duplicate work, and maintains workflow integrity.
+
+**Steps (in order):**
+
+1. **Generate a Process ID**: Create a unique process identifier in format `PID-[YYYYMMDD]-[ticket-id]` (e.g., `PID-20260608-S2-3`)
+2. **Save to Knowledge Graph Memory**: Create an entity in memory with:
+   - Entity name: The Process ID
+   - Entity type: `workflow-process`
+   - Observations: story ID, issue number, start timestamp, status "in-progress", assigned to "cline-agent"
+3. **Transition issue to "In Progress"**: `gh issue edit [issue-number] --add-label "in-progress"`
+4. **Assign the issue**: `gh issue edit [issue-number] --add-assignee @me` (prevents others from picking it up)
+5. **Log in memory**: Create a relation from the Process ID to the story entity
+
+**Example:**
+```bash
+# 1. Process ID: PID-20260608-S2-3
+# 2. Save to memory (knowledge graph)
+# 3. Transition issue
+gh issue edit 9 --add-label "in-progress"
+# 4. Assign
+gh issue edit 9 --add-assignee @me
+```
+
+> 💡 This hook ensures every story has a traceable process ID, is assigned, and is tracked in memory from the moment work begins.
+
+---
+
 ### Planning Phase
 When starting any new ticket/feature, consult these agents in order:
 1. **Product Owner** → Confirm story and priority
@@ -48,10 +77,11 @@ When starting any new ticket/feature, consult these agents in order:
 
 ### Building Phase
 1. Create a feature branch: `git checkout -b feature/[ticket-id]-[short-description]`
-2. **Update GitHub issue status to "In Progress"** using `gh issue edit [issue-number] --add-label "in-progress"`
+2. **Consult the `fullstack-dev` agent** for implementation guidance, Angular/TypeScript patterns, and TDD approach
 3. Follow TDD: Red → Green → Refactor
 4. Commit frequently with meaningful messages
 5. Keep PRs focused and small (< 400 lines when possible)
+6. **Consult `qa-tester` agent** for test plan validation before finalizing tests
 
 ### Reviewing Phase (Definition of Done Gate)
 1. Push branch and create PR

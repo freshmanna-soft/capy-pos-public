@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CartService } from '../../../../core/application/services/cart.service';
 import { ProcessCashPaymentUseCase } from '../../../../core/application/use-cases/process-cash-payment.use-case';
+import { ProcessCardPaymentUseCase } from '../../../../core/application/use-cases/process-card-payment.use-case';
 
 export type PaymentMethod = 'cash' | 'card' | 'mobile';
 
@@ -171,8 +172,16 @@ export interface PaymentResult {
             <h3 class="section-title">Card Payment</h3>
             <div class="amount-display">
               <label class="amount-label">Charging</label>
-              <span class="amount-value">{{ cartService.total() | currency }}</span>
+              <span class="amount-value">{{ cardPayment.amountToCharge() | currency }}</span>
             </div>
+            @if (cardPayment.cardBrand() !== 'unknown') {
+              <div class="card-brand-display" data-testid="card-brand">
+                <span class="brand-badge">{{ cardPayment.cardBrand() | uppercase }}</span>
+                @if (cardPayment.last4()) {
+                  <span class="last4-display">•••• {{ cardPayment.last4() }}</span>
+                }
+              </div>
+            }
             <div class="card-form">
               <div class="input-group">
                 <label for="card-number" class="input-label">Card Number</label>
@@ -180,11 +189,18 @@ export interface PaymentResult {
                   id="card-number"
                   type="text"
                   class="card-input"
+                  [class.input-error]="cardPayment.fieldValidation().cardNumber.error"
                   [(ngModel)]="cardNumber"
+                  (ngModelChange)="onCardNumberChange($event)"
                   placeholder="•••• •••• •••• ••••"
                   maxlength="19"
                   data-testid="card-number"
                   autofocus />
+                @if (cardPayment.fieldValidation().cardNumber.error) {
+                  <span class="field-error" data-testid="card-number-error">
+                    {{ cardPayment.fieldValidation().cardNumber.error }}
+                  </span>
+                }
               </div>
               <div class="card-row">
                 <div class="input-group">
@@ -193,10 +209,17 @@ export interface PaymentResult {
                     id="card-expiry"
                     type="text"
                     class="card-input"
+                    [class.input-error]="cardPayment.fieldValidation().expiry.error"
                     [(ngModel)]="cardExpiry"
+                    (ngModelChange)="onCardExpiryChange($event)"
                     placeholder="MM/YY"
                     maxlength="5"
                     data-testid="card-expiry" />
+                  @if (cardPayment.fieldValidation().expiry.error) {
+                    <span class="field-error" data-testid="card-expiry-error">
+                      {{ cardPayment.fieldValidation().expiry.error }}
+                    </span>
+                  }
                 </div>
                 <div class="input-group">
                   <label for="card-cvv" class="input-label">CVV</label>
@@ -204,10 +227,17 @@ export interface PaymentResult {
                     id="card-cvv"
                     type="password"
                     class="card-input"
+                    [class.input-error]="cardPayment.fieldValidation().cvv.error"
                     [(ngModel)]="cardCvv"
+                    (ngModelChange)="onCardCvvChange($event)"
                     placeholder="•••"
                     maxlength="4"
                     data-testid="card-cvv" />
+                  @if (cardPayment.fieldValidation().cvv.error) {
+                    <span class="field-error" data-testid="card-cvv-error">
+                      {{ cardPayment.fieldValidation().cvv.error }}
+                    </span>
+                  }
                 </div>
               </div>
             </div>
@@ -218,7 +248,7 @@ export interface PaymentResult {
                 [disabled]="!canConfirmCard()"
                 (click)="confirmPayment()"
                 data-testid="btn-confirm-card">
-                Pay {{ cartService.total() | currency }}
+                Pay {{ cardPayment.amountToCharge() | currency }}
               </button>
             </div>
           </div>
@@ -624,11 +654,47 @@ export interface PaymentResult {
       color: #dc2626;
       font-weight: 500;
     }
+
+    .field-error {
+      display: block;
+      font-size: 0.75rem;
+      color: #dc2626;
+      margin-top: 0.25rem;
+      font-weight: 500;
+    }
+
+    .card-brand-display {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.625rem 1rem;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 8px;
+      margin-bottom: 1.25rem;
+    }
+
+    .brand-badge {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #1d4ed8;
+      background: #dbeafe;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      letter-spacing: 0.05em;
+    }
+
+    .last4-display {
+      font-size: 0.875rem;
+      color: #374151;
+      font-family: monospace;
+    }
   `]
 })
 export class CheckoutComponent {
   readonly cartService = inject(CartService);
   readonly cashPayment = inject(ProcessCashPaymentUseCase);
+  readonly cardPayment = inject(ProcessCardPaymentUseCase);
 
   // Outputs
   readonly paymentComplete = output<PaymentResult>();
@@ -698,17 +764,37 @@ export class CheckoutComponent {
     return this.cashPayment.validation().isValid;
   }
 
+  /** Syncs card number input with use case */
+  onCardNumberChange(value: string): void {
+    this.cardPayment.setCardNumber(value);
+  }
+
+  /** Syncs card expiry input with use case */
+  onCardExpiryChange(value: string): void {
+    this.cardPayment.setExpiry(value);
+  }
+
+  /** Syncs card CVV input with use case */
+  onCardCvvChange(value: string): void {
+    this.cardPayment.setCvv(value);
+  }
+
   canConfirmCard(): boolean {
-    return this.cardNumber.length >= 15 && 
-           this.cardExpiry.length === 5 && 
-           this.cardCvv.length >= 3;
+    return this.cardPayment.validation().isValid;
   }
 
   confirmPayment(): void {
     if (this.selectedMethod() === 'cash') {
       const cashResult = this.cashPayment.execute();
       if (!cashResult.success) {
-        return; // Don't proceed if validation fails
+        return;
+      }
+    }
+
+    if (this.selectedMethod() === 'card') {
+      const cardResult = this.cardPayment.execute();
+      if (!cardResult.success) {
+        return;
       }
     }
 
@@ -716,17 +802,27 @@ export class CheckoutComponent {
 
     // Simulate payment processing
     setTimeout(() => {
+      const method = this.selectedMethod()!;
+      let transactionId: string;
+
+      if (method === 'cash') {
+        transactionId = this.cashPayment.execute().transactionId;
+      } else if (method === 'card') {
+        transactionId = this.cardPayment.execute().transactionId;
+      } else {
+        transactionId = this.generateTransactionId();
+      }
+
       const result: PaymentResult = {
-        method: this.selectedMethod()!,
+        method,
         amount: this.cartService.total(),
-        change: this.selectedMethod() === 'cash' ? this.cashPayment.changeAmount() : undefined,
-        transactionId: this.selectedMethod() === 'cash'
-          ? this.cashPayment.execute().transactionId
-          : this.generateTransactionId(),
+        change: method === 'cash' ? this.cashPayment.changeAmount() : undefined,
+        transactionId,
         timestamp: new Date(),
       };
 
       this.cashPayment.completeProcessing();
+      this.cardPayment.completeProcessing();
       this.paymentComplete.emit(result);
     }, 1500);
   }
