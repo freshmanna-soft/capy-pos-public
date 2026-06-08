@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The Capy-POS project has completed **Sprint 1 stories S1-1 through S1-4** (Product Search, Search Results Display, Shopping Cart, Add to Cart). The infrastructure layer is **100% complete** with enterprise-grade services. **All 694 unit tests pass with zero failures.** The build succeeds with only CSS budget warnings. Sprint 1 has 2 remaining items (S1-5, S1-6) and Sprint 2 (Payment flows) is queued in the backlog.
+The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)** and **Sprint 2 story S2-1** (Payment Method Selection). The infrastructure layer is **100% complete** with enterprise-grade services. **All 744 unit tests pass with zero failures.** The build succeeds with only CSS budget warnings. Sprint 2 has 2 remaining items (S2-2, S2-3) in the backlog.
 
 **Last Updated:** June 8, 2026
 
@@ -10,31 +10,27 @@ The Capy-POS project has completed **Sprint 1 stories S1-1 through S1-4** (Produ
 
 ## 📋 Sprint Board Summary
 
-### ✅ Done (4 items)
+### ✅ Done (7 items)
 | Ticket | Title | Status |
 |--------|-------|--------|
 | S1-1 | Product Search Component | ✅ Closed |
 | S1-2 | Search Results Display | ✅ Closed |
 | S1-3 | Shopping Cart Component | ✅ Closed |
 | S1-4 | Add to Cart Interaction | ✅ Closed |
+| S1-5 | Cart Total Calculation | ✅ Closed |
+| S1-6 | E2E Test: Search to Cart Flow | ✅ Closed |
+| S2-1 | Payment Method Selection | ✅ Closed (PR #15) |
 
-### 🔲 Remaining Sprint 1 (No Status)
+### 🔲 Sprint 2 Remaining
 | Ticket | Title | Status |
 |--------|-------|--------|
-| S1-5 | Cart Total Calculation | ⬜ Not Started |
-| S1-6 | E2E Test: Search to Cart Flow | ⬜ Not Started |
-
-### 🔲 Sprint 2 Backlog
-| Ticket | Title | Status |
-|--------|-------|--------|
-| S2-1 | Payment Method Selection | ⬜ Not Started |
 | S2-2 | Cash Payment Flow | ⬜ Not Started |
 | S2-3 | Card Payment Flow | ⬜ Not Started |
 
 ### 📊 Board Columns
-- **Todo:** 0 / 5
-- **In Progress:** 0 / 5
-- **Done:** 4
+- **Todo:** 2
+- **In Progress:** 0
+- **Done:** 7
 
 ---
 
@@ -131,38 +127,20 @@ The Capy-POS project has completed **Sprint 1 stories S1-1 through S1-4** (Produ
 
 ## 🎯 Next Steps (Priority Order)
 
-### Immediate: Complete Sprint 1
+### Immediate: Sprint 2 - Payment Flows
 
-1. **[S1-5] Cart Total Calculation** → Move to In Progress
-   - Subtotal, tax, discount calculations displayed in cart
-   - Integration with PricingService
-   - Real-time updates on quantity changes
-
-2. **[S1-6] E2E Test: Search to Cart Flow** → Move to In Progress
-   - End-to-end test covering product search → add to cart flow
-   - Playwright test implementation
-   - CI-ready test suite
-
-### Next: Sprint 2 - Payment Flows
-
-3. **[S2-1] Payment Method Selection**
-   - Cash, card, mobile payment options
-   - Payment method UI in checkout
-   - Feature branch exists: `feature/S2-1-payment-method-selection`
-
-4. **[S2-2] Cash Payment Flow**
+1. **[S2-2] Cash Payment Flow** → Next up
    - Amount tendered input
    - Change calculation
    - Cash drawer integration
 
-5. **[S2-3] Card Payment Flow**
+2. **[S2-3] Card Payment Flow**
    - Card payment form
    - Payment gateway integration
    - Transaction confirmation
 
 ### Technical Debt
 
-- ⚠️ Add ESLint configuration (`ng add angular-eslint`)
 - ⚠️ Reduce bundle size (currently 608KB, budget 500KB)
 - ⚠️ Optimize component SCSS sizes (4 files over budget)
 - ⚠️ Assign iteration to backlog items on project board
@@ -235,8 +213,8 @@ src/app/
 
 ## 📝 Git Status
 
-- **Current Branch:** `feature/S2-1-payment-method-selection`
-- **Main Branch:** Up to date with Sprint 1 (S1-1 through S1-4)
-- **Remote:** `origin/main` at commit `7a61c34`
-- **Local main:** at commit `9c77b21`
-- **Unpushed commits on main:** 1 (feat: Sprint 1 progress - S1-1 through S1-4 complete)
+- **Current Branch:** `main`
+- **Main Branch:** Up to date with Sprint 1 + S2-1
+- **Remote:** `origin/main` at commit `69c11ea`
+- **Last Merged PR:** #15 ([S2-1] Payment Method Selection)
+- **Unpushed commits on main:** 0

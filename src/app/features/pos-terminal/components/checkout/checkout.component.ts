@@ -2,6 +2,7 @@ import { Component, ChangeDetectionStrategy, inject, signal, computed, output } 
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CartService } from '../../../../core/application/services/cart.service';
+import { ProcessCashPaymentUseCase } from '../../../../core/application/use-cases/process-cash-payment.use-case';
 
 export type PaymentMethod = 'cash' | 'card' | 'mobile';
 
@@ -108,7 +109,7 @@ export interface PaymentResult {
             <h3 class="section-title">Cash Payment</h3>
             <div class="amount-display">
               <label class="amount-label">Amount Due</label>
-              <span class="amount-value">{{ cartService.total() | currency }}</span>
+              <span class="amount-value">{{ cashPayment.amountDue() | currency }}</span>
             </div>
             <div class="input-group">
               <label for="cash-tendered" class="input-label">Amount Tendered</label>
@@ -116,27 +117,38 @@ export interface PaymentResult {
                 id="cash-tendered"
                 type="number"
                 class="amount-input"
-                [min]="cartService.total()"
+                [class.input-error]="cashPayment.validation().error"
+                [min]="cashPayment.amountDue()"
                 step="0.01"
                 [(ngModel)]="cashTendered"
-                (ngModelChange)="calculateChange()"
+                (ngModelChange)="onCashAmountChange($event)"
                 data-testid="cash-tendered"
                 placeholder="0.00"
                 autofocus />
             </div>
-            @if (changeAmount() >= 0 && cashTendered > 0) {
+            @if (cashPayment.validation().error) {
+              <div class="error-display" data-testid="cash-error">
+                <span class="error-icon">⚠️</span>
+                <span class="error-text">{{ cashPayment.validation().error }}</span>
+              </div>
+            }
+            @if (cashPayment.validation().isValid && cashTendered > 0) {
               <div class="change-display" data-testid="change-amount">
-                <span class="change-label">Change</span>
-                <span class="change-value">{{ changeAmount() | currency }}</span>
+                <span class="change-label">Change Due</span>
+                <span class="change-value">{{ cashPayment.changeAmount() | currency }}</span>
               </div>
             }
             <div class="quick-amounts">
-              @for (amount of quickAmounts(); track amount) {
+              @for (amount of cashPayment.quickAmounts(); track amount) {
                 <button 
                   class="quick-btn"
                   (click)="setCashAmount(amount)"
                   [attr.data-testid]="'quick-' + amount">
-                  {{ amount | currency }}
+                  @if (amount === cashPayment.amountDue()) {
+                    Exact
+                  } @else {
+                    {{ amount | currency }}
+                  }
                 </button>
               }
             </div>
@@ -144,7 +156,7 @@ export interface PaymentResult {
               <button class="btn-back" (click)="goBack()">Back</button>
               <button 
                 class="btn-confirm"
-                [disabled]="!canConfirmCash()"
+                [disabled]="!cashPayment.validation().isValid"
                 (click)="confirmPayment()"
                 data-testid="btn-confirm-cash">
                 Confirm Payment
@@ -581,10 +593,42 @@ export interface PaymentResult {
       color: #6b7280;
       margin: 0;
     }
+
+    .input-error {
+      border-color: #ef4444;
+    }
+
+    .input-error:focus {
+      border-color: #ef4444;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+    }
+
+    .error-display {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.625rem 0.875rem;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .error-icon {
+      font-size: 1rem;
+      flex-shrink: 0;
+    }
+
+    .error-text {
+      font-size: 0.8125rem;
+      color: #dc2626;
+      font-weight: 500;
+    }
   `]
 })
 export class CheckoutComponent {
   readonly cartService = inject(CartService);
+  readonly cashPayment = inject(ProcessCashPaymentUseCase);
 
   // Outputs
   readonly paymentComplete = output<PaymentResult>();
@@ -601,7 +645,7 @@ export class CheckoutComponent {
   cardExpiry = '';
   cardCvv = '';
 
-  // Quick cash amounts
+  // Quick cash amounts (kept for backward compatibility)
   readonly quickAmounts = computed(() => {
     const total = this.cartService.total();
     const rounded = Math.ceil(total);
@@ -615,20 +659,33 @@ export class CheckoutComponent {
   proceedToDetails(): void {
     const method = this.selectedMethod();
     if (method) {
+      if (method === 'cash') {
+        this.cashPayment.reset();
+      }
       this.step.set(method);
     }
   }
 
   goBack(): void {
     this.step.set('select');
+    this.cashPayment.reset();
+    this.cashTendered = 0;
   }
 
   cancel(): void {
+    this.cashPayment.reset();
     this.checkoutCancelled.emit();
+  }
+
+  /** Handles cash amount input changes - syncs with use case */
+  onCashAmountChange(amount: number): void {
+    this.cashPayment.setAmountTendered(amount || 0);
+    this.calculateChange();
   }
 
   setCashAmount(amount: number): void {
     this.cashTendered = amount;
+    this.cashPayment.setAmountTendered(amount);
     this.calculateChange();
   }
 
@@ -638,7 +695,7 @@ export class CheckoutComponent {
   }
 
   canConfirmCash(): boolean {
-    return this.cashTendered >= this.cartService.total();
+    return this.cashPayment.validation().isValid;
   }
 
   canConfirmCard(): boolean {
@@ -648,6 +705,13 @@ export class CheckoutComponent {
   }
 
   confirmPayment(): void {
+    if (this.selectedMethod() === 'cash') {
+      const cashResult = this.cashPayment.execute();
+      if (!cashResult.success) {
+        return; // Don't proceed if validation fails
+      }
+    }
+
     this.step.set('processing');
 
     // Simulate payment processing
@@ -655,11 +719,14 @@ export class CheckoutComponent {
       const result: PaymentResult = {
         method: this.selectedMethod()!,
         amount: this.cartService.total(),
-        change: this.selectedMethod() === 'cash' ? this.changeAmount() : undefined,
-        transactionId: this.generateTransactionId(),
+        change: this.selectedMethod() === 'cash' ? this.cashPayment.changeAmount() : undefined,
+        transactionId: this.selectedMethod() === 'cash'
+          ? this.cashPayment.execute().transactionId
+          : this.generateTransactionId(),
         timestamp: new Date(),
       };
 
+      this.cashPayment.completeProcessing();
       this.paymentComplete.emit(result);
     }, 1500);
   }

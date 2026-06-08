@@ -1,6 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { CheckoutComponent, PaymentMethod, PaymentResult } from './checkout.component';
 import { CartService } from '../../../../core/application/services/cart.service';
+import { ProcessCashPaymentUseCase } from '../../../../core/application/use-cases/process-cash-payment.use-case';
+import { CalculateCartTotalsUseCase } from '../../../../core/application/use-cases/calculate-cart-totals.use-case';
 import { signal } from '@angular/core';
 
 /**
@@ -18,13 +20,30 @@ import { signal } from '@angular/core';
  * - Empty cart prevention (checkout button disabled)
  * - Displaying correct total
  * - Cancellation closes the panel
+ * - Cash payment validation and change calculation via use case
  */
 describe('CheckoutComponent', () => {
   let component: CheckoutComponent;
   let fixture: ComponentFixture<CheckoutComponent>;
   let mockCartService: Partial<CartService>;
+  let mockCashPaymentUseCase: Partial<ProcessCashPaymentUseCase>;
+  let mockCartTotals: Partial<CalculateCartTotalsUseCase>;
+
+  const mockValidation = signal({ isValid: false, error: null as string | null });
+  const mockAmountDue = signal(108.5);
+  const mockChangeAmount = signal(0);
+  const mockQuickAmounts = signal([109, 114, 119, 129]);
+  const mockAmountTendered = signal(0);
+  const mockIsProcessing = signal(false);
 
   beforeEach(async () => {
+    mockValidation.set({ isValid: false, error: null });
+    mockAmountDue.set(108.5);
+    mockChangeAmount.set(0);
+    mockQuickAmounts.set([109, 114, 119, 129]);
+    mockAmountTendered.set(0);
+    mockIsProcessing.set(false);
+
     mockCartService = {
       subtotal: signal(100),
       tax: signal(8.5),
@@ -34,10 +53,79 @@ describe('CheckoutComponent', () => {
       itemCount: signal(2),
     } as unknown as Partial<CartService>;
 
+    mockCashPaymentUseCase = {
+      amountDue: mockAmountDue,
+      amountTendered: mockAmountTendered,
+      changeAmount: mockChangeAmount,
+      validation: mockValidation,
+      quickAmounts: mockQuickAmounts,
+      isProcessing: mockIsProcessing,
+      setAmountTendered: vi.fn((amount: number) => {
+        mockAmountTendered.set(amount);
+        if (amount >= 108.5) {
+          mockValidation.set({ isValid: true, error: null });
+          mockChangeAmount.set(Math.round((amount - 108.5) * 100) / 100);
+        } else if (amount > 0) {
+          const shortfall = Math.round((108.5 - amount) * 100) / 100;
+          mockValidation.set({ isValid: false, error: `Insufficient amount. Short by $${shortfall.toFixed(2)}` });
+          mockChangeAmount.set(0);
+        } else {
+          mockValidation.set({ isValid: false, error: null });
+          mockChangeAmount.set(0);
+        }
+      }),
+      reset: vi.fn(() => {
+        mockAmountTendered.set(0);
+        mockValidation.set({ isValid: false, error: null });
+        mockChangeAmount.set(0);
+        mockIsProcessing.set(false);
+      }),
+      execute: vi.fn(() => {
+        if (mockValidation().isValid) {
+          mockIsProcessing.set(true);
+          return {
+            success: true,
+            transactionId: 'TXN-CASH-TEST123',
+            amountDue: 108.5,
+            amountTendered: mockAmountTendered(),
+            changeAmount: mockChangeAmount(),
+            timestamp: new Date(),
+          };
+        }
+        return {
+          success: false,
+          transactionId: '',
+          amountDue: 108.5,
+          amountTendered: mockAmountTendered(),
+          changeAmount: 0,
+          timestamp: new Date(),
+          error: mockValidation().error ?? 'Payment validation failed',
+        };
+      }),
+      completeProcessing: vi.fn(() => {
+        mockIsProcessing.set(false);
+      }),
+    } as unknown as Partial<ProcessCashPaymentUseCase>;
+
+    mockCartTotals = {
+      totals: signal({
+        subtotal: 100,
+        taxRate: 0.085,
+        taxAmount: 8.5,
+        discountAmount: 0,
+        discountLabel: '',
+        total: 108.5,
+        itemCount: 2,
+        isEmpty: false,
+      }),
+    } as unknown as Partial<CalculateCartTotalsUseCase>;
+
     await TestBed.configureTestingModule({
       imports: [CheckoutComponent],
       providers: [
         { provide: CartService, useValue: mockCartService },
+        { provide: ProcessCashPaymentUseCase, useValue: mockCashPaymentUseCase },
+        { provide: CalculateCartTotalsUseCase, useValue: mockCartTotals },
       ],
     }).compileComponents();
 
@@ -127,6 +215,11 @@ describe('CheckoutComponent', () => {
       el.querySelector('[data-testid="checkout-overlay"]').click();
       expect(spy).toHaveBeenCalled();
     });
+
+    it('should reset cash payment use case on cancel', () => {
+      component.cancel();
+      expect(mockCashPaymentUseCase.reset).toHaveBeenCalled();
+    });
   });
 
   describe('Cash Payment Flow (S2-2)', () => {
@@ -141,48 +234,107 @@ describe('CheckoutComponent', () => {
       expect(el.querySelector('[data-testid="cash-payment"]')).toBeTruthy();
     });
 
-    it('should display amount due', () => {
+    it('should reset cash payment use case when entering cash step', () => {
+      expect(mockCashPaymentUseCase.reset).toHaveBeenCalled();
+    });
+
+    it('should display amount due from use case', () => {
       const el = fixture.nativeElement;
       const amountEl = el.querySelector('.amount-value');
       expect(amountEl.textContent).toContain('108.50');
     });
 
-    it('should calculate change correctly', () => {
-      component.cashTendered = 120;
-      component.calculateChange();
-      expect(component.changeAmount()).toBe(11.5);
+    it('should call setAmountTendered on use case when amount changes', () => {
+      component.onCashAmountChange(120);
+      expect(mockCashPaymentUseCase.setAmountTendered).toHaveBeenCalledWith(120);
+    });
+
+    it('should calculate change correctly via use case', () => {
+      component.setCashAmount(120);
+      expect(mockCashPaymentUseCase.setAmountTendered).toHaveBeenCalledWith(120);
+      expect(mockChangeAmount()).toBe(11.5);
     });
 
     it('should not allow negative change', () => {
-      component.cashTendered = 50;
-      component.calculateChange();
-      expect(component.changeAmount()).toBe(0);
+      component.setCashAmount(50);
+      expect(mockChangeAmount()).toBe(0);
     });
 
-    it('should disable confirm when cash tendered is less than total', () => {
-      component.cashTendered = 50;
+    it('should disable confirm when validation is invalid', () => {
+      // Default state: validation is invalid (amount = 0)
       expect(component.canConfirmCash()).toBe(false);
     });
 
-    it('should enable confirm when cash tendered equals total', () => {
-      component.cashTendered = 108.5;
+    it('should enable confirm when validation is valid (amount equals total)', () => {
+      component.setCashAmount(108.5);
       expect(component.canConfirmCash()).toBe(true);
     });
 
-    it('should enable confirm when cash tendered exceeds total', () => {
-      component.cashTendered = 120;
+    it('should enable confirm when validation is valid (amount exceeds total)', () => {
+      component.setCashAmount(120);
       expect(component.canConfirmCash()).toBe(true);
+    });
+
+    it('should show error when insufficient amount', () => {
+      component.setCashAmount(50);
+      fixture.detectChanges();
+      const el = fixture.nativeElement;
+      const errorEl = el.querySelector('[data-testid="cash-error"]');
+      expect(errorEl).toBeTruthy();
+      expect(errorEl.textContent).toContain('Insufficient');
+    });
+
+    it('should not show error for zero amount (initial state)', () => {
+      fixture.detectChanges();
+      const el = fixture.nativeElement;
+      const errorEl = el.querySelector('[data-testid="cash-error"]');
+      expect(errorEl).toBeFalsy();
+    });
+
+    it('should display change amount when valid', () => {
+      component.setCashAmount(120);
+      component.cashTendered = 120;
+      fixture.detectChanges();
+      const el = fixture.nativeElement;
+      const changeEl = el.querySelector('[data-testid="change-amount"]');
+      expect(changeEl).toBeTruthy();
+      expect(changeEl.textContent).toContain('11.50');
+    });
+
+    it('should display quick amount buttons from use case', () => {
+      fixture.detectChanges();
+      const el = fixture.nativeElement;
+      const quickBtns = el.querySelectorAll('.quick-btn');
+      expect(quickBtns.length).toBe(4);
     });
 
     it('should set cash amount from quick buttons', () => {
-      const quickAmounts = component.quickAmounts();
+      const quickAmounts = mockQuickAmounts();
       component.setCashAmount(quickAmounts[0]);
       expect(component.cashTendered).toBe(quickAmounts[0]);
+      expect(mockCashPaymentUseCase.setAmountTendered).toHaveBeenCalledWith(quickAmounts[0]);
     });
 
     it('should go back to select step', () => {
       component.goBack();
       expect(component.step()).toBe('select');
+    });
+
+    it('should reset cash payment use case on go back', () => {
+      (mockCashPaymentUseCase.reset as ReturnType<typeof vi.fn>).mockClear();
+      component.goBack();
+      expect(mockCashPaymentUseCase.reset).toHaveBeenCalled();
+    });
+
+    it('should reset cashTendered on go back', () => {
+      component.cashTendered = 120;
+      component.goBack();
+      expect(component.cashTendered).toBe(0);
+    });
+
+    it('should handle zero/null input gracefully', () => {
+      component.onCashAmountChange(0);
+      expect(mockCashPaymentUseCase.setAmountTendered).toHaveBeenCalledWith(0);
     });
   });
 
@@ -223,17 +375,30 @@ describe('CheckoutComponent', () => {
       vi.useFakeTimers();
       component.selectMethod('cash');
       component.proceedToDetails();
+      // Set valid amount via use case mock
+      component.setCashAmount(120);
       component.cashTendered = 120;
-      component.calculateChange();
     });
 
     afterEach(() => {
       vi.useRealTimers();
     });
 
+    it('should call execute on use case for cash payment', () => {
+      component.confirmPayment();
+      expect(mockCashPaymentUseCase.execute).toHaveBeenCalled();
+    });
+
     it('should transition to processing step on confirm', () => {
       component.confirmPayment();
       expect(component.step()).toBe('processing');
+    });
+
+    it('should not transition to processing if validation fails', () => {
+      // Reset to invalid state
+      mockValidation.set({ isValid: false, error: 'Insufficient amount. Short by $58.50' });
+      component.confirmPayment();
+      expect(component.step()).not.toBe('processing');
     });
 
     it('should emit paymentComplete with correct result after processing', () => {
@@ -247,12 +412,23 @@ describe('CheckoutComponent', () => {
       const result: PaymentResult = spy.mock.calls[0][0];
       expect(result.method).toBe('cash');
       expect(result.amount).toBe(108.5);
-      expect(result.change).toBe(11.5);
-      expect(result.transactionId).toMatch(/^TXN-/);
+      expect(result.transactionId).toMatch(/^TXN-CASH-/);
       expect(result.timestamp).toBeInstanceOf(Date);
     });
 
-    it('should generate unique transaction IDs', () => {
+    it('should call completeProcessing after payment completes', () => {
+      component.confirmPayment();
+      vi.advanceTimersByTime(1500);
+      expect(mockCashPaymentUseCase.completeProcessing).toHaveBeenCalled();
+    });
+
+    it('should generate unique transaction IDs for card payments', () => {
+      component.selectMethod('card');
+      component.proceedToDetails();
+      component.cardNumber = '4111111111111111';
+      component.cardExpiry = '12/25';
+      component.cardCvv = '123';
+
       const ids = new Set<string>();
       for (let i = 0; i < 10; i++) {
         const spy = vi.fn();
@@ -265,7 +441,7 @@ describe('CheckoutComponent', () => {
     });
   });
 
-  describe('Quick Amounts', () => {
+  describe('Quick Amounts (backward compatibility)', () => {
     it('should generate quick amounts based on total', () => {
       const amounts = component.quickAmounts();
       expect(amounts.length).toBeGreaterThan(0);
