@@ -1,0 +1,138 @@
+# Capy-POS Development Rules
+
+## 📋 Definition of Done (DoD)
+
+A ticket/story is **NOT considered done** until ALL of the following criteria are met:
+
+### 1. Implementation Complete
+- [ ] All acceptance criteria from the Business Analyst are satisfied
+- [ ] Code follows Clean Architecture boundaries (Domain → Application → Infrastructure → Presentation)
+- [ ] TypeScript strict mode compliance (no `any` types)
+- [ ] Angular patterns followed (standalone components, OnPush, Signals)
+
+### 2. Testing Complete
+- [ ] Unit tests pass with **≥ 80% coverage** on new/modified code
+- [ ] E2E tests pass for affected user flows
+- [ ] Tests are fast, isolated, and deterministic
+- [ ] Edge cases are covered
+
+### 3. Pull Request Created
+- [ ] Feature branch pushed to remote (`git push origin feature/[branch-name]`)
+- [ ] PR created with clear title: `[Ticket-ID] Feature description`
+- [ ] PR body includes: Summary, Acceptance Criteria, Testing checklist
+- [ ] PR is linked to the ticket/story
+
+### 4. PR Reviewed and Approved by BOTH:
+- [ ] **🏛️ Architect** — Architectural review (layer compliance, dependency direction, system impact, no cross-agent coupling)
+- [ ] **👨‍💻 Tech Lead** — Technical review (code quality, TypeScript conventions, Angular patterns, test coverage, implementation correctness)
+
+> ⚠️ **MANDATORY**: Both the Architect AND Tech Lead must approve the PR before it can be merged. No exceptions. If either requests changes, those must be addressed before re-review.
+
+### 5. Merge & Cleanup
+- [ ] All BLOCKER comments resolved
+- [ ] PR merged to main branch
+- [ ] Feature branch deleted after merge
+
+---
+
+## 🔄 Workflow Rules
+
+### Planning Phase
+When starting any new ticket/feature, consult these agents in order:
+1. **Product Owner** → Confirm story and priority
+2. **Architect** → Validate technical feasibility, assess architectural impact
+3. **Tech Lead** → Estimate complexity, define implementation strategy and testing approach
+4. **Business Analyst** → Confirm acceptance criteria
+5. **UX Lead** → Confirm design specs (if UI work)
+6. **DBA** → Confirm data requirements (if data work)
+
+### Building Phase
+1. Create a feature branch: `git checkout -b feature/[ticket-id]-[short-description]`
+2. **Update GitHub issue status to "In Progress"** using `gh issue edit [issue-number] --add-label "in-progress"`
+3. Follow TDD: Red → Green → Refactor
+4. Commit frequently with meaningful messages
+5. Keep PRs focused and small (< 400 lines when possible)
+
+### Reviewing Phase (Definition of Done Gate)
+1. Push branch and create PR
+2. **Update GitHub issue status to "In Review"** using `gh issue edit [issue-number] --add-label "in-review" --remove-label "in-progress"`
+3. Request review from **Architect** (architectural compliance)
+4. Request review from **Tech Lead** (technical quality)
+5. Address any feedback/changes requested
+6. Once BOTH approve → **Update issue to "Ready to Merge"** using `gh issue edit [issue-number] --add-label "ready-to-merge" --remove-label "in-review"`
+
+### Shipping Phase (Post-Approval, Pre-Merge)
+
+> ⚠️ **MANDATORY**: After both reviews are approved, execute ALL of the following in parallel before closing the ticket:
+
+**Run these agent consultations in parallel:**
+
+| Agent | Responsibility | Output |
+|-------|---------------|--------|
+| **Scrum Master** | Update sprint board, velocity, burndown | Sprint status update in memory |
+| **QA Tester** | Verify acceptance criteria met, confirm test coverage | QA sign-off comment on PR |
+| **Code Reviewer** | Final code quality check, patterns review | Code review comment on PR |
+| **UX Lead** | Verify UI matches design specs (if UI work) | UX sign-off |
+| **Marketing** | Write release notes for the feature | Release notes in PR description |
+
+**Evidence & Demo (REQUIRED):**
+- [ ] **Capture a demo** of the feature working using Playwright MCP browser or E2E test
+- [ ] Save screenshot/evidence to `evidence/S[sprint]-[story]-[description].png`
+- [ ] **Attach evidence to the PR** as a comment: `gh pr comment [pr-number] --body "## Demo\n![evidence](evidence/...)"` 
+- [ ] If E2E test exists, run it and attach results
+- [ ] If no E2E test exists, capture manual demo via Playwright browser
+
+**Board & Issue Management:**
+1. Merge PR to main: `gh pr merge [pr-number] --squash --delete-branch`
+2. Close the issue: `gh issue close [issue-number] --comment "✅ Completed in PR #[pr-number]. Demo attached."`
+3. Update knowledge graph memory with completion status
+4. Update PROJECT_STATUS.md with sprint progress
+
+---
+
+## 🚫 Anti-Patterns to Avoid
+- Never merge without Architect + Tech Lead approval
+- Never skip tests to "ship faster"
+- Never put domain logic in components or infrastructure
+- Never use `any` type — use generics, unknown, or proper typing
+- Never create circular dependencies between agents/modules
+- **Never skip moving the card across the board** — issue labels MUST be updated at EVERY phase transition (see below)
+- Never skip consulting the **fullstack-dev** agent during the Building phase
+- Never use long PR descriptions — PR `--body` must be ≤ 200 characters
+
+---
+
+## 📐 Code Standards Quick Reference
+- Max 300 lines per file
+- Standalone components only (no NgModules for new code)
+- OnPush change detection everywhere
+- Signals for state, computed for derived state
+- inject() function over constructor injection
+- Barrel exports (index.ts) for public APIs
+- Feature-based folder structure
+
+---
+
+## 🎯 GitHub Issue Status Tracking
+
+**MANDATORY**: Update GitHub issue status at each phase transition:
+
+| Phase Transition | Command | Labels |
+|-----------------|---------|--------|
+| Start work | `gh issue edit [#] --add-label "in-progress"` | `in-progress` |
+| Create PR | `gh issue edit [#] --add-label "in-review" --remove-label "in-progress"` | `in-review` |
+| Both reviews approved | `gh issue edit [#] --add-label "ready-to-merge" --remove-label "in-review"` | `ready-to-merge` |
+| After merge | `gh issue close [#] --comment "Completed in PR #[pr-number]"` | closed |
+
+> 💡 **Tip**: Always update the issue status to keep the project board in sync with actual progress.
+
+---
+
+## 🤖 Agent Consultation Reference
+
+| Phase | Agents to Consult |
+|-------|-------------------|
+| Planning | product-owner → architect → tech-lead → business-analyst → ux-lead → scrum-master → dba |
+| Building | fullstack-dev → qa-tester → devops |
+| Reviewing (PR) | architect (REQUIRED) → tech-lead (REQUIRED) → code-reviewer → qa-tester → product-owner |
+| Shipping | devops → marketing → scrum-master |

@@ -1,9 +1,11 @@
-import { Component, ViewChild, OnInit, inject } from '@angular/core';
+import { Component, ViewChild, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProductSearchComponent } from './components/product-search/product-search.component';
 import { ShoppingCartComponent } from './components/shopping-cart/shopping-cart.component';
+import { CheckoutComponent, PaymentResult } from './components/checkout/checkout.component';
 import { Product } from '../../core/domain/entities/product.entity';
 import { DexieDatabase } from '../../core/infrastructure/database/dexie-database.service';
+import { CartService } from '../../core/application/services/cart.service';
 
 /**
  * POS Terminal Page Component
@@ -32,7 +34,8 @@ import { DexieDatabase } from '../../core/infrastructure/database/dexie-database
   imports: [
     CommonModule,
     ProductSearchComponent,
-    ShoppingCartComponent
+    ShoppingCartComponent,
+    CheckoutComponent
   ],
   template: `
     <div class="pos-terminal" data-testid="pos-terminal">
@@ -78,9 +81,18 @@ import { DexieDatabase } from '../../core/infrastructure/database/dexie-database
 
         <!-- Shopping Cart Section -->
         <aside class="cart-section" data-testid="cart-section">
-          <app-shopping-cart></app-shopping-cart>
+          <app-shopping-cart
+            (checkoutRequested)="openCheckout()">
+          </app-shopping-cart>
         </aside>
       </main>
+
+      <!-- Checkout Overlay -->
+      @if (showCheckout()) {
+        <app-checkout
+          (paymentComplete)="handlePaymentComplete($event)"
+          (checkoutCancelled)="closeCheckout()" />
+      }
     </div>
   `,
   styles: [`
@@ -252,8 +264,15 @@ import { DexieDatabase } from '../../core/infrastructure/database/dexie-database
 })
 export class PosTerminalComponent implements OnInit {
   private db = inject(DexieDatabase);
+  private cartService = inject(CartService);
   
   @ViewChild(ShoppingCartComponent) shoppingCart!: ShoppingCartComponent;
+
+  /** Controls visibility of the checkout overlay */
+  readonly showCheckout = signal(false);
+
+  /** Last completed payment result */
+  readonly lastPayment = signal<PaymentResult | null>(null);
 
   async ngOnInit() {
     // Initialize database with seed data if empty
@@ -321,8 +340,33 @@ export class PosTerminalComponent implements OnInit {
    */
   handleAddProduct(): void {
     // This would typically trigger the product selection flow
-    // For now, we'll just log that it was called
     console.log('Add Product button clicked');
+  }
+
+  /**
+   * Opens the checkout overlay
+   */
+  openCheckout(): void {
+    if (!this.cartService.isEmpty()) {
+      this.showCheckout.set(true);
+    }
+  }
+
+  /**
+   * Closes the checkout overlay
+   */
+  closeCheckout(): void {
+    this.showCheckout.set(false);
+  }
+
+  /**
+   * Handles successful payment completion
+   */
+  handlePaymentComplete(result: PaymentResult): void {
+    this.lastPayment.set(result);
+    this.showCheckout.set(false);
+    this.cartService.clearCart();
+    console.log('Payment completed:', result);
   }
 }
 

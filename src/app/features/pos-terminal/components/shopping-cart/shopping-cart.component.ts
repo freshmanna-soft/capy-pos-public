@@ -1,4 +1,4 @@
-import { Component, computed, ChangeDetectionStrategy, inject } from '@angular/core';
+import { Component, computed, ChangeDetectionStrategy, inject, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Product } from '../../../../core/domain/entities/product.entity';
 import { CartService } from '../../../../core/application/services/cart.service';
@@ -427,6 +427,9 @@ import { CartTotalsComponent } from '../cart-totals/cart-totals.component';
 export class ShoppingCartComponent {
   public cartService = inject(CartService);
 
+  /** Emitted when user clicks checkout with items in cart */
+  readonly checkoutRequested = output<void>();
+
   /**
    * Public method to add a product to the cart.
    * Called from parent component (POS Terminal).
@@ -465,23 +468,13 @@ export class ShoppingCartComponent {
   }
 
   /**
-   * Handles checkout process
+   * Handles checkout process - emits event to parent
    */
   handleCheckout(): void {
     if (this.cartService.isEmpty()) {
-      alert('Cart is empty');
       return;
     }
-
-    // TODO: Implement checkout logic with SalesAgent
-    console.log('Checkout:', {
-      items: this.cartService.items(),
-      subtotal: this.cartService.subtotal(),
-      tax: this.cartService.tax(),
-      total: this.cartService.total()
-    });
-
-    alert(`Checkout total: $${this.cartService.total().toFixed(2)}\n\nCheckout functionality will be implemented with SalesAgent integration.`);
+    this.checkoutRequested.emit();
   }
 }
 

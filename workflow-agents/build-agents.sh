@@ -11,6 +11,9 @@ echo "🦫 Building Capy-POS Workflow Agents..."
 echo "========================================="
 
 AGENTS=(
+  "orchestrator"
+  "architect"
+  "tech-lead"
   "product-owner"
   "scrum-master"
   "business-analyst"
@@ -21,7 +24,6 @@ AGENTS=(
   "devops"
   "ux-lead"
   "marketing"
-  "orchestrator"
 )
 
 BUILT=0

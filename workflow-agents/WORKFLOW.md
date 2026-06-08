@@ -24,27 +24,37 @@ This document defines how the AI workflow agents collaborate to deliver features
 ollama run capy-product-owner "Based on PROJECT_STATUS.md, write the top 5 user stories for Sprint 1 focusing on the POS Terminal checkout flow"
 ```
 
-### Step 2: Business Analyst → Acceptance Criteria
+### Step 2: Architect → Technical Feasibility & Architecture
+```bash
+ollama run capy-architect "Assess the architectural feasibility and impact of these stories. What layers are affected? What are the technical risks? [paste stories from PO]"
+```
+
+### Step 3: Tech Lead → Complexity & Implementation Strategy
+```bash
+ollama run capy-tech-lead "Estimate the complexity (S/M/L/XL) and recommend implementation strategy for these stories. What tests are needed? [paste stories from PO]"
+```
+
+### Step 4: Business Analyst → Acceptance Criteria
 ```bash
 ollama run capy-business-analyst "Write detailed acceptance criteria (Given/When/Then) for: [paste story from PO]"
 ```
 
-### Step 3: UX Lead → Design Specs
+### Step 5: UX Lead → Design Specs
 ```bash
 ollama run capy-ux-lead "Design the interaction flow and layout for: [paste story]"
 ```
 
-### Step 4: Scrum Master → Sprint Plan
+### Step 6: Scrum Master → Sprint Plan
 ```bash
 ollama run capy-scrum-master "Create sprint plan with story points and assignments for these stories: [paste stories]"
 ```
 
-### Step 5: DBA → Data Requirements
+### Step 7: DBA → Data Requirements
 ```bash
 ollama run capy-dba "What schema changes or new indexes are needed for: [paste feature]"
 ```
 
-**Output:** Sprint backlog with sized stories, acceptance criteria, and design specs.
+**Output:** Sprint backlog with sized stories, acceptance criteria, architectural guidance, and design specs.
 
 ---
 
@@ -71,22 +81,40 @@ ollama run capy-devops "Set up CI pipeline stage for: [paste new feature require
 
 ## Phase 3: REVIEWING (Quality Gate)
 
-### Step 9: Code Reviewer → Review
+### Step 9: Create Pull Request
+```bash
+git push origin feature/[branch-name]
+gh pr create --title "[Ticket-ID] Feature description" --body "## Summary\n[description]\n\n## Acceptance Criteria\n[paste AC]\n\n## Testing\n- [ ] Unit tests pass\n- [ ] E2E tests pass\n- [ ] Coverage >= 80%"
+```
+
+### Step 10: Architect → Architectural Review (REQUIRED APPROVAL)
+```bash
+ollama run capy-architect "Review this PR for architectural compliance. Check layer boundaries, dependency direction, cross-agent coupling, and system-wide impact: [paste code/diff]"
+```
+
+### Step 11: Tech Lead → Technical Review (REQUIRED APPROVAL)
+```bash
+ollama run capy-tech-lead "Review this PR for code quality, TypeScript conventions, Angular patterns, testing coverage, and implementation correctness: [paste code/diff]"
+```
+
+### Step 12: Code Reviewer → Implementation Review
 ```bash
 ollama run capy-code-reviewer "Review this implementation for quality, patterns, and security: [paste code]"
 ```
 
-### Step 10: QA Tester → Validation
+### Step 13: QA Tester → Validation
 ```bash
 ollama run capy-qa-tester "Verify these test results and identify any gaps: [paste test output]"
 ```
 
-### Step 11: Product Owner → Acceptance
+### Step 14: Product Owner → Acceptance
 ```bash
 ollama run capy-product-owner "Does this implementation meet the acceptance criteria? [paste criteria + result]"
 ```
 
-**Output:** Approved code ready for deployment.
+> ⚠️ **MANDATORY**: PR must be approved by BOTH the **Architect** and **Tech Lead** before it can be merged. No exceptions.
+
+**Output:** Approved PR ready for merge and deployment.
 
 ---
 
@@ -116,6 +144,8 @@ ollama run capy-scrum-master "Facilitate sprint retrospective. What went well, w
 | Question | Agent |
 |----------|-------|
 | "What should we build next?" | Product Owner |
+| "Is this architecturally sound?" | Architect |
+| "How complex is this to implement?" | Tech Lead |
 | "How should this feature work exactly?" | Business Analyst |
 | "How should this look and feel?" | UX Lead |
 | "How do we organize this sprint?" | Scrum Master |
@@ -126,6 +156,7 @@ ollama run capy-scrum-master "Facilitate sprint retrospective. What went well, w
 | "How do we deploy this?" | DevOps |
 | "How do we communicate this?" | Marketing |
 | "Who should handle this?" | Orchestrator |
+| "Can I merge this PR?" | Architect + Tech Lead (both must approve) |
 
 ---
 
@@ -203,6 +234,9 @@ To create all agents at once:
 cd workflow-agents
 
 AGENTS=(
+  "orchestrator"
+  "architect"
+  "tech-lead"
   "product-owner"
   "scrum-master"
   "business-analyst"
@@ -213,7 +247,6 @@ AGENTS=(
   "devops"
   "ux-lead"
   "marketing"
-  "orchestrator"
 )
 
 for agent in "${AGENTS[@]}"; do
