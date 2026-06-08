@@ -114,6 +114,7 @@ export class AuditLogService {
   private db: AuditDatabase;
   private inMemoryCache: AuditLogEntry[] = [];
   private maxCacheSize = 100;
+  private sequenceCounter = 0;
 
   constructor() {
     this.db = new AuditDatabase();
@@ -202,23 +203,38 @@ export class AuditLogService {
    * Get audit trail for a specific entity
    */
   async getEntityAuditTrail(entityType: string, entityId: string): Promise<AuditLogEntry[]> {
-    return await this.db.auditLogs
-      .where(['entityType', 'entityId'])
-      .equals([entityType, entityId])
-      .reverse()
-      .sortBy('timestamp');
+    const results = await this.db.auditLogs
+      .where('entityId')
+      .equals(entityId)
+      .filter(entry => entry.entityType === entityType)
+      .toArray();
+    
+    // Sort in reverse chronological order (newest first), use ID as tiebreaker
+    return results.sort((a, b) => {
+      const timeDiff = b.timestamp.getTime() - a.timestamp.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      // Use ID for stable sort when timestamps are equal (IDs contain sequence numbers)
+      return (b.id || '').localeCompare(a.id || '');
+    });
   }
 
   /**
    * Get user activity logs
    */
   async getUserActivity(userId: string, limit: number = 50): Promise<AuditLogEntry[]> {
-    return await this.db.auditLogs
+    const results = await this.db.auditLogs
       .where('userId')
       .equals(userId)
-      .reverse()
-      .limit(limit)
-      .sortBy('timestamp');
+      .toArray();
+    
+    // Sort in reverse chronological order (newest first), use ID as tiebreaker
+    return results
+      .sort((a, b) => {
+        const timeDiff = b.timestamp.getTime() - a.timestamp.getTime();
+        if (timeDiff !== 0) return timeDiff;
+        return (b.id || '').localeCompare(a.id || '');
+      })
+      .slice(0, limit);
   }
 
   /**
@@ -321,7 +337,8 @@ export class AuditLogService {
   }
 
   private generateId(): string {
-    return `audit-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    this.sequenceCounter++;
+    return `audit-${Date.now()}-${String(this.sequenceCounter).padStart(6, '0')}-${Math.random().toString(36).substr(2, 5)}`;
   }
 
   private convertToCSV(logs: AuditLogEntry[]): string {

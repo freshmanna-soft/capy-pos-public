@@ -3,10 +3,11 @@ import { RouterOutlet } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Product } from './core/domain/entities/product.entity';
 import { CartItem } from './core/domain/entities/cart.entity';
+import { NavigationComponent } from './shared/ui/organisms/navigation/navigation.component';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, FormsModule],
+  imports: [RouterOutlet, FormsModule, NavigationComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

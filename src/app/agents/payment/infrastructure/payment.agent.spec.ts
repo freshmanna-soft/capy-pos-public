@@ -6,17 +6,36 @@ import { PAYMENT_REPOSITORY } from '../../../core/infrastructure/factories/repos
 import { AuditLogService } from '../../../core/infrastructure/audit/audit-log.service';
 import { IPaymentRepository } from '../../../core/domain/interfaces/payment.repository.interface';
 
-// Mock payment repository
+// In-memory store for mock repository
+let paymentStore: Payment[] = [];
+
+// Mock payment repository with in-memory tracking
 const mockPaymentRepository: Partial<IPaymentRepository> = {
-  findAll: vi.fn().mockResolvedValue([]),
-  findById: vi.fn().mockResolvedValue(null),
-  findByTransactionId: vi.fn().mockResolvedValue([]),
-  findByStatus: vi.fn().mockResolvedValue([]),
-  findByMethod: vi.fn().mockResolvedValue([]),
+  findAll: vi.fn().mockImplementation(() => Promise.resolve([...paymentStore])),
+  findById: vi.fn().mockImplementation((id: string) => {
+    const found = paymentStore.find(p => p.id === id);
+    return Promise.resolve(found || null);
+  }),
+  findByTransactionId: vi.fn().mockImplementation((txnId: string) => {
+    return Promise.resolve(paymentStore.filter(p => p.orderId === txnId));
+  }),
+  findByStatus: vi.fn().mockImplementation((status: PaymentStatus) => {
+    return Promise.resolve(paymentStore.filter(p => p.status === status));
+  }),
+  findByMethod: vi.fn().mockImplementation((method: PaymentMethod) => {
+    return Promise.resolve(paymentStore.filter(p => p.method === method));
+  }),
   findByDateRange: vi.fn().mockResolvedValue([]),
   findByCustomerId: vi.fn().mockResolvedValue([]),
-  create: vi.fn().mockImplementation((payment: Payment) => Promise.resolve(payment)),
-  update: vi.fn().mockImplementation((id: string, payment: Payment) => Promise.resolve(payment)),
+  create: vi.fn().mockImplementation((payment: Payment) => {
+    paymentStore.push(payment);
+    return Promise.resolve(payment);
+  }),
+  update: vi.fn().mockImplementation((id: string, payment: Payment) => {
+    const index = paymentStore.findIndex(p => p.id === id);
+    if (index >= 0) paymentStore[index] = payment;
+    return Promise.resolve(payment);
+  }),
   delete: vi.fn().mockResolvedValue(undefined),
 };
 
@@ -25,8 +44,9 @@ describe('PaymentAgent', () => {
   let auditLogService: AuditLogService;
 
   beforeEach(() => {
-    // Reset mocks
+    // Reset mocks and payment store
     vi.clearAllMocks();
+    paymentStore = [];
     
     // Reset TestBed to ensure clean state
     TestBed.resetTestingModule();
@@ -135,7 +155,7 @@ describe('PaymentAgent', () => {
         amount: 100,
         cardNumber: '4532015112830366',
         expiryMonth: 12,
-        expiryYear: 2025,
+        expiryYear: new Date().getFullYear() + 1,
         cvv: '123'
       };
 
@@ -150,7 +170,7 @@ describe('PaymentAgent', () => {
         amount: 100,
         cardNumber: '1234567890123456',
         expiryMonth: 12,
-        expiryYear: 2025,
+        expiryYear: new Date().getFullYear() + 1,
         cvv: '123'
       };
 
@@ -232,18 +252,22 @@ describe('PaymentAgent', () => {
       await agent.start();
     });
 
-    it('should emit payment processed event', (done: any) => {
-      agent.paymentEvents$.subscribe(event => {
-        expect(event.type).toBe('payment_processed');
-        expect(event.paymentId).toBeDefined();
-        done();
+    it('should emit payment processed event', async () => {
+      const eventPromise = new Promise<void>((resolve) => {
+        agent.paymentEvents$.subscribe(event => {
+          expect(event.type).toBe('payment_processed');
+          expect(event.paymentId).toBeDefined();
+          resolve();
+        });
       });
 
-      agent.processPayment({
+      await agent.processPayment({
         transactionId: 'txn-5',
         amount: 75,
         method: PaymentMethod.CASH
       });
+
+      await eventPromise;
     });
   });
 
@@ -267,7 +291,7 @@ describe('PaymentAgent', () => {
         method: PaymentMethod.CREDIT_CARD,
         cardNumber: '4532015112830366',
         expiryMonth: 12,
-        expiryYear: 2025,
+        expiryYear: new Date().getFullYear() + 1,
         cvv: '123'
       });
 

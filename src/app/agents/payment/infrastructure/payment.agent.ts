@@ -356,7 +356,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
       const refundPayment = new Payment(
         refundPaymentId,
         payment.orderId,
-        -request.amount, // Negative amount for refund
+        request.amount, // Refund amount (positive, tracked as refund type)
         payment.method,
         PaymentStatus.COMPLETED
       );

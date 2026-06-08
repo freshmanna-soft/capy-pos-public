@@ -255,20 +255,23 @@ describe('AgentRegistry', () => {
   });
 
   describe('Combined Status Observable', () => {
-    it('should emit status changes from all agents', (done: any) => {
+    it('should emit status changes from all agents', async () => {
       const statusChanges: Array<{ agentId: string; status: AgentStatus }> = [];
       
-      registry.getCombinedStatus$().subscribe(change => {
-        statusChanges.push(change);
-        
-        // Wait for some status changes
-        if (statusChanges.length >= 6) {
-          expect(statusChanges.length).toBeGreaterThanOrEqual(6);
-          done();
-        }
+      const statusPromise = new Promise<void>((resolve) => {
+        registry.getCombinedStatus$().subscribe(change => {
+          statusChanges.push(change);
+          
+          // Wait for some status changes
+          if (statusChanges.length >= 6) {
+            resolve();
+          }
+        });
       });
 
       registry.initializeAll();
+      await statusPromise;
+      expect(statusChanges.length).toBeGreaterThanOrEqual(6);
     });
   });
 });

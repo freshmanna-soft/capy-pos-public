@@ -4,6 +4,19 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 }
 
+/* App Layout with Navigation */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-main {
+  flex: 1;
+  overflow: auto;
+  background: #f3f4f6;
+}
+
 .pos-container {
   display: flex;
   flex-direction: column;

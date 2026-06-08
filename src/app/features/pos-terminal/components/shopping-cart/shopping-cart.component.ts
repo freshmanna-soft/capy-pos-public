@@ -1,4 +1,4 @@
-import { Component, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, computed, ChangeDetectionStrategy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Product } from '../../../../core/domain/entities/product.entity';
 import { CartService } from '../../../../core/application/services/cart.service';
@@ -475,7 +475,7 @@ import { CartService } from '../../../../core/application/services/cart.service'
   `]
 })
 export class ShoppingCartComponent {
-  constructor(public cartService: CartService) {}
+  public cartService = inject(CartService);
 
   /**
    * Public method to add a product to the cart.
