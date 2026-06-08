@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)** and **Sprint 2 story S2-1** (Payment Method Selection). The infrastructure layer is **100% complete** with enterprise-grade services. **All 744 unit tests pass with zero failures.** The build succeeds with only CSS budget warnings. Sprint 2 has 2 remaining items (S2-2, S2-3) in the backlog.
+The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)** and **Sprint 2 (S2-1 through S2-3)**. All payment flows (method selection, cash, and card) are now implemented. The infrastructure layer is **100% complete** with enterprise-grade services. **All 850+ unit tests pass with zero failures.** The build succeeds with only CSS budget warnings. Sprint 2 is **complete**.
 
 **Last Updated:** June 8, 2026
 
@@ -10,7 +10,7 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)** and **Sprint
 
 ## 📋 Sprint Board Summary
 
-### ✅ Done (7 items)
+### ✅ Done (9 items)
 | Ticket | Title | Status |
 |--------|-------|--------|
 | S1-1 | Product Search Component | ✅ Closed |
@@ -20,17 +20,13 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)** and **Sprint
 | S1-5 | Cart Total Calculation | ✅ Closed |
 | S1-6 | E2E Test: Search to Cart Flow | ✅ Closed |
 | S2-1 | Payment Method Selection | ✅ Closed (PR #15) |
-
-### 🔲 Sprint 2 Remaining
-| Ticket | Title | Status |
-|--------|-------|--------|
-| S2-2 | Cash Payment Flow | ⬜ Not Started |
-| S2-3 | Card Payment Flow | ⬜ Not Started |
+| S2-2 | Cash Payment Flow | ✅ Closed (PR #16) |
+| S2-3 | Card Payment Flow | ✅ Closed (PR #17) |
 
 ### 📊 Board Columns
-- **Todo:** 2
+- **Todo:** 0
 - **In Progress:** 0
-- **Done:** 7
+- **Done:** 9
 
 ---
 
@@ -127,23 +123,16 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)** and **Sprint
 
 ## 🎯 Next Steps (Priority Order)
 
-### Immediate: Sprint 2 - Payment Flows
+### Immediate: Sprint 3 Planning
 
-1. **[S2-2] Cash Payment Flow** → Next up
-   - Amount tendered input
-   - Change calculation
-   - Cash drawer integration
-
-2. **[S2-3] Card Payment Flow**
-   - Card payment form
-   - Payment gateway integration
-   - Transaction confirmation
+- All Sprint 2 stories are complete
+- Sprint 3 backlog to be defined (receipt printing, transaction history, reporting)
 
 ### Technical Debt
 
 - ⚠️ Reduce bundle size (currently 608KB, budget 500KB)
 - ⚠️ Optimize component SCSS sizes (4 files over budget)
-- ⚠️ Assign iteration to backlog items on project board
+- ⚠️ Configure ESLint with angular-eslint
 
 ---
 
@@ -206,15 +195,16 @@ src/app/
 | Domain | 8 | ~200 | <1s |
 | Infrastructure | 6 | ~150 | <1s |
 | Agents | 6 | ~180 | ~3s |
-| Components | 4 | ~164 | <1s |
-| **Total** | **24** | **694** | **3.92s** |
+| Components | 6 | ~220 | <1s |
+| Use Cases | 2 | ~100 | <1s |
+| **Total** | **28** | **850+** | **~4s** |
 
 ---
 
 ## 📝 Git Status
 
 - **Current Branch:** `main`
-- **Main Branch:** Up to date with Sprint 1 + S2-1
-- **Remote:** `origin/main` at commit `69c11ea`
-- **Last Merged PR:** #15 ([S2-1] Payment Method Selection)
+- **Main Branch:** Up to date with Sprint 1 + Sprint 2
+- **Remote:** `origin/main` at commit `c1f7e5b`
+- **Last Merged PR:** #17 ([S2-3] Card Payment Flow)
 - **Unpushed commits on main:** 0
