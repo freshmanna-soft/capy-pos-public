@@ -266,13 +266,31 @@ export class PosTerminalComponent implements OnInit {
   }
 
   /**
-   * Handles product selection from search
+   * Handles product selection from search.
+   * Validates stock availability before adding to cart.
+   * 
+   * Rules:
+   * - Out-of-stock products (stock === 0) are rejected
+   * - Products cannot exceed available stock in cart
    */
   handleProductSelected(product: Product): void {
     // Use setTimeout to ensure ViewChild is initialized
     setTimeout(() => {
       if (!this.shoppingCart) {
         console.error('Shopping cart not initialized');
+        return;
+      }
+
+      // Prevent adding out-of-stock products
+      if (product.isOutOfStock()) {
+        console.warn('Cannot add out-of-stock product:', product.name);
+        return;
+      }
+
+      // Check if adding would exceed available stock
+      const currentQuantity = this.shoppingCart.cartService.getQuantity(product.id);
+      if (currentQuantity >= product.stock) {
+        console.warn('Cannot exceed available stock for:', product.name, `(${currentQuantity}/${product.stock})`);
         return;
       }
 
