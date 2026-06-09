@@ -117,6 +117,7 @@ When starting any new ticket/feature, consult these agents in order:
 - [ ] **Attach evidence to the PR** as a comment: `gh pr comment [pr-number] --body "## Demo\n![evidence](evidence/...)"` 
 - [ ] If E2E test exists, run it and attach results
 - [ ] If no E2E test exists, capture manual demo via Playwright browser
+- [ ] **Add evidence reference to the GitHub Issue** as a comment: `gh issue comment [issue-number] --body "## 📸 E2E Evidence\n\nFeature demonstrated and verified. Evidence captured in PR #[pr-number].\n\n![evidence](https://github.ibm.com/Javier-Pacheco2/capy-pos/blob/main/evidence/S[sprint]-[story]-[description].png?raw=true)"`
 
 **Board & Issue Management:**
 1. Merge PR to main: `gh pr merge [pr-number] --squash --delete-branch`
@@ -151,7 +152,14 @@ When starting any new ticket/feature, consult these agents in order:
    - Capture a screenshot at the key moment proving the feature works
 3. **Save evidence** to `evidence/S[sprint]-[story]-[description].png`
 4. **Commit evidence** to the repository (on the feature branch or main)
-5. **Attach to PR** as a comment: `gh pr comment [pr-number] --body "## Demo\n![evidence](evidence/...)"`
+5. **Attach evidence to the PR** as a comment:
+   ```bash
+   gh pr comment [pr-number] --body "## 📸 E2E Evidence\n![evidence](evidence/S[sprint]-[story]-[description].png)\n\nFeature verified via Playwright MCP browser."
+   ```
+6. **Add evidence reference to the GitHub Issue** as a comment:
+   ```bash
+   gh issue comment [issue-number] --body "## 📸 E2E Evidence\n\nFeature demonstrated and verified. Evidence captured in PR #[pr-number].\n\n![evidence](https://github.ibm.com/Javier-Pacheco2/capy-pos/blob/main/evidence/S[sprint]-[story]-[description].png?raw=true)"
+   ```
 
 ### Evidence Capture Steps (Playwright MCP Browser):
 ```bash
