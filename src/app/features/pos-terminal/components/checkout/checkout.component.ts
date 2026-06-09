@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { CartService } from '../../../../core/application/services/cart.service';
 import { ProcessCashPaymentUseCase } from '../../../../core/application/use-cases/process-cash-payment.use-case';
 import { ProcessCardPaymentUseCase } from '../../../../core/application/use-cases/process-card-payment.use-case';
+import { PersistTransactionUseCase } from '../../../../core/application/use-cases/persist-transaction.use-case';
 
 export type PaymentMethod = 'cash' | 'card' | 'mobile';
 
@@ -695,6 +696,7 @@ export class CheckoutComponent {
   readonly cartService = inject(CartService);
   readonly cashPayment = inject(ProcessCashPaymentUseCase);
   readonly cardPayment = inject(ProcessCardPaymentUseCase);
+  private readonly persistTransaction = inject(PersistTransactionUseCase);
 
   // Outputs
   readonly paymentComplete = output<PaymentResult>();
@@ -820,6 +822,16 @@ export class CheckoutComponent {
         transactionId,
         timestamp: new Date(),
       };
+
+      // Persist transaction to IndexedDB (fire-and-forget for offline-first)
+      this.persistTransaction.execute({
+        paymentMethod: method,
+        transactionId,
+        amountTendered: method === 'cash' ? this.cashTendered : undefined,
+        changeGiven: method === 'cash' ? this.cashPayment.changeAmount() : undefined,
+      }).catch(() => {
+        // Persistence failure is non-blocking; transaction completes regardless
+      });
 
       this.cashPayment.completeProcessing();
       this.cardPayment.completeProcessing();

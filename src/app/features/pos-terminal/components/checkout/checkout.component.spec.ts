@@ -3,6 +3,7 @@ import { CheckoutComponent, PaymentMethod, PaymentResult } from './checkout.comp
 import { CartService } from '../../../../core/application/services/cart.service';
 import { ProcessCashPaymentUseCase } from '../../../../core/application/use-cases/process-cash-payment.use-case';
 import { ProcessCardPaymentUseCase } from '../../../../core/application/use-cases/process-card-payment.use-case';
+import { PersistTransactionUseCase } from '../../../../core/application/use-cases/persist-transaction.use-case';
 import { CalculateCartTotalsUseCase } from '../../../../core/application/use-cases/calculate-cart-totals.use-case';
 import { signal } from '@angular/core';
 
@@ -30,6 +31,7 @@ describe('CheckoutComponent', () => {
   let mockCashPaymentUseCase: Partial<ProcessCashPaymentUseCase>;
   let mockCardPaymentUseCase: Partial<ProcessCardPaymentUseCase>;
   let mockCartTotals: Partial<CalculateCartTotalsUseCase>;
+  let mockPersistTransaction: Partial<PersistTransactionUseCase>;
 
   const mockValidation = signal({ isValid: false, error: null as string | null });
   const mockAmountDue = signal(108.5);
@@ -213,6 +215,15 @@ describe('CheckoutComponent', () => {
       }),
     } as unknown as Partial<CalculateCartTotalsUseCase>;
 
+    mockPersistTransaction = {
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        transactionId: 'TXN-MOCK-001',
+        paymentMethod: 'cash',
+        timestamp: new Date(),
+      }),
+    } as unknown as Partial<PersistTransactionUseCase>;
+
     await TestBed.configureTestingModule({
       imports: [CheckoutComponent],
       providers: [
@@ -220,6 +231,7 @@ describe('CheckoutComponent', () => {
         { provide: ProcessCashPaymentUseCase, useValue: mockCashPaymentUseCase },
         { provide: ProcessCardPaymentUseCase, useValue: mockCardPaymentUseCase },
         { provide: CalculateCartTotalsUseCase, useValue: mockCartTotals },
+        { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
       ],
     }).compileComponents();
 
