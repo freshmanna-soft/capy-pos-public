@@ -3,9 +3,11 @@ import { CommonModule } from '@angular/common';
 import { ProductSearchComponent } from './components/product-search/product-search.component';
 import { ShoppingCartComponent } from './components/shopping-cart/shopping-cart.component';
 import { CheckoutComponent, PaymentResult } from './components/checkout/checkout.component';
+import { ReceiptComponent } from './components/receipt/receipt.component';
 import { Product } from '../../core/domain/entities/product.entity';
 import { DexieDatabase } from '../../core/infrastructure/database/dexie-database.service';
 import { CartService } from '../../core/application/services/cart.service';
+import { GenerateReceiptUseCase, ReceiptData } from '../../core/application/use-cases/generate-receipt.use-case';
 
 /**
  * POS Terminal Page Component
@@ -35,7 +37,8 @@ import { CartService } from '../../core/application/services/cart.service';
     CommonModule,
     ProductSearchComponent,
     ShoppingCartComponent,
-    CheckoutComponent
+    CheckoutComponent,
+    ReceiptComponent
   ],
   template: `
     <div class="pos-terminal" data-testid="pos-terminal">
@@ -92,6 +95,14 @@ import { CartService } from '../../core/application/services/cart.service';
         <app-checkout
           (paymentComplete)="handlePaymentComplete($event)"
           (checkoutCancelled)="closeCheckout()" />
+      }
+
+      <!-- Receipt Overlay -->
+      @if (showReceipt() && receiptData()) {
+        <app-receipt
+          [data]="receiptData()!"
+          (printReceipt)="handlePrintReceipt()"
+          (newTransaction)="handleNewTransactionFromReceipt()" />
       }
     </div>
   `,
@@ -265,14 +276,21 @@ import { CartService } from '../../core/application/services/cart.service';
 export class PosTerminalComponent implements OnInit {
   private db = inject(DexieDatabase);
   private cartService = inject(CartService);
+  private generateReceipt = inject(GenerateReceiptUseCase);
   
   @ViewChild(ShoppingCartComponent) shoppingCart!: ShoppingCartComponent;
 
   /** Controls visibility of the checkout overlay */
   readonly showCheckout = signal(false);
 
+  /** Controls visibility of the receipt overlay */
+  readonly showReceipt = signal(false);
+
   /** Last completed payment result */
   readonly lastPayment = signal<PaymentResult | null>(null);
+
+  /** Receipt data for display after payment */
+  readonly receiptData = signal<ReceiptData | null>(null);
 
   async ngOnInit() {
     // Initialize database with seed data if empty
@@ -360,14 +378,35 @@ export class PosTerminalComponent implements OnInit {
   }
 
   /**
-   * Handles successful payment completion
+   * Handles successful payment completion.
+   * Generates receipt BEFORE clearing cart to capture item snapshot.
    */
   handlePaymentComplete(result: PaymentResult): void {
+    // Generate receipt from current cart state BEFORE clearing
+    const receipt = this.generateReceipt.execute(result);
+    this.receiptData.set(receipt);
+
     this.lastPayment.set(result);
     this.showCheckout.set(false);
+    this.showReceipt.set(true);
     this.cartService.clearCart();
     console.log('Payment completed:', result);
   }
-}
 
-// Made with Bob
+  /**
+   * Handles print receipt action from receipt component
+   */
+  handlePrintReceipt(): void {
+    window.print();
+  }
+
+  /**
+   * Handles new transaction action from receipt component.
+   * Dismisses receipt and resets state for next transaction.
+   */
+  handleNewTransactionFromReceipt(): void {
+    this.showReceipt.set(false);
+    this.receiptData.set(null);
+    this.lastPayment.set(null);
+  }
+}

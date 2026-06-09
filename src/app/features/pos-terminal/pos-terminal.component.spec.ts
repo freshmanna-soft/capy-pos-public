@@ -1,9 +1,11 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
 import { PosTerminalComponent } from './pos-terminal.component';
 import { CartService } from '../../core/application/services/cart.service';
+import { GenerateReceiptUseCase } from '../../core/application/use-cases/generate-receipt.use-case';
 import { Product } from '../../core/domain/entities/product.entity';
 import { DexieDatabase } from '../../core/infrastructure/database/dexie-database.service';
 import { PRODUCT_REPOSITORY } from '../../core/infrastructure/factories/repository.factory';
+import { PaymentResult } from './components/checkout/checkout.component';
 
 /**
  * Unit Tests for PosTerminalComponent - S1-4: Add to Cart Interaction
@@ -62,7 +64,10 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
   });
 
   afterEach(() => {
+    // Reset receipt state to prevent NG0950 errors during cleanup
+    component.handleNewTransactionFromReceipt();
     cartService.clearCart();
+    fixture.destroy();
     vi.useRealTimers();
   });
 
@@ -222,6 +227,104 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
 
       expect(cartService.isEmpty()).toBe(true);
       expect(cartService.items().length).toBe(0);
+    });
+  });
+
+  describe('S3-2: Receipt Generation after Payment', () => {
+    const mockPaymentResult: PaymentResult = {
+      method: 'cash',
+      amount: 50.0,
+      change: 35.9,
+      transactionId: 'TXN-TEST-001',
+      timestamp: new Date('2026-06-08T14:30:00'),
+    };
+
+    it('should show receipt after payment completes', () => {
+      addProduct(mockProducts.coffee);
+      component.handlePaymentComplete(mockPaymentResult);
+
+      expect(component.showReceipt()).toBe(true);
+      expect(component.showCheckout()).toBe(false);
+    });
+
+    it('should generate receipt data with cart items before clearing', () => {
+      addProduct(mockProducts.coffee);
+      addProduct(mockProducts.tea);
+
+      component.handlePaymentComplete(mockPaymentResult);
+
+      const receipt = component.receiptData();
+      expect(receipt).not.toBeNull();
+      expect(receipt!.items).toHaveLength(2);
+      expect(receipt!.items[0].product.name).toBe('Organic Coffee');
+      expect(receipt!.items[1].product.name).toBe('Green Tea');
+    });
+
+    it('should include correct totals in receipt', () => {
+      addProduct(mockProducts.coffee); // 12.99
+
+      component.handlePaymentComplete(mockPaymentResult);
+
+      const receipt = component.receiptData();
+      expect(receipt!.subtotal).toBeCloseTo(12.99, 2);
+      expect(receipt!.taxRate).toBe(0.085);
+      expect(receipt!.tax).toBeCloseTo(12.99 * 0.085, 2);
+      expect(receipt!.total).toBeCloseTo(12.99 + 12.99 * 0.085, 2);
+    });
+
+    it('should include payment details in receipt', () => {
+      addProduct(mockProducts.coffee);
+
+      component.handlePaymentComplete(mockPaymentResult);
+
+      const receipt = component.receiptData();
+      expect(receipt!.payment.method).toBe('cash');
+      expect(receipt!.payment.amount).toBe(50.0);
+      expect(receipt!.payment.change).toBe(35.9);
+      expect(receipt!.payment.transactionId).toBe('TXN-TEST-001');
+    });
+
+    it('should clear cart after generating receipt', () => {
+      addProduct(mockProducts.coffee);
+      addProduct(mockProducts.tea);
+
+      component.handlePaymentComplete(mockPaymentResult);
+
+      expect(cartService.isEmpty()).toBe(true);
+    });
+
+    it('should store lastPayment signal', () => {
+      addProduct(mockProducts.coffee);
+
+      component.handlePaymentComplete(mockPaymentResult);
+
+      expect(component.lastPayment()).toBe(mockPaymentResult);
+    });
+
+    it('should dismiss receipt and reset state on new transaction', () => {
+      addProduct(mockProducts.coffee);
+      component.handlePaymentComplete(mockPaymentResult);
+
+      expect(component.showReceipt()).toBe(true);
+
+      component.handleNewTransactionFromReceipt();
+
+      expect(component.showReceipt()).toBe(false);
+      expect(component.receiptData()).toBeNull();
+      expect(component.lastPayment()).toBeNull();
+    });
+
+    it('should handle receipt with multiple quantities', () => {
+      addProduct(mockProducts.coffee);
+      addProduct(mockProducts.coffee);
+      addProduct(mockProducts.coffee);
+
+      component.handlePaymentComplete(mockPaymentResult);
+
+      const receipt = component.receiptData();
+      expect(receipt!.items).toHaveLength(1);
+      expect(receipt!.items[0].quantity).toBe(3);
+      expect(receipt!.subtotal).toBeCloseTo(12.99 * 3, 2);
     });
   });
 });
