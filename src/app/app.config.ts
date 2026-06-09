@@ -3,7 +3,7 @@ import { provideRouter } from '@angular/router';
 
 import { routes } from './app.routes';
 import { DexieDatabase } from './core/infrastructure/database/dexie-database.service';
-import { REPOSITORY_PROVIDERS } from './core/infrastructure/factories/repository.factory';
+import { REPOSITORY_PROVIDERS, TRANSACTION_REPOSITORY } from './core/infrastructure/factories/repository.factory';
 import { INVENTORY_AGENT_PROVIDERS } from './agents/inventory/infrastructure';
 import { SALES_AGENT_PROVIDERS } from './agents/sales/infrastructure';
 import { PAYMENT_AGENT_PROVIDER } from './agents/payment/infrastructure/payment-agent.provider';
@@ -78,6 +78,11 @@ export const appConfig: ApplicationConfig = {
     },
     // Repository providers with dependency injection
     ...REPOSITORY_PROVIDERS,
+    // String-based token alias for PersistTransactionUseCase compatibility
+    {
+      provide: 'ITransactionRepository',
+      useExisting: TRANSACTION_REPOSITORY
+    },
     // Agent providers
     ...INVENTORY_AGENT_PROVIDERS,
     ...SALES_AGENT_PROVIDERS,

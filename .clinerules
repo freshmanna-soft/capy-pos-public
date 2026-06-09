@@ -135,6 +135,48 @@ When starting any new ticket/feature, consult these agents in order:
 - **Never skip moving the card across the board** — you MUST use `gh project item-edit` to transition the Status field at EVERY phase transition (labels alone do NOT move cards)
 - Never skip consulting the **fullstack-dev** agent during the Building phase
 - Never use long PR descriptions — PR `--body` must be ≤ 200 characters
+- **Never complete a story without E2E evidence** — you MUST capture a screenshot or E2E test result proving the feature works before marking a story as done
+
+---
+
+## 📸 Mandatory E2E Evidence Rule
+
+> ⚠️ **CRITICAL**: Every story/ticket MUST have E2E evidence captured BEFORE it can be considered complete. No exceptions.
+
+### Requirements:
+1. **Run E2E tests** if they exist for the affected flow — attach test results
+2. **If no E2E test exists**, use the Playwright MCP browser to manually demonstrate the feature:
+   - Navigate to the feature in the running app
+   - Perform the user flow end-to-end
+   - Capture a screenshot at the key moment proving the feature works
+3. **Save evidence** to `evidence/S[sprint]-[story]-[description].png`
+4. **Commit evidence** to the repository (on the feature branch or main)
+5. **Attach to PR** as a comment: `gh pr comment [pr-number] --body "## Demo\n![evidence](evidence/...)"`
+
+### Evidence Capture Steps (Playwright MCP Browser):
+```bash
+# 1. Start the dev server if not running
+npx ng serve --port 4200 &
+
+# 2. Use Playwright MCP browser tools:
+#    - browser_navigate to http://localhost:4200
+#    - Interact with the app (type, click, etc.)
+#    - browser_take_screenshot to capture evidence
+
+# 3. Copy screenshot to evidence directory
+cp /private/tmp/.playwright-mcp/[screenshot].png evidence/S[sprint]-[story]-[description].png
+
+# 4. Commit the evidence
+git add evidence/
+git commit -m "docs: add E2E evidence for S[sprint]-[story]"
+```
+
+### When to Capture:
+- **After implementation is complete** but before PR review
+- **After fixing review feedback** if the fix changes behavior
+- **Before closing the issue** — evidence must exist in the repo
+
+> 💡 This ensures every feature has verifiable proof of working correctly, creating an audit trail and preventing regressions from going unnoticed.
 
 ---
 
