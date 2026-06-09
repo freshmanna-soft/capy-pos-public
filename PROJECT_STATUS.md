@@ -10,7 +10,20 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)** and **Sprint
 
 ## 📋 Sprint Board Summary
 
-### ✅ Done (9 items)
+### 🏃 Sprint 3 — Current Iteration (Jun 6-19, 2026)
+
+**Team Capacity:** 13 story points | **Sprint Goal:** Transaction persistence, receipts, and history
+
+| Ticket | Title | Size | Priority | Status |
+|--------|-------|------|----------|--------|
+| S3-1 (#21) | Persist Transactions to IndexedDB | M (4 pts) | P0 | 📋 Todo |
+| S3-2 (#22) | Generate and Display Receipt after Payment | M (4 pts) | P0 | 📋 Todo |
+| S3-3 (#23) | View Transaction History | S (3 pts) | P1 | 📋 Todo |
+| S3-4 (#24) | Daily Sales Reporting (Stretch) | S (2 pts) | P2 | 📋 Todo |
+
+**Total Committed:** 11 pts (S3-1 to S3-3) | **Stretch:** 2 pts (S3-4)
+
+### ✅ Done (9 items — Sprints 1 & 2)
 | Ticket | Title | Status |
 |--------|-------|--------|
 | S1-1 | Product Search Component | ✅ Closed |
@@ -24,7 +37,7 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)** and **Sprint
 | S2-3 | Card Payment Flow | ✅ Closed (PR #17) |
 
 ### 📊 Board Columns
-- **Todo:** 0
+- **Todo:** 4 (Sprint 3)
 - **In Progress:** 0
 - **Done:** 9
 
@@ -123,10 +136,12 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)** and **Sprint
 
 ## 🎯 Next Steps (Priority Order)
 
-### Immediate: Sprint 3 Planning
+### Immediate: Sprint 3 Execution (Jun 6-19, 2026)
 
-- All Sprint 2 stories are complete
-- Sprint 3 backlog to be defined (receipt printing, transaction history, reporting)
+1. **S3-1** — Persist Transactions to IndexedDB (P0, 4 pts)
+2. **S3-2** — Generate and Display Receipt after Payment (P0, 4 pts)
+3. **S3-3** — View Transaction History (P1, 3 pts)
+4. **S3-4** — Daily Sales Reporting (P2, 2 pts — stretch)
 
 ### Technical Debt
 
