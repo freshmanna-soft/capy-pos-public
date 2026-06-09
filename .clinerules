@@ -114,16 +114,76 @@ When starting any new ticket/feature, consult these agents in order:
 **Evidence & Demo (REQUIRED):**
 - [ ] **Capture a demo** of the feature working using Playwright MCP browser or E2E test
 - [ ] Save screenshot/evidence to `evidence/S[sprint]-[story]-[description].png`
-- [ ] **Attach evidence to the PR** as a comment: `gh pr comment [pr-number] --body "## Demo\n![evidence](evidence/...)"` 
+- [ ] **Attach evidence to the PR** as a comment (use `--body-file`, see Shell Escaping Rule below)
 - [ ] If E2E test exists, run it and attach results
 - [ ] If no E2E test exists, capture manual demo via Playwright browser
-- [ ] **Add evidence reference to the GitHub Issue** as a comment: `gh issue comment [issue-number] --body "## 📸 E2E Evidence\n\nFeature demonstrated and verified. Evidence captured in PR #[pr-number].\n\n![evidence](https://github.ibm.com/Javier-Pacheco2/capy-pos/blob/main/evidence/S[sprint]-[story]-[description].png?raw=true)"`
+- [ ] **Add evidence reference to the GitHub Issue** as a comment (use `--body-file`, see Shell Escaping Rule below)
 
 **Board & Issue Management:**
 1. Merge PR to main: `gh pr merge [pr-number] --squash --delete-branch`
 2. Close the issue: `gh issue close [issue-number] --comment "✅ Completed in PR #[pr-number]. Demo attached."`
 3. Update knowledge graph memory with completion status
 4. Update PROJECT_STATUS.md with sprint progress
+
+---
+
+## 🐚 Shell Escaping Rule for `gh` CLI Comments
+
+> ⚠️ **CRITICAL**: Never pass markdown content directly via `--body` in `gh pr comment` or `gh issue comment` commands. The `!` character in markdown image syntax `![alt](url)` triggers zsh history expansion (`event not found` error), and multi-line strings with special characters break shell parsing.
+
+### ❌ NEVER do this:
+```bash
+gh pr comment 34 --body "## 📸 E2E Evidence\n![evidence](evidence/S3-4-daily-sales-report.png)\n\nFeature verified via Playwright MCP browser."
+```
+
+### ✅ ALWAYS do this instead — use `--body-file` with a temp file:
+```bash
+# 1. Write the comment body to a temporary file
+cat > /tmp/gh-comment-body.md << 'EOF'
+## 📸 E2E Evidence
+![evidence](evidence/S3-4-daily-sales-report.png)
+
+Feature verified via Playwright MCP browser. Reports page shows daily sales summary with date filter, summary cards, and payment breakdown.
+EOF
+
+# 2. Use --body-file to post the comment
+gh pr comment 34 --body-file /tmp/gh-comment-body.md
+
+# 3. Clean up
+rm -f /tmp/gh-comment-body.md
+```
+
+### Rules:
+1. **Always use `--body-file`** instead of `--body` for `gh pr comment` and `gh issue comment`
+2. **Always use a heredoc with single-quoted delimiter** (`<< 'EOF'`) to prevent shell interpolation
+3. **Never use `!` inside double-quoted strings** in zsh — it triggers history expansion
+4. **Never use `\n` for newlines** — write actual multi-line content in the temp file
+5. **Apply this to ALL `gh` commands that accept `--body`**: `gh pr comment`, `gh issue comment`, `gh pr create`, `gh issue create`
+6. **For short single-line comments** without special characters (no `!`, `$`, backticks), `--body 'simple text'` with single quotes is acceptable
+
+### Quick Reference Template:
+```bash
+# PR comment with evidence
+cat > /tmp/gh-comment-body.md << 'EOF'
+## 📸 E2E Evidence
+![evidence](evidence/S[sprint]-[story]-[description].png)
+
+Feature verified via Playwright MCP browser.
+EOF
+gh pr comment [pr-number] --body-file /tmp/gh-comment-body.md
+rm -f /tmp/gh-comment-body.md
+
+# Issue comment with evidence reference
+cat > /tmp/gh-comment-body.md << 'EOF'
+## 📸 E2E Evidence
+
+Feature demonstrated and verified. Evidence captured in PR #[pr-number].
+
+![evidence](https://github.ibm.com/Javier-Pacheco2/capy-pos/blob/main/evidence/S[sprint]-[story]-[description].png?raw=true)
+EOF
+gh issue comment [issue-number] --body-file /tmp/gh-comment-body.md
+rm -f /tmp/gh-comment-body.md
+```
 
 ---
 
@@ -152,13 +212,28 @@ When starting any new ticket/feature, consult these agents in order:
    - Capture a screenshot at the key moment proving the feature works
 3. **Save evidence** to `evidence/S[sprint]-[story]-[description].png`
 4. **Commit evidence** to the repository (on the feature branch or main)
-5. **Attach evidence to the PR** as a comment:
+5. **Attach evidence to the PR** as a comment (⚠️ use `--body-file` — see Shell Escaping Rule):
    ```bash
-   gh pr comment [pr-number] --body "## 📸 E2E Evidence\n![evidence](evidence/S[sprint]-[story]-[description].png)\n\nFeature verified via Playwright MCP browser."
+   cat > /tmp/gh-comment-body.md << 'EOF'
+   ## 📸 E2E Evidence
+   ![evidence](evidence/S[sprint]-[story]-[description].png)
+
+   Feature verified via Playwright MCP browser.
+   EOF
+   gh pr comment [pr-number] --body-file /tmp/gh-comment-body.md
+   rm -f /tmp/gh-comment-body.md
    ```
-6. **Add evidence reference to the GitHub Issue** as a comment:
+6. **Add evidence reference to the GitHub Issue** as a comment (⚠️ use `--body-file` — see Shell Escaping Rule):
    ```bash
-   gh issue comment [issue-number] --body "## 📸 E2E Evidence\n\nFeature demonstrated and verified. Evidence captured in PR #[pr-number].\n\n![evidence](https://github.ibm.com/Javier-Pacheco2/capy-pos/blob/main/evidence/S[sprint]-[story]-[description].png?raw=true)"
+   cat > /tmp/gh-comment-body.md << 'EOF'
+   ## 📸 E2E Evidence
+
+   Feature demonstrated and verified. Evidence captured in PR #[pr-number].
+
+   ![evidence](https://github.ibm.com/Javier-Pacheco2/capy-pos/blob/main/evidence/S[sprint]-[story]-[description].png?raw=true)
+   EOF
+   gh issue comment [issue-number] --body-file /tmp/gh-comment-body.md
+   rm -f /tmp/gh-comment-body.md
    ```
 
 ### Evidence Capture Steps (Playwright MCP Browser):
