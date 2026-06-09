@@ -1,6 +1,6 @@
 import { Injectable, inject, signal, computed, Signal } from '@angular/core';
-import { CartService } from '../services/cart.service';
-import { CalculateCartTotalsUseCase } from './calculate-cart-totals.use-case';
+import { CartService } from '@core/application/services/cart.service';
+import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
 
 /**
  * Card Payment Request DTO
@@ -65,7 +65,7 @@ export type CardBrand = 'visa' | 'mastercard' | 'amex' | 'discover' | 'unknown';
  * ```
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class ProcessCardPaymentUseCase {
   private readonly cartService = inject(CartService);
@@ -123,9 +123,7 @@ export class ProcessCardPaymentUseCase {
   /** Overall validation state - reactive */
   readonly validation: Signal<CardValidation> = computed(() => {
     const fields = this.fieldValidation();
-    const isValid = fields.cardNumber.isValid &&
-                    fields.expiry.isValid &&
-                    fields.cvv.isValid;
+    const isValid = fields.cardNumber.isValid && fields.expiry.isValid && fields.cvv.isValid;
     return { isValid, fields };
   });
 

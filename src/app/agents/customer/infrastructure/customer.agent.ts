@@ -1,22 +1,24 @@
 import { Injectable } from '@angular/core';
 import { Subject, Observable } from 'rxjs';
-import { BaseAgent } from '../../base/base-agent';
+import { BaseAgent } from '@app/agents/base/base-agent';
+import { IAgentMessage, IAgentResponse } from '@app/agents/base/base-agent.interface';
 import {
   ICustomerAgent,
   CreateCustomerRequest,
   CreateCustomerResponse,
   UpdateCustomerRequest,
   UpdateCustomerResponse,
-  CustomerEvent
-} from '../domain/customer-agent.interface';
-import { Customer } from '../../../core/domain/entities/customer.entity';
+  CustomerEvent,
+} from '@app/agents/customer/domain/customer-agent.interface';
+import { Customer } from '@core/domain/entities/customer.entity';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class CustomerAgent extends BaseAgent implements ICustomerAgent {
-  private customerEventsSubject = new Subject<CustomerEvent>();
-  public customerEvents$: Observable<CustomerEvent> = this.customerEventsSubject.asObservable();
+  private readonly customerEventsSubject = new Subject<CustomerEvent>();
+  public readonly customerEvents$: Observable<CustomerEvent> =
+    this.customerEventsSubject.asObservable();
 
   constructor() {
     super('customer-agent', 'CustomerAgent', 'Handles customer management and loyalty programs');
@@ -35,41 +37,56 @@ export class CustomerAgent extends BaseAgent implements ICustomerAgent {
     this.customerEventsSubject.complete();
   }
 
-  protected async handleMessage(message: any): Promise<any> {
+  protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
     switch (message.type) {
       case 'CREATE_CUSTOMER':
-        return await this.createCustomer(message.payload);
+        return {
+          success: true,
+          data: await this.createCustomer(message.payload as CreateCustomerRequest),
+        };
       case 'UPDATE_CUSTOMER':
-        return await this.updateCustomer(message.payload);
+        return {
+          success: true,
+          data: await this.updateCustomer(message.payload as UpdateCustomerRequest),
+        };
       case 'GET_CUSTOMER':
-        return await this.getCustomer(message.payload.customerId);
+        return {
+          success: true,
+          data: await this.getCustomer((message.payload as { customerId: string }).customerId),
+        };
       case 'SEARCH_CUSTOMERS':
-        return await this.searchCustomers(message.payload.query);
+        return {
+          success: true,
+          data: await this.searchCustomers((message.payload as { query: string }).query),
+        };
       case 'GET_LOYALTY_POINTS':
-        return await this.getLoyaltyPoints(message.payload.customerId);
+        return {
+          success: true,
+          data: await this.getLoyaltyPoints((message.payload as { customerId: string }).customerId),
+        };
       default:
         throw new Error(`Unknown message type: ${message.type}`);
     }
   }
 
-  async createCustomer(request: CreateCustomerRequest): Promise<CreateCustomerResponse> {
+  async createCustomer(_request: CreateCustomerRequest): Promise<CreateCustomerResponse> {
     // Mock implementation
     return { success: true };
   }
 
-  async updateCustomer(request: UpdateCustomerRequest): Promise<UpdateCustomerResponse> {
+  async updateCustomer(_request: UpdateCustomerRequest): Promise<UpdateCustomerResponse> {
     return { success: true };
   }
 
-  async getCustomer(customerId: string): Promise<Customer> {
+  async getCustomer(_customerId: string): Promise<Customer> {
     throw new Error('Not implemented');
   }
 
-  async searchCustomers(query: string): Promise<Customer[]> {
+  async searchCustomers(_query: string): Promise<Customer[]> {
     return [];
   }
 
-  async getLoyaltyPoints(customerId: string): Promise<number> {
+  async getLoyaltyPoints(_customerId: string): Promise<number> {
     return 0;
   }
 }

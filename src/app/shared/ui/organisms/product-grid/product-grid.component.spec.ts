@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ProductGridComponent } from './product-grid.component';
-import { Product } from '../../../../core/domain/entities/product.entity';
+import { ProductGridComponent } from '@shared/ui/organisms/product-grid/product-grid.component';
+import { Product } from '@core/domain/entities/product.entity';
 
 describe('ProductGridComponent (S1-2: Search Results Display)', () => {
   let component: ProductGridComponent;
@@ -16,7 +16,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
       category: 'Beverages',
       stock: 25,
       emoji: '☕',
-      lowStockThreshold: 10
+      lowStockThreshold: 10,
     }),
     Product.fromJSON({
       id: '2',
@@ -26,7 +26,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
       category: 'Beverages',
       stock: 3,
       emoji: '🍵',
-      lowStockThreshold: 5
+      lowStockThreshold: 5,
     }),
     Product.fromJSON({
       id: '3',
@@ -36,7 +36,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
       category: 'Snacks',
       stock: 0,
       emoji: '🍫',
-      lowStockThreshold: 10
+      lowStockThreshold: 10,
     }),
     Product.fromJSON({
       id: '4',
@@ -46,13 +46,13 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
       category: 'Beverages',
       stock: 50,
       emoji: '💧',
-      lowStockThreshold: 10
-    })
+      lowStockThreshold: 10,
+    }),
   ];
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [ProductGridComponent]
+      imports: [ProductGridComponent],
     }).compileComponents();
 
     fixture = TestBed.createComponent(ProductGridComponent);

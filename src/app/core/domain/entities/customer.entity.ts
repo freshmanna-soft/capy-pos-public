@@ -1,4 +1,4 @@
-import { SoftDeletableEntity } from './base.entity';
+import { SoftDeletableEntity } from '@core/domain/entities/base.entity';
 
 /**
  * Customer Status Enum
@@ -7,7 +7,7 @@ export enum CustomerStatus {
   ACTIVE = 'ACTIVE',
   INACTIVE = 'INACTIVE',
   BLOCKED = 'BLOCKED',
-  VIP = 'VIP'
+  VIP = 'VIP',
 }
 
 /**
@@ -17,7 +17,7 @@ export enum CustomerTier {
   BRONZE = 'BRONZE',
   SILVER = 'SILVER',
   GOLD = 'GOLD',
-  PLATINUM = 'PLATINUM'
+  PLATINUM = 'PLATINUM',
 }
 
 /**
@@ -32,27 +32,66 @@ export interface ILoyaltyProgram {
 }
 
 /**
+ * Base properties for AbstractCustomer construction
+ */
+export interface AbstractCustomerProps {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  status?: CustomerStatus;
+  loyaltyPoints?: number;
+  tier?: CustomerTier;
+  createdAt?: Date;
+  updatedAt?: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  deletedAt?: Date;
+  deletedBy?: string;
+}
+
+/**
+ * Extended properties for Customer construction
+ */
+export interface CustomerProps extends AbstractCustomerProps {
+  address?: string;
+  city?: string;
+  state?: string;
+  zipCode?: string;
+  country?: string;
+  dateOfBirth?: Date;
+  notes?: string;
+}
+
+/**
  * Abstract Customer Base Class
  * Provides common customer functionality
  * Implements ILoyaltyProgram interface
  */
 export abstract class AbstractCustomer extends SoftDeletableEntity implements ILoyaltyProgram {
-  constructor(
-    id: string,
-    public name: string,
-    public email: string,
-    public phone: string,
-    public status: CustomerStatus = CustomerStatus.ACTIVE,
-    public loyaltyPoints: number = 0,
-    public tier: CustomerTier = CustomerTier.BRONZE,
-    createdAt: Date = new Date(),
-    updatedAt: Date = new Date(),
-    createdBy?: string,
-    updatedBy?: string,
-    deletedAt?: Date,
-    deletedBy?: string
-  ) {
-    super(id, createdAt, updatedAt, createdBy, updatedBy, deletedAt, deletedBy);
+  public name: string;
+  public email: string;
+  public phone: string;
+  public status: CustomerStatus;
+  public loyaltyPoints: number;
+  public tier: CustomerTier;
+
+  constructor(props: AbstractCustomerProps) {
+    super(
+      props.id,
+      props.createdAt ?? new Date(),
+      props.updatedAt ?? new Date(),
+      props.createdBy,
+      props.updatedBy,
+      props.deletedAt,
+      props.deletedBy,
+    );
+    this.name = props.name;
+    this.email = props.email;
+    this.phone = props.phone;
+    this.status = props.status ?? CustomerStatus.ACTIVE;
+    this.loyaltyPoints = props.loyaltyPoints ?? 0;
+    this.tier = props.tier ?? CustomerTier.BRONZE;
   }
 
   /**
@@ -100,7 +139,7 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
     if (this.status === CustomerStatus.BLOCKED) {
       throw new Error('Cannot add points to blocked customer');
     }
-    
+
     this.loyaltyPoints += points;
     this.tier = this.calculateTier();
     this.touch(updatedBy);
@@ -120,7 +159,7 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
     if (this.status === CustomerStatus.BLOCKED) {
       throw new Error('Cannot redeem points for blocked customer');
     }
-    
+
     this.loyaltyPoints -= points;
     this.tier = this.calculateTier();
     this.touch(updatedBy);
@@ -205,7 +244,7 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
   /**
    * Converts customer to JSON
    */
-  override toJSON(): Record<string, any> {
+  override toJSON(): Record<string, unknown> {
     return {
       ...super.toJSON(),
       name: this.name,
@@ -215,7 +254,7 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
       loyaltyPoints: this.loyaltyPoints,
       tier: this.tier,
       isActive: this.isActive(),
-      isVIP: this.isVIP()
+      isVIP: this.isVIP(),
     };
   }
 }
@@ -226,43 +265,23 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
  * Represents a customer in the POS system
  */
 export class Customer extends AbstractCustomer {
-  constructor(
-    id: string,
-    name: string,
-    email: string,
-    phone: string,
-    status: CustomerStatus = CustomerStatus.ACTIVE,
-    loyaltyPoints: number = 0,
-    tier: CustomerTier = CustomerTier.BRONZE,
-    createdAt: Date = new Date(),
-    updatedAt: Date = new Date(),
-    createdBy?: string,
-    updatedBy?: string,
-    deletedAt?: Date,
-    deletedBy?: string,
-    public address?: string,
-    public city?: string,
-    public state?: string,
-    public zipCode?: string,
-    public country: string = 'USA',
-    public dateOfBirth?: Date,
-    public notes?: string
-  ) {
-    super(
-      id,
-      name,
-      email,
-      phone,
-      status,
-      loyaltyPoints,
-      tier,
-      createdAt,
-      updatedAt,
-      createdBy,
-      updatedBy,
-      deletedAt,
-      deletedBy
-    );
+  public address?: string;
+  public city?: string;
+  public state?: string;
+  public zipCode?: string;
+  public country: string;
+  public dateOfBirth?: Date;
+  public notes?: string;
+
+  constructor(props: CustomerProps) {
+    super(props);
+    this.address = props.address;
+    this.city = props.city;
+    this.state = props.state;
+    this.zipCode = props.zipCode;
+    this.country = props.country ?? 'USA';
+    this.dateOfBirth = props.dateOfBirth;
+    this.notes = props.notes;
     this.validate();
   }
 
@@ -270,23 +289,25 @@ export class Customer extends AbstractCustomer {
    * Updates customer profile
    */
   updateProfile(
-    name?: string,
-    email?: string,
-    phone?: string,
-    address?: string,
-    city?: string,
-    state?: string,
-    zipCode?: string,
-    updatedBy?: string
+    profileData: {
+      name?: string;
+      email?: string;
+      phone?: string;
+      address?: string;
+      city?: string;
+      state?: string;
+      zipCode?: string;
+    },
+    updatedBy?: string,
   ): void {
-    if (name !== undefined) this.name = name;
-    if (email !== undefined) this.email = email;
-    if (phone !== undefined) this.phone = phone;
-    if (address !== undefined) this.address = address;
-    if (city !== undefined) this.city = city;
-    if (state !== undefined) this.state = state;
-    if (zipCode !== undefined) this.zipCode = zipCode;
-    
+    if (profileData.name !== undefined) this.name = profileData.name;
+    if (profileData.email !== undefined) this.email = profileData.email;
+    if (profileData.phone !== undefined) this.phone = profileData.phone;
+    if (profileData.address !== undefined) this.address = profileData.address;
+    if (profileData.city !== undefined) this.city = profileData.city;
+    if (profileData.state !== undefined) this.state = profileData.state;
+    if (profileData.zipCode !== undefined) this.zipCode = profileData.zipCode;
+
     this.validate();
     this.touch(updatedBy);
   }
@@ -296,13 +317,13 @@ export class Customer extends AbstractCustomer {
    */
   getFullAddress(): string | undefined {
     if (!this.address) return undefined;
-    
+
     const parts = [this.address];
     if (this.city) parts.push(this.city);
     if (this.state) parts.push(this.state);
     if (this.zipCode) parts.push(this.zipCode);
     if (this.country) parts.push(this.country);
-    
+
     return parts.join(', ');
   }
 
@@ -311,16 +332,16 @@ export class Customer extends AbstractCustomer {
    */
   getCustomerAge(): number | undefined {
     if (!this.dateOfBirth) return undefined;
-    
+
     const today = new Date();
     const birthDate = new Date(this.dateOfBirth);
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
-    
+
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-    
+
     return age;
   }
 
@@ -328,34 +349,34 @@ export class Customer extends AbstractCustomer {
    * Creates a copy of the customer
    */
   override clone(): Customer {
-    return new Customer(
-      this.id,
-      this.name,
-      this.email,
-      this.phone,
-      this.status,
-      this.loyaltyPoints,
-      this.tier,
-      this.createdAt,
-      this.updatedAt,
-      this.createdBy,
-      this.updatedBy,
-      this.deletedAt,
-      this.deletedBy,
-      this.address,
-      this.city,
-      this.state,
-      this.zipCode,
-      this.country,
-      this.dateOfBirth,
-      this.notes
-    );
+    return new Customer({
+      id: this.id,
+      name: this.name,
+      email: this.email,
+      phone: this.phone,
+      status: this.status,
+      loyaltyPoints: this.loyaltyPoints,
+      tier: this.tier,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+      createdBy: this.createdBy,
+      updatedBy: this.updatedBy,
+      deletedAt: this.deletedAt,
+      deletedBy: this.deletedBy,
+      address: this.address,
+      city: this.city,
+      state: this.state,
+      zipCode: this.zipCode,
+      country: this.country,
+      dateOfBirth: this.dateOfBirth,
+      notes: this.notes,
+    });
   }
 
   /**
    * Converts customer to JSON with additional fields
    */
-  override toJSON(): Record<string, any> {
+  override toJSON(): Record<string, unknown> {
     return {
       ...super.toJSON(),
       address: this.address,
@@ -366,36 +387,36 @@ export class Customer extends AbstractCustomer {
       fullAddress: this.getFullAddress(),
       dateOfBirth: this.dateOfBirth?.toISOString(),
       age: this.getCustomerAge(),
-      notes: this.notes
+      notes: this.notes,
     };
   }
 
   /**
    * Creates customer from plain object
    */
-  static fromJSON(data: any): Customer {
-    return new Customer(
-      data.id,
-      data.name,
-      data.email,
-      data.phone,
-      data.status,
-      data.loyaltyPoints,
-      data.tier,
-      new Date(data.createdAt),
-      new Date(data.updatedAt),
-      data.createdBy,
-      data.updatedBy,
-      data.deletedAt ? new Date(data.deletedAt) : undefined,
-      data.deletedBy,
-      data.address,
-      data.city,
-      data.state,
-      data.zipCode,
-      data.country,
-      data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,
-      data.notes
-    );
+  static fromJSON(data: Record<string, unknown>): Customer {
+    return new Customer({
+      id: data['id'] as string,
+      name: data['name'] as string,
+      email: data['email'] as string,
+      phone: data['phone'] as string,
+      status: data['status'] as CustomerStatus | undefined,
+      loyaltyPoints: data['loyaltyPoints'] as number | undefined,
+      tier: data['tier'] as CustomerTier | undefined,
+      createdAt: data['createdAt'] ? new Date(data['createdAt'] as string) : undefined,
+      updatedAt: data['updatedAt'] ? new Date(data['updatedAt'] as string) : undefined,
+      createdBy: data['createdBy'] as string | undefined,
+      updatedBy: data['updatedBy'] as string | undefined,
+      deletedAt: data['deletedAt'] ? new Date(data['deletedAt'] as string) : undefined,
+      deletedBy: data['deletedBy'] as string | undefined,
+      address: data['address'] as string | undefined,
+      city: data['city'] as string | undefined,
+      state: data['state'] as string | undefined,
+      zipCode: data['zipCode'] as string | undefined,
+      country: data['country'] as string | undefined,
+      dateOfBirth: data['dateOfBirth'] ? new Date(data['dateOfBirth'] as string) : undefined,
+      notes: data['notes'] as string | undefined,
+    });
   }
 }
 

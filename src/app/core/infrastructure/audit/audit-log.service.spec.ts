@@ -1,12 +1,16 @@
 import { TestBed } from '@angular/core/testing';
-import { AuditLogService, AuditAction, AuditStatus, AuditLogEntry } from './audit-log.service';
+import {
+  AuditLogService,
+  AuditAction,
+  AuditStatus,
+} from '@core/infrastructure/audit/audit-log.service';
 
 describe('AuditLogService', () => {
   let service: AuditLogService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [AuditLogService]
+      providers: [AuditLogService],
     });
     service = TestBed.inject(AuditLogService);
   });
@@ -31,7 +35,7 @@ describe('AuditLogService', () => {
         entityId: 'PAY-123',
         action: AuditAction.CREATE,
         status: AuditStatus.SUCCESS,
-        metadata: { amount: 100 }
+        metadata: { amount: 100 },
       });
 
       const logs = service.getRecentLogs();
@@ -49,7 +53,7 @@ describe('AuditLogService', () => {
         entityType: 'Test',
         entityId: '1',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       await service.log({
@@ -58,7 +62,7 @@ describe('AuditLogService', () => {
         entityType: 'Test',
         entityId: '2',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       const logs = service.getRecentLogs();
@@ -70,19 +74,19 @@ describe('AuditLogService', () => {
 
     it('should add timestamp to log entries', async () => {
       const beforeLog = new Date();
-      
+
       await service.log({
         agentName: 'TestAgent',
         operation: 'test',
         entityType: 'Test',
         entityId: '1',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       const afterLog = new Date();
       const logs = service.getRecentLogs();
-      
+
       expect(logs[0].timestamp).toBeDefined();
       expect(logs[0].timestamp.getTime()).toBeGreaterThanOrEqual(beforeLog.getTime());
       expect(logs[0].timestamp.getTime()).toBeLessThanOrEqual(afterLog.getTime());
@@ -100,7 +104,7 @@ describe('AuditLogService', () => {
         duration: 1500,
         metadata: { refundAmount: 50, reason: 'Customer request' },
         ipAddress: '192.168.1.1',
-        userAgent: 'Mozilla/5.0'
+        userAgent: 'Mozilla/5.0',
       });
 
       const logs = service.getRecentLogs();
@@ -122,7 +126,7 @@ describe('AuditLogService', () => {
         entityType: 'Payment',
         entityId: 'PAY-1',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       await service.log({
@@ -132,7 +136,7 @@ describe('AuditLogService', () => {
         entityType: 'Product',
         entityId: 'PROD-1',
         action: AuditAction.UPDATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       await service.log({
@@ -143,7 +147,7 @@ describe('AuditLogService', () => {
         entityId: 'PAY-2',
         action: AuditAction.REFUND,
         status: AuditStatus.FAILURE,
-        errorMessage: 'Insufficient funds'
+        errorMessage: 'Insufficient funds',
       });
     });
 
@@ -155,13 +159,13 @@ describe('AuditLogService', () => {
     it('should filter by userId', async () => {
       const logs = await service.query({ userId: 'user-1' });
       expect(logs.length).toBe(2);
-      expect(logs.every(log => log.userId === 'user-1')).toBe(true);
+      expect(logs.every((log) => log.userId === 'user-1')).toBe(true);
     });
 
     it('should filter by agentName', async () => {
       const logs = await service.query({ agentName: 'PaymentAgent' });
       expect(logs.length).toBe(2);
-      expect(logs.every(log => log.agentName === 'PaymentAgent')).toBe(true);
+      expect(logs.every((log) => log.agentName === 'PaymentAgent')).toBe(true);
     });
 
     it('should filter by action', async () => {
@@ -179,13 +183,13 @@ describe('AuditLogService', () => {
     it('should filter by entityType', async () => {
       const logs = await service.query({ entityType: 'Payment' });
       expect(logs.length).toBe(2);
-      expect(logs.every(log => log.entityType === 'Payment')).toBe(true);
+      expect(logs.every((log) => log.entityType === 'Payment')).toBe(true);
     });
 
     it('should apply pagination', async () => {
       const page1 = await service.query({ limit: 2, offset: 0 });
       const page2 = await service.query({ limit: 2, offset: 2 });
-      
+
       expect(page1.length).toBe(2);
       expect(page2.length).toBe(1);
     });
@@ -199,7 +203,7 @@ describe('AuditLogService', () => {
         entityType: 'Test',
         entityId: '1',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       const logs = service.getRecentLogs();
@@ -224,7 +228,7 @@ describe('AuditLogService', () => {
         entityType: 'Payment',
         entityId: 'PAY-123',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       await service.log({
@@ -233,7 +237,7 @@ describe('AuditLogService', () => {
         entityType: 'Payment',
         entityId: 'PAY-123',
         action: AuditAction.UPDATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       await service.log({
@@ -242,7 +246,7 @@ describe('AuditLogService', () => {
         entityType: 'Payment',
         entityId: 'PAY-123',
         action: AuditAction.REFUND,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       await service.log({
@@ -251,14 +255,14 @@ describe('AuditLogService', () => {
         entityType: 'Payment',
         entityId: 'PAY-456',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
     });
 
     it('should retrieve audit trail for specific entity', async () => {
       const trail = await service.getEntityAuditTrail('Payment', 'PAY-123');
       expect(trail.length).toBe(3);
-      expect(trail.every(log => log.entityId === 'PAY-123')).toBe(true);
+      expect(trail.every((log) => log.entityId === 'PAY-123')).toBe(true);
     });
 
     it('should return logs in reverse chronological order', async () => {
@@ -279,7 +283,7 @@ describe('AuditLogService', () => {
           entityType: 'Test',
           entityId: `test-${i}`,
           action: AuditAction.CREATE,
-          status: AuditStatus.SUCCESS
+          status: AuditStatus.SUCCESS,
         });
       }
     });
@@ -310,7 +314,7 @@ describe('AuditLogService', () => {
         entityId: 'PAY-1',
         action: AuditAction.CREATE,
         status: AuditStatus.SUCCESS,
-        duration: 1000
+        duration: 1000,
       });
 
       await service.log({
@@ -320,14 +324,14 @@ describe('AuditLogService', () => {
         entityId: 'PAY-2',
         action: AuditAction.REFUND,
         status: AuditStatus.FAILURE,
-        errorMessage: 'Test error'
+        errorMessage: 'Test error',
       });
     });
 
     it('should export logs as JSON', async () => {
       const exported = await service.export({}, 'json');
       const parsed = JSON.parse(exported);
-      
+
       expect(Array.isArray(parsed)).toBe(true);
       expect(parsed.length).toBe(2);
       expect(parsed[0].agentName).toBeDefined();
@@ -335,7 +339,7 @@ describe('AuditLogService', () => {
 
     it('should export logs as CSV', async () => {
       const exported = await service.export({}, 'csv');
-      
+
       expect(exported).toContain('ID,Timestamp,User ID');
       expect(exported).toContain('PaymentAgent');
       expect(exported).toContain('processPayment');
@@ -350,7 +354,7 @@ describe('AuditLogService', () => {
         entityType: 'Payment',
         entityId: 'PAY-1',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       await service.log({
@@ -359,7 +363,7 @@ describe('AuditLogService', () => {
         entityType: 'Payment',
         entityId: 'PAY-2',
         action: AuditAction.CREATE,
-        status: AuditStatus.FAILURE
+        status: AuditStatus.FAILURE,
       });
 
       await service.log({
@@ -368,13 +372,13 @@ describe('AuditLogService', () => {
         entityType: 'Product',
         entityId: 'PROD-1',
         action: AuditAction.UPDATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
     });
 
     it('should calculate statistics correctly', async () => {
       const stats = await service.getStatistics();
-      
+
       expect(stats.totalLogs).toBe(3);
       expect(stats.byAction[AuditAction.CREATE]).toBe(2);
       expect(stats.byAction[AuditAction.UPDATE]).toBe(1);
@@ -392,20 +396,20 @@ describe('AuditLogService', () => {
       // Create old log
       const oldDate = new Date();
       oldDate.setDate(oldDate.getDate() - 100);
-      
+
       await service.log({
         agentName: 'TestAgent',
         operation: 'old',
         entityType: 'Test',
         entityId: '1',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       // Manually update timestamp in database (for testing)
-      const logs = await service.query({});
+      const _logs = await service.query({});
       // Note: In real scenario, we'd need to manipulate the database directly
-      
+
       // Create recent log
       await service.log({
         agentName: 'TestAgent',
@@ -413,7 +417,7 @@ describe('AuditLogService', () => {
         entityType: 'Test',
         entityId: '2',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       const purged = await service.purgeOldLogs(90);
@@ -430,7 +434,7 @@ describe('AuditLogService', () => {
         entityType: 'Test',
         entityId: '1',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       await service.log({
@@ -439,7 +443,7 @@ describe('AuditLogService', () => {
         entityType: 'Test',
         entityId: '2',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       const recent = service.getRecentLogs();
@@ -454,7 +458,7 @@ describe('AuditLogService', () => {
           entityType: 'Test',
           entityId: `${i}`,
           action: AuditAction.CREATE,
-          status: AuditStatus.SUCCESS
+          status: AuditStatus.SUCCESS,
         });
       }
 
@@ -471,14 +475,14 @@ describe('AuditLogService', () => {
         entityType: 'Test',
         entityId: '1',
         action: AuditAction.CREATE,
-        status: AuditStatus.SUCCESS
+        status: AuditStatus.SUCCESS,
       });
 
       await service.clearAll();
-      
+
       const logs = await service.query({});
       expect(logs.length).toBe(0);
-      
+
       const recent = service.getRecentLogs();
       expect(recent.length).toBe(0);
     });

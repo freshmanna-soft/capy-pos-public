@@ -1,11 +1,11 @@
 import { Observable } from 'rxjs';
-import { BaseEntity } from '../../domain/entities/base.entity';
+import { BaseEntity } from '@core/domain/entities/base.entity';
 
 /**
  * Base Application Service Interface
  * Defines common CRUD operations for all application services
  * Follows Interface Segregation Principle (SOLID)
- * 
+ *
  * @template TEntity - Domain entity type
  */
 export interface IBaseApplicationService<TEntity extends BaseEntity> {

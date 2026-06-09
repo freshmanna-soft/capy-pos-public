@@ -1,4 +1,4 @@
-import { BaseEntity, IRefundable, IProcessable } from './base.entity';
+import { BaseEntity, IRefundable, IProcessable } from '@core/domain/entities/base.entity';
 
 /**
  * Payment Method Enum
@@ -8,7 +8,7 @@ export enum PaymentMethod {
   CREDIT_CARD = 'CREDIT_CARD',
   DEBIT_CARD = 'DEBIT_CARD',
   DIGITAL_WALLET = 'DIGITAL_WALLET',
-  GIFT_CARD = 'GIFT_CARD'
+  GIFT_CARD = 'GIFT_CARD',
 }
 
 /**
@@ -20,7 +20,37 @@ export enum PaymentStatus {
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
   REFUNDED = 'REFUNDED',
-  PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED'
+  PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
+}
+
+/**
+ * Props for constructing an AbstractPayment
+ */
+export interface AbstractPaymentProps {
+  id: string;
+  orderId: string;
+  amount: number;
+  method: PaymentMethod;
+  status?: PaymentStatus;
+  currency?: string;
+  refundedAmount?: number;
+  createdAt?: Date;
+  updatedAt?: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  completedAt?: Date;
+  failureReason?: string;
+}
+
+/**
+ * Props for constructing a Payment entity
+ * Extends AbstractPaymentProps with card/transaction details
+ */
+export interface PaymentProps extends AbstractPaymentProps {
+  transactionId?: string;
+  cardLast4?: string;
+  cardBrand?: string;
+  receiptNumber?: string;
 }
 
 /**
@@ -30,22 +60,31 @@ export enum PaymentStatus {
  * Follows Template Method pattern
  */
 export abstract class AbstractPayment extends BaseEntity implements IRefundable, IProcessable {
-  constructor(
-    id: string,
-    public readonly orderId: string,
-    public readonly amount: number,
-    public readonly method: PaymentMethod,
-    public status: PaymentStatus = PaymentStatus.PENDING,
-    public readonly currency: string = 'USD',
-    public refundedAmount: number = 0,
-    createdAt: Date = new Date(),
-    updatedAt: Date = new Date(),
-    createdBy?: string,
-    updatedBy?: string,
-    public completedAt?: Date,
-    public failureReason?: string
-  ) {
-    super(id, createdAt, updatedAt, createdBy, updatedBy);
+  public readonly orderId: string;
+  public readonly amount: number;
+  public readonly method: PaymentMethod;
+  public status: PaymentStatus;
+  public readonly currency: string;
+  public refundedAmount: number;
+  public completedAt?: Date;
+  public failureReason?: string;
+
+  constructor(props: AbstractPaymentProps) {
+    super(
+      props.id,
+      props.createdAt ?? new Date(),
+      props.updatedAt ?? new Date(),
+      props.createdBy,
+      props.updatedBy,
+    );
+    this.orderId = props.orderId;
+    this.amount = props.amount;
+    this.method = props.method;
+    this.status = props.status ?? PaymentStatus.PENDING;
+    this.currency = props.currency ?? 'USD';
+    this.refundedAmount = props.refundedAmount ?? 0;
+    this.completedAt = props.completedAt;
+    this.failureReason = props.failureReason;
   }
 
   /**
@@ -118,8 +157,10 @@ export abstract class AbstractPayment extends BaseEntity implements IRefundable,
    * Implements IRefundable interface
    */
   refund(amount: number, updatedBy?: string): void {
-    if (this.status !== PaymentStatus.COMPLETED &&
-        this.status !== PaymentStatus.PARTIALLY_REFUNDED) {
+    if (
+      this.status !== PaymentStatus.COMPLETED &&
+      this.status !== PaymentStatus.PARTIALLY_REFUNDED
+    ) {
       throw new Error('Can only refund completed payments');
     }
     if (amount <= 0) {
@@ -130,13 +171,13 @@ export abstract class AbstractPayment extends BaseEntity implements IRefundable,
     }
 
     this.refundedAmount += amount;
-    
+
     if (this.refundedAmount === this.amount) {
       this.status = PaymentStatus.REFUNDED;
     } else {
       this.status = PaymentStatus.PARTIALLY_REFUNDED;
     }
-    
+
     this.touch(updatedBy);
   }
 
@@ -153,8 +194,7 @@ export abstract class AbstractPayment extends BaseEntity implements IRefundable,
    * Implements IRefundable interface
    */
   isRefundable(): boolean {
-    return this.status === PaymentStatus.COMPLETED && 
-           this.refundedAmount < this.amount;
+    return this.status === PaymentStatus.COMPLETED && this.refundedAmount < this.amount;
   }
 
   /**
@@ -203,7 +243,7 @@ export abstract class AbstractPayment extends BaseEntity implements IRefundable,
   /**
    * Converts payment to JSON
    */
-  override toJSON(): Record<string, any> {
+  override toJSON(): Record<string, unknown> {
     return {
       ...super.toJSON(),
       orderId: this.orderId,
@@ -215,7 +255,7 @@ export abstract class AbstractPayment extends BaseEntity implements IRefundable,
       refundableAmount: this.getRefundableAmount(),
       completedAt: this.completedAt?.toISOString(),
       failureReason: this.failureReason,
-      paymentDuration: this.getPaymentDuration()
+      paymentDuration: this.getPaymentDuration(),
     };
   }
 }
@@ -226,40 +266,17 @@ export abstract class AbstractPayment extends BaseEntity implements IRefundable,
  * Represents a payment transaction in the POS system
  */
 export class Payment extends AbstractPayment {
-  constructor(
-    id: string,
-    orderId: string,
-    amount: number,
-    method: PaymentMethod,
-    status: PaymentStatus = PaymentStatus.PENDING,
-    currency: string = 'USD',
-    refundedAmount: number = 0,
-    createdAt: Date = new Date(),
-    updatedAt: Date = new Date(),
-    createdBy?: string,
-    updatedBy?: string,
-    completedAt?: Date,
-    failureReason?: string,
-    public transactionId?: string,
-    public cardLast4?: string,
-    public cardBrand?: string,
-    public receiptNumber?: string
-  ) {
-    super(
-      id,
-      orderId,
-      amount,
-      method,
-      status,
-      currency,
-      refundedAmount,
-      createdAt,
-      updatedAt,
-      createdBy,
-      updatedBy,
-      completedAt,
-      failureReason
-    );
+  public transactionId?: string;
+  public cardLast4?: string;
+  public cardBrand?: string;
+  public receiptNumber?: string;
+
+  constructor(props: PaymentProps) {
+    super(props);
+    this.transactionId = props.transactionId;
+    this.cardLast4 = props.cardLast4;
+    this.cardBrand = props.cardBrand;
+    this.receiptNumber = props.receiptNumber;
     this.validate();
   }
 
@@ -293,64 +310,64 @@ export class Payment extends AbstractPayment {
    * Creates a copy of the payment
    */
   override clone(): Payment {
-    return new Payment(
-      this.id,
-      this.orderId,
-      this.amount,
-      this.method,
-      this.status,
-      this.currency,
-      this.refundedAmount,
-      this.createdAt,
-      this.updatedAt,
-      this.createdBy,
-      this.updatedBy,
-      this.completedAt,
-      this.failureReason,
-      this.transactionId,
-      this.cardLast4,
-      this.cardBrand,
-      this.receiptNumber
-    );
+    return new Payment({
+      id: this.id,
+      orderId: this.orderId,
+      amount: this.amount,
+      method: this.method,
+      status: this.status,
+      currency: this.currency,
+      refundedAmount: this.refundedAmount,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+      createdBy: this.createdBy,
+      updatedBy: this.updatedBy,
+      completedAt: this.completedAt,
+      failureReason: this.failureReason,
+      transactionId: this.transactionId,
+      cardLast4: this.cardLast4,
+      cardBrand: this.cardBrand,
+      receiptNumber: this.receiptNumber,
+    });
   }
 
   /**
    * Converts payment to JSON with card details
    */
-  override toJSON(): Record<string, any> {
+  override toJSON(): Record<string, unknown> {
     return {
       ...super.toJSON(),
       transactionId: this.transactionId,
       cardLast4: this.cardLast4,
       cardBrand: this.cardBrand,
       maskedCardNumber: this.getMaskedCardNumber(),
-      receiptNumber: this.receiptNumber
+      receiptNumber: this.receiptNumber,
     };
   }
 
   /**
    * Creates payment from plain object
    */
-  static fromJSON(data: any): Payment {
-    return new Payment(
-      data.id,
-      data.orderId,
-      data.amount,
-      data.method,
-      data.status,
-      data.currency,
-      data.refundedAmount,
-      new Date(data.createdAt),
-      new Date(data.updatedAt),
-      data.createdBy,
-      data.updatedBy,
-      data.completedAt ? new Date(data.completedAt) : undefined,
-      data.failureReason,
-      data.transactionId,
-      data.cardLast4,
-      data.cardBrand,
-      data.receiptNumber
-    );
+  static fromJSON(data: Record<string, unknown>): Payment {
+    return new Payment({
+      id: data['id'] as string,
+      orderId: data['orderId'] as string,
+      amount: data['amount'] as number,
+      method: data['method'] as PaymentMethod,
+      status: data['status'] as PaymentStatus,
+      currency: data['currency'] as string,
+      refundedAmount: data['refundedAmount'] as number,
+      createdAt: new Date(data['createdAt'] as string),
+      updatedAt: new Date(data['updatedAt'] as string),
+      createdBy: data['createdBy'] as string | undefined,
+      updatedBy: data['updatedBy'] as string | undefined,
+      completedAt: data['completedAt'] ? new Date(data['completedAt'] as string) : undefined,
+      failureReason: data['failureReason'] as string | undefined,
+      transactionId: data['transactionId'] as string | undefined,
+      cardLast4: data['cardLast4'] as string | undefined,
+      cardBrand: data['cardBrand'] as string | undefined,
+      receiptNumber: data['receiptNumber'] as string | undefined,
+    });
   }
 }
 

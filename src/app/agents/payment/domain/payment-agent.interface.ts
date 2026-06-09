@@ -1,11 +1,11 @@
 import { Observable } from 'rxjs';
-import { IBaseAgent } from '../../base/base-agent.interface';
-import { Payment, PaymentStatus, PaymentMethod } from '../../../core/domain/entities/payment.entity';
+import { IBaseAgent } from '@app/agents/base/base-agent.interface';
+import { Payment, PaymentStatus, PaymentMethod } from '@core/domain/entities/payment.entity';
 
 /**
  * Payment Agent Interface
  * Handles payment processing, validation, and reconciliation
- * 
+ *
  * Responsibilities:
  * - Process payments through various methods
  * - Validate payment information
@@ -53,7 +53,9 @@ export interface IPaymentAgent extends IBaseAgent {
   /**
    * Generate payment report
    */
-  generatePaymentReport(request: GeneratePaymentReportRequest): Promise<GeneratePaymentReportResponse>;
+  generatePaymentReport(
+    request: GeneratePaymentReportRequest,
+  ): Promise<GeneratePaymentReportResponse>;
 
   /**
    * Observable stream of payment events
@@ -69,7 +71,7 @@ export interface ProcessPaymentRequest {
   amount: number;
   method: PaymentMethod;
   customerId?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   // Card payment fields
   cardNumber?: string;
   cardholderName?: string;
@@ -131,7 +133,7 @@ export interface ProcessRefundRequest {
   paymentId: string;
   amount: number;
   reason: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -263,15 +265,21 @@ export interface PaymentReport {
     averageAmount: number;
     successRate: number;
   };
-  byMethod: Record<PaymentMethod, {
-    count: number;
-    amount: number;
-    percentage: number;
-  }>;
-  byStatus: Record<PaymentStatus, {
-    count: number;
-    amount: number;
-  }>;
+  byMethod: Record<
+    PaymentMethod,
+    {
+      count: number;
+      amount: number;
+      percentage: number;
+    }
+  >;
+  byStatus: Record<
+    PaymentStatus,
+    {
+      count: number;
+      amount: number;
+    }
+  >;
   refunds: {
     count: number;
     amount: number;
@@ -279,11 +287,11 @@ export interface PaymentReport {
   voids: {
     count: number;
   };
-  trends?: Array<{
+  trends?: {
     date: Date;
     count: number;
     amount: number;
-  }>;
+  }[];
 }
 
 /**
@@ -309,7 +317,7 @@ export interface PaymentEvent {
   amount: number;
   method: PaymentMethod;
   status: PaymentStatus;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 // Made with Bob

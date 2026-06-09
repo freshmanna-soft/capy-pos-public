@@ -1,8 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { PricingService } from './pricing.service';
-import { DiscountType, Discount, TaxConfig, IPricingService } from './pricing.service.interface';
-import { Product } from '../entities/product.entity';
-import { Money } from '../value-objects/money.value-object';
+import { PricingService } from '@core/domain/rules/pricing.service';
+import {
+  DiscountType,
+  Discount,
+  TaxConfig,
+  IPricingService,
+} from '@core/domain/rules/pricing.service.interface';
+import { Product } from '@core/domain/entities/product.entity';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
+import { Money } from '@core/domain/value-objects/money.value-object';
 
 describe('PricingService', () => {
   let pricingService: IPricingService;
@@ -10,35 +16,37 @@ describe('PricingService', () => {
 
   beforeEach(() => {
     pricingService = new PricingService();
-    product = new Product(
-      '1',
-      'Test Product',
-      10.00,
-      'TEST-001',
-      'Test Category',
-      100
-    );
+    product = new ProductBuilder()
+      .withId('1')
+      .withName('Test Product')
+      .withPrice(10.0)
+      .withSku('TEST-001')
+      .withCategory('Test Category')
+      .withStock(100)
+      .build();
   });
 
   describe('calculatePrice()', () => {
     it('should calculate price for single item', () => {
       const result = pricingService.calculatePrice(product, 1);
-      expect(result.amount).toBe(10.00);
+      expect(result.amount).toBe(10.0);
     });
 
     it('should calculate price for multiple items', () => {
       const result = pricingService.calculatePrice(product, 5);
-      expect(result.amount).toBe(50.00);
+      expect(result.amount).toBe(50.0);
     });
 
     it('should throw error for zero quantity', () => {
-      expect(() => pricingService.calculatePrice(product, 0))
-        .toThrow('[PricingService] quantity must be positive');
+      expect(() => pricingService.calculatePrice(product, 0)).toThrow(
+        '[PricingService] quantity must be positive',
+      );
     });
 
     it('should throw error for negative quantity', () => {
-      expect(() => pricingService.calculatePrice(product, -1))
-        .toThrow('[PricingService] quantity must be positive');
+      expect(() => pricingService.calculatePrice(product, -1)).toThrow(
+        '[PricingService] quantity must be positive',
+      );
     });
   });
 
@@ -47,21 +55,22 @@ describe('PricingService', () => {
       const subtotal = new Money(100, 'USD');
       const discount: Discount = { type: DiscountType.PERCENTAGE, value: 10 };
       const result = pricingService.applyDiscount(subtotal, 1, discount);
-      expect(result.amount).toBe(90.00);
+      expect(result.amount).toBe(90.0);
     });
 
     it('should apply 50% discount', () => {
       const subtotal = new Money(100, 'USD');
       const discount: Discount = { type: DiscountType.PERCENTAGE, value: 50 };
       const result = pricingService.applyDiscount(subtotal, 1, discount);
-      expect(result.amount).toBe(50.00);
+      expect(result.amount).toBe(50.0);
     });
 
     it('should throw error for invalid percentage', () => {
       const subtotal = new Money(100, 'USD');
       const discount: Discount = { type: DiscountType.PERCENTAGE, value: 150 };
-      expect(() => pricingService.applyDiscount(subtotal, 1, discount))
-        .toThrow('[PricingService] percentage must be between 0 and 100');
+      expect(() => pricingService.applyDiscount(subtotal, 1, discount)).toThrow(
+        '[PricingService] percentage must be between 0 and 100',
+      );
     });
   });
 
@@ -70,7 +79,7 @@ describe('PricingService', () => {
       const subtotal = new Money(100, 'USD');
       const discount: Discount = { type: DiscountType.FIXED_AMOUNT, value: 5 };
       const result = pricingService.applyDiscount(subtotal, 1, discount);
-      expect(result.amount).toBe(95.00);
+      expect(result.amount).toBe(95.0);
     });
 
     it('should not let discount exceed subtotal', () => {
@@ -86,34 +95,35 @@ describe('PricingService', () => {
       const subtotal = new Money(100, 'USD');
       const taxConfig: TaxConfig = { rate: 0.08, name: 'Sales Tax' };
       const result = pricingService.calculateTax(subtotal, taxConfig);
-      expect(result.amount).toBe(8.00);
+      expect(result.amount).toBe(8.0);
     });
 
     it('should throw error for negative tax rate', () => {
       const subtotal = new Money(100, 'USD');
       const taxConfig: TaxConfig = { rate: -0.05, name: 'Invalid Tax' };
-      expect(() => pricingService.calculateTax(subtotal, taxConfig))
-        .toThrow('[PricingService] tax rate must be non-negative');
+      expect(() => pricingService.calculateTax(subtotal, taxConfig)).toThrow(
+        '[PricingService] tax rate must be non-negative',
+      );
     });
   });
 
   describe('calculateLineItemTotal()', () => {
     it('should calculate line item without discount or tax', () => {
       const result = pricingService.calculateLineItemTotal(product, 5);
-      expect(result.subtotal.amount).toBe(50.00);
+      expect(result.subtotal.amount).toBe(50.0);
       expect(result.discount.amount).toBe(0);
       expect(result.tax.amount).toBe(0);
-      expect(result.total.amount).toBe(50.00);
+      expect(result.total.amount).toBe(50.0);
     });
 
     it('should calculate line item with discount and tax', () => {
       const discount: Discount = { type: DiscountType.PERCENTAGE, value: 10 };
       const taxConfig: TaxConfig = { rate: 0.08, name: 'Sales Tax' };
       const result = pricingService.calculateLineItemTotal(product, 5, discount, taxConfig);
-      expect(result.subtotal.amount).toBe(50.00);
-      expect(result.discount.amount).toBe(5.00);
-      expect(result.tax.amount).toBe(3.60);
-      expect(result.total.amount).toBe(48.60);
+      expect(result.subtotal.amount).toBe(50.0);
+      expect(result.discount.amount).toBe(5.0);
+      expect(result.tax.amount).toBe(3.6);
+      expect(result.total.amount).toBe(48.6);
     });
   });
 });

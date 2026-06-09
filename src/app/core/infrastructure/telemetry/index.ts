@@ -1,3 +1,3 @@
-export * from './telemetry.service';
+export * from '@core/infrastructure/telemetry/telemetry.service';
 
 // Made with Bob

@@ -1,9 +1,10 @@
-import { Injectable, Inject } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { Subject, Observable } from 'rxjs';
-import { BaseAgent } from '../../base/base-agent';
-import { IPaymentRepository } from '../../../core/domain/interfaces/payment.repository.interface';
-import { PAYMENT_REPOSITORY } from '../../../core/infrastructure/factories/repository.factory';
-import { AuditLogService, AuditAction, AuditStatus } from '../../../core/infrastructure/audit';
+import { BaseAgent } from '@app/agents/base/base-agent';
+import { IAgentMessage, IAgentResponse } from '@app/agents/base/base-agent.interface';
+import { IPaymentRepository } from '@core/domain/interfaces/payment.repository.interface';
+import { PAYMENT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import { AuditLogService, AuditAction, AuditStatus } from '@core/infrastructure/audit';
 import {
   IPaymentAgent,
   ProcessPaymentRequest,
@@ -24,14 +25,15 @@ import {
   GeneratePaymentReportResponse,
   PaymentEvent,
   PaymentDiscrepancy,
-  PaymentReport
-} from '../domain/payment-agent.interface';
-import { Payment, PaymentMethod, PaymentStatus } from '../../../core/domain/entities/payment.entity';
+  PaymentReport,
+} from '@app/agents/payment/domain/payment-agent.interface';
+import { Payment, PaymentMethod, PaymentStatus } from '@core/domain/entities/payment.entity';
+import { PaymentBuilder } from '@core/domain/entities/payment.builder';
 
 /**
  * Payment Agent
  * Handles payment processing, validation, and reconciliation
- * 
+ *
  * Features:
  * - Multiple payment method support
  * - Payment validation
@@ -43,20 +45,21 @@ import { Payment, PaymentMethod, PaymentStatus } from '../../../core/domain/enti
  * - Real-time payment events
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class PaymentAgent extends BaseAgent implements IPaymentAgent {
-  private paymentEventsSubject = new Subject<PaymentEvent>();
-  public paymentEvents$: Observable<PaymentEvent> = this.paymentEventsSubject.asObservable();
+  private readonly paymentRepository = inject<IPaymentRepository>(PAYMENT_REPOSITORY);
+  private readonly auditLog = inject(AuditLogService);
 
-  constructor(
-    @Inject(PAYMENT_REPOSITORY) private paymentRepository: IPaymentRepository,
-    private auditLog: AuditLogService
-  ) {
+  private readonly paymentEventsSubject = new Subject<PaymentEvent>();
+  public readonly paymentEvents$: Observable<PaymentEvent> =
+    this.paymentEventsSubject.asObservable();
+
+  constructor() {
     super(
       'payment-agent',
       'PaymentAgent',
-      'Handles payment processing, validation, and reconciliation'
+      'Handles payment processing, validation, and reconciliation',
     );
   }
 
@@ -92,26 +95,50 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
   /**
    * Handle incoming messages
    */
-  protected async handleMessage(message: any): Promise<any> {
+  protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
     console.log('PaymentAgent received message', { type: message.type });
 
     switch (message.type) {
       case 'PROCESS_PAYMENT':
-        return await this.processPayment(message.payload);
+        return {
+          success: true,
+          data: await this.processPayment(message.payload as ProcessPaymentRequest),
+        };
       case 'VALIDATE_PAYMENT':
-        return await this.validatePayment(message.payload);
+        return {
+          success: true,
+          data: await this.validatePayment(message.payload as ValidatePaymentRequest),
+        };
       case 'PROCESS_REFUND':
-        return await this.processRefund(message.payload);
+        return {
+          success: true,
+          data: await this.processRefund(message.payload as ProcessRefundRequest),
+        };
       case 'VOID_PAYMENT':
-        return await this.voidPayment(message.payload);
+        return {
+          success: true,
+          data: await this.voidPayment(message.payload as VoidPaymentRequest),
+        };
       case 'GET_PAYMENT_STATUS':
-        return await this.getPaymentStatus(message.payload);
+        return {
+          success: true,
+          data: await this.getPaymentStatus(message.payload as GetPaymentStatusRequest),
+        };
       case 'GET_PAYMENT_HISTORY':
-        return await this.getPaymentHistory(message.payload);
+        return {
+          success: true,
+          data: await this.getPaymentHistory(message.payload as GetPaymentHistoryRequest),
+        };
       case 'RECONCILE_PAYMENTS':
-        return await this.reconcilePayments(message.payload);
+        return {
+          success: true,
+          data: await this.reconcilePayments(message.payload as ReconcilePaymentsRequest),
+        };
       case 'GENERATE_PAYMENT_REPORT':
-        return await this.generatePaymentReport(message.payload);
+        return {
+          success: true,
+          data: await this.generatePaymentReport(message.payload as GeneratePaymentReportRequest),
+        };
       default:
         throw new Error(`Unknown message type: ${message.type}`);
     }
@@ -126,7 +153,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
       console.log('Processing payment', {
         transactionId: request.transactionId,
         amount: request.amount,
-        method: request.method
+        method: request.method,
       });
 
       // Validate payment request
@@ -139,25 +166,25 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
         cvv: request.cvv,
         walletToken: request.walletToken,
         accountNumber: request.accountNumber,
-        routingNumber: request.routingNumber
+        routingNumber: request.routingNumber,
       });
 
       if (!validation.valid) {
         return {
           success: false,
-          error: `Payment validation failed: ${validation.errors.join(', ')}`
+          error: `Payment validation failed: ${validation.errors.join(', ')}`,
         };
       }
 
       // Create payment entity
       const paymentId = this.generatePaymentId();
-      const payment = new Payment(
-        paymentId,
-        request.transactionId,
-        request.amount,
-        request.method,
-        PaymentStatus.PENDING
-      );
+      const payment = new PaymentBuilder()
+        .withId(paymentId)
+        .withOrderId(request.transactionId)
+        .withAmount(request.amount)
+        .withMethod(request.method)
+        .withStatus(PaymentStatus.PENDING)
+        .build();
 
       // Process based on payment method
       let authorizationCode: string | undefined;
@@ -165,7 +192,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
 
       try {
         payment.markAsProcessing();
-        
+
         switch (request.method) {
           case PaymentMethod.CASH:
             authorizationCode = await this.processCashPayment(payment, request);
@@ -198,7 +225,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
           transactionId: request.transactionId,
           amount: request.amount,
           method: request.method,
-          status: PaymentStatus.COMPLETED
+          status: PaymentStatus.COMPLETED,
         });
 
         console.log('Payment processed successfully', { paymentId });
@@ -217,17 +244,16 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
             amount: request.amount,
             method: request.method,
             authorizationCode,
-            transactionReference
-          }
+            transactionReference,
+          },
         });
 
         return {
           success: true,
           payment,
           authorizationCode,
-          transactionReference
+          transactionReference,
         };
-
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         payment.markAsFailed(errorMessage);
@@ -241,16 +267,15 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
           amount: request.amount,
           method: request.method,
           status: PaymentStatus.FAILED,
-          metadata: { error: errorMessage }
+          metadata: { error: errorMessage },
         });
 
         throw error;
       }
-
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('Payment processing failed', error);
-      
+
       // Audit log failed payment
       await this.auditLog.log({
         agentName: this.name,
@@ -264,13 +289,13 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
         metadata: {
           transactionId: request.transactionId,
           amount: request.amount,
-          method: request.method
-        }
+          method: request.method,
+        },
       });
-      
+
       return {
         success: false,
-        error: errorMessage
+        error: errorMessage,
       };
     }
   }
@@ -307,7 +332,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
     return {
       valid: errors.length === 0,
       errors,
-      warnings: warnings.length > 0 ? warnings : undefined
+      warnings: warnings.length > 0 ? warnings : undefined,
     };
   }
 
@@ -319,28 +344,28 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
     try {
       console.log('Processing refund', {
         paymentId: request.paymentId,
-        amount: request.amount
+        amount: request.amount,
       });
 
       const payment = await this.paymentRepository.findById(request.paymentId);
       if (!payment) {
         return {
           success: false,
-          error: 'Payment not found'
+          error: 'Payment not found',
         };
       }
 
       if (!payment.isRefundable()) {
         return {
           success: false,
-          error: 'Payment is not refundable'
+          error: 'Payment is not refundable',
         };
       }
 
       if (request.amount > payment.getRefundableAmount()) {
         return {
           success: false,
-          error: `Refund amount exceeds refundable amount (${payment.getRefundableAmount()})`
+          error: `Refund amount exceeds refundable amount (${payment.getRefundableAmount()})`,
         };
       }
 
@@ -353,13 +378,13 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
 
       // Create refund payment record
       const refundPaymentId = this.generatePaymentId();
-      const refundPayment = new Payment(
-        refundPaymentId,
-        payment.orderId,
-        request.amount, // Refund amount (positive, tracked as refund type)
-        payment.method,
-        PaymentStatus.COMPLETED
-      );
+      const refundPayment = new PaymentBuilder()
+        .withId(refundPaymentId)
+        .withOrderId(payment.orderId)
+        .withAmount(request.amount)
+        .withMethod(payment.method)
+        .withStatus(PaymentStatus.COMPLETED)
+        .build();
       await this.paymentRepository.create(refundPayment);
 
       // Emit refund event
@@ -371,12 +396,12 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
         amount: request.amount,
         method: payment.method,
         status: payment.status,
-        metadata: { reason: request.reason }
+        metadata: { reason: request.reason },
       });
 
       console.log('Refund processed successfully', {
         paymentId: request.paymentId,
-        refundPaymentId
+        refundPaymentId,
       });
 
       // Audit log successful refund
@@ -392,20 +417,19 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
           refundPaymentId,
           refundAmount: request.amount,
           reason: request.reason,
-          refundReference
-        }
+          refundReference,
+        },
       });
 
       return {
         success: true,
         refundPayment,
-        refundReference
+        refundReference,
       };
-
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('Refund processing failed', error);
-      
+
       // Audit log failed refund
       await this.auditLog.log({
         agentName: this.name,
@@ -418,13 +442,13 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
         errorMessage,
         metadata: {
           refundAmount: request.amount,
-          reason: request.reason
-        }
+          reason: request.reason,
+        },
       });
-      
+
       return {
         success: false,
-        error: errorMessage
+        error: errorMessage,
       };
     }
   }
@@ -441,15 +465,14 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
       if (!payment) {
         return {
           success: false,
-          error: 'Payment not found'
+          error: 'Payment not found',
         };
       }
 
-      if (payment.status !== PaymentStatus.PENDING && 
-          payment.status !== PaymentStatus.PROCESSING) {
+      if (payment.status !== PaymentStatus.PENDING && payment.status !== PaymentStatus.PROCESSING) {
         return {
           success: false,
-          error: 'Can only void pending or processing payments'
+          error: 'Can only void pending or processing payments',
         };
       }
 
@@ -469,7 +492,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
         amount: payment.amount,
         method: payment.method,
         status: payment.status,
-        metadata: { reason: request.reason }
+        metadata: { reason: request.reason },
       });
 
       console.log('Payment voided successfully', { paymentId: request.paymentId });
@@ -484,16 +507,15 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
         status: AuditStatus.SUCCESS,
         duration: Date.now() - startTime,
         metadata: {
-          reason: request.reason
-        }
+          reason: request.reason,
+        },
       });
 
       return { success: true };
-
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('Payment void failed', error);
-      
+
       // Audit log failed void
       await this.auditLog.log({
         agentName: this.name,
@@ -505,13 +527,13 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
         duration: Date.now() - startTime,
         errorMessage,
         metadata: {
-          reason: request.reason
-        }
+          reason: request.reason,
+        },
       });
-      
+
       return {
         success: false,
-        error: errorMessage
+        error: errorMessage,
       };
     }
   }
@@ -528,7 +550,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
     return {
       payment,
       status: payment.status,
-      lastUpdated: payment.updatedAt
+      lastUpdated: payment.updatedAt,
     };
   }
 
@@ -536,7 +558,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
    * Get payment history
    */
   async getPaymentHistory(request: GetPaymentHistoryRequest): Promise<GetPaymentHistoryResponse> {
-    let payments: Payment[] = [];
+    let payments: Payment[];
 
     // Use repository methods for efficient querying
     if (request.transactionId) {
@@ -554,8 +576,8 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
     // Apply additional filters
     if (request.customerId) {
       const customerPayments = await this.paymentRepository.findByCustomerId(request.customerId);
-      const customerPaymentIds = new Set(customerPayments.map(p => p.id));
-      payments = payments.filter(p => customerPaymentIds.has(p.id));
+      const customerPaymentIds = new Set(customerPayments.map((p) => p.id));
+      payments = payments.filter((p) => customerPaymentIds.has(p.id));
     }
 
     // Sort by date (newest first)
@@ -569,7 +591,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
     return {
       payments: paginatedPayments,
       total,
-      hasMore: offset + limit < total
+      hasMore: offset + limit < total,
     };
   }
 
@@ -586,18 +608,18 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
 
     // Filter by method if specified
     if (request.method) {
-      payments = payments.filter(p => p.method === request.method);
+      payments = payments.filter((p) => p.method === request.method);
     }
 
     const totalPayments = payments.length;
     const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
-    const successfulPayments = payments.filter(p => p.status === PaymentStatus.COMPLETED).length;
-    const failedPayments = payments.filter(p => p.status === PaymentStatus.FAILED).length;
+    const successfulPayments = payments.filter((p) => p.status === PaymentStatus.COMPLETED).length;
+    const failedPayments = payments.filter((p) => p.status === PaymentStatus.FAILED).length;
     const refundedPayments = payments.filter(
-      p => p.status === PaymentStatus.REFUNDED || p.status === PaymentStatus.PARTIALLY_REFUNDED
+      (p) => p.status === PaymentStatus.REFUNDED || p.status === PaymentStatus.PARTIALLY_REFUNDED,
     ).length;
     const voidedPayments = payments.filter(
-      p => p.status === PaymentStatus.FAILED && p.failureReason?.includes('Voided')
+      (p) => p.status === PaymentStatus.FAILED && p.failureReason?.includes('Voided'),
     ).length;
 
     // Check for discrepancies
@@ -611,24 +633,26 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
       failedPayments,
       refundedPayments,
       voidedPayments,
-      discrepancies
+      discrepancies,
     };
   }
 
   /**
    * Generate payment report
    */
-  async generatePaymentReport(request: GeneratePaymentReportRequest): Promise<GeneratePaymentReportResponse> {
+  async generatePaymentReport(
+    request: GeneratePaymentReportRequest,
+  ): Promise<GeneratePaymentReportResponse> {
     const payments = await this.paymentRepository.findByDateRange(
       request.startDate,
-      request.endDate
+      request.endDate,
     );
 
     // Calculate summary
     const totalPayments = payments.length;
-    const totalAmount = payments.reduce((sum, p) => p.amount > 0 ? sum + p.amount : sum, 0);
+    const totalAmount = payments.reduce((sum, p) => (p.amount > 0 ? sum + p.amount : sum), 0);
     const averageAmount = totalPayments > 0 ? totalAmount / totalPayments : 0;
-    const successfulPayments = payments.filter(p => p.status === PaymentStatus.COMPLETED).length;
+    const successfulPayments = payments.filter((p) => p.status === PaymentStatus.COMPLETED).length;
     const successRate = totalPayments > 0 ? (successfulPayments / totalPayments) * 100 : 0;
 
     // Group by method
@@ -637,17 +661,17 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
       [PaymentMethod.CREDIT_CARD]: { count: 0, amount: 0, percentage: 0 },
       [PaymentMethod.DEBIT_CARD]: { count: 0, amount: 0, percentage: 0 },
       [PaymentMethod.DIGITAL_WALLET]: { count: 0, amount: 0, percentage: 0 },
-      [PaymentMethod.GIFT_CARD]: { count: 0, amount: 0, percentage: 0 }
+      [PaymentMethod.GIFT_CARD]: { count: 0, amount: 0, percentage: 0 },
     };
 
-    payments.forEach(p => {
+    payments.forEach((p) => {
       if (p.amount > 0) {
         byMethod[p.method].count++;
         byMethod[p.method].amount += p.amount;
       }
     });
 
-    Object.values(byMethod).forEach(method => {
+    Object.values(byMethod).forEach((method) => {
       method.percentage = totalAmount > 0 ? (method.amount / totalAmount) * 100 : 0;
     });
 
@@ -658,44 +682,44 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
       [PaymentStatus.COMPLETED]: { count: 0, amount: 0 },
       [PaymentStatus.FAILED]: { count: 0, amount: 0 },
       [PaymentStatus.REFUNDED]: { count: 0, amount: 0 },
-      [PaymentStatus.PARTIALLY_REFUNDED]: { count: 0, amount: 0 }
+      [PaymentStatus.PARTIALLY_REFUNDED]: { count: 0, amount: 0 },
     };
 
-    payments.forEach(p => {
+    payments.forEach((p) => {
       byStatus[p.status].count++;
       byStatus[p.status].amount += Math.abs(p.amount);
     });
 
     // Calculate refunds
-    const refundPayments = payments.filter(p => p.amount < 0);
+    const refundPayments = payments.filter((p) => p.amount < 0);
     const refunds = {
       count: refundPayments.length,
-      amount: Math.abs(refundPayments.reduce((sum, p) => sum + p.amount, 0))
+      amount: Math.abs(refundPayments.reduce((sum, p) => sum + p.amount, 0)),
     };
 
     // Calculate voids
     const voidPayments = payments.filter(
-      p => p.status === PaymentStatus.FAILED && p.failureReason?.includes('Voided')
+      (p) => p.status === PaymentStatus.FAILED && p.failureReason?.includes('Voided'),
     );
     const voids = {
-      count: voidPayments.length
+      count: voidPayments.length,
     };
 
     const report: PaymentReport = {
       period: {
         start: request.startDate,
-        end: request.endDate
+        end: request.endDate,
       },
       summary: {
         totalPayments,
         totalAmount,
         averageAmount,
-        successRate
+        successRate,
       },
       byMethod,
       byStatus,
       refunds,
-      voids
+      voids,
     };
 
     return { report };
@@ -705,43 +729,55 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
    * Private helper methods
    */
 
-  private async processCashPayment(payment: Payment, request: ProcessPaymentRequest): Promise<string> {
+  private async processCashPayment(
+    _payment: Payment,
+    _request: ProcessPaymentRequest,
+  ): Promise<string> {
     // Cash payments are immediately successful
     return 'CASH-' + Date.now();
   }
 
-  private async processCardPayment(payment: Payment, request: ProcessPaymentRequest): Promise<string> {
+  private async processCardPayment(
+    payment: Payment,
+    request: ProcessPaymentRequest,
+  ): Promise<string> {
     // Simulate card processing
     // In production, integrate with payment gateway (Stripe, Square, etc.)
     await this.delay(1000);
-    
+
     if (request.cardNumber) {
       payment.cardLast4 = request.cardNumber.slice(-4);
       payment.cardBrand = this.detectCardBrand(request.cardNumber);
     }
-    
+
     return 'AUTH-' + Date.now();
   }
 
-  private async processWalletPayment(payment: Payment, request: ProcessPaymentRequest): Promise<string> {
+  private async processWalletPayment(
+    _payment: Payment,
+    _request: ProcessPaymentRequest,
+  ): Promise<string> {
     // Simulate wallet processing
     await this.delay(800);
     return 'WALLET-' + Date.now();
   }
 
-  private async processGiftCardPayment(payment: Payment, request: ProcessPaymentRequest): Promise<string> {
+  private async processGiftCardPayment(
+    _payment: Payment,
+    _request: ProcessPaymentRequest,
+  ): Promise<string> {
     // Simulate gift card processing
     await this.delay(500);
     return 'GIFT-' + Date.now();
   }
 
-  private async processRefundWithGateway(payment: Payment, amount: number): Promise<string> {
+  private async processRefundWithGateway(_payment: Payment, _amount: number): Promise<string> {
     // Simulate refund processing with gateway
     await this.delay(1000);
     return 'REFUND-' + Date.now();
   }
 
-  private async voidPaymentWithGateway(payment: Payment): Promise<void> {
+  private async voidPaymentWithGateway(_payment: Payment): Promise<void> {
     // Simulate void processing with gateway
     await this.delay(500);
   }
@@ -749,7 +785,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
   private validateCardPayment(
     request: ValidatePaymentRequest,
     errors: string[],
-    warnings: string[]
+    warnings: string[],
   ): void {
     if (!request.cardNumber) {
       errors.push('Card number is required');
@@ -809,12 +845,12 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
 
   private detectCardBrand(cardNumber: string): string {
     const digits = cardNumber.replace(/\D/g, '');
-    
+
     if (/^4/.test(digits)) return 'Visa';
     if (/^5[1-5]/.test(digits)) return 'Mastercard';
     if (/^3[47]/.test(digits)) return 'American Express';
     if (/^6(?:011|5)/.test(digits)) return 'Discover';
-    
+
     return 'Unknown';
   }
 
@@ -831,7 +867,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

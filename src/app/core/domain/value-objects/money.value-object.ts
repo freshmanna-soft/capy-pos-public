@@ -1,8 +1,8 @@
 import {
   BaseValueObject,
   INumericValueObject,
-  IFormattable
-} from './base.value-object';
+  IFormattable,
+} from '@core/domain/value-objects/base.value-object';
 
 /**
  * Money Value Object
@@ -18,15 +18,15 @@ export class Money
   private readonly _amount: number;
   private readonly _currency: string;
 
-  constructor(amount: number, currency: string = 'USD') {
+  constructor(amount: number, currency = 'USD') {
     super();
     this.validateAmount(amount);
     this.validateCurrency(currency);
-    
+
     // Store as cents/smallest unit to avoid floating point issues
     this._amount = Math.round(amount * 100);
     this._currency = currency.toUpperCase();
-    
+
     this.freeze(); // Enforce immutability
   }
 
@@ -84,14 +84,14 @@ export class Money
     if (divisor === 0) {
       throw new Error('Cannot divide by zero');
     }
-    return new Money((this._amount / divisor) / 100, this._currency);
+    return new Money(this._amount / divisor / 100, this._currency);
   }
 
   /**
    * Calculate percentage
    */
   percentage(percent: number): Money {
-    return new Money((this._amount * percent / 100) / 100, this._currency);
+    return new Money((this._amount * percent) / 100 / 100, this._currency);
   }
 
   /**
@@ -158,10 +158,10 @@ export class Money
   /**
    * Format as string with currency symbol
    */
-  format(locale: string = 'en-US'): string {
+  format(locale = 'en-US'): string {
     return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: this._currency
+      currency: this._currency,
     }).format(this.amount);
   }
 
@@ -171,7 +171,7 @@ export class Money
   toJSON(): { amount: number; currency: string } {
     return {
       amount: this.amount,
-      currency: this._currency
+      currency: this._currency,
     };
   }
 
@@ -185,14 +185,14 @@ export class Money
   /**
    * Create zero Money value
    */
-  static zero(currency: string = 'USD'): Money {
+  static zero(currency = 'USD'): Money {
     return new Money(0, currency);
   }
 
   /**
    * Create Money from cents
    */
-  static fromCents(cents: number, currency: string = 'USD'): Money {
+  static fromCents(cents: number, currency = 'USD'): Money {
     return new Money(cents / 100, currency);
   }
 
@@ -200,11 +200,11 @@ export class Money
    * Validate amount
    */
   private validateAmount(amount: number): void {
-    if (typeof amount !== 'number' || isNaN(amount)) {
-      throw new Error('Amount must be a valid number');
+    if (typeof amount !== 'number' || Number.isNaN(amount)) {
+      throw new TypeError('Amount must be a valid number');
     }
-    if (!isFinite(amount)) {
-      throw new Error('Amount must be finite');
+    if (!Number.isFinite(amount)) {
+      throw new TypeError('Amount must be finite');
     }
   }
 
@@ -226,7 +226,7 @@ export class Money
   private assertSameCurrency(other: Money): void {
     if (this._currency !== other._currency) {
       throw new Error(
-        `Cannot operate on different currencies: ${this._currency} and ${other._currency}`
+        `Cannot operate on different currencies: ${this._currency} and ${other._currency}`,
       );
     }
   }

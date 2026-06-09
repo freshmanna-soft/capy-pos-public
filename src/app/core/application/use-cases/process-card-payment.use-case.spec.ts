@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
-import { ProcessCardPaymentUseCase, CardBrand } from './process-card-payment.use-case';
-import { CartService } from '../services/cart.service';
-import { CalculateCartTotalsUseCase } from './calculate-cart-totals.use-case';
+import { ProcessCardPaymentUseCase } from '@core/application/use-cases/process-card-payment.use-case';
+import { CartService } from '@core/application/services/cart.service';
+import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
 import { signal } from '@angular/core';
 
 describe('ProcessCardPaymentUseCase', () => {

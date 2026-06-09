@@ -1,14 +1,14 @@
 import { Injectable } from '@angular/core';
-import { Subject, Observable, interval } from 'rxjs';
+import { Subject, Observable } from 'rxjs';
 
 /**
  * Metric Type
  */
 export enum MetricType {
-  COUNTER = 'COUNTER',       // Incremental count
-  GAUGE = 'GAUGE',           // Current value
-  HISTOGRAM = 'HISTOGRAM',   // Distribution of values
-  TIMER = 'TIMER'            // Duration measurements
+  COUNTER = 'COUNTER', // Incremental count
+  GAUGE = 'GAUGE', // Current value
+  HISTOGRAM = 'HISTOGRAM', // Distribution of values
+  TIMER = 'TIMER', // Duration measurements
 }
 
 /**
@@ -34,9 +34,9 @@ export interface MetricSummary {
   min: number;
   max: number;
   avg: number;
-  p50?: number;  // Median
-  p95?: number;  // 95th percentile
-  p99?: number;  // 99th percentile
+  p50?: number; // Median
+  p95?: number; // 95th percentile
+  p99?: number; // 99th percentile
   lastValue: number;
   lastUpdated: Date;
   tags?: Record<string, string>;
@@ -48,7 +48,7 @@ export interface MetricSummary {
 export interface TelemetryEvent {
   name: string;
   timestamp: Date;
-  properties?: Record<string, any>;
+  properties?: Record<string, unknown>;
   measurements?: Record<string, number>;
 }
 
@@ -75,7 +75,7 @@ export interface SystemMetrics {
 /**
  * Telemetry Service
  * Collects and manages application metrics and telemetry data
- * 
+ *
  * Features:
  * - Multiple metric types (counter, gauge, histogram, timer)
  * - Real-time metric streaming
@@ -85,24 +85,24 @@ export interface SystemMetrics {
  * - Performance monitoring
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class TelemetryService {
-  private metrics = new Map<string, MetricDataPoint[]>();
+  private readonly metrics = new Map<string, MetricDataPoint[]>();
   private events: TelemetryEvent[] = [];
-  private maxDataPoints = 1000;
-  private maxEvents = 500;
-  
-  private metricsSubject = new Subject<MetricDataPoint>();
+  private readonly maxDataPoints = 1000;
+  private readonly maxEvents = 500;
+
+  private readonly metricsSubject = new Subject<MetricDataPoint>();
   public metrics$: Observable<MetricDataPoint> = this.metricsSubject.asObservable();
-  
-  private eventsSubject = new Subject<TelemetryEvent>();
+
+  private readonly eventsSubject = new Subject<TelemetryEvent>();
   public events$: Observable<TelemetryEvent> = this.eventsSubject.asObservable();
-  
-  private systemMetricsSubject = new Subject<SystemMetrics>();
+
+  private readonly systemMetricsSubject = new Subject<SystemMetrics>();
   public systemMetrics$: Observable<SystemMetrics> = this.systemMetricsSubject.asObservable();
-  
-  private monitoringInterval?: any;
+
+  private monitoringInterval?: ReturnType<typeof setInterval>;
 
   constructor() {
     this.startSystemMonitoring();
@@ -111,13 +111,13 @@ export class TelemetryService {
   /**
    * Record a counter metric (incremental)
    */
-  recordCounter(name: string, value: number = 1, tags?: Record<string, string>): void {
+  recordCounter(name: string, value = 1, tags?: Record<string, string>): void {
     this.recordMetric({
       name,
       type: MetricType.COUNTER,
       value,
       timestamp: new Date(),
-      tags
+      tags,
     });
   }
 
@@ -131,7 +131,7 @@ export class TelemetryService {
       value,
       timestamp: new Date(),
       tags,
-      unit
+      unit,
     });
   }
 
@@ -145,7 +145,7 @@ export class TelemetryService {
       value,
       timestamp: new Date(),
       tags,
-      unit
+      unit,
     });
   }
 
@@ -154,7 +154,7 @@ export class TelemetryService {
    */
   startTimer(name: string, tags?: Record<string, string>): () => void {
     const startTime = Date.now();
-    
+
     return () => {
       const duration = Date.now() - startTime;
       this.recordMetric({
@@ -163,7 +163,7 @@ export class TelemetryService {
         value: duration,
         timestamp: new Date(),
         tags,
-        unit: 'ms'
+        unit: 'ms',
       });
     };
   }
@@ -174,7 +174,7 @@ export class TelemetryService {
   async measureAsync<T>(
     name: string,
     fn: () => Promise<T>,
-    tags?: Record<string, string>
+    tags?: Record<string, string>,
   ): Promise<T> {
     const stopTimer = this.startTimer(name, tags);
     try {
@@ -193,18 +193,18 @@ export class TelemetryService {
    */
   trackEvent(
     name: string,
-    properties?: Record<string, any>,
-    measurements?: Record<string, number>
+    properties?: Record<string, unknown>,
+    measurements?: Record<string, number>,
   ): void {
     const event: TelemetryEvent = {
       name,
       timestamp: new Date(),
       properties,
-      measurements
+      measurements,
     };
 
     this.events.push(event);
-    
+
     // Trim events if exceeds max
     if (this.events.length > this.maxEvents) {
       this.events = this.events.slice(-this.maxEvents);
@@ -221,7 +221,7 @@ export class TelemetryService {
     const dataPoints = this.getMetricDataPoints(name, tags);
     if (dataPoints.length === 0) return null;
 
-    const values = dataPoints.map(dp => dp.value);
+    const values = dataPoints.map((dp) => dp.value);
     const sortedValues = [...values].sort((a, b) => a - b);
 
     return {
@@ -237,7 +237,7 @@ export class TelemetryService {
       p99: this.percentile(sortedValues, 99),
       lastValue: values[values.length - 1],
       lastUpdated: dataPoints[dataPoints.length - 1].timestamp,
-      tags
+      tags,
     };
   }
 
@@ -246,7 +246,7 @@ export class TelemetryService {
    */
   getAllMetricSummaries(): Record<string, MetricSummary> {
     const summaries: Record<string, MetricSummary> = {};
-    
+
     this.metrics.forEach((_, name) => {
       const summary = this.getMetricSummary(name);
       if (summary) {
@@ -271,7 +271,7 @@ export class TelemetryService {
    * Get events by name
    */
   getEventsByName(name: string, limit?: number): TelemetryEvent[] {
-    const filtered = this.events.filter(e => e.name === name);
+    const filtered = this.events.filter((e) => e.name === name);
     if (limit) {
       return filtered.slice(-limit);
     }
@@ -301,16 +301,19 @@ export class TelemetryService {
    */
   getSystemMetrics(): SystemMetrics {
     const metrics: SystemMetrics = {
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
-    // Memory metrics (if available)
-    if ('memory' in performance && (performance as any).memory) {
-      const memory = (performance as any).memory;
+    // Memory metrics (if available - Chrome only)
+    const perfWithMemory = performance as unknown as {
+      memory?: { usedJSHeapSize: number; totalJSHeapSize: number };
+    };
+    if (perfWithMemory.memory) {
+      const memory = perfWithMemory.memory;
       metrics.memory = {
         used: memory.usedJSHeapSize,
         total: memory.totalJSHeapSize,
-        percentage: (memory.usedJSHeapSize / memory.totalJSHeapSize) * 100
+        percentage: (memory.usedJSHeapSize / memory.totalJSHeapSize) * 100,
       };
     }
 
@@ -325,7 +328,7 @@ export class TelemetryService {
       metrics: this.getAllMetricSummaries(),
       events: this.events,
       systemMetrics: this.getSystemMetrics(),
-      exportedAt: new Date()
+      exportedAt: new Date(),
     };
 
     return JSON.stringify(data, null, 2);
@@ -347,7 +350,7 @@ export class TelemetryService {
 
   private recordMetric(dataPoint: MetricDataPoint): void {
     const key = this.getMetricKey(dataPoint.name, dataPoint.tags);
-    
+
     if (!this.metrics.has(key)) {
       this.metrics.set(key, []);
     }
@@ -405,15 +408,13 @@ export class TelemetryService {
  * Automatically measure method execution time
  */
 export function Measure(metricName?: string) {
-  return function (
-    target: any,
-    propertyKey: string,
-    descriptor: PropertyDescriptor
-  ) {
+  return function (target: unknown, propertyKey: string, descriptor: PropertyDescriptor) {
     const originalMethod = descriptor.value;
-    const name = metricName || `${target.constructor.name}.${propertyKey}`;
+    const name =
+      metricName ||
+      `${(target as { constructor: { name: string } }).constructor.name}.${propertyKey}`;
 
-    descriptor.value = async function (...args: any[]) {
+    descriptor.value = async function (...args: unknown[]) {
       const telemetry = new TelemetryService();
       return telemetry.measureAsync(name, () => originalMethod.apply(this, args));
     };

@@ -4,12 +4,12 @@
  */
 
 // Base repositories
-export * from './base-dexie.repository';
+export * from '@core/infrastructure/repositories/base-dexie.repository';
 
 // Concrete repositories
-export * from './dexie-product.repository';
-export * from './dexie-customer.repository';
-export * from './dexie-transaction.repository';
-export * from './dexie-payment.repository';
+export * from '@core/infrastructure/repositories/dexie-product.repository';
+export * from '@core/infrastructure/repositories/dexie-customer.repository';
+export * from '@core/infrastructure/repositories/dexie-transaction.repository';
+export * from '@core/infrastructure/repositories/dexie-payment.repository';
 
 // Made with Bob

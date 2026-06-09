@@ -1,3 +1,3 @@
 // Export inventory agent infrastructure
-export { InventoryAgent } from './inventory.agent';
-export { INVENTORY_AGENT_PROVIDERS } from './inventory-agent.provider';
+export { InventoryAgent } from '@app/agents/inventory/infrastructure/inventory.agent';
+export { INVENTORY_AGENT_PROVIDERS } from '@app/agents/inventory/infrastructure/inventory-agent.provider';

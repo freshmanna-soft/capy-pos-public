@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { BaseDomainService } from './base-domain.service';
+import { BaseDomainService } from '@core/domain/rules/base-domain.service';
 import {
   ILoyaltyService,
   LoyaltyTier,
@@ -7,15 +7,15 @@ import {
   PointsCalculation,
   RewardRedemption,
   TierProgression,
-  PointsTransaction
-} from './loyalty.service.interface';
+  PointsTransaction,
+} from '@core/domain/rules/loyalty.service.interface';
 
 /**
  * Loyalty Service Implementation
- * 
+ *
  * Implements customer loyalty program operations including points calculation,
  * tier management, and reward redemption.
- * 
+ *
  * @class LoyaltyService
  * @extends BaseDomainService
  * @implements ILoyaltyService
@@ -25,31 +25,43 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
   /**
    * Tier configurations with thresholds and benefits
    */
-  private readonly tierConfigs: Map<LoyaltyTier, TierConfig> = new Map([
-    [LoyaltyTier.BRONZE, {
-      tier: LoyaltyTier.BRONZE,
-      minPoints: 0,
-      pointsMultiplier: 1.0,
-      discountPercentage: 0
-    }],
-    [LoyaltyTier.SILVER, {
-      tier: LoyaltyTier.SILVER,
-      minPoints: 1000,
-      pointsMultiplier: 1.25,
-      discountPercentage: 5
-    }],
-    [LoyaltyTier.GOLD, {
-      tier: LoyaltyTier.GOLD,
-      minPoints: 5000,
-      pointsMultiplier: 1.5,
-      discountPercentage: 10
-    }],
-    [LoyaltyTier.PLATINUM, {
-      tier: LoyaltyTier.PLATINUM,
-      minPoints: 10000,
-      pointsMultiplier: 2.0,
-      discountPercentage: 15
-    }]
+  private readonly tierConfigs = new Map<LoyaltyTier, TierConfig>([
+    [
+      LoyaltyTier.BRONZE,
+      {
+        tier: LoyaltyTier.BRONZE,
+        minPoints: 0,
+        pointsMultiplier: 1,
+        discountPercentage: 0,
+      },
+    ],
+    [
+      LoyaltyTier.SILVER,
+      {
+        tier: LoyaltyTier.SILVER,
+        minPoints: 1000,
+        pointsMultiplier: 1.25,
+        discountPercentage: 5,
+      },
+    ],
+    [
+      LoyaltyTier.GOLD,
+      {
+        tier: LoyaltyTier.GOLD,
+        minPoints: 5000,
+        pointsMultiplier: 1.5,
+        discountPercentage: 10,
+      },
+    ],
+    [
+      LoyaltyTier.PLATINUM,
+      {
+        tier: LoyaltyTier.PLATINUM,
+        minPoints: 10000,
+        pointsMultiplier: 2,
+        discountPercentage: 15,
+      },
+    ],
   ]);
 
   /**
@@ -72,16 +84,16 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
   calculatePoints(
     purchaseAmount: number,
     currentTier: LoyaltyTier,
-    isSpecialPromotion: boolean = false
+    isSpecialPromotion = false,
   ): PointsCalculation {
     this.validateNonNegative(purchaseAmount, 'Purchase amount');
-    
+
     const tierConfig = this.getTierConfig(currentTier);
     const basePoints = Math.floor(purchaseAmount * this.BASE_POINTS_PER_DOLLAR);
     const tierMultiplier = tierConfig.pointsMultiplier;
-    const promotionMultiplier = isSpecialPromotion ? this.PROMOTION_MULTIPLIER : 1.0;
+    const promotionMultiplier = isSpecialPromotion ? this.PROMOTION_MULTIPLIER : 1;
     const totalMultiplier = tierMultiplier * promotionMultiplier;
-    
+
     const bonusPoints = Math.floor(basePoints * (totalMultiplier - 1));
     const totalPoints = basePoints + bonusPoints;
 
@@ -89,7 +101,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
       basePoints,
       bonusPoints,
       totalPoints,
-      multiplier: totalMultiplier
+      multiplier: totalMultiplier,
     };
   }
 
@@ -129,7 +141,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     const currentTier = this.determineTier(currentPoints);
     const tiers = [LoyaltyTier.BRONZE, LoyaltyTier.SILVER, LoyaltyTier.GOLD, LoyaltyTier.PLATINUM];
     const currentTierIndex = tiers.indexOf(currentTier);
-    
+
     let nextTier: LoyaltyTier | null = null;
     let pointsToNextTier = 0;
     let progressPercentage = 100;
@@ -138,7 +150,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
       nextTier = tiers[currentTierIndex + 1];
       const nextTierConfig = this.getTierConfig(nextTier);
       const currentTierConfig = this.getTierConfig(currentTier);
-      
+
       pointsToNextTier = nextTierConfig.minPoints - currentPoints;
       const tierRange = nextTierConfig.minPoints - currentTierConfig.minPoints;
       const pointsInTier = currentPoints - currentTierConfig.minPoints;
@@ -150,7 +162,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
       currentPoints,
       nextTier,
       pointsToNextTier,
-      progressPercentage
+      progressPercentage,
     };
   }
 
@@ -162,7 +174,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     rewardId: string,
     pointsCost: number,
     currentBalance: number,
-    expirationDays: number | null = null
+    expirationDays: number | null = null,
   ): RewardRedemption {
     this.validateRequired(customerId, 'Customer ID');
     this.validateRequired(rewardId, 'Reward ID');
@@ -172,7 +184,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     if (!this.hasSufficientPoints(currentBalance, pointsCost)) {
       throw new Error(
         `[${this.serviceName}] Insufficient points. ` +
-        `Required: ${pointsCost}, Available: ${currentBalance}`
+          `Required: ${pointsCost}, Available: ${currentBalance}`,
       );
     }
 
@@ -181,7 +193,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     }
 
     const redeemedAt = new Date();
-    const expiresAt = expirationDays 
+    const expiresAt = expirationDays
       ? new Date(redeemedAt.getTime() + expirationDays * 24 * 60 * 60 * 1000)
       : null;
 
@@ -190,7 +202,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
       pointsCost,
       customerId,
       redeemedAt,
-      expiresAt
+      expiresAt,
     };
   }
 
@@ -202,7 +214,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     points: number,
     type: 'EARNED' | 'REDEEMED' | 'EXPIRED' | 'ADJUSTED',
     reason: string,
-    currentBalance: number
+    currentBalance: number,
   ): PointsTransaction {
     this.validateRequired(customerId, 'Customer ID');
     this.validateRequired(reason, 'Reason');
@@ -214,9 +226,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     } else if (type === 'REDEEMED' || type === 'EXPIRED') {
       this.validatePositive(Math.abs(points), 'Points');
       if (points > 0) {
-        throw new Error(
-          `[${this.serviceName}] Points for ${type} transactions must be negative`
-        );
+        throw new Error(`[${this.serviceName}] Points for ${type} transactions must be negative`);
       }
     }
 
@@ -224,7 +234,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     if (balanceAfter < 0) {
       throw new Error(
         `[${this.serviceName}] Transaction would result in negative balance. ` +
-        `Current: ${currentBalance}, Change: ${points}, Result: ${balanceAfter}`
+          `Current: ${currentBalance}, Change: ${points}, Result: ${balanceAfter}`,
       );
     }
 
@@ -234,7 +244,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
       type,
       reason,
       transactionDate: new Date(),
-      balanceAfter
+      balanceAfter,
     };
   }
 
@@ -243,7 +253,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
    */
   calculateTierDiscount(amount: number, tier: LoyaltyTier): number {
     this.validateNonNegative(amount, 'Amount');
-    
+
     const tierConfig = this.getTierConfig(tier);
     return Math.floor(amount * (tierConfig.discountPercentage / 100) * 100) / 100;
   }

@@ -1,13 +1,20 @@
-import { ApplicationConfig, provideBrowserGlobalErrorListeners, APP_INITIALIZER } from '@angular/core';
+import {
+  ApplicationConfig,
+  provideBrowserGlobalErrorListeners,
+  APP_INITIALIZER,
+} from '@angular/core';
 import { provideRouter } from '@angular/router';
 
-import { routes } from './app.routes';
-import { DexieDatabase } from './core/infrastructure/database/dexie-database.service';
-import { REPOSITORY_PROVIDERS, TRANSACTION_REPOSITORY } from './core/infrastructure/factories/repository.factory';
-import { INVENTORY_AGENT_PROVIDERS } from './agents/inventory/infrastructure';
-import { SALES_AGENT_PROVIDERS } from './agents/sales/infrastructure';
-import { PAYMENT_AGENT_PROVIDER } from './agents/payment/infrastructure/payment-agent.provider';
-import { AgentRegistry } from './agents/agent.registry';
+import { routes } from '@app/app.routes';
+import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
+import {
+  REPOSITORY_PROVIDERS,
+  TRANSACTION_REPOSITORY,
+} from '@core/infrastructure/factories/repository.factory';
+import { INVENTORY_AGENT_PROVIDERS } from '@app/agents/inventory/infrastructure';
+import { SALES_AGENT_PROVIDERS } from '@app/agents/sales/infrastructure';
+import { PAYMENT_AGENT_PROVIDER } from '@app/agents/payment/infrastructure/payment-agent.provider';
+import { AgentRegistry } from '@app/agents/agent.registry';
 
 /**
  * Initialize Dexie database on application startup
@@ -18,11 +25,11 @@ export function initializeDexieDatabase(db: DexieDatabase) {
       // Open the database
       await db.open();
       console.log('Dexie database opened successfully');
-      
+
       // Initialize with seed data if needed
       await db.initializeWithSeedData();
       console.log('Database initialized with seed data');
-      
+
       // Log database stats
       const stats = await db.getStats();
       console.log('Database statistics:', stats);
@@ -40,19 +47,18 @@ export function initializeAgents(registry: AgentRegistry) {
   return async () => {
     try {
       console.log('Initializing agents via AgentRegistry...');
-      
+
       // Initialize and start all agents through registry
       await registry.initializeAll();
       await registry.startAll();
-      
+
       // Log agent statistics
       const stats = registry.getStatistics();
       console.log('Agent statistics:', stats);
-      
+
       // Check health
       const allHealthy = await registry.areAllHealthy();
       console.log('All agents healthy:', allHealthy);
-      
     } catch (error) {
       console.error('Failed to initialize agents:', error);
       throw error;
@@ -68,24 +74,24 @@ export const appConfig: ApplicationConfig = {
       provide: APP_INITIALIZER,
       useFactory: initializeDexieDatabase,
       deps: [DexieDatabase],
-      multi: true
+      multi: true,
     },
     {
       provide: APP_INITIALIZER,
       useFactory: initializeAgents,
       deps: [AgentRegistry],
-      multi: true
+      multi: true,
     },
     // Repository providers with dependency injection
     ...REPOSITORY_PROVIDERS,
     // String-based token alias for PersistTransactionUseCase compatibility
     {
       provide: 'ITransactionRepository',
-      useExisting: TRANSACTION_REPOSITORY
+      useExisting: TRANSACTION_REPOSITORY,
     },
     // Agent providers
     ...INVENTORY_AGENT_PROVIDERS,
     ...SALES_AGENT_PROVIDERS,
-    PAYMENT_AGENT_PROVIDER
-  ]
+    PAYMENT_AGENT_PROVIDER,
+  ],
 };

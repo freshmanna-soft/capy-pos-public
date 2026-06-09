@@ -1,10 +1,10 @@
-import { ResponseDto, CreateDto, UpdateDto } from '../dtos/base.dto';
+import { ResponseDto, CreateDto, UpdateDto } from '@core/application/dtos/base.dto';
 
 /**
  * Abstract Base Mapper
  * Provides common mapping functionality for all entity mappers
  * Follows Open/Closed Principle - open for extension, closed for modification
- * 
+ *
  * @template TEntity - Domain entity type
  * @template TCreateDto - DTO for creating entities
  * @template TUpdateDto - DTO for updating entities
@@ -14,7 +14,7 @@ export abstract class BaseMapper<
   TEntity,
   TCreateDto extends CreateDto,
   TUpdateDto extends UpdateDto,
-  TResponseDto extends ResponseDto
+  TResponseDto extends ResponseDto,
 > {
   /**
    * Maps CreateDto to domain entity
@@ -45,7 +45,7 @@ export abstract class BaseMapper<
    * Common implementation for all mappers
    */
   toResponseDtoList(entities: TEntity[]): TResponseDto[] {
-    return entities.map(entity => this.toResponseDto(entity));
+    return entities.map((entity) => this.toResponseDto(entity));
   }
 
   /**
@@ -53,7 +53,7 @@ export abstract class BaseMapper<
    * Common implementation for all mappers
    */
   fromResponseDtoList(dtos: TResponseDto[]): TEntity[] {
-    return dtos.map(dto => this.fromResponseDto(dto));
+    return dtos.map((dto) => this.fromResponseDto(dto));
   }
 
   /**
@@ -84,7 +84,7 @@ export abstract class BaseMapper<
    * Validates that required fields are present
    * Common utility for all mappers
    */
-  protected validateRequired(value: any, fieldName: string): void {
+  protected validateRequired(value: unknown, fieldName: string): void {
     if (value === undefined || value === null) {
       throw new Error(`${fieldName} is required`);
     }

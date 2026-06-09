@@ -1,21 +1,24 @@
-import { Injectable } from '@angular/core';
-import { BaseDexieRepository } from './base-dexie.repository';
-import { IPaymentRepository } from '../../domain/interfaces/payment.repository.interface';
-import { Payment, PaymentStatus, PaymentMethod } from '../../domain/entities/payment.entity';
-import { DexieDatabase, IPaymentDB } from '../database/dexie-database.service';
+import { Injectable, inject } from '@angular/core';
+import { BaseDexieRepository } from '@core/infrastructure/repositories/base-dexie.repository';
+import { IPaymentRepository } from '@core/domain/interfaces/payment.repository.interface';
+import { Payment, PaymentStatus, PaymentMethod } from '@core/domain/entities/payment.entity';
+import { PaymentBuilder } from '@core/domain/entities/payment.builder';
+import { DexieDatabase, IPaymentDB } from '@core/infrastructure/database/dexie-database.service';
 
 /**
  * Dexie Payment Repository
  * Implements payment repository using Dexie.js (IndexedDB)
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
-export class DexiePaymentRepository 
-  extends BaseDexieRepository<Payment, IPaymentDB> 
-  implements IPaymentRepository {
+export class DexiePaymentRepository
+  extends BaseDexieRepository<Payment, IPaymentDB>
+  implements IPaymentRepository
+{
+  constructor() {
+    const db = inject(DexieDatabase);
 
-  constructor(db: DexieDatabase) {
     super(db.payments);
   }
 
@@ -23,25 +26,27 @@ export class DexiePaymentRepository
    * Map database record to domain entity
    */
   protected mapToDomain(record: IPaymentDB): Payment {
-    return new Payment(
-      record.id,
-      record.orderId,
-      record.amount,
-      record.method as PaymentMethod,
-      record.status as PaymentStatus,
-      record.currency,
-      record.refundedAmount,
-      record.createdAt,
-      record.updatedAt,
-      record.createdBy,
-      record.updatedBy,
-      record.completedAt,
-      record.failureReason,
-      record.transactionId,
-      record.cardLast4,
-      record.cardBrand,
-      record.receiptNumber
-    );
+    const builder = new PaymentBuilder()
+      .withId(record.id)
+      .withOrderId(record.orderId)
+      .withAmount(record.amount)
+      .withMethod(record.method as PaymentMethod)
+      .withStatus(record.status as PaymentStatus)
+      .withCurrency(record.currency)
+      .withRefundedAmount(record.refundedAmount)
+      .withCreatedAt(record.createdAt)
+      .withUpdatedAt(record.updatedAt);
+
+    if (record.createdBy) builder.withCreatedBy(record.createdBy);
+    if (record.updatedBy) builder.withUpdatedBy(record.updatedBy);
+    if (record.completedAt) builder.withCompletedAt(record.completedAt);
+    if (record.failureReason) builder.withFailureReason(record.failureReason);
+    if (record.transactionId) builder.withTransactionId(record.transactionId);
+    if (record.cardLast4) builder.withCardLast4(record.cardLast4);
+    if (record.cardBrand) builder.withCardBrand(record.cardBrand);
+    if (record.receiptNumber) builder.withReceiptNumber(record.receiptNumber);
+
+    return builder.build();
   }
 
   /**
@@ -72,7 +77,7 @@ export class DexiePaymentRepository
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
       createdBy: entity.createdBy,
-      updatedBy: entity.updatedBy
+      updatedBy: entity.updatedBy,
     };
   }
 
@@ -80,18 +85,15 @@ export class DexiePaymentRepository
    * Find payments by transaction/order ID
    */
   async findByTransactionId(transactionId: string): Promise<Payment[]> {
-    const records = await this.table
-      .where('orderId')
-      .equals(transactionId)
-      .toArray();
-    return records.map(r => this.mapToDomain(r));
+    const records = await this.table.where('orderId').equals(transactionId).toArray();
+    return records.map((r) => this.mapToDomain(r));
   }
 
   /**
    * Find payments by customer ID
    * Note: This requires joining with transactions table or storing customerId
    */
-  async findByCustomerId(customerId: string): Promise<Payment[]> {
+  async findByCustomerId(_customerId: string): Promise<Payment[]> {
     // For now, return empty array as we'd need to join with transactions
     // In a real implementation, you'd either:
     // 1. Store customerId in payments table
@@ -103,22 +105,16 @@ export class DexiePaymentRepository
    * Find payments by status
    */
   async findByStatus(status: PaymentStatus): Promise<Payment[]> {
-    const records = await this.table
-      .where('status')
-      .equals(status)
-      .toArray();
-    return records.map(r => this.mapToDomain(r));
+    const records = await this.table.where('status').equals(status).toArray();
+    return records.map((r) => this.mapToDomain(r));
   }
 
   /**
    * Find payments by method
    */
   async findByMethod(method: PaymentMethod): Promise<Payment[]> {
-    const records = await this.table
-      .where('method')
-      .equals(method)
-      .toArray();
-    return records.map(r => this.mapToDomain(r));
+    const records = await this.table.where('method').equals(method).toArray();
+    return records.map((r) => this.mapToDomain(r));
   }
 
   /**
@@ -129,7 +125,7 @@ export class DexiePaymentRepository
       .where('createdAt')
       .between(startDate, endDate, true, true)
       .toArray();
-    return records.map(r => this.mapToDomain(r));
+    return records.map((r) => this.mapToDomain(r));
   }
 
   /**
@@ -138,7 +134,7 @@ export class DexiePaymentRepository
   async getTotalByTransaction(transactionId: string): Promise<number> {
     const payments = await this.findByTransactionId(transactionId);
     return payments
-      .filter(p => p.status === PaymentStatus.COMPLETED)
+      .filter((p) => p.status === PaymentStatus.COMPLETED)
       .reduce((sum, p) => sum + p.amount, 0);
   }
 
@@ -148,14 +144,17 @@ export class DexiePaymentRepository
   async getTotalByCustomer(customerId: string): Promise<number> {
     const payments = await this.findByCustomerId(customerId);
     return payments
-      .filter(p => p.status === PaymentStatus.COMPLETED)
+      .filter((p) => p.status === PaymentStatus.COMPLETED)
       .reduce((sum, p) => sum + p.amount, 0);
   }
 
   /**
    * Get payment statistics for a date range
    */
-  async getStatsByDateRange(startDate: Date, endDate: Date): Promise<{
+  async getStatsByDateRange(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<{
     totalAmount: number;
     totalCount: number;
     byMethod: Record<PaymentMethod, { count: number; amount: number }>;
@@ -168,7 +167,7 @@ export class DexiePaymentRepository
       [PaymentMethod.CREDIT_CARD]: { count: 0, amount: 0 },
       [PaymentMethod.DEBIT_CARD]: { count: 0, amount: 0 },
       [PaymentMethod.DIGITAL_WALLET]: { count: 0, amount: 0 },
-      [PaymentMethod.GIFT_CARD]: { count: 0, amount: 0 }
+      [PaymentMethod.GIFT_CARD]: { count: 0, amount: 0 },
     };
 
     const byStatus: Record<PaymentStatus, { count: number; amount: number }> = {
@@ -177,7 +176,7 @@ export class DexiePaymentRepository
       [PaymentStatus.COMPLETED]: { count: 0, amount: 0 },
       [PaymentStatus.FAILED]: { count: 0, amount: 0 },
       [PaymentStatus.REFUNDED]: { count: 0, amount: 0 },
-      [PaymentStatus.PARTIALLY_REFUNDED]: { count: 0, amount: 0 }
+      [PaymentStatus.PARTIALLY_REFUNDED]: { count: 0, amount: 0 },
     };
 
     let totalAmount = 0;
@@ -198,7 +197,7 @@ export class DexiePaymentRepository
       totalAmount,
       totalCount,
       byMethod,
-      byStatus
+      byStatus,
     };
   }
 
@@ -206,36 +205,31 @@ export class DexiePaymentRepository
    * Get refunded payments
    */
   async getRefundedPayments(startDate?: Date, endDate?: Date): Promise<Payment[]> {
-    let query = this.table.where('status').anyOf([
-      PaymentStatus.REFUNDED,
-      PaymentStatus.PARTIALLY_REFUNDED
-    ]);
+    const query = this.table
+      .where('status')
+      .anyOf([PaymentStatus.REFUNDED, PaymentStatus.PARTIALLY_REFUNDED]);
 
     let records = await query.toArray();
 
     if (startDate && endDate) {
-      records = records.filter(r => 
-        r.createdAt >= startDate && r.createdAt <= endDate
-      );
+      records = records.filter((r) => r.createdAt >= startDate && r.createdAt <= endDate);
     }
 
-    return records.map(r => this.mapToDomain(r));
+    return records.map((r) => this.mapToDomain(r));
   }
 
   /**
    * Get failed payments
    */
   async getFailedPayments(startDate?: Date, endDate?: Date): Promise<Payment[]> {
-    let query = this.table.where('status').equals(PaymentStatus.FAILED);
+    const query = this.table.where('status').equals(PaymentStatus.FAILED);
     let records = await query.toArray();
 
     if (startDate && endDate) {
-      records = records.filter(r => 
-        r.createdAt >= startDate && r.createdAt <= endDate
-      );
+      records = records.filter((r) => r.createdAt >= startDate && r.createdAt <= endDate);
     }
 
-    return records.map(r => this.mapToDomain(r));
+    return records.map((r) => this.mapToDomain(r));
   }
 }
 

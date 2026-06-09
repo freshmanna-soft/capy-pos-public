@@ -1,6 +1,16 @@
 import { defineConfig } from 'vitest/config';
+import { resolve } from 'path';
 
 export default defineConfig({
+  resolve: {
+    alias: [
+      { find: '@app', replacement: resolve(__dirname, 'src/app') },
+      { find: '@core', replacement: resolve(__dirname, 'src/app/core') },
+      { find: '@features', replacement: resolve(__dirname, 'src/app/features') },
+      { find: '@shared', replacement: resolve(__dirname, 'src/app/shared') },
+      { find: '@environments', replacement: resolve(__dirname, 'src/app/environments') }
+    ]
+  },
   test: {
     globals: true,
     environment: 'jsdom',

@@ -1,7 +1,10 @@
 import { TestBed } from '@angular/core/testing';
-import { ProcessCashPaymentUseCase, CASH_DENOMINATIONS, CashPaymentResult } from './process-cash-payment.use-case';
-import { CartService } from '../services/cart.service';
-import { CalculateCartTotalsUseCase } from './calculate-cart-totals.use-case';
+import {
+  ProcessCashPaymentUseCase,
+  CASH_DENOMINATIONS,
+} from '@core/application/use-cases/process-cash-payment.use-case';
+import { CartService } from '@core/application/services/cart.service';
+import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
 import { signal } from '@angular/core';
 
 describe('ProcessCashPaymentUseCase', () => {
@@ -149,9 +152,14 @@ describe('ProcessCashPaymentUseCase', () => {
       // Re-create use case with empty cart
       const emptyCartTotals = {
         totals: signal({
-          subtotal: 0, taxRate: 0.0899, taxAmount: 0,
-          discountAmount: 0, discountLabel: '', total: 0,
-          itemCount: 0, isEmpty: true,
+          subtotal: 0,
+          taxRate: 0.0899,
+          taxAmount: 0,
+          discountAmount: 0,
+          discountLabel: '',
+          total: 0,
+          itemCount: 0,
+          isEmpty: true,
         }),
       };
 
@@ -241,9 +249,14 @@ describe('ProcessCashPaymentUseCase', () => {
             provide: CalculateCartTotalsUseCase,
             useValue: {
               totals: signal({
-                subtotal: 0, taxRate: 0, taxAmount: 0,
-                discountAmount: 0, discountLabel: '', total: 0,
-                itemCount: 0, isEmpty: true,
+                subtotal: 0,
+                taxRate: 0,
+                taxAmount: 0,
+                discountAmount: 0,
+                discountLabel: '',
+                total: 0,
+                itemCount: 0,
+                isEmpty: true,
               }),
             },
           },
@@ -264,9 +277,14 @@ describe('ProcessCashPaymentUseCase', () => {
             provide: CalculateCartTotalsUseCase,
             useValue: {
               totals: signal({
-                subtotal: 3.50, taxRate: 0.0899, taxAmount: 0.31,
-                discountAmount: 0, discountLabel: '', total: 3.81,
-                itemCount: 1, isEmpty: false,
+                subtotal: 3.5,
+                taxRate: 0.0899,
+                taxAmount: 0.31,
+                discountAmount: 0,
+                discountLabel: '',
+                total: 3.81,
+                itemCount: 1,
+                isEmpty: false,
               }),
             },
           },
@@ -276,8 +294,8 @@ describe('ProcessCashPaymentUseCase', () => {
       const smallUseCase = TestBed.inject(ProcessCashPaymentUseCase);
       const amounts = smallUseCase.quickAmounts();
       expect(amounts).toContain(3.81); // exact
-      expect(amounts).toContain(5);    // first denomination >= total
-      expect(amounts).toContain(10);   // next denomination
+      expect(amounts).toContain(5); // first denomination >= total
+      expect(amounts).toContain(10); // next denomination
     });
   });
 

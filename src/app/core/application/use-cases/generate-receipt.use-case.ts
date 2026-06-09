@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
-import { CartService } from '../services/cart.service';
-import { CartItem } from '../services/cart.service.interface';
-import { PaymentResult } from '../../../features/pos-terminal/components/checkout/checkout.component';
+import { CartService } from '@core/application/services/cart.service';
+import { CartItem } from '@core/application/services/cart.service.interface';
+import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
 
 /**
  * Receipt data structure for display
@@ -71,7 +71,7 @@ export class GenerateReceiptUseCase {
     subtotal: number,
     tax: number,
     taxRate: number,
-    total: number
+    total: number,
   ): ReceiptData {
     return { payment, items, subtotal, tax, taxRate, total };
   }

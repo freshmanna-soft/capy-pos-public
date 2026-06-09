@@ -3,9 +3,9 @@
  * Basic building blocks of the UI
  */
 
-export * from './button/button.component';
-export * from './input/input.component';
-export * from './badge/badge.component';
-export * from './card/card.component';
+export * from '@shared/ui/atoms/button/button.component';
+export * from '@shared/ui/atoms/input/input.component';
+export * from '@shared/ui/atoms/badge/badge.component';
+export * from '@shared/ui/atoms/card/card.component';
 
 // Made with Bob

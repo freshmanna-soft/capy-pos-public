@@ -1,6 +1,6 @@
 import { Observable } from 'rxjs';
-import { IBaseAgent } from '../../base/base-agent.interface';
-import { Customer } from '../../../core/domain/entities/customer.entity';
+import { IBaseAgent } from '@app/agents/base/base-agent.interface';
+import { Customer } from '@core/domain/entities/customer.entity';
 
 /**
  * Customer Agent Interface
@@ -42,7 +42,7 @@ export interface CustomerEvent {
   type: 'customer_created' | 'customer_updated' | 'loyalty_earned';
   timestamp: Date;
   customerId: string;
-  data?: any;
+  data?: unknown;
 }
 
 // Made with Bob

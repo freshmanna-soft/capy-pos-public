@@ -1,5 +1,5 @@
-import { Product } from '../../domain/entities/product.entity';
-import { IBaseApplicationService } from './base-application.service.interface';
+import { Product } from '@core/domain/entities/product.entity';
+import { IBaseApplicationService } from '@core/application/services/base-application.service.interface';
 
 /**
  * Product Service Interface
@@ -8,7 +8,6 @@ import { IBaseApplicationService } from './base-application.service.interface';
  * Follows Interface Segregation Principle (SOLID)
  */
 export interface IProductService extends IBaseApplicationService<Product> {
-
   // Product-specific operations
   getProductsByCategory(category: string): Promise<Product[]>;
   getActiveProducts(): Promise<Product[]>;

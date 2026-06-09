@@ -1,5 +1,5 @@
-import { Money } from '../value-objects/money.value-object';
-import { Product } from '../entities/product.entity';
+import { Money } from '@core/domain/value-objects/money.value-object';
+import { Product } from '@core/domain/entities/product.entity';
 
 /**
  * Discount type enumeration
@@ -7,7 +7,7 @@ import { Product } from '../entities/product.entity';
 export enum DiscountType {
   PERCENTAGE = 'PERCENTAGE',
   FIXED_AMOUNT = 'FIXED_AMOUNT',
-  BUY_X_GET_Y = 'BUY_X_GET_Y'
+  BUY_X_GET_Y = 'BUY_X_GET_Y',
 }
 
 /**
@@ -50,7 +50,7 @@ export interface LineItemTotal {
 
 /**
  * Pricing Service Interface
- * 
+ *
  * Defines the contract for pricing calculations in the domain.
  * Follows Interface Segregation Principle (ISP) and Dependency Inversion Principle (DIP).
  */
@@ -58,21 +58,12 @@ export interface IPricingService {
   /**
    * Calculate final price for a product with quantity and optional discount
    */
-  calculatePrice(
-    product: Product,
-    quantity: number,
-    discount?: Discount,
-    currency?: string
-  ): Money;
+  calculatePrice(product: Product, quantity: number, discount?: Discount, currency?: string): Money;
 
   /**
    * Apply discount to a subtotal
    */
-  applyDiscount(
-    subtotal: Money,
-    quantity: number,
-    discount: Discount
-  ): Money;
+  applyDiscount(subtotal: Money, quantity: number, discount: Discount): Money;
 
   /**
    * Calculate tax on a subtotal
@@ -87,11 +78,7 @@ export interface IPricingService {
   /**
    * Calculate bulk pricing discount based on quantity tiers
    */
-  calculateBulkPrice(
-    basePrice: Money,
-    quantity: number,
-    tiers: BulkPricingTier[]
-  ): Money;
+  calculateBulkPrice(basePrice: Money, quantity: number, tiers: BulkPricingTier[]): Money;
 
   /**
    * Calculate line item total (price * quantity with discount and tax)
@@ -101,7 +88,7 @@ export interface IPricingService {
     quantity: number,
     discount?: Discount,
     taxConfig?: TaxConfig,
-    currency?: string
+    currency?: string,
   ): LineItemTotal;
 }
 

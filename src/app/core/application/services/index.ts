@@ -4,15 +4,15 @@
  */
 
 // Base service interface and implementation
-export * from './base-application.service.interface';
-export * from './base-application.service';
+export * from '@core/application/services/base-application.service.interface';
+export * from '@core/application/services/base-application.service';
 
 // Service interfaces
-export * from './product.service.interface';
-export * from './customer.service.interface';
+export * from '@core/application/services/product.service.interface';
+export * from '@core/application/services/customer.service.interface';
 
 // Service implementations
-export * from './product.service';
-export * from './customer.service';
+export * from '@core/application/services/product.service';
+export * from '@core/application/services/customer.service';
 
 // Made with Bob

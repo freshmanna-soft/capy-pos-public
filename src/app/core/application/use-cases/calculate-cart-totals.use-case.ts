@@ -1,5 +1,5 @@
 import { Injectable, computed, signal, inject, Signal } from '@angular/core';
-import { CartService } from '../services/cart.service';
+import { CartService } from '@core/application/services/cart.service';
 
 /**
  * Cart Totals DTO
@@ -42,7 +42,7 @@ export interface CartDiscount {
  * ```
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class CalculateCartTotalsUseCase {
   private readonly cartService = inject(CartService);
@@ -95,7 +95,7 @@ export class CalculateCartTotalsUseCase {
     discountLabel: this._discount()?.label ?? '',
     total: this.totalWithDiscount(),
     itemCount: this.cartService.totalItems(),
-    isEmpty: this.cartService.isEmpty()
+    isEmpty: this.cartService.isEmpty(),
   }));
 
   /**

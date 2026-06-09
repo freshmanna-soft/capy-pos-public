@@ -4,12 +4,12 @@
  */
 
 // Atoms - Basic building blocks
-export * from './atoms';
+export * from '@shared/ui/atoms';
 
 // Molecules - Simple combinations of atoms
-export * from './molecules';
+export * from '@shared/ui/molecules';
 
 // Organisms - Complex UI sections
-export * from './organisms';
+export * from '@shared/ui/organisms';
 
 // Made with Bob

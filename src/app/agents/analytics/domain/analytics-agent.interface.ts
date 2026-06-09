@@ -1,5 +1,5 @@
 import { Observable } from 'rxjs';
-import { IBaseAgent } from '../../base/base-agent.interface';
+import { IBaseAgent } from '@app/agents/base/base-agent.interface';
 
 /**
  * Analytics Agent Interface
@@ -14,7 +14,9 @@ export interface IAnalyticsAgent extends IBaseAgent {
   /**
    * Generate inventory analytics
    */
-  generateInventoryAnalytics(request: InventoryAnalyticsRequest): Promise<InventoryAnalyticsResponse>;
+  generateInventoryAnalytics(
+    request: InventoryAnalyticsRequest,
+  ): Promise<InventoryAnalyticsResponse>;
 
   /**
    * Generate customer analytics
@@ -42,7 +44,7 @@ export interface SalesAnalyticsResponse {
   totalSales: number;
   totalRevenue: number;
   averageOrderValue: number;
-  trends: Array<{ date: Date; sales: number; revenue: number }>;
+  trends: { date: Date; sales: number; revenue: number }[];
 }
 
 export interface InventoryAnalyticsRequest {
@@ -54,7 +56,7 @@ export interface InventoryAnalyticsResponse {
   totalProducts: number;
   outOfStock: number;
   lowStock: number;
-  topSellingProducts: Array<{ productId: string; name: string; quantity: number }>;
+  topSellingProducts: { productId: string; name: string; quantity: number }[];
 }
 
 export interface CustomerAnalyticsRequest {
@@ -66,7 +68,7 @@ export interface CustomerAnalyticsResponse {
   totalCustomers: number;
   newCustomers: number;
   returningCustomers: number;
-  topCustomers: Array<{ customerId: string; name: string; totalSpent: number }>;
+  topCustomers: { customerId: string; name: string; totalSpent: number }[];
 }
 
 export interface RealTimeMetricsResponse {
@@ -79,7 +81,7 @@ export interface RealTimeMetricsResponse {
 export interface AnalyticsEvent {
   type: 'metric_updated' | 'alert_triggered' | 'report_generated';
   timestamp: Date;
-  data: any;
+  data: unknown;
 }
 
 // Made with Bob

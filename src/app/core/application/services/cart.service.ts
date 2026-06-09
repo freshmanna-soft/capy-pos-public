@@ -1,22 +1,22 @@
 import { Injectable, computed, signal } from '@angular/core';
-import { Product } from '../../domain/entities/product.entity';
-import { ICartService, CartItem } from './cart.service.interface';
+import { Product } from '@core/domain/entities/product.entity';
+import { CartItem } from '@core/application/services/cart.service.interface';
 
 /**
  * Service responsible for managing shopping cart state and operations.
  * Uses Angular signals for reactive state management.
- * 
+ *
  * @example
  * ```typescript
  * constructor(private cartService: CartService) {}
- * 
+ *
  * addToCart(product: Product) {
  *   this.cartService.addProduct(product);
  * }
  * ```
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class CartService {
   // State signals
@@ -34,7 +34,7 @@ export class CartService {
 
   readonly subtotal = computed(() => {
     return this._items().reduce((sum, item) => {
-      return sum + (item.product.price * item.quantity);
+      return sum + item.product.price * item.quantity;
     }, 0);
   });
 
@@ -52,7 +52,7 @@ export class CartService {
 
   /**
    * Adds a product to the cart. If the product already exists, increases quantity by 1.
-   * 
+   *
    * @param product - The product to add to the cart
    * @throws Error if product is null or undefined
    */
@@ -62,16 +62,14 @@ export class CartService {
     }
 
     const currentItems = this._items();
-    const existingItemIndex = currentItems.findIndex(
-      item => item.product.id === product.id
-    );
+    const existingItemIndex = currentItems.findIndex((item) => item.product.id === product.id);
 
     if (existingItemIndex >= 0) {
       // Product exists, increase quantity
       const updatedItems = [...currentItems];
       updatedItems[existingItemIndex] = {
         ...updatedItems[existingItemIndex],
-        quantity: updatedItems[existingItemIndex].quantity + 1
+        quantity: updatedItems[existingItemIndex].quantity + 1,
       };
       this._items.set(updatedItems);
     } else {
@@ -82,15 +80,13 @@ export class CartService {
 
   /**
    * Increases the quantity of a product in the cart by 1.
-   * 
+   *
    * @param productId - The ID of the product to increase quantity for
    * @throws Error if product is not found in cart
    */
   increaseQuantity(productId: string): void {
     const currentItems = this._items();
-    const itemIndex = currentItems.findIndex(
-      item => item.product.id === productId
-    );
+    const itemIndex = currentItems.findIndex((item) => item.product.id === productId);
 
     if (itemIndex === -1) {
       throw new Error(`Product with ID ${productId} not found in cart`);
@@ -99,7 +95,7 @@ export class CartService {
     const updatedItems = [...currentItems];
     updatedItems[itemIndex] = {
       ...updatedItems[itemIndex],
-      quantity: updatedItems[itemIndex].quantity + 1
+      quantity: updatedItems[itemIndex].quantity + 1,
     };
     this._items.set(updatedItems);
   }
@@ -107,15 +103,13 @@ export class CartService {
   /**
    * Decreases the quantity of a product in the cart by 1.
    * If quantity reaches 0, removes the item from cart.
-   * 
+   *
    * @param productId - The ID of the product to decrease quantity for
    * @throws Error if product is not found in cart
    */
   decreaseQuantity(productId: string): void {
     const currentItems = this._items();
-    const itemIndex = currentItems.findIndex(
-      item => item.product.id === productId
-    );
+    const itemIndex = currentItems.findIndex((item) => item.product.id === productId);
 
     if (itemIndex === -1) {
       throw new Error(`Product with ID ${productId} not found in cart`);
@@ -131,7 +125,7 @@ export class CartService {
       const updatedItems = [...currentItems];
       updatedItems[itemIndex] = {
         ...updatedItems[itemIndex],
-        quantity: currentQuantity - 1
+        quantity: currentQuantity - 1,
       };
       this._items.set(updatedItems);
     }
@@ -140,7 +134,7 @@ export class CartService {
   /**
    * Updates the quantity of a product in the cart to a specific value.
    * If quantity is 0 or negative, removes the item from cart.
-   * 
+   *
    * @param productId - The ID of the product to update
    * @param quantity - The new quantity (must be >= 0)
    * @throws Error if product is not found in cart or quantity is negative
@@ -156,9 +150,7 @@ export class CartService {
     }
 
     const currentItems = this._items();
-    const itemIndex = currentItems.findIndex(
-      item => item.product.id === productId
-    );
+    const itemIndex = currentItems.findIndex((item) => item.product.id === productId);
 
     if (itemIndex === -1) {
       throw new Error(`Product with ID ${productId} not found in cart`);
@@ -167,21 +159,19 @@ export class CartService {
     const updatedItems = [...currentItems];
     updatedItems[itemIndex] = {
       ...updatedItems[itemIndex],
-      quantity
+      quantity,
     };
     this._items.set(updatedItems);
   }
 
   /**
    * Removes a product from the cart completely.
-   * 
+   *
    * @param productId - The ID of the product to remove
    */
   removeItem(productId: string): void {
     const currentItems = this._items();
-    const filteredItems = currentItems.filter(
-      item => item.product.id !== productId
-    );
+    const filteredItems = currentItems.filter((item) => item.product.id !== productId);
     this._items.set(filteredItems);
   }
 
@@ -194,7 +184,7 @@ export class CartService {
 
   /**
    * Updates the tax rate for cart calculations.
-   * 
+   *
    * @param rate - The new tax rate (e.g., 0.085 for 8.5%)
    * @throws Error if rate is negative or greater than 1
    */
@@ -207,27 +197,27 @@ export class CartService {
 
   /**
    * Gets a specific cart item by product ID.
-   * 
+   *
    * @param productId - The ID of the product to find
    * @returns The cart item or undefined if not found
    */
   getItem(productId: string): CartItem | undefined {
-    return this._items().find(item => item.product.id === productId);
+    return this._items().find((item) => item.product.id === productId);
   }
 
   /**
    * Checks if a product is in the cart.
-   * 
+   *
    * @param productId - The ID of the product to check
    * @returns true if product is in cart, false otherwise
    */
   hasProduct(productId: string): boolean {
-    return this._items().some(item => item.product.id === productId);
+    return this._items().some((item) => item.product.id === productId);
   }
 
   /**
    * Gets the quantity of a specific product in the cart.
-   * 
+   *
    * @param productId - The ID of the product
    * @returns The quantity or 0 if product is not in cart
    */

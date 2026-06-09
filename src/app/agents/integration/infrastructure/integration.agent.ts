@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Subject, Observable } from 'rxjs';
-import { BaseAgent } from '../../base/base-agent';
+import { BaseAgent } from '@app/agents/base/base-agent';
+import { IAgentMessage, IAgentResponse } from '@app/agents/base/base-agent.interface';
 import {
   IIntegrationAgent,
   SyncDataRequest,
@@ -8,15 +9,16 @@ import {
   WebhookRequest,
   WebhookResponse,
   IntegrationStatus,
-  IntegrationEvent
-} from '../domain/integration-agent.interface';
+  IntegrationEvent,
+} from '@app/agents/integration/domain/integration-agent.interface';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class IntegrationAgent extends BaseAgent implements IIntegrationAgent {
-  private integrationEventsSubject = new Subject<IntegrationEvent>();
-  public integrationEvents$: Observable<IntegrationEvent> = this.integrationEventsSubject.asObservable();
+  private readonly integrationEventsSubject = new Subject<IntegrationEvent>();
+  public readonly integrationEvents$: Observable<IntegrationEvent> =
+    this.integrationEventsSubject.asObservable();
 
   constructor() {
     super('integration-agent', 'IntegrationAgent', 'Handles external system integrations');
@@ -35,24 +37,29 @@ export class IntegrationAgent extends BaseAgent implements IIntegrationAgent {
     this.integrationEventsSubject.complete();
   }
 
-  protected async handleMessage(message: any): Promise<any> {
+  protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
     switch (message.type) {
       case 'SYNC_DATA':
-        return await this.syncData(message.payload);
+        return { success: true, data: await this.syncData(message.payload as SyncDataRequest) };
       case 'SEND_WEBHOOK':
-        return await this.sendWebhook(message.payload);
+        return { success: true, data: await this.sendWebhook(message.payload as WebhookRequest) };
       case 'GET_INTEGRATION_STATUS':
-        return await this.getIntegrationStatus(message.payload.integrationId);
+        return {
+          success: true,
+          data: await this.getIntegrationStatus(
+            (message.payload as { integrationId: string }).integrationId,
+          ),
+        };
       default:
         throw new Error(`Unknown message type: ${message.type}`);
     }
   }
 
-  async syncData(request: SyncDataRequest): Promise<SyncDataResponse> {
+  async syncData(_request: SyncDataRequest): Promise<SyncDataResponse> {
     return { success: true, recordsProcessed: 0 };
   }
 
-  async sendWebhook(request: WebhookRequest): Promise<WebhookResponse> {
+  async sendWebhook(_request: WebhookRequest): Promise<WebhookResponse> {
     return { success: true, statusCode: 200 };
   }
 

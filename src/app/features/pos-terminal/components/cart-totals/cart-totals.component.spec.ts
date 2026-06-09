@@ -1,8 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { CartTotalsComponent } from './cart-totals.component';
-import { CalculateCartTotalsUseCase } from '../../../../core/application/use-cases/calculate-cart-totals.use-case';
-import { CartService } from '../../../../core/application/services/cart.service';
-import { Product } from '../../../../core/domain/entities/product.entity';
+import { CartTotalsComponent } from '@features/pos-terminal/components/cart-totals/cart-totals.component';
+import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
+import { CartService } from '@core/application/services/cart.service';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
 
 /**
  * Unit Tests for CartTotalsComponent
@@ -25,17 +25,29 @@ describe('CartTotalsComponent', () => {
   let cartService: CartService;
   let totalsUseCase: CalculateCartTotalsUseCase;
 
-  const mockProduct1 = new Product(
-    'prod-1', 'Organic Coffee', 12.99, 'COF-001', 'Beverages', 50, 'Premium coffee'
-  );
+  const mockProduct1 = new ProductBuilder()
+    .withId('prod-1')
+    .withName('Organic Coffee')
+    .withPrice(12.99)
+    .withSku('COF-001')
+    .withCategory('Beverages')
+    .withStock(50)
+    .withDescription('Premium coffee')
+    .build();
 
-  const mockProduct2 = new Product(
-    'prod-2', 'Green Tea', 8.49, 'TEA-001', 'Beverages', 30, 'Matcha green tea'
-  );
+  const mockProduct2 = new ProductBuilder()
+    .withId('prod-2')
+    .withName('Green Tea')
+    .withPrice(8.49)
+    .withSku('TEA-001')
+    .withCategory('Beverages')
+    .withStock(30)
+    .withDescription('Matcha green tea')
+    .build();
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [CartTotalsComponent]
+      imports: [CartTotalsComponent],
     }).compileComponents();
 
     fixture = TestBed.createComponent(CartTotalsComponent);
@@ -115,7 +127,7 @@ describe('CartTotalsComponent', () => {
 
     it('should update tax when rate changes', () => {
       cartService.addProduct(mockProduct1);
-      cartService.setTaxRate(0.10);
+      cartService.setTaxRate(0.1);
       fixture.detectChanges();
 
       const taxEl = fixture.nativeElement.querySelector('[data-testid="totals-tax"]');
@@ -146,7 +158,7 @@ describe('CartTotalsComponent', () => {
 
     it('should display fixed discount', () => {
       cartService.addProduct(mockProduct1);
-      totalsUseCase.applyDiscount({ type: 'fixed', value: 5.00, label: '$5 Off' });
+      totalsUseCase.applyDiscount({ type: 'fixed', value: 5.0, label: '$5 Off' });
       fixture.detectChanges();
 
       const discountEl = fixture.nativeElement.querySelector('[data-testid="totals-discount"]');
@@ -157,7 +169,7 @@ describe('CartTotalsComponent', () => {
 
     it('should hide discount after removal', () => {
       cartService.addProduct(mockProduct1);
-      totalsUseCase.applyDiscount({ type: 'fixed', value: 5.00, label: '$5 Off' });
+      totalsUseCase.applyDiscount({ type: 'fixed', value: 5.0, label: '$5 Off' });
       fixture.detectChanges();
 
       expect(fixture.nativeElement.querySelector('[data-testid="totals-discount"]')).toBeTruthy();

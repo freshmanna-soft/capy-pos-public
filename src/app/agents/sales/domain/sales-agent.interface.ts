@@ -4,8 +4,8 @@
  */
 
 import { Observable } from 'rxjs';
-import { IBaseAgent, IAgentMessage, IAgentResponse } from '../../base';
-import { Transaction, TransactionStatus, TransactionType } from '../../../core/domain/entities/transaction.entity';
+import { IBaseAgent, IAgentResponse } from '@app/agents/base';
+import { Transaction } from '@core/domain/entities/transaction.entity';
 
 /**
  * Sales-specific message types
@@ -27,12 +27,12 @@ export enum SalesMessageType {
 export interface IRecordSaleRequest {
   transactionId: string;
   customerId?: string;
-  items: Array<{
+  items: {
     productId: string;
     productName: string;
     quantity: number;
     unitPrice: number;
-  }>;
+  }[];
   subtotal: number;
   taxRate: number;
   discountAmount?: number;
@@ -48,11 +48,11 @@ export interface IRecordSaleRequest {
 export interface IProcessReturnRequest {
   originalTransactionId: string;
   returnTransactionId: string;
-  items: Array<{
+  items: {
     productId: string;
     quantity: number;
     refundAmount: number;
-  }>;
+  }[];
   reason: string;
   refundMethod: 'ORIGINAL' | 'CASH' | 'STORE_CREDIT';
   processedBy?: string;
@@ -95,17 +95,17 @@ export interface IDailySummary {
   transactionCount: number;
   refundCount: number;
   netRevenue: number;
-  topProducts: Array<{
+  topProducts: {
     productId: string;
     productName: string;
     quantitySold: number;
     revenue: number;
-  }>;
-  hourlyBreakdown: Array<{
+  }[];
+  hourlyBreakdown: {
     hour: number;
     sales: number;
     transactions: number;
-  }>;
+  }[];
 }
 
 /**
@@ -181,7 +181,7 @@ export interface ISalesAgent extends IBaseAgent {
   /**
    * Generate a sales report
    */
-  generateReport(request: ISalesReportRequest): Promise<IAgentResponse<any>>;
+  generateReport(request: ISalesReportRequest): Promise<IAgentResponse<unknown>>;
 
   /**
    * Get daily summary
@@ -191,7 +191,11 @@ export interface ISalesAgent extends IBaseAgent {
   /**
    * Get top selling products
    */
-  getTopProducts(limit: number, startDate?: Date, endDate?: Date): Promise<IAgentResponse<ITopProduct[]>>;
+  getTopProducts(
+    limit: number,
+    startDate?: Date,
+    endDate?: Date,
+  ): Promise<IAgentResponse<ITopProduct[]>>;
 
   /**
    * Get sales by period

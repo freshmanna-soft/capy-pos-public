@@ -1,6 +1,6 @@
 import { Injectable, inject, signal, computed, Signal } from '@angular/core';
-import { CartService } from '../services/cart.service';
-import { CalculateCartTotalsUseCase } from './calculate-cart-totals.use-case';
+import { CartService } from '@core/application/services/cart.service';
+import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
 
 /**
  * Cash Payment Request DTO
@@ -53,7 +53,7 @@ export const CASH_DENOMINATIONS = [5, 10, 20, 50, 100] as const;
  * ```
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class ProcessCashPaymentUseCase {
   private readonly cartService = inject(CartService);
@@ -105,7 +105,7 @@ export class ProcessCashPaymentUseCase {
       const shortfall = Math.round((due - tendered) * 100) / 100;
       return {
         isValid: false,
-        error: `Insufficient amount. Short by $${shortfall.toFixed(2)}`
+        error: `Insufficient amount. Short by $${shortfall.toFixed(2)}`,
       };
     }
 
@@ -175,7 +175,7 @@ export class ProcessCashPaymentUseCase {
         amountTendered: this._amountTendered(),
         changeAmount: 0,
         timestamp: new Date(),
-        error: validationResult.error ?? 'Payment validation failed'
+        error: validationResult.error ?? 'Payment validation failed',
       };
     }
 

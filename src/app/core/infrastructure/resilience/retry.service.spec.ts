@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { RetryService, RetryStrategy, RetryExhaustedError } from './retry.service';
+import {
+  RetryService,
+  RetryStrategy,
+  RetryExhaustedError,
+} from '@core/infrastructure/resilience/retry.service';
 
 describe('RetryService', () => {
   let service: RetryService;
@@ -38,7 +42,7 @@ describe('RetryService', () => {
 
       const result = await service.execute('test-op', fn, {
         maxAttempts: 3,
-        initialDelay: 10
+        initialDelay: 10,
       });
 
       expect(result).toBe('success');
@@ -51,7 +55,7 @@ describe('RetryService', () => {
       try {
         await service.execute('test-op', fn, {
           maxAttempts: 3,
-          initialDelay: 10
+          initialDelay: 10,
         });
         expect(true).toBe(false); // Should not reach here
       } catch (error) {
@@ -69,7 +73,7 @@ describe('RetryService', () => {
       try {
         await service.execute('test-op', fn, {
           maxAttempts: 3,
-          initialDelay: 10
+          initialDelay: 10,
         });
         expect(true).toBe(false); // Should not reach here
       } catch (error) {
@@ -88,7 +92,7 @@ describe('RetryService', () => {
         await service.execute('test-op', fn, {
           maxAttempts: 3,
           initialDelay: 10,
-          shouldRetry
+          shouldRetry,
         });
         expect(true).toBe(false); // Should not reach here
       } catch (error) {
@@ -106,7 +110,7 @@ describe('RetryService', () => {
         await service.execute('test-op', fn, {
           maxAttempts: 3,
           initialDelay: 10,
-          retryableErrors: ['timeout', 'connection']
+          retryableErrors: ['timeout', 'connection'],
         });
         expect(true).toBe(false); // Should not reach here
       } catch (error) {
@@ -123,7 +127,7 @@ describe('RetryService', () => {
         await service.execute('test-op', fn, {
           maxAttempts: 3,
           initialDelay: 10,
-          retryableErrors: ['timeout', 'connection']
+          retryableErrors: ['timeout', 'connection'],
         });
         expect(true).toBe(false); // Should not reach here
       } catch (error) {
@@ -155,12 +159,12 @@ describe('RetryService', () => {
       await service.execute('test-op', fn, {
         maxAttempts: 3,
         initialDelay: 50,
-        strategy: RetryStrategy.FIXED
+        strategy: RetryStrategy.FIXED,
       });
 
       expect(attempts).toBe(3);
       // Delays should be roughly equal (allowing for jitter ±25%)
-      delays.forEach(delay => {
+      delays.forEach((delay) => {
         expect(delay).toBeGreaterThan(30); // 50ms - 25% jitter
         expect(delay).toBeLessThan(70); // 50ms + 25% jitter
       });
@@ -187,7 +191,7 @@ describe('RetryService', () => {
         maxAttempts: 3,
         initialDelay: 50,
         strategy: RetryStrategy.EXPONENTIAL,
-        backoffMultiplier: 2
+        backoffMultiplier: 2,
       });
 
       expect(attempts).toBe(3);
@@ -217,7 +221,7 @@ describe('RetryService', () => {
       await service.execute('test-op', fn, {
         maxAttempts: 3,
         initialDelay: 50,
-        strategy: RetryStrategy.LINEAR
+        strategy: RetryStrategy.LINEAR,
       });
 
       expect(attempts).toBe(3);
@@ -249,11 +253,11 @@ describe('RetryService', () => {
         initialDelay: 100,
         maxDelay: 150,
         strategy: RetryStrategy.EXPONENTIAL,
-        backoffMultiplier: 3
+        backoffMultiplier: 3,
       });
 
       // All delays should be capped at maxDelay (with jitter)
-      delays.forEach(delay => {
+      delays.forEach((delay) => {
         expect(delay).toBeLessThan(200); // maxDelay + jitter margin
       });
     });
@@ -322,10 +326,10 @@ describe('RetryService', () => {
 
       await service.execute('test-op', fn, {
         maxAttempts: 3,
-        initialDelay: 10
+        initialDelay: 10,
       });
 
-      const stats = service.getStats('test-op') as any;
+      const stats = service.getStats('test-op') as unknown;
       expect(stats.successfulRetries).toBe(1);
       expect(stats.failedRetries).toBe(0);
       expect(stats.totalAttempts).toBe(3);
@@ -339,13 +343,13 @@ describe('RetryService', () => {
       try {
         await service.execute('test-op', fn, {
           maxAttempts: 3,
-          initialDelay: 10
+          initialDelay: 10,
         });
-      } catch (error) {
+      } catch (_error) {
         // Expected
       }
 
-      const stats = service.getStats('test-op') as any;
+      const stats = service.getStats('test-op') as unknown;
       expect(stats.successfulRetries).toBe(0);
       expect(stats.failedRetries).toBe(1);
       expect(stats.totalAttempts).toBe(3);
@@ -370,7 +374,7 @@ describe('RetryService', () => {
       };
       await service.execute('test-op', fn2, { maxAttempts: 3, initialDelay: 10 });
 
-      const stats = service.getStats('test-op') as any;
+      const stats = service.getStats('test-op') as unknown;
       expect(stats.averageAttempts).toBe(2.5); // (2 + 3) / 2
     });
 
@@ -380,7 +384,7 @@ describe('RetryService', () => {
       await service.execute('op1', fn);
       await service.execute('op2', fn);
 
-      const allStats = service.getStats() as Record<string, any>;
+      const allStats = service.getStats() as Record<string, unknown>;
       expect(Object.keys(allStats).length).toBe(2);
       expect(allStats['op1']).toBeDefined();
       expect(allStats['op2']).toBeDefined();
@@ -394,8 +398,8 @@ describe('RetryService', () => {
       await service.execute('op2', fn);
 
       // Verify both have stats before clearing
-      const statsBefore1 = service.getStats('op1') as any;
-      const statsBefore2 = service.getStats('op2') as any;
+      const statsBefore1 = service.getStats('op1') as unknown;
+      const statsBefore2 = service.getStats('op2') as unknown;
       expect(statsBefore1.totalAttempts).toBeGreaterThan(0);
       expect(statsBefore2.totalAttempts).toBeGreaterThan(0);
 
@@ -403,8 +407,8 @@ describe('RetryService', () => {
       service.clearStats('op1');
 
       // Verify op1 is cleared but op2 is not
-      const stats1 = service.getStats('op1') as any;
-      const stats2 = service.getStats('op2') as any;
+      const stats1 = service.getStats('op1') as unknown;
+      const stats2 = service.getStats('op2') as unknown;
 
       expect(stats1.totalAttempts).toBe(0); // Cleared
       expect(stats2.totalAttempts).toBeGreaterThan(0); // Not cleared
@@ -418,7 +422,7 @@ describe('RetryService', () => {
 
       service.clearStats();
 
-      const allStats = service.getStats() as Record<string, any>;
+      const allStats = service.getStats() as Record<string, unknown>;
       expect(Object.keys(allStats).length).toBe(0);
     });
   });
@@ -432,7 +436,7 @@ describe('RetryService', () => {
       try {
         await service.execute('test-op', fn, {
           maxAttempts: 2,
-          initialDelay: 10
+          initialDelay: 10,
         });
         expect(true).toBe(false); // Should not reach here
       } catch (error) {
@@ -449,7 +453,7 @@ describe('RetryService', () => {
       try {
         await service.execute('test-op', fn, {
           maxAttempts: 2,
-          initialDelay: 10
+          initialDelay: 10,
         });
         expect(true).toBe(false); // Should not reach here
       } catch (error) {

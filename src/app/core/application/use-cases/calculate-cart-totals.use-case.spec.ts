@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
-import { CalculateCartTotalsUseCase, CartDiscount } from './calculate-cart-totals.use-case';
-import { CartService } from '../services/cart.service';
-import { Product } from '../../domain/entities/product.entity';
+import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
+import { CartService } from '@core/application/services/cart.service';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
 
 /**
  * Unit Tests for CalculateCartTotalsUseCase
@@ -19,17 +19,35 @@ describe('CalculateCartTotalsUseCase', () => {
   let useCase: CalculateCartTotalsUseCase;
   let cartService: CartService;
 
-  const mockProduct1 = new Product(
-    'prod-1', 'Organic Coffee', 12.99, 'COF-001', 'Beverages', 50, 'Premium coffee'
-  );
+  const mockProduct1 = new ProductBuilder()
+    .withId('prod-1')
+    .withName('Organic Coffee')
+    .withPrice(12.99)
+    .withSku('COF-001')
+    .withCategory('Beverages')
+    .withStock(50)
+    .withDescription('Premium coffee')
+    .build();
 
-  const mockProduct2 = new Product(
-    'prod-2', 'Green Tea', 8.49, 'TEA-001', 'Beverages', 30, 'Matcha green tea'
-  );
+  const mockProduct2 = new ProductBuilder()
+    .withId('prod-2')
+    .withName('Green Tea')
+    .withPrice(8.49)
+    .withSku('TEA-001')
+    .withCategory('Beverages')
+    .withStock(30)
+    .withDescription('Matcha green tea')
+    .build();
 
-  const mockProduct3 = new Product(
-    'prod-3', 'Croissant', 3.50, 'BKR-001', 'Bakery', 100, 'Fresh croissant'
-  );
+  const mockProduct3 = new ProductBuilder()
+    .withId('prod-3')
+    .withName('Croissant')
+    .withPrice(3.5)
+    .withSku('BKR-001')
+    .withCategory('Bakery')
+    .withStock(100)
+    .withDescription('Fresh croissant')
+    .build();
 
   beforeEach(() => {
     TestBed.configureTestingModule({});
@@ -81,7 +99,7 @@ describe('CalculateCartTotalsUseCase', () => {
       cartService.addProduct(mockProduct3); // 3.50
       cartService.updateQuantity('prod-3', 20); // qty = 20
       const totals = useCase.totals();
-      expect(totals.subtotal).toBeCloseTo(70.00, 2);
+      expect(totals.subtotal).toBeCloseTo(70.0, 2);
     });
   });
 
@@ -96,9 +114,9 @@ describe('CalculateCartTotalsUseCase', () => {
 
     it('should calculate tax with custom rate', () => {
       cartService.addProduct(mockProduct1); // 12.99
-      cartService.setTaxRate(0.10); // 10%
+      cartService.setTaxRate(0.1); // 10%
       const totals = useCase.totals();
-      expect(totals.taxAmount).toBeCloseTo(1.30, 2);
+      expect(totals.taxAmount).toBeCloseTo(1.3, 2);
     });
 
     it('should calculate tax after discount', () => {
@@ -106,7 +124,7 @@ describe('CalculateCartTotalsUseCase', () => {
       useCase.applyDiscount({ type: 'fixed', value: 2.99, label: '$2.99 Off' });
       const totals = useCase.totals();
       // Taxable amount = 12.99 - 2.99 = 10.00
-      const expectedTax = 10.00 * 0.085;
+      const expectedTax = 10.0 * 0.085;
       expect(totals.taxAmount).toBeCloseTo(expectedTax, 2);
     });
   });
@@ -116,7 +134,7 @@ describe('CalculateCartTotalsUseCase', () => {
       cartService.addProduct(mockProduct1); // 12.99
       useCase.applyDiscount({ type: 'percentage', value: 10, label: '10% Off' });
       const totals = useCase.totals();
-      expect(totals.discountAmount).toBeCloseTo(1.30, 2);
+      expect(totals.discountAmount).toBeCloseTo(1.3, 2);
       expect(totals.discountLabel).toBe('10% Off');
     });
 
@@ -124,7 +142,7 @@ describe('CalculateCartTotalsUseCase', () => {
       cartService.addProduct(mockProduct1); // 12.99
       useCase.applyDiscount({ type: 'percentage', value: 50, label: '50% Off' });
       const totals = useCase.totals();
-      expect(totals.discountAmount).toBeCloseTo(6.50, 2);
+      expect(totals.discountAmount).toBeCloseTo(6.5, 2);
     });
 
     it('should reject percentage discount over 100%', () => {
@@ -143,22 +161,22 @@ describe('CalculateCartTotalsUseCase', () => {
   describe('Discount - Fixed Amount', () => {
     it('should apply fixed discount', () => {
       cartService.addProduct(mockProduct1); // 12.99
-      useCase.applyDiscount({ type: 'fixed', value: 5.00, label: '$5 Off' });
+      useCase.applyDiscount({ type: 'fixed', value: 5.0, label: '$5 Off' });
       const totals = useCase.totals();
-      expect(totals.discountAmount).toBeCloseTo(5.00, 2);
+      expect(totals.discountAmount).toBeCloseTo(5.0, 2);
     });
 
     it('should cap fixed discount at subtotal', () => {
       cartService.addProduct(mockProduct3); // 3.50
-      useCase.applyDiscount({ type: 'fixed', value: 10.00, label: '$10 Off' });
+      useCase.applyDiscount({ type: 'fixed', value: 10.0, label: '$10 Off' });
       const totals = useCase.totals();
-      expect(totals.discountAmount).toBeCloseTo(3.50, 2);
+      expect(totals.discountAmount).toBeCloseTo(3.5, 2);
     });
 
     it('should remove discount', () => {
       cartService.addProduct(mockProduct1); // 12.99
-      useCase.applyDiscount({ type: 'fixed', value: 5.00, label: '$5 Off' });
-      expect(useCase.discountAmount()).toBeCloseTo(5.00, 2);
+      useCase.applyDiscount({ type: 'fixed', value: 5.0, label: '$5 Off' });
+      expect(useCase.discountAmount()).toBeCloseTo(5.0, 2);
 
       useCase.removeDiscount();
       expect(useCase.discountAmount()).toBe(0);
@@ -170,7 +188,7 @@ describe('CalculateCartTotalsUseCase', () => {
     it('should calculate total as subtotal + tax (no discount)', () => {
       cartService.addProduct(mockProduct1); // 12.99
       const totals = useCase.totals();
-      const expected = 12.99 + (12.99 * 0.085);
+      const expected = 12.99 + 12.99 * 0.085;
       expect(totals.total).toBeCloseTo(expected, 2);
     });
 
@@ -240,7 +258,7 @@ describe('CalculateCartTotalsUseCase', () => {
     it('should update discount amount when subtotal changes', () => {
       cartService.addProduct(mockProduct1); // 12.99
       useCase.applyDiscount({ type: 'percentage', value: 10, label: '10% Off' });
-      expect(useCase.discountAmount()).toBeCloseTo(1.30, 2);
+      expect(useCase.discountAmount()).toBeCloseTo(1.3, 2);
 
       cartService.addProduct(mockProduct2); // +8.49 = 21.48
       expect(useCase.discountAmount()).toBeCloseTo(2.15, 2);

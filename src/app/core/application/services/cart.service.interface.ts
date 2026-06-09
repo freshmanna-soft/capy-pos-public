@@ -1,5 +1,5 @@
 import { Signal } from '@angular/core';
-import { Product } from '../../domain/entities/product.entity';
+import { Product } from '@core/domain/entities/product.entity';
 
 /**
  * Interface representing an item in the shopping cart
@@ -28,7 +28,7 @@ export interface ICartService {
   // Operations
   /**
    * Adds a product to the cart. If the product already exists, increases quantity by 1.
-   * 
+   *
    * @param product - The product to add to the cart
    * @throws Error if product is null or undefined
    */
@@ -36,7 +36,7 @@ export interface ICartService {
 
   /**
    * Increases the quantity of a product in the cart by 1.
-   * 
+   *
    * @param productId - The ID of the product to increase quantity for
    * @throws Error if product is not found in cart
    */
@@ -45,7 +45,7 @@ export interface ICartService {
   /**
    * Decreases the quantity of a product in the cart by 1.
    * If quantity reaches 0, removes the item from cart.
-   * 
+   *
    * @param productId - The ID of the product to decrease quantity for
    * @throws Error if product is not found in cart
    */
@@ -54,7 +54,7 @@ export interface ICartService {
   /**
    * Updates the quantity of a product in the cart to a specific value.
    * If quantity is 0 or negative, removes the item from cart.
-   * 
+   *
    * @param productId - The ID of the product to update
    * @param quantity - The new quantity (must be >= 0)
    * @throws Error if product is not found in cart or quantity is negative
@@ -63,7 +63,7 @@ export interface ICartService {
 
   /**
    * Removes a product from the cart completely.
-   * 
+   *
    * @param productId - The ID of the product to remove
    */
   removeItem(productId: string): void;
@@ -75,7 +75,7 @@ export interface ICartService {
 
   /**
    * Updates the tax rate for cart calculations.
-   * 
+   *
    * @param rate - The new tax rate (e.g., 0.085 for 8.5%)
    * @throws Error if rate is negative or greater than 1
    */
@@ -83,7 +83,7 @@ export interface ICartService {
 
   /**
    * Gets a specific cart item by product ID.
-   * 
+   *
    * @param productId - The ID of the product to find
    * @returns The cart item or undefined if not found
    */
@@ -91,7 +91,7 @@ export interface ICartService {
 
   /**
    * Checks if a product is in the cart.
-   * 
+   *
    * @param productId - The ID of the product to check
    * @returns true if product is in cart, false otherwise
    */
@@ -99,7 +99,7 @@ export interface ICartService {
 
   /**
    * Gets the quantity of a specific product in the cart.
-   * 
+   *
    * @param productId - The ID of the product
    * @returns The quantity or 0 if product is not in cart
    */

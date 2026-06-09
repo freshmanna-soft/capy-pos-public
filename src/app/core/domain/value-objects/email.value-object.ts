@@ -1,11 +1,11 @@
-import { BaseValueObject, IValueObject } from './base.value-object';
+import { BaseValueObject, IValueObject } from '@core/domain/value-objects/base.value-object';
 
 /**
  * Email Value Object
- * 
+ *
  * Represents an email address with validation.
  * Immutable and compared by value.
- * 
+ *
  * @example
  * ```typescript
  * const email = new Email('user@example.com');
@@ -48,8 +48,9 @@ export class Email extends BaseValueObject<Email> implements IValueObject<Email>
     }
 
     // RFC 5322 compliant email regex (simplified) - requires at least one dot in domain
-    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-    
+    const emailRegex =
+      /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
+
     if (!emailRegex.test(trimmed)) {
       throw new Error('Invalid email format');
     }
@@ -79,7 +80,7 @@ export class Email extends BaseValueObject<Email> implements IValueObject<Email>
   /**
    * Get normalized email (already lowercase)
    */
-  normalize(): Email {
+  normalize(): this {
     return this; // Already normalized in constructor
   }
 
@@ -95,7 +96,7 @@ export class Email extends BaseValueObject<Email> implements IValueObject<Email>
       'aol.com',
       'icloud.com',
       'mail.com',
-      'protonmail.com'
+      'protonmail.com',
     ];
     return freeProviders.includes(this.getDomain());
   }

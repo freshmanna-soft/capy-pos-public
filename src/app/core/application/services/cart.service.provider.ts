@@ -1,11 +1,10 @@
 import { Provider } from '@angular/core';
-import { ICartService } from './cart.service.interface';
-import { CartService } from './cart.service';
+import { CartService } from '@core/application/services/cart.service';
 
 /**
  * Provides the CartService implementation for dependency injection.
  * Use this provider when you need to inject ICartService.
- * 
+ *
  * @example
  * ```typescript
  * @Component({
@@ -19,14 +18,14 @@ import { CartService } from './cart.service';
 export function provideCartService(): Provider {
   return {
     provide: 'ICartService',
-    useClass: CartService
+    useClass: CartService,
   };
 }
 
 /**
  * Token for injecting ICartService.
  * Use this with @Inject() decorator.
- * 
+ *
  * @example
  * ```typescript
  * constructor(@Inject(CART_SERVICE_TOKEN) private cartService: ICartService) {}

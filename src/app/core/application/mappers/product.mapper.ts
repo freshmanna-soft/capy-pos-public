@@ -1,10 +1,11 @@
-import { Product } from '../../domain/entities/product.entity';
+import { Product } from '@core/domain/entities/product.entity';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
 import {
   CreateProductDto,
   UpdateProductDto,
-  ProductResponseDto
-} from '../dtos/product.dto';
-import { BaseMapper } from './base.mapper';
+  ProductResponseDto,
+} from '@core/application/dtos/product.dto';
+import { BaseMapper } from '@core/application/mappers/base.mapper';
 
 /**
  * ProductMapper
@@ -23,18 +24,20 @@ export class ProductMapper extends BaseMapper<
    * Used when creating new products from API requests or forms
    */
   toDomain(dto: CreateProductDto, id?: string): Product {
-    return new Product(
-      id || this.generateId(),
-      dto.name,
-      dto.price,
-      dto.sku,
-      dto.category,
-      dto.stock,
-      dto.description,
-      dto.imageUrl,
-      dto.barcode,
-      dto.emoji
-    );
+    const builder = new ProductBuilder()
+      .withId(id || this.generateId())
+      .withName(dto.name)
+      .withPrice(dto.price)
+      .withSku(dto.sku)
+      .withCategory(dto.category)
+      .withStock(dto.stock);
+
+    if (dto.description) builder.withDescription(dto.description);
+    if (dto.imageUrl) builder.withImageUrl(dto.imageUrl);
+    if (dto.barcode) builder.withBarcode(dto.barcode);
+    if (dto.emoji) builder.withEmoji(dto.emoji);
+
+    return builder.build();
   }
 
   /**
@@ -58,7 +61,7 @@ export class ProductMapper extends BaseMapper<
       entity.createdBy,
       entity.updatedBy,
       this.dateToIsoString(entity.deletedAt),
-      entity.deletedBy
+      entity.deletedBy,
     );
   }
 
@@ -67,28 +70,27 @@ export class ProductMapper extends BaseMapper<
    * Used when receiving product data from API
    */
   fromResponseDto(dto: ProductResponseDto): Product {
-    return new Product(
-      dto.id,
-      dto.name,
-      dto.price,
-      dto.sku,
-      dto.category,
-      dto.stock,
-      dto.description,
-      dto.imageUrl,
-      dto.barcode,
-      dto.emoji,
-      10, // lowStockThreshold - default value
-      20, // reorderQuantity - default value
-      0,  // cost - default value
-      true, // isActive - default value
-      new Date(dto.createdAt),
-      new Date(dto.updatedAt),
-      dto.createdBy,
-      dto.updatedBy,
-      this.isoStringToDate(dto.deletedAt),
-      dto.deletedBy
-    );
+    const builder = new ProductBuilder()
+      .withId(dto.id)
+      .withName(dto.name)
+      .withPrice(dto.price)
+      .withSku(dto.sku)
+      .withCategory(dto.category)
+      .withStock(dto.stock)
+      .withCreatedAt(new Date(dto.createdAt))
+      .withUpdatedAt(new Date(dto.updatedAt));
+
+    if (dto.description) builder.withDescription(dto.description);
+    if (dto.imageUrl) builder.withImageUrl(dto.imageUrl);
+    if (dto.barcode) builder.withBarcode(dto.barcode);
+    if (dto.emoji) builder.withEmoji(dto.emoji);
+    if (dto.createdBy) builder.withCreatedBy(dto.createdBy);
+    if (dto.updatedBy) builder.withUpdatedBy(dto.updatedBy);
+    const deletedAt = this.isoStringToDate(dto.deletedAt);
+    if (deletedAt) builder.withDeletedAt(deletedAt);
+    if (dto.deletedBy) builder.withDeletedBy(dto.deletedBy);
+
+    return builder.build();
   }
 
   /**
@@ -98,7 +100,7 @@ export class ProductMapper extends BaseMapper<
    */
   applyUpdate(entity: Product, dto: UpdateProductDto): Product {
     const updated = entity.clone();
-    
+
     if (dto.name !== undefined) updated.name = dto.name;
     if (dto.price !== undefined) updated.price = dto.price;
     if (dto.sku !== undefined) updated.sku = dto.sku;
@@ -108,7 +110,7 @@ export class ProductMapper extends BaseMapper<
     if (dto.imageUrl !== undefined) updated.imageUrl = dto.imageUrl;
     if (dto.barcode !== undefined) updated.barcode = dto.barcode;
     if (dto.emoji !== undefined) updated.emoji = dto.emoji;
-    
+
     return updated;
   }
 

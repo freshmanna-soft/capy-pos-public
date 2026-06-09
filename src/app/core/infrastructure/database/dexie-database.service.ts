@@ -184,7 +184,7 @@ export interface ISyncQueueDB {
  * Supports offline-first architecture with automatic indexing
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class DexieDatabase extends Dexie {
   // Tables
@@ -202,41 +202,41 @@ export class DexieDatabase extends Dexie {
 
   constructor() {
     super('CapyPOSDB');
-    
+
     // Define schema version 1
     this.version(1).stores({
       // Products table with indexes
       products: 'id, sku, barcode, category, isActive, [category+isActive], deletedAt',
-      
+
       // Customers table with indexes
       customers: 'id, email, phone, status, tier, [status+tier], deletedAt',
-      
+
       // Transactions table with indexes
       transactions: 'id, customerId, status, type, createdAt, completedAt, cancelledAt, deletedAt',
-      
+
       // Transaction items table with indexes
       transactionItems: 'id, transactionId, productId, [transactionId+productId]',
-      
+
       // Payments table with indexes
       payments: 'id, orderId, method, status, createdAt, completedAt',
-      
+
       // Stock reservations table with indexes
       stockReservations: 'id, productId, status, expiresAt, [productId+status]',
-      
+
       // Stock adjustments table with indexes
       stockAdjustments: 'id, productId, createdAt',
-      
+
       // Loyalty transactions table with indexes
       loyaltyTransactions: 'id, customerId, transactionId, type, createdAt',
-      
+
       // Rewards table with indexes
       rewards: 'id, isActive, expiresAt',
-      
+
       // Reward redemptions table with indexes
       rewardRedemptions: 'id, customerId, rewardId, status, redeemedAt',
-      
+
       // Sync queue table with indexes
-      syncQueue: 'id, entityType, entityId, status, createdAt, [entityType+status]'
+      syncQueue: 'id, entityType, entityId, status, createdAt, [entityType+status]',
     });
 
     // Map tables to classes (optional, for better type safety)
@@ -249,7 +249,7 @@ export class DexieDatabase extends Dexie {
    */
   async initializeWithSeedData(): Promise<void> {
     const productCount = await this.products.count();
-    
+
     if (productCount === 0) {
       // Seed products
       await this.products.bulkAdd([
@@ -260,8 +260,8 @@ export class DexieDatabase extends Dexie {
           sku: 'BEV-COF-001',
           barcode: '1234567890123',
           category: 'Beverages',
-          price: 2.50,
-          cost: 0.80,
+          price: 2.5,
+          cost: 0.8,
           quantity: 150,
           minStockLevel: 30,
           maxStockLevel: 300,
@@ -269,7 +269,7 @@ export class DexieDatabase extends Dexie {
           taxRate: 0.08,
           isActive: true,
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         },
         {
           id: '2',
@@ -278,8 +278,8 @@ export class DexieDatabase extends Dexie {
           sku: 'BEV-CAP-001',
           barcode: '1234567890124',
           category: 'Beverages',
-          price: 4.50,
-          cost: 1.80,
+          price: 4.5,
+          cost: 1.8,
           quantity: 100,
           minStockLevel: 20,
           maxStockLevel: 200,
@@ -287,7 +287,7 @@ export class DexieDatabase extends Dexie {
           taxRate: 0.08,
           isActive: true,
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         },
         {
           id: '3',
@@ -296,8 +296,8 @@ export class DexieDatabase extends Dexie {
           sku: 'FOOD-CRO-001',
           barcode: '1234567890125',
           category: 'Food',
-          price: 3.00,
-          cost: 1.00,
+          price: 3,
+          cost: 1,
           quantity: 50,
           minStockLevel: 10,
           maxStockLevel: 100,
@@ -305,7 +305,7 @@ export class DexieDatabase extends Dexie {
           taxRate: 0.08,
           isActive: true,
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         },
         {
           id: '4',
@@ -314,8 +314,8 @@ export class DexieDatabase extends Dexie {
           sku: 'BEV-LAT-001',
           barcode: '1234567890126',
           category: 'Beverages',
-          price: 4.00,
-          cost: 1.50,
+          price: 4,
+          cost: 1,
           quantity: 100,
           minStockLevel: 20,
           maxStockLevel: 200,
@@ -323,7 +323,7 @@ export class DexieDatabase extends Dexie {
           taxRate: 0.08,
           isActive: true,
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         },
         {
           id: '5',
@@ -332,8 +332,8 @@ export class DexieDatabase extends Dexie {
           sku: 'FOOD-MUF-001',
           barcode: '1234567890127',
           category: 'Food',
-          price: 2.50,
-          cost: 0.80,
+          price: 2.5,
+          cost: 0.8,
           quantity: 30,
           minStockLevel: 10,
           maxStockLevel: 80,
@@ -341,7 +341,7 @@ export class DexieDatabase extends Dexie {
           taxRate: 0.08,
           isActive: true,
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         },
         {
           id: '6',
@@ -350,8 +350,8 @@ export class DexieDatabase extends Dexie {
           sku: 'BEV-SEA-001',
           barcode: '1234567890128',
           category: 'Beverages',
-          price: 5.50,
-          cost: 2.50,
+          price: 5.5,
+          cost: 2.5,
           quantity: 0,
           minStockLevel: 10,
           maxStockLevel: 50,
@@ -359,8 +359,8 @@ export class DexieDatabase extends Dexie {
           taxRate: 0.08,
           isActive: true,
           createdAt: new Date(),
-          updatedAt: new Date()
-        }
+          updatedAt: new Date(),
+        },
       ]);
 
       // Seed rewards
@@ -372,7 +372,7 @@ export class DexieDatabase extends Dexie {
           pointsCost: 100,
           isActive: true,
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         },
         {
           id: '2',
@@ -381,7 +381,7 @@ export class DexieDatabase extends Dexie {
           pointsCost: 200,
           isActive: true,
           createdAt: new Date(),
-          updatedAt: new Date()
+          updatedAt: new Date(),
         },
         {
           id: '3',
@@ -390,8 +390,8 @@ export class DexieDatabase extends Dexie {
           pointsCost: 150,
           isActive: true,
           createdAt: new Date(),
-          updatedAt: new Date()
-        }
+          updatedAt: new Date(),
+        },
       ]);
 
       console.log('Database initialized with seed data');
@@ -403,7 +403,7 @@ export class DexieDatabase extends Dexie {
    */
   async clearAllData(): Promise<void> {
     await this.transaction('rw', this.tables, async () => {
-      await Promise.all(this.tables.map(table => table.clear()));
+      await Promise.all(this.tables.map((table) => table.clear()));
     });
   }
 
@@ -412,11 +412,11 @@ export class DexieDatabase extends Dexie {
    */
   async getStats(): Promise<Record<string, number>> {
     const stats: Record<string, number> = {};
-    
+
     for (const table of this.tables) {
       stats[table.name] = await table.count();
     }
-    
+
     return stats;
   }
 
@@ -424,12 +424,12 @@ export class DexieDatabase extends Dexie {
    * Export database to JSON
    */
   async exportToJSON(): Promise<string> {
-    const data: Record<string, any[]> = {};
-    
+    const data: Record<string, unknown[]> = {};
+
     for (const table of this.tables) {
       data[table.name] = await table.toArray();
     }
-    
+
     return JSON.stringify(data, null, 2);
   }
 
@@ -438,10 +438,10 @@ export class DexieDatabase extends Dexie {
    */
   async importFromJSON(jsonData: string): Promise<void> {
     const data = JSON.parse(jsonData);
-    
+
     await this.transaction('rw', this.tables, async () => {
       for (const tableName in data) {
-        const table = (this as any)[tableName];
+        const table = (this as unknown as Record<string, Table>)[tableName];
         if (table) {
           await table.clear();
           await table.bulkAdd(data[tableName]);

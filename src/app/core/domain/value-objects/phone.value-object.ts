@@ -1,12 +1,12 @@
-import { BaseValueObject, IValueObject } from './base.value-object';
+import { BaseValueObject, IValueObject } from '@core/domain/value-objects/base.value-object';
 
 /**
  * Phone Number Value Object
- * 
+ *
  * Represents a phone number with validation and formatting.
  * Supports international formats with country codes.
  * Immutable and compared by value.
- * 
+ *
  * @example
  * ```typescript
  * const phone = new Phone('+1-555-123-4567');
@@ -22,15 +22,15 @@ export class Phone extends BaseValueObject<Phone> implements IValueObject<Phone>
   constructor(value: string) {
     super();
     this.validatePhone(value);
-    
+
     const normalized = this.normalizePhone(value);
     this._value = normalized;
-    
+
     // Extract country code and number
     const parsed = this.parsePhone(normalized);
     this._countryCode = parsed.countryCode;
     this._number = parsed.number;
-    
+
     this.freeze();
   }
 
@@ -70,9 +70,9 @@ export class Phone extends BaseValueObject<Phone> implements IValueObject<Phone>
 
     // Remove all non-digit characters except + at the start
     const digitsOnly = trimmed.replace(/[^\d+]/g, '');
-    
+
     // Must have at least 10 digits (minimum for most countries)
-    const digitCount = digitsOnly.replace(/\+/g, '').length;
+    const digitCount = digitsOnly.replaceAll('+', '').length;
     if (digitCount < 10) {
       throw new Error('Phone number must have at least 10 digits');
     }
@@ -92,8 +92,8 @@ export class Phone extends BaseValueObject<Phone> implements IValueObject<Phone>
    */
   private normalizePhone(value: string): string {
     // Remove all whitespace and special characters except + at start
-    let normalized = value.trim().replace(/[\s\-\(\)\.]/g, '');
-    
+    let normalized = value.trim().replace(/[\s\-().]/g, '');
+
     // Ensure + is only at the start
     if (normalized.includes('+')) {
       const plusCount = (normalized.match(/\+/g) || []).length;
@@ -104,12 +104,12 @@ export class Phone extends BaseValueObject<Phone> implements IValueObject<Phone>
         throw new Error('+ symbol must be at the start of the phone number');
       }
     }
-    
+
     // If no country code, assume US (+1)
     if (!normalized.startsWith('+')) {
       normalized = '+1' + normalized;
     }
-    
+
     return normalized;
   }
 
@@ -121,37 +121,37 @@ export class Phone extends BaseValueObject<Phone> implements IValueObject<Phone>
     // US/Canada: +1 (1 digit)
     // Most countries: +XX (2 digits)
     // Some countries: +XXX (3 digits)
-    
+
     // Special case: US/Canada +1 with exactly 10 digits after
     if (normalized.startsWith('+1') && normalized.length === 12) {
       return {
         countryCode: '+1',
-        number: normalized.substring(2)
+        number: normalized.substring(2),
       };
     }
-    
+
     // Try 3-digit country code (for numbers like +123 with 10+ digits after)
     if (normalized.length >= 14) {
       const threeDigitCode = normalized.substring(0, 4); // +XXX
       return {
         countryCode: threeDigitCode,
-        number: normalized.substring(4)
+        number: normalized.substring(4),
       };
     }
-    
+
     // Try 2-digit country code
     if (normalized.length >= 12) {
       const twoDigitCode = normalized.substring(0, 3); // +XX
       return {
         countryCode: twoDigitCode,
-        number: normalized.substring(3)
+        number: normalized.substring(3),
       };
     }
-    
+
     // Fallback: assume 1-digit country code
     return {
       countryCode: normalized.substring(0, 2),
-      number: normalized.substring(2)
+      number: normalized.substring(2),
     };
   }
 
@@ -159,7 +159,7 @@ export class Phone extends BaseValueObject<Phone> implements IValueObject<Phone>
    * Get only the digits (no + or formatting)
    */
   getDigitsOnly(): string {
-    return this._value.replace(/\+/g, '');
+    return this._value.replaceAll('+', '');
   }
 
   /**
@@ -175,7 +175,7 @@ export class Phone extends BaseValueObject<Phone> implements IValueObject<Phone>
       const lineNumber = this._number.substring(6);
       return `${this._countryCode} (${areaCode}) ${prefix}-${lineNumber}`;
     }
-    
+
     // International format - add spaces every 4 digits
     const formatted = this._number.match(/.{1,4}/g)?.join(' ') || this._number;
     return `${this._countryCode} ${formatted}`;

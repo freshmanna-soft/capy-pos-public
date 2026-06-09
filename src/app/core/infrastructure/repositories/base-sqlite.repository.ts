@@ -1,13 +1,14 @@
-import { DatabaseService } from '../sqlite/database.service';
-import { IBaseRepository } from '../../domain/interfaces/base.repository.interface';
+import { BindParams } from 'sql.js';
+import { DatabaseService } from '@core/infrastructure/sqlite/database.service';
+import { IBaseRepository } from '@core/domain/interfaces/base.repository.interface';
 
 /**
  * Base SQLite Repository
- * 
+ *
  * Abstract base class for all SQLite repository implementations.
  * Provides common functionality and enforces consistent patterns.
  * Follows Template Method Pattern and DRY principle.
- * 
+ *
  * @abstract
  * @class BaseSQLiteRepository
  * @implements IBaseRepository
@@ -31,7 +32,7 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
   async findAll(): Promise<T[]> {
     const sql = `SELECT * FROM ${this.tableName} WHERE deleted_at IS NULL ORDER BY created_at DESC`;
     const rows = this.db.query(sql);
-    return rows.map(row => this.mapToEntity(row));
+    return rows.map((row) => this.mapToEntity(row));
   }
 
   /**
@@ -48,7 +49,7 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
    */
   async create(entity: T): Promise<T> {
     const { sql, params } = this.buildInsertQuery(entity);
-    this.db.run(sql, params);
+    this.db.run(sql, params as BindParams);
     return entity;
   }
 
@@ -62,7 +63,7 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
     }
 
     const { sql, params } = this.buildUpdateQuery(id, data);
-    this.db.run(sql, params);
+    this.db.run(sql, params as BindParams);
 
     const updated = await this.findById(id);
     if (!updated) {
@@ -93,7 +94,7 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
    */
   async exists(id: string): Promise<boolean> {
     const sql = `SELECT COUNT(*) as count FROM ${this.tableName} WHERE id = ? AND deleted_at IS NULL`;
-    const result = this.db.queryOne(sql, [id]);
+    const result = this.db.queryOne(sql, [id]) as { count: number } | null;
     return result ? result.count > 0 : false;
   }
 
@@ -102,7 +103,7 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
    */
   async count(): Promise<number> {
     const sql = `SELECT COUNT(*) as count FROM ${this.tableName} WHERE deleted_at IS NULL`;
-    const result = this.db.queryOne(sql);
+    const result = this.db.queryOne(sql) as { count: number } | null;
     return result ? result.count : 0;
   }
 
@@ -121,9 +122,9 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
   /**
    * Bulk update multiple entities
    */
-  async bulkUpdate(updates: Array<{ id: string; data: Partial<T> }>): Promise<T[]> {
+  async bulkUpdate(updates: { id: string; data: Partial<T> }[]): Promise<T[]> {
     const updated: T[] = [];
-    
+
     await this.db.transaction(async () => {
       for (const update of updates) {
         const entity = await this.update(update.id, update.data);
@@ -137,7 +138,10 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
   /**
    * Find entities with pagination
    */
-  async findPaginated(page: number, pageSize: number): Promise<{
+  async findPaginated(
+    page: number,
+    pageSize: number,
+  ): Promise<{
     data: T[];
     total: number;
     page: number;
@@ -147,7 +151,7 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
     const offset = (page - 1) * pageSize;
     const sql = `SELECT * FROM ${this.tableName} WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT ? OFFSET ?`;
     const rows = this.db.query(sql, [pageSize, offset]);
-    const data = rows.map(row => this.mapToEntity(row));
+    const data = rows.map((row) => this.mapToEntity(row));
     const total = await this.count();
     const totalPages = Math.ceil(total / pageSize);
 
@@ -156,7 +160,7 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
       total,
       page,
       pageSize,
-      totalPages
+      totalPages,
     };
   }
 
@@ -165,41 +169,48 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
    * Must be implemented by concrete repositories
    * @abstract
    */
-  protected abstract mapToEntity(row: any): T;
+  protected abstract mapToEntity(row: unknown): T;
 
   /**
    * Build INSERT query for entity
    * Must be implemented by concrete repositories
    * @abstract
    */
-  protected abstract buildInsertQuery(entity: T): { sql: string; params: any[] };
+  protected abstract buildInsertQuery(entity: T): { sql: string; params: unknown[] };
 
   /**
    * Build UPDATE query for entity
    * Must be implemented by concrete repositories
    * @abstract
    */
-  protected abstract buildUpdateQuery(id: string, data: Partial<T>): { sql: string; params: any[] };
+  protected abstract buildUpdateQuery(
+    id: string,
+    data: Partial<T>,
+  ): { sql: string; params: unknown[] };
 
   /**
    * Get column names for the table
    * Helper method for building queries
    */
-  protected getColumnNames(data: any): string[] {
-    return Object.keys(data).filter(key => data[key] !== undefined);
+  protected getColumnNames(data: unknown): string[] {
+    const d = data as Record<string, unknown>;
+    return Object.keys(d).filter((key) => d[key] !== undefined);
   }
 
   /**
    * Build WHERE clause for search
    */
-  protected buildSearchWhere(searchFields: string[], query: string): { where: string; params: any[] } {
-    const conditions = searchFields.map(field => `${field} LIKE ?`);
+  protected buildSearchWhere(
+    searchFields: string[],
+    query: string,
+  ): { where: string; params: unknown[] } {
+    const conditions = searchFields.map((field) => `${field} LIKE ?`);
     const searchPattern = `%${query}%`;
     const params = searchFields.map(() => searchPattern);
-    
+
     return {
       where: `(${conditions.join(' OR ')})`,
-      params
+      params,
     };
   }
 }

@@ -1,12 +1,12 @@
 import { Injectable } from '@angular/core';
-import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
+import initSqlJs, { BindParams, Database, SqlJsStatic } from 'sql.js';
 
 /**
  * SQLite Database Service
- * 
+ *
  * Manages SQLite database initialization, connections, and operations
  * for offline-first data storage in the browser using sql.js.
- * 
+ *
  * @class DatabaseService
  */
 @Injectable({ providedIn: 'root' })
@@ -27,12 +27,12 @@ export class DatabaseService {
     try {
       // Load sql.js WASM module
       this.SQL = await initSqlJs({
-        locateFile: (file) => `https://sql.js.org/dist/${file}`
+        locateFile: (file) => `https://sql.js.org/dist/${file}`,
       });
 
       // Try to load existing database from localStorage
       const savedDb = localStorage.getItem('capy-pos-db');
-      
+
       if (savedDb) {
         // Load existing database
         const buffer = this.base64ToUint8Array(savedDb);
@@ -47,7 +47,7 @@ export class DatabaseService {
       this.initialized = true;
     } catch (error) {
       console.error('[DatabaseService] Failed to initialize database:', error);
-      throw new Error('Failed to initialize SQLite database');
+      throw new Error('Failed to initialize SQLite database', { cause: error });
     }
   }
 
@@ -68,19 +68,19 @@ export class DatabaseService {
    * @param params Query parameters
    * @returns Query results
    */
-  exec(sql: string, params?: any[]): any[] {
+  exec(sql: string, params?: BindParams): unknown[] {
     const db = this.getDatabase();
-    
+
     try {
       if (params) {
         const stmt = db.prepare(sql);
         stmt.bind(params);
-        const results: any[] = [];
-        
+        const results: unknown[] = [];
+
         while (stmt.step()) {
           results.push(stmt.getAsObject());
         }
-        
+
         stmt.free();
         return results;
       } else {
@@ -99,7 +99,7 @@ export class DatabaseService {
    * @param params Query parameters
    * @returns First result or null
    */
-  queryOne(sql: string, params?: any[]): any | null {
+  queryOne(sql: string, params?: BindParams): unknown {
     const results = this.query(sql, params);
     return results.length > 0 ? results[0] : null;
   }
@@ -110,21 +110,21 @@ export class DatabaseService {
    * @param params Query parameters
    * @returns Array of results
    */
-  query(sql: string, params?: any[]): any[] {
+  query(sql: string, params?: BindParams): unknown[] {
     const db = this.getDatabase();
-    
+
     try {
       const stmt = db.prepare(sql);
-      
+
       if (params) {
         stmt.bind(params);
       }
-      
-      const results: any[] = [];
+
+      const results: unknown[] = [];
       while (stmt.step()) {
         results.push(stmt.getAsObject());
       }
-      
+
       stmt.free();
       return results;
     } catch (error) {
@@ -139,9 +139,9 @@ export class DatabaseService {
    * @param params Statement parameters
    * @returns Number of affected rows
    */
-  run(sql: string, params?: any[]): number {
+  run(sql: string, params?: BindParams): number {
     const db = this.getDatabase();
-    
+
     try {
       if (params) {
         const stmt = db.prepare(sql);
@@ -151,10 +151,10 @@ export class DatabaseService {
       } else {
         db.run(sql);
       }
-      
+
       // Save database to localStorage after modification
       this.save();
-      
+
       // Return number of changes
       return db.getRowsModified();
     } catch (error) {
@@ -224,7 +224,7 @@ export class DatabaseService {
       this.db.close();
       this.db = null;
     }
-    
+
     localStorage.removeItem('capy-pos-db');
     this.initialized = false;
   }
@@ -262,7 +262,7 @@ export class DatabaseService {
     let binary = '';
     const len = bytes.byteLength;
     for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
+      binary += String.fromCodePoint(bytes[i]);
     }
     return btoa(binary);
   }
@@ -275,7 +275,7 @@ export class DatabaseService {
     const len = binary.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
-      bytes[i] = binary.charCodeAt(i);
+      bytes[i] = binary.codePointAt(i) ?? 0;
     }
     return bytes;
   }

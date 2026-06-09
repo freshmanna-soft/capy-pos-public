@@ -3,6 +3,6 @@
  * Combinations of atoms that form simple UI components
  */
 
-export * from './product-card/product-card.component';
+export * from '@shared/ui/molecules/product-card/product-card.component';
 
 // Made with Bob

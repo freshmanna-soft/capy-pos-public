@@ -1,16 +1,16 @@
 import { Observable, Subject, BehaviorSubject } from 'rxjs';
-import { 
-  IBaseAgent, 
-  AgentStatus, 
-  IAgentMessage, 
-  IAgentResponse 
-} from './base-agent.interface';
+import {
+  IBaseAgent,
+  AgentStatus,
+  IAgentMessage,
+  IAgentResponse,
+} from '@app/agents/base/base-agent.interface';
 
 /**
  * Base Agent Abstract Class
  * Implements common agent functionality
  * Follows Template Method Pattern for agent lifecycle
- * 
+ *
  * Concrete agents extend this class and implement:
  * - onInitialize(): Custom initialization logic
  * - onStart(): Custom start logic
@@ -27,7 +27,7 @@ export abstract class BaseAgent implements IBaseAgent {
   constructor(
     public readonly id: string,
     public readonly name: string,
-    public readonly description: string
+    public readonly description: string,
   ) {}
 
   /**
@@ -120,7 +120,7 @@ export abstract class BaseAgent implements IBaseAgent {
    */
   async processMessage(message: IAgentMessage): Promise<IAgentResponse> {
     const previousStatus = this.status;
-    
+
     try {
       this._status$.next(AgentStatus.PROCESSING);
       this._lastActivity = new Date();
@@ -136,7 +136,7 @@ export abstract class BaseAgent implements IBaseAgent {
 
       // Update status
       this._status$.next(AgentStatus.COMPLETED);
-      
+
       // Return to previous status after a brief moment
       setTimeout(() => {
         if (this.status === AgentStatus.COMPLETED) {
@@ -148,10 +148,10 @@ export abstract class BaseAgent implements IBaseAgent {
     } catch (error) {
       this._errorCount++;
       this._status$.next(AgentStatus.ERROR);
-      
+
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error(`Agent ${this.name} failed to process message:`, error);
-      
+
       return {
         success: false,
         error: errorMessage,
@@ -159,8 +159,8 @@ export abstract class BaseAgent implements IBaseAgent {
           agentId: this.id,
           agentName: this.name,
           messageId: message.id,
-          timestamp: new Date()
-        }
+          timestamp: new Date(),
+        },
       };
     }
   }
@@ -185,7 +185,7 @@ export abstract class BaseAgent implements IBaseAgent {
       healthy: this.status !== AgentStatus.ERROR && this._isInitialized,
       status: this.status,
       lastActivity: this._lastActivity,
-      errorCount: this._errorCount
+      errorCount: this._errorCount,
     };
   }
 

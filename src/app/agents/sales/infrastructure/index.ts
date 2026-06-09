@@ -2,7 +2,7 @@
  * Sales Agent Infrastructure Layer Exports
  */
 
-export * from './sales.agent';
-export * from './sales-agent.provider';
+export * from '@app/agents/sales/infrastructure/sales.agent';
+export * from '@app/agents/sales/infrastructure/sales-agent.provider';
 
 // Made with Bob

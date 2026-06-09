@@ -1,7 +1,6 @@
-import { BaseEntity, IRefundable } from './base.entity';
-import { Customer } from './customer.entity';
-import { Payment, PaymentMethod } from './payment.entity';
-import { CartItem } from './cart.entity';
+import { BaseEntity, IRefundable } from '@core/domain/entities/base.entity';
+import { Customer } from '@core/domain/entities/customer.entity';
+import { CartItem } from '@core/domain/entities/cart.entity';
 
 /**
  * Transaction Status Enum
@@ -12,7 +11,7 @@ export enum TransactionStatus {
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
   REFUNDED = 'REFUNDED',
-  PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED'
+  PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
 }
 
 /**
@@ -22,7 +21,7 @@ export enum TransactionType {
   SALE = 'SALE',
   RETURN = 'RETURN',
   EXCHANGE = 'EXCHANGE',
-  VOID = 'VOID'
+  VOID = 'VOID',
 }
 
 /**
@@ -40,32 +39,82 @@ export interface ITransactionItem {
 }
 
 /**
+ * Parameters for constructing an AbstractTransaction
+ * Groups related constructor parameters into a single object
+ */
+export interface IAbstractTransactionParams {
+  id: string;
+  customerId?: string;
+  items: ITransactionItem[];
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  discountAmount: number;
+  total: number;
+  status?: TransactionStatus;
+  type?: TransactionType;
+  refundedAmount?: number;
+  createdAt?: Date;
+  updatedAt?: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  completedAt?: Date;
+  cancelledAt?: Date;
+  cancellationReason?: string;
+}
+
+/**
+ * Parameters for constructing a Transaction
+ * Extends AbstractTransaction params with Transaction-specific fields
+ */
+export interface ITransactionParams extends IAbstractTransactionParams {
+  paymentIds?: string[];
+  receiptNumber?: string;
+  notes?: string;
+  customer?: Customer;
+}
+
+/**
  * Abstract Transaction Base Class
  * Provides common transaction functionality
  * Implements IRefundable interface
  */
 export abstract class AbstractTransaction extends BaseEntity implements IRefundable {
-  constructor(
-    id: string,
-    public readonly customerId: string | undefined,
-    public readonly items: ITransactionItem[],
-    public readonly subtotal: number,
-    public readonly taxRate: number,
-    public readonly taxAmount: number,
-    public readonly discountAmount: number,
-    public readonly total: number,
-    public status: TransactionStatus = TransactionStatus.PENDING,
-    public readonly type: TransactionType = TransactionType.SALE,
-    public refundedAmount: number = 0,
-    createdAt: Date = new Date(),
-    updatedAt: Date = new Date(),
-    createdBy?: string,
-    updatedBy?: string,
-    public completedAt?: Date,
-    public cancelledAt?: Date,
-    public cancellationReason?: string
-  ) {
-    super(id, createdAt, updatedAt, createdBy, updatedBy);
+  public readonly customerId: string | undefined;
+  public readonly items: ITransactionItem[];
+  public readonly subtotal: number;
+  public readonly taxRate: number;
+  public readonly taxAmount: number;
+  public readonly discountAmount: number;
+  public readonly total: number;
+  public status: TransactionStatus;
+  public readonly type: TransactionType;
+  public refundedAmount: number;
+  public completedAt?: Date;
+  public cancelledAt?: Date;
+  public cancellationReason?: string;
+
+  constructor(params: IAbstractTransactionParams) {
+    super(
+      params.id,
+      params.createdAt ?? new Date(),
+      params.updatedAt ?? new Date(),
+      params.createdBy,
+      params.updatedBy,
+    );
+    this.customerId = params.customerId;
+    this.items = params.items;
+    this.subtotal = params.subtotal;
+    this.taxRate = params.taxRate;
+    this.taxAmount = params.taxAmount;
+    this.discountAmount = params.discountAmount;
+    this.total = params.total;
+    this.status = params.status ?? TransactionStatus.PENDING;
+    this.type = params.type ?? TransactionType.SALE;
+    this.refundedAmount = params.refundedAmount ?? 0;
+    this.completedAt = params.completedAt;
+    this.cancelledAt = params.cancelledAt;
+    this.cancellationReason = params.cancellationReason;
   }
 
   /**
@@ -142,8 +191,10 @@ export abstract class AbstractTransaction extends BaseEntity implements IRefunda
    * Implements IRefundable interface
    */
   refund(amount: number, updatedBy?: string): void {
-    if (this.status !== TransactionStatus.COMPLETED &&
-        this.status !== TransactionStatus.PARTIALLY_REFUNDED) {
+    if (
+      this.status !== TransactionStatus.COMPLETED &&
+      this.status !== TransactionStatus.PARTIALLY_REFUNDED
+    ) {
       throw new Error('Can only refund completed transactions');
     }
     if (amount <= 0) {
@@ -154,13 +205,13 @@ export abstract class AbstractTransaction extends BaseEntity implements IRefunda
     }
 
     this.refundedAmount += amount;
-    
+
     if (this.refundedAmount === this.total) {
       this.status = TransactionStatus.REFUNDED;
     } else {
       this.status = TransactionStatus.PARTIALLY_REFUNDED;
     }
-    
+
     this.touch(updatedBy);
   }
 
@@ -177,8 +228,7 @@ export abstract class AbstractTransaction extends BaseEntity implements IRefunda
    * Implements IRefundable interface
    */
   isRefundable(): boolean {
-    return this.status === TransactionStatus.COMPLETED && 
-           this.refundedAmount < this.total;
+    return this.status === TransactionStatus.COMPLETED && this.refundedAmount < this.total;
   }
 
   /**
@@ -248,7 +298,7 @@ export abstract class AbstractTransaction extends BaseEntity implements IRefunda
   /**
    * Converts transaction to JSON
    */
-  override toJSON(): Record<string, any> {
+  override toJSON(): Record<string, unknown> {
     return {
       ...super.toJSON(),
       customerId: this.customerId,
@@ -267,7 +317,7 @@ export abstract class AbstractTransaction extends BaseEntity implements IRefunda
       completedAt: this.completedAt?.toISOString(),
       cancelledAt: this.cancelledAt?.toISOString(),
       cancellationReason: this.cancellationReason,
-      transactionDuration: this.getTransactionDuration()
+      transactionDuration: this.getTransactionDuration(),
     };
   }
 }
@@ -278,50 +328,17 @@ export abstract class AbstractTransaction extends BaseEntity implements IRefunda
  * Represents a complete sales transaction in the POS system
  */
 export class Transaction extends AbstractTransaction {
-  constructor(
-    id: string,
-    customerId: string | undefined,
-    items: ITransactionItem[],
-    subtotal: number,
-    taxRate: number,
-    taxAmount: number,
-    discountAmount: number,
-    total: number,
-    status: TransactionStatus = TransactionStatus.PENDING,
-    type: TransactionType = TransactionType.SALE,
-    refundedAmount: number = 0,
-    createdAt: Date = new Date(),
-    updatedAt: Date = new Date(),
-    createdBy?: string,
-    updatedBy?: string,
-    completedAt?: Date,
-    cancelledAt?: Date,
-    cancellationReason?: string,
-    public paymentIds: string[] = [],
-    public receiptNumber?: string,
-    public notes?: string,
-    public customer?: Customer
-  ) {
-    super(
-      id,
-      customerId,
-      items,
-      subtotal,
-      taxRate,
-      taxAmount,
-      discountAmount,
-      total,
-      status,
-      type,
-      refundedAmount,
-      createdAt,
-      updatedAt,
-      createdBy,
-      updatedBy,
-      completedAt,
-      cancelledAt,
-      cancellationReason
-    );
+  public paymentIds: string[];
+  public receiptNumber?: string;
+  public notes?: string;
+  public customer?: Customer;
+
+  constructor(params: ITransactionParams) {
+    super(params);
+    this.paymentIds = params.paymentIds ?? [];
+    this.receiptNumber = params.receiptNumber;
+    this.notes = params.notes;
+    this.customer = params.customer;
     this.validate();
   }
 
@@ -389,50 +406,50 @@ export class Transaction extends AbstractTransaction {
    * Gets item by product ID
    */
   getItem(productId: string): ITransactionItem | undefined {
-    return this.items.find(item => item.productId === productId);
+    return this.items.find((item) => item.productId === productId);
   }
 
   /**
    * Checks if transaction contains a specific product
    */
   hasProduct(productId: string): boolean {
-    return this.items.some(item => item.productId === productId);
+    return this.items.some((item) => item.productId === productId);
   }
 
   /**
    * Creates a copy of the transaction
    */
   override clone(): Transaction {
-    return new Transaction(
-      this.id,
-      this.customerId,
-      [...this.items],
-      this.subtotal,
-      this.taxRate,
-      this.taxAmount,
-      this.discountAmount,
-      this.total,
-      this.status,
-      this.type,
-      this.refundedAmount,
-      this.createdAt,
-      this.updatedAt,
-      this.createdBy,
-      this.updatedBy,
-      this.completedAt,
-      this.cancelledAt,
-      this.cancellationReason,
-      [...this.paymentIds],
-      this.receiptNumber,
-      this.notes,
-      this.customer
-    );
+    return new Transaction({
+      id: this.id,
+      customerId: this.customerId,
+      items: [...this.items],
+      subtotal: this.subtotal,
+      taxRate: this.taxRate,
+      taxAmount: this.taxAmount,
+      discountAmount: this.discountAmount,
+      total: this.total,
+      status: this.status,
+      type: this.type,
+      refundedAmount: this.refundedAmount,
+      createdAt: this.createdAt,
+      updatedAt: this.updatedAt,
+      createdBy: this.createdBy,
+      updatedBy: this.updatedBy,
+      completedAt: this.completedAt,
+      cancelledAt: this.cancelledAt,
+      cancellationReason: this.cancellationReason,
+      paymentIds: [...this.paymentIds],
+      receiptNumber: this.receiptNumber,
+      notes: this.notes,
+      customer: this.customer,
+    });
   }
 
   /**
    * Converts transaction to JSON with additional fields
    */
-  override toJSON(): Record<string, any> {
+  override toJSON(): Record<string, unknown> {
     return {
       ...super.toJSON(),
       paymentIds: this.paymentIds,
@@ -440,38 +457,62 @@ export class Transaction extends AbstractTransaction {
       receiptNumber: this.receiptNumber,
       notes: this.notes,
       hasCustomer: this.hasCustomer(),
-      customer: this.customer?.toJSON()
+      customer: this.customer?.toJSON(),
     };
   }
 
   /**
    * Creates transaction from plain object
    */
-  static fromJSON(data: any): Transaction {
-    return new Transaction(
-      data.id,
-      data.customerId,
-      data.items,
-      data.subtotal,
-      data.taxRate,
-      data.taxAmount,
-      data.discountAmount,
-      data.total,
-      data.status,
-      data.type,
-      data.refundedAmount,
-      new Date(data.createdAt),
-      new Date(data.updatedAt),
-      data.createdBy,
-      data.updatedBy,
-      data.completedAt ? new Date(data.completedAt) : undefined,
-      data.cancelledAt ? new Date(data.cancelledAt) : undefined,
-      data.cancellationReason,
-      data.paymentIds || [],
-      data.receiptNumber,
-      data.notes,
-      data.customer ? Customer.fromJSON(data.customer) : undefined
-    );
+  static fromJSON(data: unknown): Transaction {
+    const record = data as {
+      id: string;
+      customerId?: string;
+      items: ITransactionItem[];
+      subtotal: number;
+      taxRate: number;
+      taxAmount: number;
+      discountAmount: number;
+      total: number;
+      status: TransactionStatus;
+      type: TransactionType;
+      refundedAmount: number;
+      createdAt: string;
+      updatedAt: string;
+      createdBy?: string;
+      updatedBy?: string;
+      completedAt?: string;
+      cancelledAt?: string;
+      cancellationReason?: string;
+      paymentIds?: string[];
+      receiptNumber?: string;
+      notes?: string;
+      customer?: Record<string, unknown>;
+    };
+    return new Transaction({
+      id: record.id,
+      customerId: record.customerId,
+      items: record.items,
+      subtotal: record.subtotal,
+      taxRate: record.taxRate,
+      taxAmount: record.taxAmount,
+      discountAmount: record.discountAmount,
+      total: record.total,
+      status: record.status,
+      type: record.type,
+      refundedAmount: record.refundedAmount,
+      createdAt: new Date(record.createdAt),
+      updatedAt: new Date(record.updatedAt),
+      createdBy: record.createdBy,
+      updatedBy: record.updatedBy,
+      completedAt: record.completedAt ? new Date(record.completedAt) : undefined,
+      cancelledAt: record.cancelledAt ? new Date(record.cancelledAt) : undefined,
+      cancellationReason: record.cancellationReason,
+      paymentIds: record.paymentIds ?? [],
+      receiptNumber: record.receiptNumber,
+      notes: record.notes,
+      customer: record.customer ? Customer.fromJSON(record.customer) : undefined,
+    });
   }
 
   /**
@@ -481,23 +522,23 @@ export class Transaction extends AbstractTransaction {
     id: string,
     cartItems: CartItem[],
     taxRate: number,
-    discountAmount: number = 0,
+    discountAmount = 0,
     customerId?: string,
-    createdBy?: string
+    createdBy?: string,
   ): Transaction {
-    const items: ITransactionItem[] = cartItems.map(item => ({
+    const items: ITransactionItem[] = cartItems.map((item) => ({
       productId: item.product.id,
       productName: item.product.name,
       quantity: item.quantity,
       unitPrice: item.product.price,
-      subtotal: item.getSubtotal()
+      subtotal: item.getSubtotal(),
     }));
 
     const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
     const taxAmount = (subtotal - discountAmount) * taxRate;
     const total = subtotal - discountAmount + taxAmount;
 
-    return new Transaction(
+    return new Transaction({
       id,
       customerId,
       items,
@@ -506,13 +547,11 @@ export class Transaction extends AbstractTransaction {
       taxAmount,
       discountAmount,
       total,
-      TransactionStatus.PENDING,
-      TransactionType.SALE,
-      0,
-      new Date(),
-      new Date(),
-      createdBy
-    );
+      status: TransactionStatus.PENDING,
+      type: TransactionType.SALE,
+      refundedAmount: 0,
+      createdBy,
+    });
   }
 }
 

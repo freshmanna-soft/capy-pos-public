@@ -4,8 +4,7 @@
  */
 
 import { Observable } from 'rxjs';
-import { IBaseAgent, IAgentMessage, IAgentResponse } from '../../base';
-import { Product } from '../../../core/domain/entities/product.entity';
+import { IBaseAgent, IAgentResponse } from '@app/agents/base';
 
 /**
  * Inventory-specific message types
@@ -87,11 +86,11 @@ export interface IStockAuditResult {
  * Bulk stock update request
  */
 export interface IBulkStockUpdate {
-  updates: Array<{
+  updates: {
     productId: string;
     quantity: number;
     reason?: string;
-  }>;
+  }[];
 }
 
 /**

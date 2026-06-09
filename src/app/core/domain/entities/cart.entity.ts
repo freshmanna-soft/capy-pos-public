@@ -1,4 +1,4 @@
-import { Product } from './product.entity';
+import { Product } from '@core/domain/entities/product.entity';
 
 /**
  * Cart Item Value Object
@@ -8,7 +8,7 @@ export class CartItem {
   constructor(
     public readonly product: Product,
     public quantity: number,
-    public readonly addedAt: Date = new Date()
+    public readonly addedAt: Date = new Date(),
   ) {
     this.validate();
   }
@@ -49,13 +49,13 @@ export class CartItem {
  * Follows Single Responsibility Principle
  */
 export class Cart {
-  private items: Map<string, CartItem> = new Map();
+  private readonly items = new Map<string, CartItem>();
 
   constructor(
     public readonly id: string,
     public readonly customerId?: string,
     public readonly createdAt: Date = new Date(),
-    public updatedAt: Date = new Date()
+    public updatedAt: Date = new Date(),
   ) {
     if (!this.id || this.id.trim() === '') {
       throw new Error('Cart ID is required');
@@ -67,7 +67,7 @@ export class Cart {
    */
   addItem(product: Product, quantity: number): void {
     const existingItem = this.items.get(product.id);
-    
+
     if (existingItem) {
       // Update quantity if item already exists
       const newQuantity = existingItem.quantity + quantity;
@@ -77,7 +77,7 @@ export class Cart {
       const cartItem = new CartItem(product, quantity);
       this.items.set(product.id, cartItem);
     }
-    
+
     this.updatedAt = new Date();
   }
 
@@ -122,29 +122,27 @@ export class Cart {
    * Calculates total number of items
    */
   getTotalItems(): number {
-    return Array.from(this.items.values())
-      .reduce((total, item) => total + item.quantity, 0);
+    return Array.from(this.items.values()).reduce((total, item) => total + item.quantity, 0);
   }
 
   /**
    * Calculates cart subtotal (before tax and discounts)
    */
   getSubtotal(): number {
-    return Array.from(this.items.values())
-      .reduce((total, item) => total + item.getSubtotal(), 0);
+    return Array.from(this.items.values()).reduce((total, item) => total + item.getSubtotal(), 0);
   }
 
   /**
    * Calculates tax amount
    */
-  getTax(taxRate: number = 0.08): number {
+  getTax(taxRate = 0.08): number {
     return this.getSubtotal() * taxRate;
   }
 
   /**
    * Calculates total (subtotal + tax)
    */
-  getTotal(taxRate: number = 0.08): number {
+  getTotal(taxRate = 0.08): number {
     return this.getSubtotal() + this.getTax(taxRate);
   }
 
@@ -192,29 +190,29 @@ export class Cart {
 
     return {
       valid: errors.length === 0,
-      errors
+      errors,
     };
   }
 
   /**
    * Converts cart to plain object
    */
-  toJSON(): Record<string, any> {
+  toJSON(): Record<string, unknown> {
     return {
       id: this.id,
       customerId: this.customerId,
-      items: this.getItems().map(item => ({
+      items: this.getItems().map((item) => ({
         product: item.product.toJSON(),
         quantity: item.quantity,
         subtotal: item.getSubtotal(),
-        addedAt: item.addedAt.toISOString()
+        addedAt: item.addedAt.toISOString(),
       })),
       totalItems: this.getTotalItems(),
       subtotal: this.getSubtotal(),
       tax: this.getTax(),
       total: this.getTotal(),
       createdAt: this.createdAt.toISOString(),
-      updatedAt: this.updatedAt.toISOString()
+      updatedAt: this.updatedAt.toISOString(),
     };
   }
 }

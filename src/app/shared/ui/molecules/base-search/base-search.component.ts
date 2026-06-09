@@ -1,27 +1,35 @@
-import { Component, Output, EventEmitter, signal, OnDestroy, Directive } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { Subject, debounceTime, distinctUntilChanged, switchMap, catchError, of, Subscription } from 'rxjs';
+import { Output, EventEmitter, signal, OnDestroy, Directive } from '@angular/core';
+import {
+  Observable,
+  Subject,
+  debounceTime,
+  distinctUntilChanged,
+  switchMap,
+  catchError,
+  of,
+  Subscription,
+} from 'rxjs';
 
 /**
  * BaseSearchComponent (Abstract Molecule)
- * 
+ *
  * Template Method Pattern for search functionality
  * Provides common search behavior that can be extended for different entity types
- * 
+ *
  * Features:
  * - Debounced search (configurable)
  * - Keyboard navigation
  * - Loading and error states
  * - Accessibility (ARIA attributes)
  * - Reactive state with signals
- * 
+ *
  * @example
  * ```typescript
  * export class ProductSearchComponent extends BaseSearchComponent<Product> {
  *   protected override performSearch(query: string): Observable<Product[]> {
  *     return from(this.productService.searchProducts(query));
  *   }
- * 
+ *
  *   protected override isItemDisabled(item: Product): boolean {
  *     return item.stock === 0;
  *   }
@@ -46,7 +54,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
   @Output() itemSelected = new EventEmitter<T>();
 
   // Search subject for debouncing
-  private searchSubject = new Subject<string>();
+  private readonly searchSubject = new Subject<string>();
   private subscription?: Subscription;
 
   constructor() {
@@ -62,36 +70,38 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    * Template method that uses hook methods
    */
   private setupSearch(): void {
-    this.subscription = this.searchSubject.pipe(
-      debounceTime(this.debounceTime),
-      distinctUntilChanged(),
-      switchMap(query => {
-        if (query.length < this.minSearchLength) {
-          return of([]);
-        }
-
-        this.isLoading.set(true);
-        this.error.set(null);
-        this.onSearchStart(query);
-
-        return this.performSearch(query).pipe(
-          catchError(err => {
-            const errorMessage = this.formatError(err);
-            this.error.set(errorMessage);
-            this.onSearchError(err);
+    this.subscription = this.searchSubject
+      .pipe(
+        debounceTime(this.debounceTime),
+        distinctUntilChanged(),
+        switchMap((query) => {
+          if (query.length < this.minSearchLength) {
             return of([]);
-          })
-        );
-      })
-    ).subscribe(results => {
-      const filteredResults = this.filterResults(results as T[]);
-      const limitedResults = filteredResults.slice(0, this.maxResults);
-      
-      this.searchResults.set(limitedResults);
-      this.isLoading.set(false);
-      this.highlightedIndex.set(-1);
-      this.onSearchComplete(limitedResults);
-    });
+          }
+
+          this.isLoading.set(true);
+          this.error.set(null);
+          this.onSearchStart(query);
+
+          return this.performSearch(query).pipe(
+            catchError((err) => {
+              const errorMessage = this.formatError(err);
+              this.error.set(errorMessage);
+              this.onSearchError(err);
+              return of([]);
+            }),
+          );
+        }),
+      )
+      .subscribe((results) => {
+        const filteredResults = this.filterResults(results as T[]);
+        const limitedResults = filteredResults.slice(0, this.maxResults);
+
+        this.searchResults.set(limitedResults);
+        this.isLoading.set(false);
+        this.highlightedIndex.set(-1);
+        this.onSearchComplete(limitedResults);
+      });
   }
 
   /**
@@ -100,9 +110,9 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
   onSearchInput(event: Event): void {
     const input = event.target as HTMLInputElement;
     const query = input.value;
-    
+
     this.searchQuery.set(query);
-    
+
     if (query.length === 0) {
       this.clearSearch();
       return;
@@ -130,7 +140,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    */
   onKeyDown(event: KeyboardEvent): void {
     const results = this.searchResults();
-    
+
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
@@ -150,13 +160,14 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
         }
         break;
 
-      case 'Enter':
+      case 'Enter': {
         event.preventDefault();
         const index = this.highlightedIndex();
         if (index >= 0 && index < results.length) {
           this.selectItem(results[index]);
         }
         break;
+      }
 
       case 'Escape':
         event.preventDefault();
@@ -180,7 +191,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
     if (this.beforeItemSelect(item)) {
       this.itemSelected.emit(item);
       this.afterItemSelect(item);
-      
+
       if (this.shouldClearAfterSelect()) {
         this.clearSearch();
       }
@@ -206,7 +217,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    * Perform the actual search
    * MUST be implemented by subclasses
    */
-  protected abstract performSearch(query: string): any;
+  protected abstract performSearch(query: string): Observable<T[]>;
 
   /**
    * Get display text for an item
@@ -224,7 +235,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    * Check if item should be disabled
    * Override to customize
    */
-  protected isItemDisabled(item: T): boolean {
+  protected isItemDisabled(_item: T): boolean {
     return false;
   }
 
@@ -240,15 +251,18 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    * Format error message
    * Override to customize error messages
    */
-  protected formatError(error: any): string {
-    return error.message || 'Search failed. Please try again.';
+  protected formatError(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message || 'Search failed. Please try again.';
+    }
+    return 'Search failed. Please try again.';
   }
 
   /**
    * Called before item selection
    * Return false to prevent selection
    */
-  protected beforeItemSelect(item: T): boolean {
+  protected beforeItemSelect(_item: T): boolean {
     return true;
   }
 
@@ -256,7 +270,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    * Called after item selection
    * Override to add custom behavior
    */
-  protected afterItemSelect(item: T): void {
+  protected afterItemSelect(_item: T): void {
     // Override in subclass
   }
 
@@ -272,7 +286,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    * Called when search starts
    * Override to add custom behavior
    */
-  protected onSearchStart(query: string): void {
+  protected onSearchStart(_query: string): void {
     // Override in subclass
   }
 
@@ -280,7 +294,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    * Called when search completes
    * Override to add custom behavior
    */
-  protected onSearchComplete(results: T[]): void {
+  protected onSearchComplete(_results: T[]): void {
     // Override in subclass
   }
 
@@ -288,7 +302,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    * Called when search error occurs
    * Override to add custom behavior
    */
-  protected onSearchError(error: any): void {
+  protected onSearchError(_error: unknown): void {
     // Override in subclass
   }
 
@@ -304,7 +318,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    * Called during keyboard navigation
    * Override to add custom behavior
    */
-  protected onNavigate(index: number, item: T): void {
+  protected onNavigate(_index: number, _item: T): void {
     // Override in subclass
   }
 
@@ -312,7 +326,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
    * Called for other keyboard events
    * Override to handle custom keys
    */
-  protected onOtherKey(event: KeyboardEvent): void {
+  protected onOtherKey(_event: KeyboardEvent): void {
     // Override in subclass
   }
 
@@ -336,9 +350,8 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
       'aria-autocomplete': 'list',
       'aria-expanded': this.searchResults().length > 0,
       'aria-controls': 'search-results',
-      'aria-activedescendant': this.highlightedIndex() >= 0 
-        ? `result-${this.highlightedIndex()}` 
-        : null
+      'aria-activedescendant':
+        this.highlightedIndex() >= 0 ? `result-${this.highlightedIndex()}` : null,
     };
   }
 

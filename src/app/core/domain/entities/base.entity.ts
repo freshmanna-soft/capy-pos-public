@@ -33,8 +33,8 @@ export interface ISoftDeletable {
  * Serializable Interface
  * For entities that can be converted to/from JSON
  */
-export interface ISerializable<T> {
-  toJSON(): Record<string, any>;
+export interface ISerializable<_T> {
+  toJSON(): Record<string, unknown>;
 }
 
 /**
@@ -70,7 +70,7 @@ export abstract class BaseEntity implements IEntity, IAuditable, ISerializable<B
     public readonly createdAt: Date = new Date(),
     public updatedAt: Date = new Date(),
     public createdBy?: string,
-    public updatedBy?: string
+    public updatedBy?: string,
   ) {
     this.validateId();
   }
@@ -127,13 +127,13 @@ export abstract class BaseEntity implements IEntity, IAuditable, ISerializable<B
    * Converts entity to plain object
    * Can be overridden by derived classes
    */
-  toJSON(): Record<string, any> {
+  toJSON(): Record<string, unknown> {
     return {
       id: this.id,
       createdAt: this.createdAt.toISOString(),
       updatedAt: this.updatedAt.toISOString(),
       createdBy: this.createdBy,
-      updatedBy: this.updatedBy
+      updatedBy: this.updatedBy,
     };
   }
 
@@ -141,8 +141,7 @@ export abstract class BaseEntity implements IEntity, IAuditable, ISerializable<B
    * Compares entities by ID
    */
   equals(other: BaseEntity): boolean {
-    return this.id === other.id && 
-           this.constructor.name === other.constructor.name;
+    return this.id === other.id && this.constructor.name === other.constructor.name;
   }
 
   /**
@@ -163,7 +162,7 @@ export abstract class SoftDeletableEntity extends BaseEntity implements ISoftDel
     createdBy?: string,
     updatedBy?: string,
     public deletedAt?: Date,
-    public deletedBy?: string
+    public deletedBy?: string,
   ) {
     super(id, createdAt, updatedAt, createdBy, updatedBy);
   }
@@ -202,12 +201,12 @@ export abstract class SoftDeletableEntity extends BaseEntity implements ISoftDel
   /**
    * Converts entity to JSON including soft delete info
    */
-  override toJSON(): Record<string, any> {
+  override toJSON(): Record<string, unknown> {
     return {
       ...super.toJSON(),
       deletedAt: this.deletedAt?.toISOString(),
       deletedBy: this.deletedBy,
-      isDeleted: this.isDeleted
+      isDeleted: this.isDeleted,
     };
   }
 }
@@ -230,7 +229,7 @@ export abstract class ValueObject {
   /**
    * Converts value object to plain object
    */
-  abstract toJSON(): Record<string, any>;
+  abstract toJSON(): Record<string, unknown>;
 }
 
 // Made with Bob

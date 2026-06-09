@@ -1,10 +1,9 @@
-import { Injectable, Inject } from '@angular/core';
-import { Observable, from } from 'rxjs';
-import { IProductRepository } from '../../domain/interfaces/product.repository.interface';
-import { PRODUCT_REPOSITORY } from '../../infrastructure/factories/repository.factory';
-import { Product } from '../../domain/entities/product.entity';
-import { BaseApplicationService } from './base-application.service';
-import { IProductService } from './product.service.interface';
+import { Injectable, inject } from '@angular/core';
+import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
+import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import { Product } from '@core/domain/entities/product.entity';
+import { BaseApplicationService } from '@core/application/services/base-application.service';
+import { IProductService } from '@core/application/services/product.service.interface';
 
 /**
  * Product Application Service
@@ -23,14 +22,15 @@ import { IProductService } from './product.service.interface';
  * ```
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class ProductService
   extends BaseApplicationService<Product, IProductRepository>
-  implements IProductService {
-  constructor(
-    @Inject(PRODUCT_REPOSITORY) productRepository: IProductRepository
-  ) {
+  implements IProductService
+{
+  constructor() {
+    const productRepository = inject<IProductRepository>(PRODUCT_REPOSITORY);
+
     super(productRepository);
   }
 
@@ -61,7 +61,6 @@ export class ProductService
   async getLowStockProducts(): Promise<Product[]> {
     return this.repository.findLowStock();
   }
-
 
   /**
    * Update product stock

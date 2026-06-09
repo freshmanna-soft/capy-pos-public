@@ -1,4 +1,32 @@
-import { SoftDeletableEntity } from './base.entity';
+import { SoftDeletableEntity } from '@core/domain/entities/base.entity';
+
+/**
+ * Product Interface
+ * Defines the shape of a product without class behavior.
+ * Use this for typing in services, DTOs, and tests.
+ */
+export interface IProduct {
+  readonly id: string;
+  name: string;
+  price: number;
+  sku: string;
+  category: string;
+  stock: number;
+  description?: string;
+  imageUrl?: string;
+  barcode?: string;
+  emoji?: string;
+  lowStockThreshold: number;
+  reorderQuantity: number;
+  cost: number;
+  isActive: boolean;
+  readonly createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+  updatedBy?: string;
+  deletedAt?: Date;
+  deletedBy?: string;
+}
 
 /**
  * Product Entity
@@ -6,7 +34,7 @@ import { SoftDeletableEntity } from './base.entity';
  * Extends SoftDeletableEntity for common functionality
  * Follows SOLID principles - Single Responsibility
  */
-export class Product extends SoftDeletableEntity {
+export class Product extends SoftDeletableEntity implements IProduct {
   constructor(
     id: string,
     public name: string,
@@ -18,16 +46,16 @@ export class Product extends SoftDeletableEntity {
     public imageUrl?: string,
     public barcode?: string,
     public emoji?: string,
-    public lowStockThreshold: number = 10,
-    public reorderQuantity: number = 20,
-    public cost: number = 0,
-    public isActive: boolean = true,
+    public lowStockThreshold = 10,
+    public reorderQuantity = 20,
+    public cost = 0,
+    public isActive = true,
     createdAt: Date = new Date(),
     updatedAt: Date = new Date(),
     createdBy?: string,
     updatedBy?: string,
     deletedAt?: Date,
-    deletedBy?: string
+    deletedBy?: string,
   ) {
     super(id, createdAt, updatedAt, createdBy, updatedBy, deletedAt, deletedBy);
     this.validate();
@@ -70,7 +98,7 @@ export class Product extends SoftDeletableEntity {
    * Checks if product is low on stock
    * @param threshold - Minimum stock level (default: 10)
    */
-  isLowStock(threshold: number = 10): boolean {
+  isLowStock(threshold = 10): boolean {
     return this.stock <= threshold;
   }
 
@@ -118,14 +146,14 @@ export class Product extends SoftDeletableEntity {
       this.createdBy,
       this.updatedBy,
       this.deletedAt,
-      this.deletedBy
+      this.deletedBy,
     );
   }
 
   /**
    * Converts product to plain object
    */
-  override toJSON(): Record<string, any> {
+  override toJSON(): Record<string, unknown> {
     return {
       ...super.toJSON(),
       name: this.name,
@@ -140,35 +168,36 @@ export class Product extends SoftDeletableEntity {
       lowStockThreshold: this.lowStockThreshold,
       reorderQuantity: this.reorderQuantity,
       cost: this.cost,
-      isActive: this.isActive
+      isActive: this.isActive,
     };
   }
 
   /**
    * Creates product from plain object
    */
-  static fromJSON(data: any): Product {
+  static fromJSON(data: unknown): Product {
+    const record = data as Record<string, unknown>;
     return new Product(
-      data.id,
-      data.name,
-      data.price,
-      data.sku,
-      data.category,
-      data.stock,
-      data.description,
-      data.imageUrl,
-      data.barcode,
-      data.emoji,
-      data.lowStockThreshold ?? 10,
-      data.reorderQuantity ?? 20,
-      data.cost ?? 0,
-      data.isActive ?? true,
-      data.createdAt ? new Date(data.createdAt) : new Date(),
-      data.updatedAt ? new Date(data.updatedAt) : new Date(),
-      data.createdBy,
-      data.updatedBy,
-      data.deletedAt ? new Date(data.deletedAt) : undefined,
-      data.deletedBy
+      record['id'] as string,
+      record['name'] as string,
+      record['price'] as number,
+      record['sku'] as string,
+      record['category'] as string,
+      record['stock'] as number,
+      record['description'] as string | undefined,
+      record['imageUrl'] as string | undefined,
+      record['barcode'] as string | undefined,
+      record['emoji'] as string | undefined,
+      (record['lowStockThreshold'] as number) ?? 10,
+      (record['reorderQuantity'] as number) ?? 20,
+      (record['cost'] as number) ?? 0,
+      (record['isActive'] as boolean) ?? true,
+      record['createdAt'] ? new Date(record['createdAt'] as string) : new Date(),
+      record['updatedAt'] ? new Date(record['updatedAt'] as string) : new Date(),
+      record['createdBy'] as string | undefined,
+      record['updatedBy'] as string | undefined,
+      record['deletedAt'] ? new Date(record['deletedAt'] as string) : undefined,
+      record['deletedBy'] as string | undefined,
     );
   }
 }

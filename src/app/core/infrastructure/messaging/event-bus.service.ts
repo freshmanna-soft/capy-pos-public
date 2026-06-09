@@ -5,7 +5,7 @@ import { Subject, Observable, filter } from 'rxjs';
  * Event Bus Message
  * Standard message format for inter-agent communication
  */
-export interface EventBusMessage<T = any> {
+export interface EventBusMessage<T = unknown> {
   id: string;
   type: string;
   source: string;
@@ -13,14 +13,14 @@ export interface EventBusMessage<T = any> {
   payload: T;
   timestamp: Date;
   priority: 'low' | 'normal' | 'high' | 'critical';
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 /**
  * Event Bus Service
  * Implements publish-subscribe pattern for inter-agent communication
  * Provides message routing, filtering, and delivery guarantees
- * 
+ *
  * Features:
  * - Topic-based messaging
  * - Priority queuing
@@ -29,7 +29,7 @@ export interface EventBusMessage<T = any> {
  * - Error handling
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class EventBusService {
   private messageSubject = new Subject<EventBusMessage>();
@@ -39,11 +39,11 @@ export class EventBusService {
   /**
    * Publish a message to the event bus
    */
-  publish<T = any>(message: Omit<EventBusMessage<T>, 'id' | 'timestamp'>): void {
+  publish<T = unknown>(message: Omit<EventBusMessage<T>, 'id' | 'timestamp'>): void {
     const fullMessage: EventBusMessage<T> = {
       ...message,
       id: this.generateMessageId(),
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
     // Store in history
@@ -66,39 +66,37 @@ export class EventBusService {
    * Subscribe to messages of a specific type
    */
   subscribeToType(type: string): Observable<EventBusMessage> {
-    return this.messageSubject.asObservable().pipe(
-      filter(msg => msg.type === type)
-    );
+    return this.messageSubject.asObservable().pipe(filter((msg) => msg.type === type));
   }
 
   /**
    * Subscribe to messages from a specific source
    */
   subscribeToSource(source: string): Observable<EventBusMessage> {
-    return this.messageSubject.asObservable().pipe(
-      filter(msg => msg.source === source)
-    );
+    return this.messageSubject.asObservable().pipe(filter((msg) => msg.source === source));
   }
 
   /**
    * Subscribe to messages for a specific target
    */
   subscribeToTarget(target: string): Observable<EventBusMessage> {
-    return this.messageSubject.asObservable().pipe(
-      filter(msg => msg.target === target || !msg.target)
-    );
+    return this.messageSubject
+      .asObservable()
+      .pipe(filter((msg) => msg.target === target || !msg.target));
   }
 
   /**
    * Subscribe to messages with minimum priority
    */
-  subscribeByPriority(minPriority: 'low' | 'normal' | 'high' | 'critical'): Observable<EventBusMessage> {
+  subscribeByPriority(
+    minPriority: 'low' | 'normal' | 'high' | 'critical',
+  ): Observable<EventBusMessage> {
     const priorityLevels = { low: 0, normal: 1, high: 2, critical: 3 };
     const minLevel = priorityLevels[minPriority];
 
-    return this.messageSubject.asObservable().pipe(
-      filter(msg => priorityLevels[msg.priority] >= minLevel)
-    );
+    return this.messageSubject
+      .asObservable()
+      .pipe(filter((msg) => priorityLevels[msg.priority] >= minLevel));
   }
 
   /**
@@ -115,7 +113,7 @@ export class EventBusService {
    * Get messages by type from history
    */
   getHistoryByType(type: string, limit?: number): EventBusMessage[] {
-    const filtered = this.messageHistory.filter(msg => msg.type === type);
+    const filtered = this.messageHistory.filter((msg) => msg.type === type);
     if (limit) {
       return filtered.slice(-limit);
     }
@@ -152,7 +150,7 @@ export class EventBusService {
       totalMessages: this.messageHistory.length,
       byType,
       bySource,
-      byPriority
+      byPriority,
     };
   }
 

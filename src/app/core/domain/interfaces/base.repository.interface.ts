@@ -1,9 +1,9 @@
 /**
  * Base Repository Interface
- * 
+ *
  * Defines the contract for all repository implementations.
  * Follows Repository Pattern and Interface Segregation Principle (SOLID).
- * 
+ *
  * @interface IBaseRepository
  * @template T - The entity type
  */
@@ -68,7 +68,7 @@ export interface IBaseRepository<T> {
    * @param updates - Array of update operations
    * @returns Promise resolving to updated entities
    */
-  bulkUpdate(updates: Array<{ id: string; data: Partial<T> }>): Promise<T[]>;
+  bulkUpdate(updates: { id: string; data: Partial<T> }[]): Promise<T[]>;
 }
 
 // Made with Bob

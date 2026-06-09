@@ -1,10 +1,9 @@
-import { Injectable, Inject } from '@angular/core';
-import { Observable, from } from 'rxjs';
-import { ICustomerRepository } from '../../domain/interfaces/customer.repository.interface';
-import { CUSTOMER_REPOSITORY } from '../../infrastructure/factories/repository.factory';
-import { Customer, CustomerStatus, CustomerTier } from '../../domain/entities/customer.entity';
-import { BaseApplicationService } from './base-application.service';
-import { ICustomerService } from './customer.service.interface';
+import { Injectable, inject } from '@angular/core';
+import { ICustomerRepository } from '@core/domain/interfaces/customer.repository.interface';
+import { CUSTOMER_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
+import { BaseApplicationService } from '@core/application/services/base-application.service';
+import { ICustomerService } from '@core/application/services/customer.service.interface';
 
 /**
  * Customer Application Service
@@ -23,14 +22,15 @@ import { ICustomerService } from './customer.service.interface';
  * ```
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class CustomerService
   extends BaseApplicationService<Customer, ICustomerRepository>
-  implements ICustomerService {
-  constructor(
-    @Inject(CUSTOMER_REPOSITORY) customerRepository: ICustomerRepository
-  ) {
+  implements ICustomerService
+{
+  constructor() {
+    const customerRepository = inject<ICustomerRepository>(CUSTOMER_REPOSITORY);
+
     super(customerRepository);
   }
 

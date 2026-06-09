@@ -1,19 +1,19 @@
-import { Injectable } from '@angular/core';
-import { AgentStatus } from './base/base-agent.interface';
-import { BaseAgent } from './base/base-agent';
+import { Injectable, inject } from '@angular/core';
+import { AgentStatus } from '@app/agents/base/base-agent.interface';
+import { BaseAgent } from '@app/agents/base/base-agent';
 import { Observable, merge } from 'rxjs';
-import { InventoryAgent } from './inventory/infrastructure/inventory.agent';
-import { SalesAgent } from './sales/infrastructure/sales.agent';
-import { PaymentAgent } from './payment/infrastructure/payment.agent';
-import { AnalyticsAgent } from './analytics/infrastructure/analytics.agent';
-import { CustomerAgent } from './customer/infrastructure/customer.agent';
-import { IntegrationAgent } from './integration/infrastructure/integration.agent';
+import { InventoryAgent } from '@app/agents/inventory/infrastructure/inventory.agent';
+import { SalesAgent } from '@app/agents/sales/infrastructure/sales.agent';
+import { PaymentAgent } from '@app/agents/payment/infrastructure/payment.agent';
+import { AnalyticsAgent } from '@app/agents/analytics/infrastructure/analytics.agent';
+import { CustomerAgent } from '@app/agents/customer/infrastructure/customer.agent';
+import { IntegrationAgent } from '@app/agents/integration/infrastructure/integration.agent';
 
 /**
  * Agent Registry
  * Centralized management of all agents in the system
  * Provides unified interface for agent lifecycle and communication
- * 
+ *
  * Features:
  * - Agent registration and discovery
  * - Unified initialization and lifecycle management
@@ -22,19 +22,26 @@ import { IntegrationAgent } from './integration/infrastructure/integration.agent
  * - Status aggregation
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class AgentRegistry {
-  private agents: Map<string, BaseAgent> = new Map();
+  private readonly inventoryAgent = inject(InventoryAgent);
+  private readonly salesAgent = inject(SalesAgent);
+  private readonly paymentAgent = inject(PaymentAgent);
+  private readonly analyticsAgent = inject(AnalyticsAgent);
+  private readonly customerAgent = inject(CustomerAgent);
+  private readonly integrationAgent = inject(IntegrationAgent);
 
-  constructor(
-    private inventoryAgent: InventoryAgent,
-    private salesAgent: SalesAgent,
-    private paymentAgent: PaymentAgent,
-    private analyticsAgent: AnalyticsAgent,
-    private customerAgent: CustomerAgent,
-    private integrationAgent: IntegrationAgent
-  ) {
+  private readonly agents = new Map<string, BaseAgent>();
+
+  constructor() {
+    const inventoryAgent = this.inventoryAgent;
+    const salesAgent = this.salesAgent;
+    const paymentAgent = this.paymentAgent;
+    const analyticsAgent = this.analyticsAgent;
+    const customerAgent = this.customerAgent;
+    const integrationAgent = this.integrationAgent;
+
     // Register all agents
     this.registerAgent(inventoryAgent);
     this.registerAgent(salesAgent);
@@ -82,7 +89,7 @@ export class AgentRegistry {
    * Get agents by status
    */
   getAgentsByStatus(status: AgentStatus): BaseAgent[] {
-    return this.getAllAgents().filter(agent => agent.getStatus() === status);
+    return this.getAllAgents().filter((agent) => agent.getStatus() === status);
   }
 
   /**
@@ -90,7 +97,7 @@ export class AgentRegistry {
    */
   async initializeAll(): Promise<void> {
     console.log('Initializing all agents...');
-    const promises = this.getAllAgents().map(agent => agent.initialize());
+    const promises = this.getAllAgents().map((agent) => agent.initialize());
     await Promise.all(promises);
     console.log('All agents initialized');
   }
@@ -100,7 +107,7 @@ export class AgentRegistry {
    */
   async startAll(): Promise<void> {
     console.log('Starting all agents...');
-    const promises = this.getAllAgents().map(agent => agent.start());
+    const promises = this.getAllAgents().map((agent) => agent.start());
     await Promise.all(promises);
     console.log('All agents started');
   }
@@ -110,7 +117,7 @@ export class AgentRegistry {
    */
   async stopAll(): Promise<void> {
     console.log('Stopping all agents...');
-    const promises = this.getAllAgents().map(agent => agent.stop());
+    const promises = this.getAllAgents().map((agent) => agent.stop());
     await Promise.all(promises);
     console.log('All agents stopped');
   }
@@ -118,17 +125,37 @@ export class AgentRegistry {
   /**
    * Get health status of all agents
    */
-  async getHealthStatus(): Promise<Map<string, any>> {
-    const healthMap = new Map<string, any>();
-    
+  async getHealthStatus(): Promise<
+    Map<
+      string,
+      {
+        name: string;
+        healthy: boolean;
+        status: AgentStatus;
+        lastActivity?: Date;
+        errorCount?: number;
+      }
+    >
+  > {
+    const healthMap = new Map<
+      string,
+      {
+        name: string;
+        healthy: boolean;
+        status: AgentStatus;
+        lastActivity?: Date;
+        errorCount?: number;
+      }
+    >();
+
     for (const agent of this.getAllAgents()) {
       const health = await agent.getHealth();
       healthMap.set(agent.id, {
         name: agent.name,
-        ...health
+        ...health,
       });
     }
-    
+
     return healthMap;
   }
 
@@ -137,22 +164,23 @@ export class AgentRegistry {
    */
   async areAllHealthy(): Promise<boolean> {
     const healthMap = await this.getHealthStatus();
-    return Array.from(healthMap.values()).every(health => health.healthy);
+    return Array.from(healthMap.values()).every((health) => health.healthy);
   }
 
   /**
    * Get combined status observable from all agents
    */
   getCombinedStatus$(): Observable<{ agentId: string; status: AgentStatus }> {
-    const statusObservables = this.getAllAgents().map(agent =>
-      new Observable<{ agentId: string; status: AgentStatus }>(observer => {
-        const subscription = agent.status$.subscribe((status: AgentStatus) => {
-          observer.next({ agentId: agent.id, status });
-        });
-        return () => subscription.unsubscribe();
-      })
+    const statusObservables = this.getAllAgents().map(
+      (agent) =>
+        new Observable<{ agentId: string; status: AgentStatus }>((observer) => {
+          const subscription = agent.status$.subscribe((status: AgentStatus) => {
+            observer.next({ agentId: agent.id, status });
+          });
+          return () => subscription.unsubscribe();
+        }),
     );
-    
+
     return merge(...statusObservables);
   }
 
@@ -168,17 +196,17 @@ export class AgentRegistry {
       [AgentStatus.IDLE]: 0,
       [AgentStatus.PROCESSING]: 0,
       [AgentStatus.COMPLETED]: 0,
-      [AgentStatus.ERROR]: 0
+      [AgentStatus.ERROR]: 0,
     };
 
-    agents.forEach(agent => {
+    agents.forEach((agent) => {
       const status = agent.getStatus();
       byStatus[status]++;
     });
 
     return {
       total: agents.length,
-      byStatus
+      byStatus,
     };
   }
 
@@ -187,7 +215,7 @@ export class AgentRegistry {
    */
   findAgentsByName(pattern: string): BaseAgent[] {
     const regex = new RegExp(pattern, 'i');
-    return this.getAllAgents().filter(agent => regex.test(agent.name));
+    return this.getAllAgents().filter((agent) => regex.test(agent.name));
   }
 }
 

@@ -1,10 +1,10 @@
 import { InjectionToken, Provider } from '@angular/core';
-import { IBaseAgent } from './base-agent.interface';
+import { IBaseAgent } from '@app/agents/base/base-agent.interface';
 
 /**
  * Generic Agent Provider Factory
  * Creates injection tokens and providers for agents to reduce code duplication
- * 
+ *
  * @example
  * ```typescript
  * // Create provider for InventoryAgent
@@ -16,16 +16,16 @@ import { IBaseAgent } from './base-agent.interface';
  */
 export function createAgentProvider<T extends IBaseAgent>(
   tokenName: string,
-  agentClass: new () => T
+  agentClass: new () => T,
 ): {
   token: InjectionToken<T>;
   provider: Provider;
 } {
   const token = new InjectionToken<T>(tokenName);
-  
+
   const provider: Provider = {
     provide: token,
-    useFactory: () => new agentClass()
+    useFactory: () => new agentClass(),
   };
 
   return { token, provider };
@@ -34,7 +34,7 @@ export function createAgentProvider<T extends IBaseAgent>(
 /**
  * Create multiple agent providers at once
  * Useful for creating all agent providers in one call
- * 
+ *
  * @example
  * ```typescript
  * export const AGENT_PROVIDERS = createAgentProviders([
@@ -45,9 +45,9 @@ export function createAgentProvider<T extends IBaseAgent>(
  * ```
  */
 export function createAgentProviders<T extends IBaseAgent>(
-  configs: Array<{ name: string; class: new () => T }>
-): Array<{ token: InjectionToken<T>; provider: Provider }> {
-  return configs.map(config => createAgentProvider(config.name, config.class));
+  configs: { name: string; class: new () => T }[],
+): { token: InjectionToken<T>; provider: Provider }[] {
+  return configs.map((config) => createAgentProvider(config.name, config.class));
 }
 
 // Made with Bob

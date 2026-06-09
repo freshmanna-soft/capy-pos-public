@@ -1,18 +1,18 @@
 import { TestBed } from '@angular/core/testing';
-import { AgentRegistry } from './agent.registry';
-import { AgentStatus } from './base/base-agent.interface';
-import { InventoryAgent } from './inventory/infrastructure/inventory.agent';
-import { SalesAgent } from './sales/infrastructure/sales.agent';
-import { PaymentAgent } from './payment/infrastructure/payment.agent';
-import { AnalyticsAgent } from './analytics/infrastructure/analytics.agent';
-import { CustomerAgent } from './customer/infrastructure/customer.agent';
-import { IntegrationAgent } from './integration/infrastructure/integration.agent';
-import { IProductRepository } from '../core/domain/interfaces/product.repository.interface';
-import { ITransactionRepository } from '../core/domain/interfaces/transaction.repository.interface';
-import { IPaymentRepository } from '../core/domain/interfaces/payment.repository.interface';
-import { PAYMENT_REPOSITORY } from '../core/infrastructure/factories/repository.factory';
-import { AuditLogService } from '../core/infrastructure/audit/audit-log.service';
-import { EventBusService } from '../core/infrastructure/messaging/event-bus.service';
+import { AgentRegistry } from '@app/agents/agent.registry';
+import { AgentStatus } from '@app/agents/base/base-agent.interface';
+import { InventoryAgent } from '@app/agents/inventory/infrastructure/inventory.agent';
+import { SalesAgent } from '@app/agents/sales/infrastructure/sales.agent';
+import { PaymentAgent } from '@app/agents/payment/infrastructure/payment.agent';
+import { AnalyticsAgent } from '@app/agents/analytics/infrastructure/analytics.agent';
+import { CustomerAgent } from '@app/agents/customer/infrastructure/customer.agent';
+import { IntegrationAgent } from '@app/agents/integration/infrastructure/integration.agent';
+import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
+import { ITransactionRepository } from '@core/domain/interfaces/transaction.repository.interface';
+import { IPaymentRepository } from '@core/domain/interfaces/payment.repository.interface';
+import { PAYMENT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import { AuditLogService } from '@core/infrastructure/audit/audit-log.service';
+import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 
 // Mock repositories
 const mockProductRepository: Partial<IProductRepository> = {
@@ -53,16 +53,16 @@ describe('AgentRegistry', () => {
         // Provide mock repositories with string-based tokens (for InventoryAgent, SalesAgent)
         {
           provide: 'IProductRepository',
-          useValue: mockProductRepository
+          useValue: mockProductRepository,
         },
         {
           provide: 'ITransactionRepository',
-          useValue: mockTransactionRepository
+          useValue: mockTransactionRepository,
         },
         // Provide mock repository with InjectionToken (for PaymentAgent)
         {
           provide: PAYMENT_REPOSITORY,
-          useValue: mockPaymentRepository
+          useValue: mockPaymentRepository,
         },
         // Provide agents explicitly
         InventoryAgent,
@@ -80,16 +80,9 @@ describe('AgentRegistry', () => {
             payment: PaymentAgent,
             analytics: AnalyticsAgent,
             customer: CustomerAgent,
-            integration: IntegrationAgent
+            integration: IntegrationAgent,
           ) => {
-            return new AgentRegistry(
-              inventory,
-              sales,
-              payment,
-              analytics,
-              customer,
-              integration
-            );
+            return new AgentRegistry(inventory, sales, payment, analytics, customer, integration);
           },
           deps: [
             InventoryAgent,
@@ -97,10 +90,10 @@ describe('AgentRegistry', () => {
             PaymentAgent,
             AnalyticsAgent,
             CustomerAgent,
-            IntegrationAgent
-          ]
-        }
-      ]
+            IntegrationAgent,
+          ],
+        },
+      ],
     });
 
     registry = TestBed.inject(AgentRegistry);
@@ -149,7 +142,7 @@ describe('AgentRegistry', () => {
   describe('Lifecycle Management', () => {
     it('should initialize all agents', async () => {
       await registry.initializeAll();
-      
+
       const agents = registry.getAllAgents();
       for (const agent of agents) {
         const health = await agent.getHealth();
@@ -160,7 +153,7 @@ describe('AgentRegistry', () => {
     it('should start all agents', async () => {
       await registry.initializeAll();
       await registry.startAll();
-      
+
       const agents = registry.getAllAgents();
       for (const agent of agents) {
         expect(agent.getStatus()).toBe(AgentStatus.PROCESSING);
@@ -171,7 +164,7 @@ describe('AgentRegistry', () => {
       await registry.initializeAll();
       await registry.startAll();
       await registry.stopAll();
-      
+
       const agents = registry.getAllAgents();
       for (const agent of agents) {
         expect(agent.getStatus()).toBe(AgentStatus.IDLE);
@@ -183,7 +176,7 @@ describe('AgentRegistry', () => {
     it('should get health status of all agents', async () => {
       await registry.initializeAll();
       const healthMap = await registry.getHealthStatus();
-      
+
       expect(healthMap.size).toBe(6);
       expect(healthMap.has('inventory-agent')).toBe(true);
       expect(healthMap.has('sales-agent')).toBe(true);
@@ -206,7 +199,7 @@ describe('AgentRegistry', () => {
     it('should get agent statistics', async () => {
       await registry.initializeAll();
       const stats = registry.getStatistics();
-      
+
       expect(stats.total).toBe(6);
       expect(stats.byStatus[AgentStatus.IDLE]).toBe(6);
     });
@@ -214,7 +207,7 @@ describe('AgentRegistry', () => {
     it('should update statistics after starting agents', async () => {
       await registry.initializeAll();
       await registry.startAll();
-      
+
       const stats = registry.getStatistics();
       expect(stats.byStatus[AgentStatus.PROCESSING]).toBe(6);
     });
@@ -248,7 +241,7 @@ describe('AgentRegistry', () => {
     it('should filter processing agents', async () => {
       await registry.initializeAll();
       await registry.startAll();
-      
+
       const processingAgents = registry.getAgentsByStatus(AgentStatus.PROCESSING);
       expect(processingAgents.length).toBe(6);
     });
@@ -256,12 +249,12 @@ describe('AgentRegistry', () => {
 
   describe('Combined Status Observable', () => {
     it('should emit status changes from all agents', async () => {
-      const statusChanges: Array<{ agentId: string; status: AgentStatus }> = [];
-      
+      const statusChanges: { agentId: string; status: AgentStatus }[] = [];
+
       const statusPromise = new Promise<void>((resolve) => {
-        registry.getCombinedStatus$().subscribe(change => {
+        registry.getCombinedStatus$().subscribe((change) => {
           statusChanges.push(change);
-          
+
           // Wait for some status changes
           if (statusChanges.length >= 6) {
             resolve();

@@ -1,10 +1,10 @@
 import { TestBed } from '@angular/core/testing';
-import { PaymentAgent } from './payment.agent';
-import { PaymentMethod, PaymentStatus, Payment } from '../../../core/domain/entities/payment.entity';
-import { AgentStatus } from '../../base/base-agent.interface';
-import { PAYMENT_REPOSITORY } from '../../../core/infrastructure/factories/repository.factory';
-import { AuditLogService } from '../../../core/infrastructure/audit/audit-log.service';
-import { IPaymentRepository } from '../../../core/domain/interfaces/payment.repository.interface';
+import { PaymentAgent } from '@app/agents/payment/infrastructure/payment.agent';
+import { PaymentMethod, PaymentStatus, Payment } from '@core/domain/entities/payment.entity';
+import { AgentStatus } from '@app/agents/base/base-agent.interface';
+import { PAYMENT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import { AuditLogService } from '@core/infrastructure/audit/audit-log.service';
+import type { IPaymentRepository } from '@core/domain/interfaces/payment.repository.interface';
 
 // In-memory store for mock repository
 let paymentStore: Payment[] = [];
@@ -13,17 +13,17 @@ let paymentStore: Payment[] = [];
 const mockPaymentRepository: Partial<IPaymentRepository> = {
   findAll: vi.fn().mockImplementation(() => Promise.resolve([...paymentStore])),
   findById: vi.fn().mockImplementation((id: string) => {
-    const found = paymentStore.find(p => p.id === id);
+    const found = paymentStore.find((p) => p.id === id);
     return Promise.resolve(found || null);
   }),
   findByTransactionId: vi.fn().mockImplementation((txnId: string) => {
-    return Promise.resolve(paymentStore.filter(p => p.orderId === txnId));
+    return Promise.resolve(paymentStore.filter((p) => p.orderId === txnId));
   }),
   findByStatus: vi.fn().mockImplementation((status: PaymentStatus) => {
-    return Promise.resolve(paymentStore.filter(p => p.status === status));
+    return Promise.resolve(paymentStore.filter((p) => p.status === status));
   }),
   findByMethod: vi.fn().mockImplementation((method: PaymentMethod) => {
-    return Promise.resolve(paymentStore.filter(p => p.method === method));
+    return Promise.resolve(paymentStore.filter((p) => p.method === method));
   }),
   findByDateRange: vi.fn().mockResolvedValue([]),
   findByCustomerId: vi.fn().mockResolvedValue([]),
@@ -32,7 +32,7 @@ const mockPaymentRepository: Partial<IPaymentRepository> = {
     return Promise.resolve(payment);
   }),
   update: vi.fn().mockImplementation((id: string, payment: Payment) => {
-    const index = paymentStore.findIndex(p => p.id === id);
+    const index = paymentStore.findIndex((p) => p.id === id);
     if (index >= 0) paymentStore[index] = payment;
     return Promise.resolve(payment);
   }),
@@ -47,26 +47,24 @@ describe('PaymentAgent', () => {
     // Reset mocks and payment store
     vi.clearAllMocks();
     paymentStore = [];
-    
+
     // Reset TestBed to ensure clean state
     TestBed.resetTestingModule();
-    
+
     TestBed.configureTestingModule({
       providers: [
+        PaymentAgent,
         AuditLogService,
         {
           provide: PAYMENT_REPOSITORY,
-          useValue: mockPaymentRepository
-        }
-      ]
+          useValue: mockPaymentRepository,
+        },
+      ],
     });
-    
-    // Get AuditLogService instance
+
+    // Get instances via DI
     auditLogService = TestBed.inject(AuditLogService);
-    
-    // Manually create PaymentAgent with injected dependencies
-    // This ensures proper dependency injection
-    agent = new PaymentAgent(mockPaymentRepository as IPaymentRepository, auditLogService);
+    agent = TestBed.inject(PaymentAgent);
   });
 
   afterEach(async () => {
@@ -103,7 +101,7 @@ describe('PaymentAgent', () => {
       const request = {
         transactionId: 'txn-1',
         amount: 100,
-        method: PaymentMethod.CASH
+        method: PaymentMethod.CASH,
       };
 
       const response = await agent.processPayment(request);
@@ -121,7 +119,7 @@ describe('PaymentAgent', () => {
         cardholderName: 'John Doe',
         expiryMonth: 12,
         expiryYear: new Date().getFullYear() + 1,
-        cvv: '123'
+        cvv: '123',
       };
 
       const response = await agent.processPayment(request);
@@ -134,7 +132,7 @@ describe('PaymentAgent', () => {
       const request = {
         transactionId: 'txn-3',
         amount: -50,
-        method: PaymentMethod.CASH
+        method: PaymentMethod.CASH,
       };
 
       const response = await agent.processPayment(request);
@@ -156,7 +154,7 @@ describe('PaymentAgent', () => {
         cardNumber: '4532015112830366',
         expiryMonth: 12,
         expiryYear: new Date().getFullYear() + 1,
-        cvv: '123'
+        cvv: '123',
       };
 
       const response = await agent.validatePayment(request);
@@ -171,7 +169,7 @@ describe('PaymentAgent', () => {
         cardNumber: '1234567890123456',
         expiryMonth: 12,
         expiryYear: new Date().getFullYear() + 1,
-        cvv: '123'
+        cvv: '123',
       };
 
       const response = await agent.validatePayment(request);
@@ -186,7 +184,7 @@ describe('PaymentAgent', () => {
         cardNumber: '4532015112830366',
         expiryMonth: 1,
         expiryYear: 2020,
-        cvv: '123'
+        cvv: '123',
       };
 
       const response = await agent.validatePayment(request);
@@ -197,7 +195,7 @@ describe('PaymentAgent', () => {
     it('should validate cash payment without additional fields', async () => {
       const request = {
         method: PaymentMethod.CASH,
-        amount: 50
+        amount: 50,
       };
 
       const response = await agent.validatePayment(request);
@@ -216,7 +214,7 @@ describe('PaymentAgent', () => {
       const paymentRequest = {
         transactionId: 'txn-4',
         amount: 200,
-        method: PaymentMethod.CASH
+        method: PaymentMethod.CASH,
       };
       const paymentResponse = await agent.processPayment(paymentRequest);
       const paymentId = paymentResponse.payment!.id;
@@ -225,7 +223,7 @@ describe('PaymentAgent', () => {
       const refundRequest = {
         paymentId,
         amount: 100,
-        reason: 'Customer request'
+        reason: 'Customer request',
       };
 
       const refundResponse = await agent.processRefund(refundRequest);
@@ -237,7 +235,7 @@ describe('PaymentAgent', () => {
       const refundRequest = {
         paymentId: 'non-existent',
         amount: 50,
-        reason: 'Test'
+        reason: 'Test',
       };
 
       const response = await agent.processRefund(refundRequest);
@@ -254,7 +252,7 @@ describe('PaymentAgent', () => {
 
     it('should emit payment processed event', async () => {
       const eventPromise = new Promise<void>((resolve) => {
-        agent.paymentEvents$.subscribe(event => {
+        agent.paymentEvents$.subscribe((event) => {
           expect(event.type).toBe('payment_processed');
           expect(event.paymentId).toBeDefined();
           resolve();
@@ -264,7 +262,7 @@ describe('PaymentAgent', () => {
       await agent.processPayment({
         transactionId: 'txn-5',
         amount: 75,
-        method: PaymentMethod.CASH
+        method: PaymentMethod.CASH,
       });
 
       await eventPromise;
@@ -282,7 +280,7 @@ describe('PaymentAgent', () => {
       await agent.processPayment({
         transactionId: 'txn-6',
         amount: 100,
-        method: PaymentMethod.CASH
+        method: PaymentMethod.CASH,
       });
 
       await agent.processPayment({
@@ -292,7 +290,7 @@ describe('PaymentAgent', () => {
         cardNumber: '4532015112830366',
         expiryMonth: 12,
         expiryYear: new Date().getFullYear() + 1,
-        cvv: '123'
+        cvv: '123',
       });
 
       const history = await agent.getPaymentHistory({});
@@ -304,14 +302,14 @@ describe('PaymentAgent', () => {
       await agent.processPayment({
         transactionId: 'txn-8',
         amount: 100,
-        method: PaymentMethod.CASH
+        method: PaymentMethod.CASH,
       });
 
       const history = await agent.getPaymentHistory({
-        method: PaymentMethod.CASH
+        method: PaymentMethod.CASH,
       });
 
-      expect(history.payments.every(p => p.method === PaymentMethod.CASH)).toBe(true);
+      expect(history.payments.every((p) => p.method === PaymentMethod.CASH)).toBe(true);
     });
   });
 

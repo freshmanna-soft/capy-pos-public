@@ -1,4 +1,4 @@
-import { BaseValueObject, IValueObject } from './base.value-object';
+import { BaseValueObject, IValueObject } from '@core/domain/value-objects/base.value-object';
 
 /**
  * Address components interface
@@ -13,10 +13,10 @@ export interface AddressComponents {
 
 /**
  * Address Value Object
- * 
+ *
  * Represents a physical address with validation.
  * Immutable and compared by value.
- * 
+ *
  * @example
  * ```typescript
  * const address = new Address({
@@ -40,13 +40,13 @@ export class Address extends BaseValueObject<Address> implements IValueObject<Ad
   constructor(components: AddressComponents) {
     super();
     this.validateComponents(components);
-    
+
     this._street = components.street.trim();
     this._city = components.city.trim();
     this._state = components.state.trim().toUpperCase();
     this._postalCode = this.normalizePostalCode(components.postalCode);
     this._country = components.country.trim().toUpperCase();
-    
+
     this.freeze();
   }
 
@@ -141,7 +141,7 @@ export class Address extends BaseValueObject<Address> implements IValueObject<Ad
    */
   private normalizePostalCode(postalCode: string): string {
     const trimmed = postalCode.trim().toUpperCase();
-    
+
     // Remove extra spaces
     return trimmed.replace(/\s+/g, ' ');
   }
@@ -211,7 +211,7 @@ export class Address extends BaseValueObject<Address> implements IValueObject<Ad
       city: this._city,
       state: this._state,
       postalCode: this._postalCode,
-      country: this._country
+      country: this._country,
     };
   }
 
@@ -268,7 +268,7 @@ export class Address extends BaseValueObject<Address> implements IValueObject<Ad
       city,
       state,
       postalCode: zipCode,
-      country: 'USA'
+      country: 'USA',
     });
   }
 
@@ -281,7 +281,7 @@ export class Address extends BaseValueObject<Address> implements IValueObject<Ad
       city,
       state: province,
       postalCode,
-      country: 'CANADA'
+      country: 'CANADA',
     });
   }
 
@@ -294,7 +294,7 @@ export class Address extends BaseValueObject<Address> implements IValueObject<Ad
       city,
       state: county,
       postalCode: postcode,
-      country: 'UK'
+      country: 'UK',
     });
   }
 }

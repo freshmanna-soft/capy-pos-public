@@ -1,5 +1,5 @@
-import { IBaseRepository } from './base.repository.interface';
-import { Customer, CustomerStatus, CustomerTier } from '../entities/customer.entity';
+import { IBaseRepository } from '@core/domain/interfaces/base.repository.interface';
+import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
 
 /**
  * Customer Repository Interface

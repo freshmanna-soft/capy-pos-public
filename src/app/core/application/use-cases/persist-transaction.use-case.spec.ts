@@ -1,11 +1,17 @@
 import { TestBed } from '@angular/core/testing';
 import { vi, describe, it, expect, beforeEach, Mock } from 'vitest';
-import { PersistTransactionUseCase, PersistTransactionRequest, PersistTransactionResult } from './persist-transaction.use-case';
-import { ITransactionRepository } from '../../domain/interfaces/transaction.repository.interface';
-import { Transaction, TransactionStatus, TransactionType } from '../../domain/entities/transaction.entity';
-import { CartService } from '../services/cart.service';
-import { CalculateCartTotalsUseCase } from './calculate-cart-totals.use-case';
-import { Product } from '../../domain/entities/product.entity';
+import {
+  PersistTransactionUseCase,
+  PersistTransactionRequest,
+} from '@core/application/use-cases/persist-transaction.use-case';
+import {
+  Transaction,
+  TransactionStatus,
+  TransactionType,
+} from '@core/domain/entities/transaction.entity';
+import { CartService } from '@core/application/services/cart.service';
+import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
 
 /**
  * PersistTransactionUseCase Unit Tests
@@ -21,23 +27,23 @@ describe('PersistTransactionUseCase', () => {
   let cartService: CartService;
   let cartTotals: CalculateCartTotalsUseCase;
 
-  const mockProduct = new Product(
-    'prod-1',
-    'Test Product',
-    9.99,
-    'SKU-001',
-    'Test Category',
-    100
-  );
+  const mockProduct = new ProductBuilder()
+    .withId('prod-1')
+    .withName('Test Product')
+    .withPrice(9.99)
+    .withSku('SKU-001')
+    .withCategory('Test Category')
+    .withStock(100)
+    .build();
 
-  const mockProduct2 = new Product(
-    'prod-2',
-    'Another Product',
-    14.99,
-    'SKU-002',
-    'Test Category',
-    50
-  );
+  const mockProduct2 = new ProductBuilder()
+    .withId('prod-2')
+    .withName('Another Product')
+    .withPrice(14.99)
+    .withSku('SKU-002')
+    .withCategory('Test Category')
+    .withStock(50)
+    .build();
 
   beforeEach(() => {
     mockRepository = {
@@ -65,7 +71,7 @@ describe('PersistTransactionUseCase', () => {
       findPending: vi.fn(),
       updateStatus: vi.fn(),
       addPayment: vi.fn(),
-      findByProduct: vi.fn()
+      findByProduct: vi.fn(),
     };
 
     TestBed.configureTestingModule({
@@ -73,8 +79,8 @@ describe('PersistTransactionUseCase', () => {
         PersistTransactionUseCase,
         CartService,
         CalculateCartTotalsUseCase,
-        { provide: 'ITransactionRepository', useValue: mockRepository }
-      ]
+        { provide: 'ITransactionRepository', useValue: mockRepository },
+      ],
     });
 
     useCase = TestBed.inject(PersistTransactionUseCase);
@@ -92,8 +98,8 @@ describe('PersistTransactionUseCase', () => {
       const request: PersistTransactionRequest = {
         paymentMethod: 'cash',
         transactionId: 'TXN-TEST-001',
-        amountTendered: 30.00,
-        changeGiven: 2.82
+        amountTendered: 30.0,
+        changeGiven: 2.82,
       };
 
       mockRepository['create'].mockResolvedValue(undefined);
@@ -121,8 +127,8 @@ describe('PersistTransactionUseCase', () => {
       const request: PersistTransactionRequest = {
         paymentMethod: 'cash',
         transactionId: 'TXN-TEST-002',
-        amountTendered: 25.00,
-        changeGiven: 3.33
+        amountTendered: 25.0,
+        changeGiven: 3.33,
       };
 
       mockRepository['create'].mockResolvedValue(undefined);
@@ -146,7 +152,7 @@ describe('PersistTransactionUseCase', () => {
 
       const request: PersistTransactionRequest = {
         paymentMethod: 'card',
-        transactionId: 'TXN-TEST-003'
+        transactionId: 'TXN-TEST-003',
       };
 
       mockRepository['create'].mockResolvedValue(undefined);
@@ -169,8 +175,8 @@ describe('PersistTransactionUseCase', () => {
       const request: PersistTransactionRequest = {
         paymentMethod: 'cash',
         transactionId: 'TXN-TEST-004',
-        amountTendered: 20.00,
-        changeGiven: 9.16
+        amountTendered: 20.0,
+        changeGiven: 9.16,
       };
 
       mockRepository['create'].mockResolvedValue(undefined);
@@ -190,7 +196,7 @@ describe('PersistTransactionUseCase', () => {
 
       const request: PersistTransactionRequest = {
         paymentMethod: 'mobile',
-        transactionId: 'TXN-TEST-005'
+        transactionId: 'TXN-TEST-005',
       };
 
       mockRepository['create'].mockResolvedValue(undefined);
@@ -208,7 +214,7 @@ describe('PersistTransactionUseCase', () => {
       const request: PersistTransactionRequest = {
         paymentMethod: 'cash',
         transactionId: 'TXN-TEST-006',
-        amountTendered: 10.00
+        amountTendered: 10.0,
       };
 
       // Act
@@ -227,7 +233,7 @@ describe('PersistTransactionUseCase', () => {
       const request: PersistTransactionRequest = {
         paymentMethod: 'cash',
         transactionId: 'TXN-TEST-007',
-        amountTendered: 20.00
+        amountTendered: 20.0,
       };
 
       mockRepository['create'].mockRejectedValue(new Error('Database connection failed'));
@@ -247,7 +253,7 @@ describe('PersistTransactionUseCase', () => {
 
       const request: PersistTransactionRequest = {
         paymentMethod: 'card',
-        transactionId: 'TXN-TEST-008'
+        transactionId: 'TXN-TEST-008',
       };
 
       mockRepository['create'].mockResolvedValue(undefined);
@@ -267,7 +273,7 @@ describe('PersistTransactionUseCase', () => {
       const request: PersistTransactionRequest = {
         paymentMethod: 'cash',
         transactionId: 'TXN-TEST-009',
-        amountTendered: 20.00
+        amountTendered: 20.0,
       };
 
       mockRepository['create'].mockResolvedValue(undefined);
@@ -288,7 +294,7 @@ describe('PersistTransactionUseCase', () => {
       const request: PersistTransactionRequest = {
         paymentMethod: 'cash',
         transactionId: 'TXN-TEST-010',
-        amountTendered: 20.00
+        amountTendered: 20.0,
       };
 
       mockRepository['create'].mockResolvedValue(undefined);
@@ -308,8 +314,8 @@ describe('PersistTransactionUseCase', () => {
       const request: PersistTransactionRequest = {
         paymentMethod: 'cash',
         transactionId: 'TXN-TEST-011',
-        amountTendered: 20.00,
-        customerId: 'customer-123'
+        amountTendered: 20.0,
+        customerId: 'customer-123',
       };
 
       mockRepository['create'].mockResolvedValue(undefined);
@@ -328,7 +334,7 @@ describe('PersistTransactionUseCase', () => {
 
       const request: PersistTransactionRequest = {
         paymentMethod: 'card',
-        transactionId: 'TXN-TEST-012'
+        transactionId: 'TXN-TEST-012',
       };
 
       mockRepository['create'].mockResolvedValue(undefined);

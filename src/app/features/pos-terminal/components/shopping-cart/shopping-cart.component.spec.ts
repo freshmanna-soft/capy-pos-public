@@ -1,12 +1,12 @@
 import { TestBed } from '@angular/core/testing';
-import { ShoppingCartComponent } from './shopping-cart.component';
-import { CartService } from '../../../../core/application/services/cart.service';
-import { Product } from '../../../../core/domain/entities/product.entity';
+import { ShoppingCartComponent } from '@features/pos-terminal/components/shopping-cart/shopping-cart.component';
+import { CartService } from '@core/application/services/cart.service';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
 
 /**
  * Unit Tests for ShoppingCartComponent
  * Sprint 1 - Issue #3: Shopping Cart Component
- * 
+ *
  * Acceptance Criteria:
  * - AC1: Display cart items with product name, price, quantity
  * - AC2: Quantity controls (increase/decrease/manual input)
@@ -20,13 +20,25 @@ describe('ShoppingCartComponent', () => {
   let component: ShoppingCartComponent;
   let cartService: CartService;
 
-  const mockProduct = new Product(
-    'prod-1', 'Organic Coffee', 12.99, 'COF-001', 'Beverages', 50, 'Premium coffee'
-  );
+  const mockProduct = new ProductBuilder()
+    .withId('prod-1')
+    .withName('Organic Coffee')
+    .withPrice(12.99)
+    .withSku('COF-001')
+    .withCategory('Beverages')
+    .withStock(50)
+    .withDescription('Premium coffee')
+    .build();
 
-  const mockProduct2 = new Product(
-    'prod-2', 'Green Tea', 8.49, 'TEA-001', 'Beverages', 30, 'Matcha green tea'
-  );
+  const mockProduct2 = new ProductBuilder()
+    .withId('prod-2')
+    .withName('Green Tea')
+    .withPrice(8.49)
+    .withSku('TEA-001')
+    .withCategory('Beverages')
+    .withStock(30)
+    .withDescription('Matcha green tea')
+    .build();
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -128,7 +140,7 @@ describe('ShoppingCartComponent', () => {
 
     it('should calculate total (subtotal + tax)', () => {
       component.addProduct(mockProduct); // 12.99
-      const expectedTotal = 12.99 + (12.99 * cartService.taxRate());
+      const expectedTotal = 12.99 + 12.99 * cartService.taxRate();
       expect(cartService.total()).toBeCloseTo(expectedTotal, 2);
     });
 

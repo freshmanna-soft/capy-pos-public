@@ -1,7 +1,9 @@
 import { Provider } from '@angular/core';
-import { InventoryAgent } from './inventory.agent';
-import { DexieProductRepository } from '../../../core/infrastructure/repositories/dexie-product.repository';
-import { DexieDatabase } from '../../../core/infrastructure/database/dexie-database.service';
+import {
+  InventoryAgent,
+  PRODUCT_REPOSITORY_TOKEN,
+} from '@app/agents/inventory/infrastructure/inventory.agent';
+import { DexieProductRepository } from '@core/infrastructure/repositories/dexie-product.repository';
 
 /**
  * Provider for InventoryAgent
@@ -13,12 +15,8 @@ export const INVENTORY_AGENT_PROVIDERS: Provider[] = [
     useClass: InventoryAgent,
   },
   {
-    provide: InventoryAgent,
-    useFactory: (db: DexieDatabase) => {
-      const productRepository = new DexieProductRepository(db);
-      return new InventoryAgent(productRepository);
-    },
-    deps: [DexieDatabase],
+    provide: PRODUCT_REPOSITORY_TOKEN,
+    useClass: DexieProductRepository,
   },
 ];
 

@@ -1,13 +1,13 @@
 import { InjectionToken, Provider } from '@angular/core';
-import { IPricingService } from './pricing.service.interface';
-import { PricingService } from './pricing.service';
+import { IPricingService } from '@core/domain/rules/pricing.service.interface';
+import { PricingService } from '@core/domain/rules/pricing.service';
 
 /**
  * Injection Token for IPricingService
- * 
+ *
  * This token allows us to inject the interface rather than the concrete implementation,
  * following the Dependency Inversion Principle (DIP).
- * 
+ *
  * @example
  * ```typescript
  * // In a component or service
@@ -16,15 +16,15 @@ import { PricingService } from './pricing.service';
  */
 export const PRICING_SERVICE = new InjectionToken<IPricingService>('IPricingService', {
   providedIn: 'root',
-  factory: () => new PricingService()
+  factory: () => new PricingService(),
 });
 
 /**
  * Provider configuration for PricingService
- * 
+ *
  * Use this provider in your module or component providers array
  * when you need to override the default implementation.
- * 
+ *
  * @example
  * ```typescript
  * // In app.config.ts or component providers
@@ -36,13 +36,13 @@ export const PRICING_SERVICE = new InjectionToken<IPricingService>('IPricingServ
 export function providePricingService(): Provider {
   return {
     provide: PRICING_SERVICE,
-    useClass: PricingService
+    useClass: PricingService,
   };
 }
 
 /**
  * Provider for using a custom implementation
- * 
+ *
  * @example
  * ```typescript
  * // In tests or when using a mock
@@ -54,7 +54,7 @@ export function providePricingService(): Provider {
 export function providePricingServiceImpl(implementation: new () => IPricingService): Provider {
   return {
     provide: PRICING_SERVICE,
-    useClass: implementation
+    useClass: implementation,
   };
 }
 

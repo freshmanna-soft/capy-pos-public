@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Subject, Observable } from 'rxjs';
-import { BaseAgent } from '../../base/base-agent';
+import { BaseAgent } from '@app/agents/base/base-agent';
+import { IAgentMessage, IAgentResponse } from '@app/agents/base/base-agent.interface';
 import {
   IAnalyticsAgent,
   SalesAnalyticsRequest,
@@ -10,25 +11,26 @@ import {
   CustomerAnalyticsRequest,
   CustomerAnalyticsResponse,
   RealTimeMetricsResponse,
-  AnalyticsEvent
-} from '../domain/analytics-agent.interface';
+  AnalyticsEvent,
+} from '@app/agents/analytics/domain/analytics-agent.interface';
 
 /**
  * Analytics Agent
  * Handles data analytics, reporting, and insights generation
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class AnalyticsAgent extends BaseAgent implements IAnalyticsAgent {
-  private analyticsEventsSubject = new Subject<AnalyticsEvent>();
-  public analyticsEvents$: Observable<AnalyticsEvent> = this.analyticsEventsSubject.asObservable();
+  private readonly analyticsEventsSubject = new Subject<AnalyticsEvent>();
+  public readonly analyticsEvents$: Observable<AnalyticsEvent> =
+    this.analyticsEventsSubject.asObservable();
 
   constructor() {
     super(
       'analytics-agent',
       'AnalyticsAgent',
-      'Handles data analytics, reporting, and insights generation'
+      'Handles data analytics, reporting, and insights generation',
     );
   }
 
@@ -45,46 +47,59 @@ export class AnalyticsAgent extends BaseAgent implements IAnalyticsAgent {
     this.analyticsEventsSubject.complete();
   }
 
-  protected async handleMessage(message: any): Promise<any> {
+  protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
     switch (message.type) {
       case 'GENERATE_SALES_ANALYTICS':
-        return await this.generateSalesAnalytics(message.payload);
+        return {
+          success: true,
+          data: await this.generateSalesAnalytics(message.payload as SalesAnalyticsRequest),
+        };
       case 'GENERATE_INVENTORY_ANALYTICS':
-        return await this.generateInventoryAnalytics(message.payload);
+        return {
+          success: true,
+          data: await this.generateInventoryAnalytics(message.payload as InventoryAnalyticsRequest),
+        };
       case 'GENERATE_CUSTOMER_ANALYTICS':
-        return await this.generateCustomerAnalytics(message.payload);
+        return {
+          success: true,
+          data: await this.generateCustomerAnalytics(message.payload as CustomerAnalyticsRequest),
+        };
       case 'GET_REALTIME_METRICS':
-        return await this.getRealTimeMetrics();
+        return { success: true, data: await this.getRealTimeMetrics() };
       default:
         throw new Error(`Unknown message type: ${message.type}`);
     }
   }
 
-  async generateSalesAnalytics(request: SalesAnalyticsRequest): Promise<SalesAnalyticsResponse> {
+  async generateSalesAnalytics(_request: SalesAnalyticsRequest): Promise<SalesAnalyticsResponse> {
     // Mock implementation - replace with actual analytics logic
     return {
       totalSales: 150,
       totalRevenue: 15000,
       averageOrderValue: 100,
-      trends: []
+      trends: [],
     };
   }
 
-  async generateInventoryAnalytics(request: InventoryAnalyticsRequest): Promise<InventoryAnalyticsResponse> {
+  async generateInventoryAnalytics(
+    _request: InventoryAnalyticsRequest,
+  ): Promise<InventoryAnalyticsResponse> {
     return {
       totalProducts: 100,
       outOfStock: 5,
       lowStock: 10,
-      topSellingProducts: []
+      topSellingProducts: [],
     };
   }
 
-  async generateCustomerAnalytics(request: CustomerAnalyticsRequest): Promise<CustomerAnalyticsResponse> {
+  async generateCustomerAnalytics(
+    _request: CustomerAnalyticsRequest,
+  ): Promise<CustomerAnalyticsResponse> {
     return {
       totalCustomers: 500,
       newCustomers: 50,
       returningCustomers: 450,
-      topCustomers: []
+      topCustomers: [],
     };
   }
 
@@ -93,7 +108,7 @@ export class AnalyticsAgent extends BaseAgent implements IAnalyticsAgent {
       currentSales: 25,
       todayRevenue: 2500,
       activeTransactions: 3,
-      lowStockAlerts: 5
+      lowStockAlerts: 5,
     };
   }
 }

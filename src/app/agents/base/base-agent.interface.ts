@@ -8,7 +8,7 @@ export enum AgentStatus {
   IDLE = 'IDLE',
   PROCESSING = 'PROCESSING',
   ERROR = 'ERROR',
-  COMPLETED = 'COMPLETED'
+  COMPLETED = 'COMPLETED',
 }
 
 /**
@@ -18,7 +18,7 @@ export enum AgentStatus {
 export interface IAgentMessage {
   id: string;
   type: string;
-  payload: any;
+  payload: unknown;
   timestamp: Date;
   source?: string;
   target?: string;
@@ -28,18 +28,18 @@ export interface IAgentMessage {
  * Agent Response Interface
  * Represents the response from an agent
  */
-export interface IAgentResponse<T = any> {
+export interface IAgentResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 /**
  * Base Agent Interface
  * Defines the contract for all agents in the system
  * Agents are autonomous components that handle specific business domains
- * 
+ *
  * Following the Agent Pattern for distributed, autonomous processing
  */
 export interface IBaseAgent {

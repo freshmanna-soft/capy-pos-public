@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Email } from './email.value-object';
+import { Email } from '@core/domain/value-objects/email.value-object';
 
 describe('Email Value Object', () => {
   describe('Constructor and Validation', () => {
@@ -19,8 +19,8 @@ describe('Email Value Object', () => {
     });
 
     it('should throw error for null or undefined', () => {
-      expect(() => new Email(null as any)).toThrow('Email must be a non-empty string');
-      expect(() => new Email(undefined as any)).toThrow('Email must be a non-empty string');
+      expect(() => new Email(null as unknown)).toThrow('Email must be a non-empty string');
+      expect(() => new Email(undefined as unknown)).toThrow('Email must be a non-empty string');
     });
 
     it('should throw error for empty string', () => {
@@ -29,8 +29,8 @@ describe('Email Value Object', () => {
     });
 
     it('should throw error for non-string values', () => {
-      expect(() => new Email(123 as any)).toThrow('Email must be a non-empty string');
-      expect(() => new Email({} as any)).toThrow('Email must be a non-empty string');
+      expect(() => new Email(123 as unknown)).toThrow('Email must be a non-empty string');
+      expect(() => new Email({} as unknown)).toThrow('Email must be a non-empty string');
     });
 
     it('should throw error for email exceeding 254 characters', () => {
@@ -159,9 +159,9 @@ describe('Email Value Object', () => {
 
     it('should return false for non-Email objects', () => {
       const email = new Email('user@example.com');
-      expect(email.equals('user@example.com' as any)).toBe(false);
-      expect(email.equals(null as any)).toBe(false);
-      expect(email.equals(undefined as any)).toBe(false);
+      expect(email.equals('user@example.com' as unknown)).toBe(false);
+      expect(email.equals(null as unknown)).toBe(false);
+      expect(email.equals(undefined as unknown)).toBe(false);
     });
   });
 
@@ -224,7 +224,7 @@ describe('Email Value Object', () => {
     it('should not allow modification of value property', () => {
       const email = new Email('user@example.com');
       expect(() => {
-        (email as any)._value = 'hacker@evil.com';
+        (email as unknown)._value = 'hacker@evil.com';
       }).toThrow();
     });
   });
@@ -241,10 +241,10 @@ describe('Email Value Object', () => {
       const email1 = new Email('user1@example.com');
       const email2 = new Email('user2@example.com');
       const map = new Map<Email, string>();
-      
+
       map.set(email1, 'User 1');
       map.set(email2, 'User 2');
-      
+
       expect(map.get(email1)).toBe('User 1');
       expect(map.get(email2)).toBe('User 2');
       expect(map.size).toBe(2);

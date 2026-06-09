@@ -2,6 +2,6 @@
  * Sales Agent Domain Layer Exports
  */
 
-export * from './sales-agent.interface';
+export * from '@app/agents/sales/domain/sales-agent.interface';
 
 // Made with Bob

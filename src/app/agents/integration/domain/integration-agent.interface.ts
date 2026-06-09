@@ -1,5 +1,5 @@
 import { Observable } from 'rxjs';
-import { IBaseAgent } from '../../base/base-agent.interface';
+import { IBaseAgent } from '@app/agents/base/base-agent.interface';
 
 /**
  * Integration Agent Interface
@@ -27,7 +27,7 @@ export interface SyncDataResponse {
 export interface WebhookRequest {
   url: string;
   event: string;
-  payload: any;
+  payload: unknown;
 }
 
 export interface WebhookResponse {
@@ -47,7 +47,7 @@ export interface IntegrationEvent {
   type: 'sync_started' | 'sync_completed' | 'webhook_sent' | 'connection_error';
   timestamp: Date;
   integrationId: string;
-  data?: any;
+  data?: unknown;
 }
 
 // Made with Bob

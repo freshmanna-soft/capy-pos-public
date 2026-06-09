@@ -1,17 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { Product } from './product.entity';
+import { Product } from '@core/domain/entities/product.entity';
 
 describe('Product Entity', () => {
   describe('constructor', () => {
     it('should create a valid product', () => {
-      const product = new Product(
-        '1',
-        'Test Product',
-        29.99,
-        'TEST-001',
-        'Electronics',
-        100
-      );
+      const product = new Product('1', 'Test Product', 29.99, 'TEST-001', 'Electronics', 100);
 
       expect(product.id).toBe('1');
       expect(product.name).toBe('Test Product');
@@ -75,7 +68,7 @@ describe('Product Entity', () => {
     it('should update updatedAt timestamp', () => {
       const product = new Product('1', 'Test', 10, 'SKU', 'Cat', 50);
       const oldTimestamp = product.updatedAt;
-      
+
       // Wait a bit to ensure timestamp changes
       setTimeout(() => {
         product.updateStock(5);
@@ -166,7 +159,7 @@ describe('Product Entity', () => {
         category: 'Cat',
         stock: 50,
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       };
 
       const product = Product.fromJSON(data);

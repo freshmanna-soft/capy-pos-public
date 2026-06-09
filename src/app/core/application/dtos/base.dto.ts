@@ -32,6 +32,7 @@ export interface ResponseDto extends SoftDeletableDto {
 /**
  * Base interface for create DTOs (no ID, no audit fields)
  */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface CreateDto {
   // Marker interface - specific DTOs will extend this
 }
@@ -39,6 +40,7 @@ export interface CreateDto {
 /**
  * Base interface for update DTOs (partial updates)
  */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface UpdateDto {
   // Marker interface - specific DTOs will extend this
 }

@@ -1,5 +1,5 @@
-import { Product } from '../entities/product.entity';
-import { IBaseRepository } from './base.repository.interface';
+import { Product } from '@core/domain/entities/product.entity';
+import { IBaseRepository } from '@core/domain/interfaces/base.repository.interface';
 
 /**
  * Product Repository Interface

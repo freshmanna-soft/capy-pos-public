@@ -1,15 +1,15 @@
 import { Injectable } from '@angular/core';
-import { Money } from '../value-objects/money.value-object';
-import { Product } from '../entities/product.entity';
+import { Money } from '@core/domain/value-objects/money.value-object';
+import { Product } from '@core/domain/entities/product.entity';
 import {
   IPricingService,
   Discount,
   DiscountType,
   TaxConfig,
   BulkPricingTier,
-  LineItemTotal
-} from './pricing.service.interface';
-import { BaseDomainService } from './base-domain.service';
+  LineItemTotal,
+} from '@core/domain/rules/pricing.service.interface';
+import { BaseDomainService } from '@core/domain/rules/base-domain.service';
 
 /**
  * Pricing Service Implementation
@@ -36,7 +36,7 @@ import { BaseDomainService } from './base-domain.service';
  * ```
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class PricingService extends BaseDomainService implements IPricingService {
   constructor() {
@@ -46,12 +46,7 @@ export class PricingService extends BaseDomainService implements IPricingService
   /**
    * Calculate final price for a product with quantity and optional discount
    */
-  calculatePrice(
-    product: Product,
-    quantity: number,
-    discount?: Discount,
-    currency: string = 'USD'
-  ): Money {
+  calculatePrice(product: Product, quantity: number, discount?: Discount, currency = 'USD'): Money {
     this.validateRequired(product, 'product');
     this.validatePositive(quantity, 'quantity');
 
@@ -68,11 +63,7 @@ export class PricingService extends BaseDomainService implements IPricingService
   /**
    * Apply discount to a subtotal
    */
-  applyDiscount(
-    subtotal: Money,
-    quantity: number,
-    discount: Discount
-  ): Money {
+  applyDiscount(subtotal: Money, quantity: number, discount: Discount): Money {
     // Check minimum quantity requirement
     if (discount.minQuantity && quantity < discount.minQuantity) {
       return subtotal;
@@ -81,13 +72,13 @@ export class PricingService extends BaseDomainService implements IPricingService
     switch (discount.type) {
       case DiscountType.PERCENTAGE:
         return this.applyPercentageDiscount(subtotal, discount.value);
-      
+
       case DiscountType.FIXED_AMOUNT:
         return this.applyFixedDiscount(subtotal, discount.value);
-      
+
       case DiscountType.BUY_X_GET_Y:
         return this.applyBuyXGetYDiscount(subtotal, quantity, discount);
-      
+
       default:
         return subtotal;
     }
@@ -110,7 +101,7 @@ export class PricingService extends BaseDomainService implements IPricingService
     this.validateNonNegative(amount, 'discount amount');
 
     const discountMoney = new Money(amount, subtotal.currency);
-    
+
     // Don't let discount exceed subtotal
     if (discountMoney.greaterThan(subtotal)) {
       return new Money(0, subtotal.currency);
@@ -122,11 +113,7 @@ export class PricingService extends BaseDomainService implements IPricingService
   /**
    * Apply Buy X Get Y discount (e.g., Buy 2 Get 1 Free)
    */
-  private applyBuyXGetYDiscount(
-    subtotal: Money,
-    quantity: number,
-    discount: Discount
-  ): Money {
+  private applyBuyXGetYDiscount(subtotal: Money, quantity: number, discount: Discount): Money {
     this.validateRequired(discount.buyQuantity, 'discount.buyQuantity');
     this.validateRequired(discount.getQuantity, 'discount.getQuantity');
 
@@ -169,7 +156,7 @@ export class PricingService extends BaseDomainService implements IPricingService
    */
   calculateTotal(subtotal: Money, taxConfig: TaxConfig): Money {
     const tax = this.calculateTax(subtotal, taxConfig);
-    
+
     if (taxConfig.inclusive) {
       // Tax already included, return subtotal as is
       return subtotal;
@@ -182,11 +169,7 @@ export class PricingService extends BaseDomainService implements IPricingService
   /**
    * Calculate bulk pricing discount based on quantity tiers
    */
-  calculateBulkPrice(
-    basePrice: Money,
-    quantity: number,
-    tiers: BulkPricingTier[]
-  ): Money {
+  calculateBulkPrice(basePrice: Money, quantity: number, tiers: BulkPricingTier[]): Money {
     this.validateRequired(basePrice, 'basePrice');
     this.validatePositive(quantity, 'quantity');
     this.validateRequired(tiers, 'tiers');
@@ -195,7 +178,7 @@ export class PricingService extends BaseDomainService implements IPricingService
     const sortedTiers = [...tiers].sort((a, b) => b.minQuantity - a.minQuantity);
 
     // Find the first tier that applies
-    const applicableTier = sortedTiers.find(tier => quantity >= tier.minQuantity);
+    const applicableTier = sortedTiers.find((tier) => quantity >= tier.minQuantity);
 
     if (!applicableTier) {
       return basePrice.multiply(quantity);
@@ -214,11 +197,11 @@ export class PricingService extends BaseDomainService implements IPricingService
     quantity: number,
     discount?: Discount,
     taxConfig?: TaxConfig,
-    currency: string = 'USD'
+    currency = 'USD',
   ): LineItemTotal {
     const priceAsMoney = new Money(product.price, currency);
     const subtotal = priceAsMoney.multiply(quantity);
-    
+
     let discountAmount = new Money(0, currency);
     let finalSubtotal = subtotal;
 
@@ -239,7 +222,7 @@ export class PricingService extends BaseDomainService implements IPricingService
       subtotal,
       discount: discountAmount,
       tax,
-      total
+      total,
     };
   }
 }

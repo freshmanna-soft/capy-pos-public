@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Customer, CustomerStatus, CustomerTier } from './customer.entity';
+import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
 
 describe('Customer Entity', () => {
   let customer: Customer;
@@ -9,7 +9,7 @@ describe('Customer Entity', () => {
   const testPhone = '+1-555-0123';
 
   beforeEach(() => {
-    customer = new Customer(testId, testName, testEmail, testPhone);
+    customer = new Customer({ id: testId, name: testName, email: testEmail, phone: testPhone });
   });
 
   describe('Creation & Validation', () => {
@@ -28,12 +28,20 @@ describe('Customer Entity', () => {
       ['invalid email', testName, 'invalid-email', testPhone, 'Valid email is required'],
       ['invalid phone', testName, testEmail, '123', 'Valid phone number is required'],
     ])('should throw error for %s', (_, name, email, phone, expectedError) => {
-      expect(() => new Customer(testId, name, email, phone)).toThrow(expectedError);
+      expect(() => new Customer({ id: testId, name, email, phone })).toThrow(expectedError);
     });
 
     it('should throw error for negative loyalty points', () => {
-      expect(() => 
-        new Customer(testId, testName, testEmail, testPhone, CustomerStatus.ACTIVE, -100)
+      expect(
+        () =>
+          new Customer({
+            id: testId,
+            name: testName,
+            email: testEmail,
+            phone: testPhone,
+            status: CustomerStatus.ACTIVE,
+            loyaltyPoints: -100,
+          }),
       ).toThrow('Loyalty points cannot be negative');
     });
   });
@@ -143,7 +151,7 @@ describe('Customer Entity', () => {
       if (status === CustomerStatus.INACTIVE) customer.deactivate();
       if (status === CustomerStatus.BLOCKED) customer.block('Test');
       if (status === CustomerStatus.VIP) customer.promoteToVIP();
-      
+
       expect(customer.isActive()).toBe(expected.isActive);
       expect(customer.isVIP()).toBe(expected.isVIP);
       expect(customer.isBlocked()).toBe(expected.isBlocked);
@@ -153,16 +161,18 @@ describe('Customer Entity', () => {
   describe('Profile Management', () => {
     it('should update profile', () => {
       customer.updateProfile(
-        'Jane Doe',
-        'jane.doe@example.com',
-        '+1-555-9999',
-        '123 Main St',
-        'New York',
-        'NY',
-        '10001',
-        'user-1'
+        {
+          name: 'Jane Doe',
+          email: 'jane.doe@example.com',
+          phone: '+1-555-9999',
+          address: '123 Main St',
+          city: 'New York',
+          state: 'NY',
+          zipCode: '10001',
+        },
+        'user-1',
       );
-      
+
       expect(customer.name).toBe('Jane Doe');
       expect(customer.email).toBe('jane.doe@example.com');
       expect(customer.phone).toBe('+1-555-9999');
@@ -174,27 +184,35 @@ describe('Customer Entity', () => {
     });
 
     it('should update partial profile', () => {
-      customer.updateProfile(undefined, undefined, undefined, '456 Oak Ave');
+      customer.updateProfile({ address: '456 Oak Ave' });
       expect(customer.name).toBe(testName); // Unchanged
       expect(customer.address).toBe('456 Oak Ave');
     });
 
     it('should validate after profile update', () => {
       expect(() =>
-        customer.updateProfile('', 'valid@email.com', '+1-555-0000')
+        customer.updateProfile({ name: '', email: 'valid@email.com', phone: '+1-555-0000' }),
       ).toThrow('Customer name is required');
     });
   });
 
   describe('Address & Demographics', () => {
     it('should get full address', () => {
-      const customerWithAddress = new Customer(
-        testId, testName, testEmail, testPhone,
-        CustomerStatus.ACTIVE, 0, CustomerTier.BRONZE,
-        new Date(), new Date(), undefined, undefined, undefined, undefined,
-        '123 Main St', 'New York', 'NY', '10001', 'USA'
-      );
-      
+      const customerWithAddress = new Customer({
+        id: testId,
+        name: testName,
+        email: testEmail,
+        phone: testPhone,
+        status: CustomerStatus.ACTIVE,
+        loyaltyPoints: 0,
+        tier: CustomerTier.BRONZE,
+        address: '123 Main St',
+        city: 'New York',
+        state: 'NY',
+        zipCode: '10001',
+        country: 'USA',
+      });
+
       expect(customerWithAddress.getFullAddress()).toBe('123 Main St, New York, NY, 10001, USA');
     });
 
@@ -204,13 +222,18 @@ describe('Customer Entity', () => {
 
     it('should calculate customer age', () => {
       const birthDate = new Date('1990-01-15');
-      const customerWithDOB = new Customer(
-        testId, testName, testEmail, testPhone,
-        CustomerStatus.ACTIVE, 0, CustomerTier.BRONZE,
-        new Date(), new Date(), undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, 'USA', birthDate
-      );
-      
+      const customerWithDOB = new Customer({
+        id: testId,
+        name: testName,
+        email: testEmail,
+        phone: testPhone,
+        status: CustomerStatus.ACTIVE,
+        loyaltyPoints: 0,
+        tier: CustomerTier.BRONZE,
+        country: 'USA',
+        dateOfBirth: birthDate,
+      });
+
       const age = customerWithDOB.getCustomerAge();
       expect(age).toBeGreaterThan(30);
       expect(age).toBeLessThan(40);
@@ -257,8 +280,8 @@ describe('Customer Entity', () => {
 
     it('should convert to JSON', () => {
       customer.addPoints(1500);
-      customer.updateProfile(undefined, undefined, undefined, '123 Main St', 'NYC');
-      
+      customer.updateProfile({ address: '123 Main St', city: 'NYC' });
+
       const json = customer.toJSON();
       expect(json['id']).toBe(testId);
       expect(json['name']).toBe(testName);
@@ -296,8 +319,18 @@ describe('Customer Entity', () => {
     });
 
     it('should compare customers by ID', () => {
-      const sameCustomer = new Customer(testId, testName, testEmail, testPhone);
-      const differentCustomer = new Customer('different-id', testName, testEmail, testPhone);
+      const sameCustomer = new Customer({
+        id: testId,
+        name: testName,
+        email: testEmail,
+        phone: testPhone,
+      });
+      const differentCustomer = new Customer({
+        id: 'different-id',
+        name: testName,
+        email: testEmail,
+        phone: testPhone,
+      });
       expect(customer.equals(sameCustomer)).toBe(true);
       expect(customer.equals(differentCustomer)).toBe(false);
     });

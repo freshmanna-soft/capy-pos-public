@@ -1,18 +1,21 @@
 import { TestBed } from '@angular/core/testing';
-import { ReceiptComponent, ReceiptData } from './receipt.component';
-import { PaymentResult } from '../checkout/checkout.component';
+import {
+  ReceiptComponent,
+  ReceiptData,
+} from '@features/pos-terminal/components/receipt/receipt.component';
+import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
 
 /**
  * Unit Tests for ReceiptComponent
- * 
+ *
  * Covers Sprint 2 Story S2-4: Receipt Generation
- * 
+ *
  * Acceptance Criteria:
  * - Given a completed transaction, receipt displays order details
  * - Receipt shows payment method and total amount
  * - Receipt includes transaction ID
  * - Print and New Transaction actions are available
- * 
+ *
  * Note: Uses class-level testing due to Angular 21 signal input
  * compatibility with Vitest JIT compilation (NG0315/NG0950).
  * Template rendering is covered by E2E tests.
@@ -31,8 +34,28 @@ describe('ReceiptComponent', () => {
   const mockReceiptData: ReceiptData = {
     payment: mockPayment,
     items: [
-      { product: { id: '1', name: 'Coffee', price: 4.5, sku: 'COF-001', stock: 50, category: 'Beverages' } as any, quantity: 2 },
-      { product: { id: '2', name: 'Muffin', price: 3.0, sku: 'MUF-001', stock: 30, category: 'Food' } as any, quantity: 1 },
+      {
+        product: {
+          id: '1',
+          name: 'Coffee',
+          price: 4.5,
+          sku: 'COF-001',
+          stock: 50,
+          category: 'Beverages',
+        } as unknown,
+        quantity: 2,
+      },
+      {
+        product: {
+          id: '2',
+          name: 'Muffin',
+          price: 3.0,
+          sku: 'MUF-001',
+          stock: 30,
+          category: 'Food',
+        } as unknown,
+        quantity: 1,
+      },
     ],
     subtotal: 12.0,
     tax: 1.02,
@@ -47,6 +70,8 @@ describe('ReceiptComponent', () => {
 
     const fixture = TestBed.createComponent(ReceiptComponent);
     component = fixture.componentInstance;
+    component.data = mockReceiptData;
+    fixture.detectChanges();
   });
 
   describe('Component Creation', () => {

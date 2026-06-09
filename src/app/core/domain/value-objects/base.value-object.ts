@@ -12,7 +12,7 @@ export interface IValueObject<T> {
   /**
    * Convert to plain object for serialization
    */
-  toJSON(): any;
+  toJSON(): unknown;
 
   /**
    * String representation
@@ -36,7 +36,7 @@ export abstract class BaseValueObject<T> implements IValueObject<T> {
    * Convert to plain object for serialization
    * Must be implemented by concrete classes
    */
-  abstract toJSON(): any;
+  abstract toJSON(): unknown;
 
   /**
    * String representation

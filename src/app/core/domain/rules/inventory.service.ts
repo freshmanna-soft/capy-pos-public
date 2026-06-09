@@ -1,19 +1,19 @@
 import { Injectable } from '@angular/core';
-import { BaseDomainService } from './base-domain.service';
+import { BaseDomainService } from '@core/domain/rules/base-domain.service';
 import {
   IInventoryService,
   StockReservation,
   StockAvailability,
   LowStockThreshold,
-  StockAdjustment
-} from './inventory.service.interface';
+  StockAdjustment,
+} from '@core/domain/rules/inventory.service.interface';
 
 /**
  * Inventory Service Implementation
- * 
+ *
  * Implements inventory management operations including stock checking,
  * reservation, and availability calculations.
- * 
+ *
  * @class InventoryService
  * @extends BaseDomainService
  * @implements IInventoryService
@@ -30,7 +30,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
   checkAvailability(
     productId: string,
     requestedQuantity: number,
-    currentStock: number
+    currentStock: number,
   ): StockAvailability {
     this.validateRequired(productId, 'Product ID');
     this.validatePositive(requestedQuantity, 'Requested quantity');
@@ -44,7 +44,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
       available,
       reserved: 0,
       total: currentStock,
-      isAvailable
+      isAvailable,
     };
   }
 
@@ -56,7 +56,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     quantity: number,
     currentStock: number,
     reservedStock: number,
-    durationMinutes: number = 15
+    durationMinutes = 15,
   ): StockReservation {
     this.validateRequired(productId, 'Product ID');
     this.validatePositive(quantity, 'Quantity');
@@ -65,11 +65,11 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     this.validatePositive(durationMinutes, 'Duration');
 
     const availableStock = currentStock - reservedStock;
-    
+
     if (availableStock < quantity) {
       throw new Error(
         `[${this.serviceName}] Insufficient stock available. ` +
-        `Requested: ${quantity}, Available: ${availableStock}`
+          `Requested: ${quantity}, Available: ${availableStock}`,
       );
     }
 
@@ -82,7 +82,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
       quantity,
       reservedAt: now,
       expiresAt,
-      reservationId
+      reservationId,
     };
   }
 
@@ -105,7 +105,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     productId: string,
     currentStock: number,
     adjustmentAmount: number,
-    reason: string
+    reason: string,
   ): StockAdjustment {
     this.validateRequired(productId, 'Product ID');
     this.validateNonNegative(currentStock, 'Current stock');
@@ -116,7 +116,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     if (newQuantity < 0) {
       throw new Error(
         `[${this.serviceName}] Stock adjustment would result in negative stock. ` +
-        `Current: ${currentStock}, Adjustment: ${adjustmentAmount}, Result: ${newQuantity}`
+          `Current: ${currentStock}, Adjustment: ${adjustmentAmount}, Result: ${newQuantity}`,
       );
     }
 
@@ -126,18 +126,14 @@ export class InventoryService extends BaseDomainService implements IInventorySer
       newQuantity,
       adjustmentAmount,
       reason,
-      adjustedAt: new Date()
+      adjustedAt: new Date(),
     };
   }
 
   /**
    * Check if stock is below threshold (low stock alert)
    */
-  checkLowStock(
-    productId: string,
-    currentStock: number,
-    threshold: number
-  ): LowStockThreshold {
+  checkLowStock(productId: string, currentStock: number, threshold: number): LowStockThreshold {
     this.validateRequired(productId, 'Product ID');
     this.validateNonNegative(currentStock, 'Current stock');
     this.validateNonNegative(threshold, 'Threshold');
@@ -146,7 +142,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
       productId,
       threshold,
       currentStock,
-      isLowStock: currentStock <= threshold
+      isLowStock: currentStock <= threshold,
     };
   }
 
@@ -160,7 +156,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     if (reservedStock > currentStock) {
       throw new Error(
         `[${this.serviceName}] Reserved stock cannot exceed current stock. ` +
-        `Current: ${currentStock}, Reserved: ${reservedStock}`
+          `Current: ${currentStock}, Reserved: ${reservedStock}`,
       );
     }
 
@@ -170,11 +166,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
   /**
    * Validate if a stock operation is allowed
    */
-  canFulfillOrder(
-    currentStock: number,
-    requestedQuantity: number,
-    reservedStock: number
-  ): boolean {
+  canFulfillOrder(currentStock: number, requestedQuantity: number, reservedStock: number): boolean {
     this.validateNonNegative(currentStock, 'Current stock');
     this.validatePositive(requestedQuantity, 'Requested quantity');
     this.validateNonNegative(reservedStock, 'Reserved stock');

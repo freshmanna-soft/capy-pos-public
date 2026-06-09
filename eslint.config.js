@@ -6,6 +6,9 @@ const angular = require('angular-eslint');
 
 module.exports = defineConfig([
   {
+    ignores: ['src/stories/**', 'coverage/**'],
+  },
+  {
     files: ['**/*.ts'],
     extends: [
       eslint.configs.recommended,
@@ -29,6 +32,14 @@ module.exports = defineConfig([
           type: 'element',
           prefix: 'app',
           style: 'kebab-case',
+        },
+      ],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
         },
       ],
     },

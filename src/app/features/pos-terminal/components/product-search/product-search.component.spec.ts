@@ -1,13 +1,13 @@
 import { TestBed } from '@angular/core/testing';
-import { ProductSearchComponent } from './product-search.component';
-import { ProductService } from '../../../../core/application/services/product.service';
-import { Product } from '../../../../core/domain/entities/product.entity';
-import { PRODUCT_REPOSITORY } from '../../../../core/infrastructure/factories/repository.factory';
+import { ProductSearchComponent } from '@features/pos-terminal/components/product-search/product-search.component';
+import { Product } from '@core/domain/entities/product.entity';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
+import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 
 /**
  * Unit Tests for ProductSearchComponent
  * Sprint 1 - Issue #1: Product Search Component
- * 
+ *
  * Acceptance Criteria:
  * - AC1: Search input with debounce (300ms)
  * - AC2: Results display with product name, price, stock status
@@ -20,10 +20,42 @@ describe('ProductSearchComponent', () => {
   let component: ProductSearchComponent;
 
   const mockProducts: Product[] = [
-    new Product('1', 'Organic Coffee', 12.99, 'COF-001', 'Beverages', 50, 'Premium coffee'),
-    new Product('2', 'Green Tea', 8.49, 'TEA-001', 'Beverages', 30, 'Matcha green tea'),
-    new Product('3', 'Chocolate Bar', 3.99, 'CHO-001', 'Snacks', 100, 'Dark chocolate'),
-    new Product('4', 'Out of Stock Item', 5.99, 'OOS-001', 'Snacks', 0, 'Unavailable'),
+    new ProductBuilder()
+      .withId('1')
+      .withName('Organic Coffee')
+      .withPrice(12.99)
+      .withSku('COF-001')
+      .withCategory('Beverages')
+      .withStock(50)
+      .withDescription('Premium coffee')
+      .build(),
+    new ProductBuilder()
+      .withId('2')
+      .withName('Green Tea')
+      .withPrice(8.49)
+      .withSku('TEA-001')
+      .withCategory('Beverages')
+      .withStock(30)
+      .withDescription('Matcha green tea')
+      .build(),
+    new ProductBuilder()
+      .withId('3')
+      .withName('Chocolate Bar')
+      .withPrice(3.99)
+      .withSku('CHO-001')
+      .withCategory('Snacks')
+      .withStock(100)
+      .withDescription('Dark chocolate')
+      .build(),
+    new ProductBuilder()
+      .withId('4')
+      .withName('Out of Stock Item')
+      .withPrice(5.99)
+      .withSku('OOS-001')
+      .withCategory('Snacks')
+      .withStock(0)
+      .withDescription('Unavailable')
+      .build(),
   ];
 
   const mockProductRepository = {
@@ -49,9 +81,7 @@ describe('ProductSearchComponent', () => {
 
     await TestBed.configureTestingModule({
       imports: [ProductSearchComponent],
-      providers: [
-        { provide: PRODUCT_REPOSITORY, useValue: mockProductRepository }
-      ]
+      providers: [{ provide: PRODUCT_REPOSITORY, useValue: mockProductRepository }],
     }).compileComponents();
 
     const fixture = TestBed.createComponent(ProductSearchComponent);

@@ -1,7 +1,7 @@
 import { Observable, from } from 'rxjs';
-import { IBaseRepository } from '../../domain/interfaces/base.repository.interface';
-import { BaseEntity } from '../../domain/entities/base.entity';
-import { IBaseApplicationService } from './base-application.service.interface';
+import { IBaseRepository } from '@core/domain/interfaces/base.repository.interface';
+import { BaseEntity } from '@core/domain/entities/base.entity';
+import { IBaseApplicationService } from '@core/application/services/base-application.service.interface';
 
 /**
  * Base Application Service
@@ -15,7 +15,7 @@ import { IBaseApplicationService } from './base-application.service.interface';
  */
 export abstract class BaseApplicationService<
   TEntity extends BaseEntity,
-  TRepository extends IBaseRepository<TEntity>
+  TRepository extends IBaseRepository<TEntity>,
 > implements IBaseApplicationService<TEntity> {
   constructor(protected readonly repository: TRepository) {}
 
@@ -149,7 +149,7 @@ export abstract class BaseApplicationService<
    * Validate entity before operations
    * Override in concrete services for custom validation
    */
-  protected validateEntity(entity: TEntity): void {
+  protected validateEntity(_entity: TEntity): void {
     // Default: no validation
     // Override in concrete services
   }
@@ -166,7 +166,7 @@ export abstract class BaseApplicationService<
    * Hook called after create
    * Override in concrete services for custom logic
    */
-  protected async afterCreate(entity: TEntity): Promise<void> {
+  protected async afterCreate(_entity: TEntity): Promise<void> {
     // Default: no action
   }
 
@@ -182,7 +182,7 @@ export abstract class BaseApplicationService<
    * Hook called after update
    * Override in concrete services for custom logic
    */
-  protected async afterUpdate(entity: TEntity): Promise<void> {
+  protected async afterUpdate(_entity: TEntity): Promise<void> {
     // Default: no action
   }
 
@@ -190,7 +190,7 @@ export abstract class BaseApplicationService<
    * Hook called before delete
    * Override in concrete services for custom logic
    */
-  protected async beforeDelete(id: string): Promise<void> {
+  protected async beforeDelete(_id: string): Promise<void> {
     // Default: no action
   }
 
@@ -198,7 +198,7 @@ export abstract class BaseApplicationService<
    * Hook called after delete
    * Override in concrete services for custom logic
    */
-  protected async afterDelete(id: string): Promise<void> {
+  protected async afterDelete(_id: string): Promise<void> {
     // Default: no action
   }
 }

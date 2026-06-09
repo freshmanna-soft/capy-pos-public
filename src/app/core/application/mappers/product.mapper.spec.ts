@@ -1,7 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { productMapper } from './product.mapper';
-import { Product } from '../../domain/entities/product.entity';
-import { CreateProductDto, UpdateProductDto, ProductResponseDto } from '../dtos/product.dto';
+import { describe, it, expect } from 'vitest';
+import { productMapper } from '@core/application/mappers/product.mapper';
+import { Product } from '@core/domain/entities/product.entity';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
+import {
+  CreateProductDto,
+  UpdateProductDto,
+  ProductResponseDto,
+} from '@core/application/dtos/product.dto';
 
 describe('ProductMapper', () => {
   describe('toDomain', () => {
@@ -15,7 +20,7 @@ describe('ProductMapper', () => {
         description: 'Test description',
         imageUrl: 'https://example.com/image.jpg',
         barcode: '1234567890',
-        emoji: '📱'
+        emoji: '📱',
       };
 
       const product = productMapper.toDomain(dto, 'test-id');
@@ -39,7 +44,7 @@ describe('ProductMapper', () => {
         price: 99.99,
         sku: 'TEST-001',
         category: 'Electronics',
-        stock: 10
+        stock: 10,
       };
 
       const product = productMapper.toDomain(dto);
@@ -51,18 +56,18 @@ describe('ProductMapper', () => {
 
   describe('toResponseDto', () => {
     it('should map Product entity to ProductResponseDto', () => {
-      const product = new Product(
-        'test-id',
-        'Test Product',
-        99.99,
-        'TEST-001',
-        'Electronics',
-        10,
-        'Test description',
-        'https://example.com/image.jpg',
-        '1234567890',
-        '📱'
-      );
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Test Product')
+        .withPrice(99.99)
+        .withSku('TEST-001')
+        .withCategory('Electronics')
+        .withStock(10)
+        .withDescription('Test description')
+        .withImageUrl('https://example.com/image.jpg')
+        .withBarcode('1234567890')
+        .withEmoji('📱')
+        .build();
 
       const dto = productMapper.toResponseDto(product);
 
@@ -81,14 +86,14 @@ describe('ProductMapper', () => {
     });
 
     it('should convert dates to ISO strings', () => {
-      const product = new Product(
-        'test-id',
-        'Test Product',
-        99.99,
-        'TEST-001',
-        'Electronics',
-        10
-      );
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Test Product')
+        .withPrice(99.99)
+        .withSku('TEST-001')
+        .withCategory('Electronics')
+        .withStock(10)
+        .build();
 
       const dto = productMapper.toResponseDto(product);
 
@@ -113,7 +118,7 @@ describe('ProductMapper', () => {
         'Test description',
         'https://example.com/image.jpg',
         '1234567890',
-        '📱'
+        '📱',
       );
 
       const product = productMapper.fromResponseDto(dto);
@@ -141,7 +146,7 @@ describe('ProductMapper', () => {
         'Electronics',
         10,
         now.toISOString(),
-        now.toISOString()
+        now.toISOString(),
       );
 
       const product = productMapper.fromResponseDto(dto);
@@ -153,22 +158,16 @@ describe('ProductMapper', () => {
 
   describe('applyUpdate', () => {
     it('should apply UpdateProductDto to Product entity', () => {
-      const product = new Product(
-        'test-id',
-        'Original Name',
-        99.99,
-        'TEST-001',
-        'Electronics',
-        10
-      );
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Original Name')
+        .withPrice(99.99)
+        .withSku('TEST-001')
+        .withCategory('Electronics')
+        .withStock(10)
+        .build();
 
-      const updateDto = new UpdateProductDto(
-        'Updated Name',
-        149.99,
-        undefined,
-        undefined,
-        20
-      );
+      const updateDto = new UpdateProductDto('Updated Name', 149.99, undefined, undefined, 20);
 
       const updated = productMapper.applyUpdate(product, updateDto);
 
@@ -180,14 +179,14 @@ describe('ProductMapper', () => {
     });
 
     it('should not modify original entity', () => {
-      const product = new Product(
-        'test-id',
-        'Original Name',
-        99.99,
-        'TEST-001',
-        'Electronics',
-        10
-      );
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Original Name')
+        .withPrice(99.99)
+        .withSku('TEST-001')
+        .withCategory('Electronics')
+        .withStock(10)
+        .build();
 
       const updateDto = new UpdateProductDto('Updated Name');
 
@@ -197,19 +196,16 @@ describe('ProductMapper', () => {
     });
 
     it('should handle partial updates', () => {
-      const product = new Product(
-        'test-id',
-        'Original Name',
-        99.99,
-        'TEST-001',
-        'Electronics',
-        10
-      );
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Original Name')
+        .withPrice(99.99)
+        .withSku('TEST-001')
+        .withCategory('Electronics')
+        .withStock(10)
+        .build();
 
-      const updateDto = new UpdateProductDto(
-        undefined,
-        149.99
-      );
+      const updateDto = new UpdateProductDto(undefined, 149.99);
 
       const updated = productMapper.applyUpdate(product, updateDto);
 
@@ -221,8 +217,22 @@ describe('ProductMapper', () => {
   describe('toResponseDtoList', () => {
     it('should map array of Product entities to array of DTOs', () => {
       const products = [
-        new Product('id-1', 'Product 1', 10, 'SKU-1', 'Cat1', 5),
-        new Product('id-2', 'Product 2', 20, 'SKU-2', 'Cat2', 10)
+        new ProductBuilder()
+          .withId('id-1')
+          .withName('Product 1')
+          .withPrice(10)
+          .withSku('SKU-1')
+          .withCategory('Cat1')
+          .withStock(5)
+          .build(),
+        new ProductBuilder()
+          .withId('id-2')
+          .withName('Product 2')
+          .withPrice(20)
+          .withSku('SKU-2')
+          .withCategory('Cat2')
+          .withStock(10)
+          .build(),
       ];
 
       const dtos = productMapper.toResponseDtoList(products);
@@ -249,7 +259,7 @@ describe('ProductMapper', () => {
           'Cat1',
           5,
           new Date().toISOString(),
-          new Date().toISOString()
+          new Date().toISOString(),
         ),
         new ProductResponseDto(
           'id-2',
@@ -259,8 +269,8 @@ describe('ProductMapper', () => {
           'Cat2',
           10,
           new Date().toISOString(),
-          new Date().toISOString()
-        )
+          new Date().toISOString(),
+        ),
       ];
 
       const products = productMapper.fromResponseDtoList(dtos);
@@ -280,18 +290,18 @@ describe('ProductMapper', () => {
 
   describe('bidirectional mapping', () => {
     it('should maintain data integrity through round-trip conversion', () => {
-      const original = new Product(
-        'test-id',
-        'Test Product',
-        99.99,
-        'TEST-001',
-        'Electronics',
-        10,
-        'Test description',
-        'https://example.com/image.jpg',
-        '1234567890',
-        '📱'
-      );
+      const original = new ProductBuilder()
+        .withId('test-id')
+        .withName('Test Product')
+        .withPrice(99.99)
+        .withSku('TEST-001')
+        .withCategory('Electronics')
+        .withStock(10)
+        .withDescription('Test description')
+        .withImageUrl('https://example.com/image.jpg')
+        .withBarcode('1234567890')
+        .withEmoji('📱')
+        .build();
 
       const dto = productMapper.toResponseDto(original);
       const restored = productMapper.fromResponseDto(dto);

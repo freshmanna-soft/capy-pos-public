@@ -7,7 +7,7 @@ import { Injectable } from '@angular/core';
 export class CircuitBreakerError extends Error {
   constructor(
     public readonly circuitName: string,
-    public readonly state: CircuitState
+    public readonly state: CircuitState,
   ) {
     super(`Circuit breaker is ${state} for ${circuitName}`);
     this.name = 'CircuitBreakerError';
@@ -19,19 +19,19 @@ export class CircuitBreakerError extends Error {
  * Circuit Breaker State
  */
 export enum CircuitState {
-  CLOSED = 'CLOSED',     // Normal operation
-  OPEN = 'OPEN',         // Failing, reject requests
-  HALF_OPEN = 'HALF_OPEN' // Testing if service recovered
+  CLOSED = 'CLOSED', // Normal operation
+  OPEN = 'OPEN', // Failing, reject requests
+  HALF_OPEN = 'HALF_OPEN', // Testing if service recovered
 }
 
 /**
  * Circuit Breaker Configuration
  */
 export interface CircuitBreakerConfig {
-  failureThreshold: number;      // Number of failures before opening
-  successThreshold: number;      // Number of successes to close from half-open
-  timeout: number;               // Time in ms before attempting half-open
-  monitoringPeriod: number;      // Time window for failure counting (ms)
+  failureThreshold: number; // Number of failures before opening
+  successThreshold: number; // Number of successes to close from half-open
+  timeout: number; // Time in ms before attempting half-open
+  monitoringPeriod: number; // Time window for failure counting (ms)
 }
 
 /**
@@ -53,7 +53,7 @@ export interface CircuitBreakerStats {
 /**
  * Circuit Breaker
  * Implements the Circuit Breaker pattern to prevent cascading failures
- * 
+ *
  * States:
  * - CLOSED: Normal operation, requests pass through
  * - OPEN: Too many failures, requests are rejected immediately
@@ -61,21 +61,21 @@ export interface CircuitBreakerStats {
  */
 export class CircuitBreaker {
   private state: CircuitState = CircuitState.CLOSED;
-  private failures: number = 0;
-  private successes: number = 0;
-  private consecutiveFailures: number = 0;
-  private consecutiveSuccesses: number = 0;
+  private failures = 0;
+  private successes = 0;
+  private consecutiveFailures = 0;
+  private consecutiveSuccesses = 0;
   private lastFailureTime?: Date;
   private lastSuccessTime?: Date;
   private nextAttemptTime?: Date;
-  private totalCalls: number = 0;
-  private totalFailures: number = 0;
-  private totalSuccesses: number = 0;
+  private totalCalls = 0;
+  private totalFailures = 0;
+  private totalSuccesses = 0;
   private failureTimestamps: number[] = [];
 
   constructor(
     private name: string,
-    private config: CircuitBreakerConfig
+    private config: CircuitBreakerConfig,
   ) {}
 
   /**
@@ -125,7 +125,7 @@ export class CircuitBreaker {
       lastSuccessTime: this.lastSuccessTime,
       totalCalls: this.totalCalls,
       totalFailures: this.totalFailures,
-      totalSuccesses: this.totalSuccesses
+      totalSuccesses: this.totalSuccesses,
     };
   }
 
@@ -170,13 +170,13 @@ export class CircuitBreaker {
     this.consecutiveFailures++;
     this.consecutiveSuccesses = 0;
     this.lastFailureTime = new Date();
-    
+
     const now = Date.now();
     this.failureTimestamps.push(now);
-    
+
     // Remove old failures outside monitoring period
     this.failureTimestamps = this.failureTimestamps.filter(
-      timestamp => now - timestamp < this.config.monitoringPeriod
+      (timestamp) => now - timestamp < this.config.monitoringPeriod,
     );
 
     if (this.state === CircuitState.HALF_OPEN) {
@@ -189,7 +189,9 @@ export class CircuitBreaker {
       if (this.failureTimestamps.length >= this.config.failureThreshold) {
         this.state = CircuitState.OPEN;
         this.nextAttemptTime = new Date(Date.now() + this.config.timeout);
-        console.log(`[CircuitBreaker:${this.name}] Opened after ${this.failureTimestamps.length} failures`);
+        console.log(
+          `[CircuitBreaker:${this.name}] Opened after ${this.failureTimestamps.length} failures`,
+        );
       }
     }
   }
@@ -207,16 +209,16 @@ export class CircuitBreaker {
  * Manages multiple circuit breakers for different services/operations
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class CircuitBreakerService {
   private breakers = new Map<string, CircuitBreaker>();
-  
+
   private defaultConfig: CircuitBreakerConfig = {
     failureThreshold: 5,
     successThreshold: 2,
     timeout: 60000, // 1 minute
-    monitoringPeriod: 120000 // 2 minutes
+    monitoringPeriod: 120000, // 2 minutes
   };
 
   /**
@@ -236,7 +238,7 @@ export class CircuitBreakerService {
   async execute<T>(
     name: string,
     fn: () => Promise<T>,
-    config?: Partial<CircuitBreakerConfig>
+    config?: Partial<CircuitBreakerConfig>,
   ): Promise<T> {
     const breaker = this.getBreaker(name, config);
     return breaker.execute(fn);
@@ -267,7 +269,7 @@ export class CircuitBreakerService {
    * Reset all circuit breakers
    */
   resetAll(): void {
-    this.breakers.forEach(breaker => breaker.reset());
+    this.breakers.forEach((breaker) => breaker.reset());
   }
 
   /**

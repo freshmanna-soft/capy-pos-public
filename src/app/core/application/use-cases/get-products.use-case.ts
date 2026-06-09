@@ -1,7 +1,7 @@
-import { Injectable, Inject } from '@angular/core';
-import { Product } from '../../domain/entities/product.entity';
-import { IProductRepository } from '../../domain/interfaces/product.repository.interface';
-import { PRODUCT_REPOSITORY } from '../../infrastructure/factories/repository.factory';
+import { Injectable, inject } from '@angular/core';
+import { Product } from '@core/domain/entities/product.entity';
+import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
+import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 
 /**
  * Get Products Use Case
@@ -10,12 +10,10 @@ import { PRODUCT_REPOSITORY } from '../../infrastructure/factories/repository.fa
  * Follows Single Responsibility Principle (SOLID)
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class GetProductsUseCase {
-  constructor(
-    @Inject(PRODUCT_REPOSITORY) private repository: IProductRepository
-  ) {}
+  private repository = inject<IProductRepository>(PRODUCT_REPOSITORY);
 
   /**
    * Executes the use case to get all products

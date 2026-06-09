@@ -1,8 +1,8 @@
 import { TestBed } from '@angular/core/testing';
-import { GenerateReceiptUseCase, ReceiptData } from './generate-receipt.use-case';
-import { CartService } from '../services/cart.service';
-import { Product } from '../../domain/entities/product.entity';
-import { PaymentResult } from '../../../features/pos-terminal/components/checkout/checkout.component';
+import { GenerateReceiptUseCase } from '@core/application/use-cases/generate-receipt.use-case';
+import { CartService } from '@core/application/services/cart.service';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
+import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
 
 /**
  * Unit Tests for GenerateReceiptUseCase
@@ -29,18 +29,36 @@ describe('GenerateReceiptUseCase', () => {
   };
 
   const mockProducts = {
-    coffee: new Product(
-      '1', 'Organic Coffee', 12.99, 'COF-001', 'Beverages',
-      50, 'Premium coffee', undefined, undefined, '☕'
-    ),
-    muffin: new Product(
-      '2', 'Blueberry Muffin', 4.50, 'MUF-001', 'Food',
-      30, 'Fresh muffin', undefined, undefined, '🧁'
-    ),
-    juice: new Product(
-      '3', 'Orange Juice', 6.99, 'JUI-001', 'Beverages',
-      20, 'Fresh squeezed', undefined, undefined, '🍊'
-    ),
+    coffee: new ProductBuilder()
+      .withId('1')
+      .withName('Organic Coffee')
+      .withPrice(12.99)
+      .withSku('COF-001')
+      .withCategory('Beverages')
+      .withStock(50)
+      .withDescription('Premium coffee')
+      .withEmoji('☕')
+      .build(),
+    muffin: new ProductBuilder()
+      .withId('2')
+      .withName('Blueberry Muffin')
+      .withPrice(4.5)
+      .withSku('MUF-001')
+      .withCategory('Food')
+      .withStock(30)
+      .withDescription('Fresh muffin')
+      .withEmoji('🧁')
+      .build(),
+    juice: new ProductBuilder()
+      .withId('3')
+      .withName('Orange Juice')
+      .withPrice(6.99)
+      .withSku('JUI-001')
+      .withCategory('Beverages')
+      .withStock(20)
+      .withDescription('Fresh squeezed')
+      .withEmoji('🍊')
+      .build(),
   };
 
   beforeEach(() => {
@@ -133,13 +151,13 @@ describe('GenerateReceiptUseCase', () => {
     });
 
     it('should capture custom tax rate', () => {
-      cartService.setTaxRate(0.10); // 10%
+      cartService.setTaxRate(0.1); // 10%
       cartService.addProduct(mockProducts.coffee);
 
       const receipt = useCase.execute(mockPayment);
 
-      expect(receipt.taxRate).toBe(0.10);
-      expect(receipt.tax).toBeCloseTo(12.99 * 0.10, 2);
+      expect(receipt.taxRate).toBe(0.1);
+      expect(receipt.tax).toBeCloseTo(12.99 * 0.1, 2);
     });
 
     it('should return a copy of items (not a reference)', () => {
@@ -183,13 +201,11 @@ describe('GenerateReceiptUseCase', () => {
   describe('fromSnapshot() - Reconstruct from persisted data', () => {
     it('should reconstruct receipt from explicit values', () => {
       const items = [
-        { product: mockProducts.coffee as any, quantity: 2 },
-        { product: mockProducts.muffin as any, quantity: 1 },
+        { product: mockProducts.coffee as unknown, quantity: 2 },
+        { product: mockProducts.muffin as unknown, quantity: 1 },
       ];
 
-      const receipt = useCase.fromSnapshot(
-        mockPayment, items, 30.48, 2.59, 0.085, 33.07
-      );
+      const receipt = useCase.fromSnapshot(mockPayment, items, 30.48, 2.59, 0.085, 33.07);
 
       expect(receipt.payment).toBe(mockPayment);
       expect(receipt.items).toHaveLength(2);
@@ -202,13 +218,9 @@ describe('GenerateReceiptUseCase', () => {
     it('should not depend on cart service state', () => {
       cartService.addProduct(mockProducts.juice);
 
-      const items = [
-        { product: mockProducts.coffee as any, quantity: 1 },
-      ];
+      const items = [{ product: mockProducts.coffee as unknown, quantity: 1 }];
 
-      const receipt = useCase.fromSnapshot(
-        mockPayment, items, 12.99, 1.10, 0.085, 14.09
-      );
+      const receipt = useCase.fromSnapshot(mockPayment, items, 12.99, 1.1, 0.085, 14.09);
 
       // Should use provided values, not cart state
       expect(receipt.items).toHaveLength(1);

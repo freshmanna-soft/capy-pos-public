@@ -18,7 +18,8 @@
     "format": "prettier --write \"src/**/*.{ts,html,scss}\"",
     "format:check": "prettier --check \"src/**/*.{ts,html,scss}\"",
     "storybook": "ng run capy-pos:storybook",
-    "build-storybook": "ng run capy-pos:build-storybook"
+    "build-storybook": "ng run capy-pos:build-storybook",
+    "prepare": "husky"
   },
   "private": true,
   "packageManager": "npm@11.12.1",
@@ -63,7 +64,9 @@
     "autoprefixer": "^10.5.0",
     "eslint": "^10.3.0",
     "fake-indexeddb": "^6.2.5",
+    "husky": "^9.1.7",
     "jsdom": "^28.0.0",
+    "lint-staged": "^17.0.7",
     "playwright": "^1.60.0",
     "postcss": "^8.5.15",
     "prettier": "^3.8.1",
@@ -73,5 +76,17 @@
     "typescript": "~5.9.2",
     "typescript-eslint": "8.59.2",
     "vitest": "^4.0.8"
+  },
+  "lint-staged": {
+    "src/**/*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "src/**/*.html": [
+      "prettier --write"
+    ],
+    "src/**/*.scss": [
+      "prettier --write"
+    ]
   }
 }

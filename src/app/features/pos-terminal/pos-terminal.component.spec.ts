@@ -1,19 +1,25 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
-import { PosTerminalComponent } from './pos-terminal.component';
-import { CartService } from '../../core/application/services/cart.service';
-import { GenerateReceiptUseCase } from '../../core/application/use-cases/generate-receipt.use-case';
-import { Product } from '../../core/domain/entities/product.entity';
-import { DexieDatabase } from '../../core/infrastructure/database/dexie-database.service';
-import { PRODUCT_REPOSITORY } from '../../core/infrastructure/factories/repository.factory';
-import { PaymentResult } from './components/checkout/checkout.component';
+import { PosTerminalComponent } from '@features/pos-terminal/pos-terminal.component';
+import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
+import {
+  CheckoutComponent,
+  PaymentResult,
+} from '@features/pos-terminal/components/checkout/checkout.component';
+import { ProductSearchComponent } from '@features/pos-terminal/components/product-search/product-search.component';
+import { ShoppingCartComponent } from '@features/pos-terminal/components/shopping-cart/shopping-cart.component';
+import { CartService } from '@core/application/services/cart.service';
+import { Product } from '@core/domain/entities/product.entity';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
+import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
+import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 
 /**
  * Unit Tests for PosTerminalComponent - S1-4: Add to Cart Interaction
  * Sprint 1 - Issue #4: Add to Cart Interaction
- * 
+ *
  * Tests the integration between ProductSearch/ProductGrid and ShoppingCart
  * via the PosTerminalComponent orchestrator.
- * 
+ *
  * Acceptance Criteria:
  * - AC1: Clicking a product in the grid adds it to the cart
  * - AC2: Clicking the same product again increments quantity
@@ -27,11 +33,56 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
   let cartService: CartService;
 
   const mockProducts = {
-    coffee: new Product('1', 'Organic Coffee', 12.99, 'COF-001', 'Beverages', 50, 'Premium coffee', undefined, undefined, '☕'),
-    tea: new Product('2', 'Green Tea', 8.49, 'TEA-001', 'Beverages', 30, 'Matcha green tea', undefined, undefined, '🍵'),
-    chocolate: new Product('3', 'Chocolate Bar', 3.99, 'CHO-001', 'Snacks', 100, 'Dark chocolate', undefined, undefined, '🍫'),
-    outOfStock: new Product('4', 'Sold Out Item', 5.99, 'OOS-001', 'Snacks', 0, 'Unavailable', undefined, undefined, '❌'),
-    lowStock: new Product('5', 'Last One', 15.99, 'LOW-001', 'Electronics', 1, 'Only 1 left', undefined, undefined, '📱'),
+    coffee: new ProductBuilder()
+      .withId('1')
+      .withName('Organic Coffee')
+      .withPrice(12.99)
+      .withSku('COF-001')
+      .withCategory('Beverages')
+      .withStock(50)
+      .withDescription('Premium coffee')
+      .withEmoji('☕')
+      .build(),
+    tea: new ProductBuilder()
+      .withId('2')
+      .withName('Green Tea')
+      .withPrice(8.49)
+      .withSku('TEA-001')
+      .withCategory('Beverages')
+      .withStock(30)
+      .withDescription('Matcha green tea')
+      .withEmoji('🍵')
+      .build(),
+    chocolate: new ProductBuilder()
+      .withId('3')
+      .withName('Chocolate Bar')
+      .withPrice(3.99)
+      .withSku('CHO-001')
+      .withCategory('Snacks')
+      .withStock(100)
+      .withDescription('Dark chocolate')
+      .withEmoji('🍫')
+      .build(),
+    outOfStock: new ProductBuilder()
+      .withId('4')
+      .withName('Sold Out Item')
+      .withPrice(5.99)
+      .withSku('OOS-001')
+      .withCategory('Snacks')
+      .withStock(0)
+      .withDescription('Unavailable')
+      .withEmoji('❌')
+      .build(),
+    lowStock: new ProductBuilder()
+      .withId('5')
+      .withName('Last One')
+      .withPrice(15.99)
+      .withSku('LOW-001')
+      .withCategory('Electronics')
+      .withStock(1)
+      .withDescription('Only 1 left')
+      .withEmoji('📱')
+      .build(),
   };
 
   const mockDexieDatabase = {
@@ -49,7 +100,13 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     vi.useFakeTimers();
 
     await TestBed.configureTestingModule({
-      imports: [PosTerminalComponent],
+      imports: [
+        PosTerminalComponent,
+        ReceiptComponent,
+        CheckoutComponent,
+        ProductSearchComponent,
+        ShoppingCartComponent,
+      ],
       providers: [
         CartService,
         { provide: DexieDatabase, useValue: mockDexieDatabase },
@@ -211,7 +268,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     it('should calculate total (subtotal + tax) correctly', () => {
       addProduct(mockProducts.coffee);
 
-      const expectedTotal = 12.99 + (12.99 * 0.085);
+      const expectedTotal = 12.99 + 12.99 * 0.085;
       expect(cartService.total()).toBeCloseTo(expectedTotal, 2);
     });
   });

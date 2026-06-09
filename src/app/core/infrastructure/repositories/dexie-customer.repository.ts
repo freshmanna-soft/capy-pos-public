@@ -1,50 +1,59 @@
-import { Injectable } from '@angular/core';
-import { BaseDexieRepository } from './base-dexie.repository';
-import { Customer, CustomerStatus, CustomerTier } from '../../domain/entities/customer.entity';
-import { ICustomerRepository } from '../../domain/interfaces/customer.repository.interface';
-import { DexieDatabase, ICustomerDB } from '../database/dexie-database.service';
+import { Injectable, inject } from '@angular/core';
+import { BaseDexieRepository } from '@core/infrastructure/repositories/base-dexie.repository';
+import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
+import { CustomerBuilder } from '@core/domain/entities/customer.builder';
+import { ICustomerRepository } from '@core/domain/interfaces/customer.repository.interface';
+import { DexieDatabase, ICustomerDB } from '@core/infrastructure/database/dexie-database.service';
 
 /**
  * Dexie Customer Repository
  * Implements customer-specific operations using Dexie ORM
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
-export class DexieCustomerRepository 
-  extends BaseDexieRepository<Customer, ICustomerDB> 
-  implements ICustomerRepository {
+export class DexieCustomerRepository
+  extends BaseDexieRepository<Customer, ICustomerDB>
+  implements ICustomerRepository
+{
+  private readonly db: DexieDatabase;
 
-  constructor(private db: DexieDatabase) {
+  constructor() {
+    const db = inject(DexieDatabase);
+
     super(db.customers);
+
+    this.db = db;
   }
 
   /**
    * Map database record to Customer entity
    */
   protected mapToEntity(record: ICustomerDB): Customer {
-    return new Customer(
-      record.id,
-      record.name,
-      record.email,
-      record.phone,
-      record.status as CustomerStatus,
-      record.loyaltyPoints,
-      record.tier as CustomerTier,
-      record.createdAt,
-      record.updatedAt,
-      record.createdBy,
-      record.updatedBy,
-      record.deletedAt,
-      record.deletedBy,
-      record.address,
-      record.city,
-      record.state,
-      record.zipCode,
-      record.country,
-      record.dateOfBirth,
-      record.notes
-    );
+    const builder = new CustomerBuilder()
+      .withId(record.id)
+      .withName(record.name)
+      .withEmail(record.email)
+      .withPhone(record.phone)
+      .withStatus(record.status as CustomerStatus)
+      .withLoyaltyPoints(record.loyaltyPoints)
+      .withTier(record.tier as CustomerTier)
+      .withCreatedAt(record.createdAt)
+      .withUpdatedAt(record.updatedAt)
+      .withCountry(record.country ?? 'USA');
+
+    if (record.createdBy) builder.withCreatedBy(record.createdBy);
+    if (record.updatedBy) builder.withUpdatedBy(record.updatedBy);
+    if (record.deletedAt) builder.withDeletedAt(record.deletedAt);
+    if (record.deletedBy) builder.withDeletedBy(record.deletedBy);
+    if (record.address) builder.withAddress(record.address);
+    if (record.city) builder.withCity(record.city);
+    if (record.state) builder.withState(record.state);
+    if (record.zipCode) builder.withZipCode(record.zipCode);
+    if (record.dateOfBirth) builder.withDateOfBirth(record.dateOfBirth);
+    if (record.notes) builder.withNotes(record.notes);
+
+    return builder.build();
   }
 
   /**
@@ -71,7 +80,7 @@ export class DexieCustomerRepository
       createdBy: entity.createdBy,
       updatedBy: entity.updatedBy,
       deletedAt: entity.deletedAt,
-      deletedBy: entity.deletedBy
+      deletedBy: entity.deletedBy,
     };
   }
 
@@ -113,25 +122,25 @@ export class DexieCustomerRepository
   /**
    * Search customers by name, email, or phone
    */
-  async search(query: string, limit: number = 50): Promise<Customer[]> {
+  async search(query: string, limit = 50): Promise<Customer[]> {
     const lowerQuery = query.toLowerCase();
-    
+
     const records = await this.table
-      .filter(record => {
+      .filter((record) => {
         if (record.deletedAt) return false;
-        
+
         const name = record.name.toLowerCase();
         const email = record.email.toLowerCase();
         const phone = record.phone.toLowerCase();
-        
-        return name.includes(lowerQuery) || 
-               email.includes(lowerQuery) || 
-               phone.includes(lowerQuery);
+
+        return (
+          name.includes(lowerQuery) || email.includes(lowerQuery) || phone.includes(lowerQuery)
+        );
       })
       .limit(limit)
       .toArray();
-    
-    return records.map(record => this.mapToEntity(record));
+
+    return records.map((record) => this.mapToEntity(record));
   }
 
   /**
@@ -153,27 +162,27 @@ export class DexieCustomerRepository
    */
   async findByMinLoyaltyPoints(minPoints: number): Promise<Customer[]> {
     const records = await this.table
-      .filter(record => {
+      .filter((record) => {
         if (record.deletedAt) return false;
         return record.loyaltyPoints >= minPoints;
       })
       .toArray();
-    
-    return records.map(record => this.mapToEntity(record));
+
+    return records.map((record) => this.mapToEntity(record));
   }
 
   /**
    * Get top customers by loyalty points
    */
-  async getTopCustomers(limit: number = 10): Promise<Customer[]> {
+  async getTopCustomers(limit = 10): Promise<Customer[]> {
     const records = await this.table
       .orderBy('loyaltyPoints')
       .reverse()
-      .filter(record => !record.deletedAt)
+      .filter((record) => !record.deletedAt)
       .limit(limit)
       .toArray();
-    
-    return records.map(record => this.mapToEntity(record));
+
+    return records.map((record) => this.mapToEntity(record));
   }
 
   /**
@@ -190,11 +199,11 @@ export class DexieCustomerRepository
     } else if (points < 0) {
       customer.redeemPoints(Math.abs(points));
     }
-    
+
     await this.table.update(customerId, {
       loyaltyPoints: customer.loyaltyPoints,
       tier: customer.tier,
-      updatedAt: customer.updatedAt
+      updatedAt: customer.updatedAt,
     });
 
     return customer;
@@ -224,10 +233,10 @@ export class DexieCustomerRepository
         customer.promoteToVIP();
         break;
     }
-    
+
     await this.table.update(customerId, {
       status: customer.status,
-      updatedAt: customer.updatedAt
+      updatedAt: customer.updatedAt,
     });
 
     return customer;
@@ -244,20 +253,21 @@ export class DexieCustomerRepository
     byTier: Record<CustomerTier, number>;
   }> {
     const allCustomers = await this.findAll();
-    
+
     const stats = {
       total: allCustomers.length,
-      active: allCustomers.filter(c => c.status === CustomerStatus.ACTIVE).length,
-      vip: allCustomers.filter(c => c.status === CustomerStatus.VIP).length,
-      blocked: allCustomers.filter(c => c.status === CustomerStatus.BLOCKED).length,
+      active: allCustomers.filter((c) => c.status === CustomerStatus.ACTIVE).length,
+      vip: allCustomers.filter((c) => c.status === CustomerStatus.VIP).length,
+      blocked: allCustomers.filter((c) => c.status === CustomerStatus.BLOCKED).length,
       byTier: {
-        [CustomerTier.BRONZE]: allCustomers.filter(c => c.tier === CustomerTier.BRONZE).length,
-        [CustomerTier.SILVER]: allCustomers.filter(c => c.tier === CustomerTier.SILVER).length,
-        [CustomerTier.GOLD]: allCustomers.filter(c => c.tier === CustomerTier.GOLD).length,
-        [CustomerTier.PLATINUM]: allCustomers.filter(c => c.tier === CustomerTier.PLATINUM).length
-      }
+        [CustomerTier.BRONZE]: allCustomers.filter((c) => c.tier === CustomerTier.BRONZE).length,
+        [CustomerTier.SILVER]: allCustomers.filter((c) => c.tier === CustomerTier.SILVER).length,
+        [CustomerTier.GOLD]: allCustomers.filter((c) => c.tier === CustomerTier.GOLD).length,
+        [CustomerTier.PLATINUM]: allCustomers.filter((c) => c.tier === CustomerTier.PLATINUM)
+          .length,
+      },
     };
-    
+
     return stats;
   }
 

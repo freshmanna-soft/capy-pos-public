@@ -1,5 +1,9 @@
-import { Transaction, TransactionStatus, TransactionType } from '../entities/transaction.entity';
-import { IBaseRepository } from './base.repository.interface';
+import {
+  Transaction,
+  TransactionStatus,
+  TransactionType,
+} from '@core/domain/entities/transaction.entity';
+import { IBaseRepository } from '@core/domain/interfaces/base.repository.interface';
 
 /**
  * Transaction Repository Interface
@@ -79,24 +83,32 @@ export interface ITransactionRepository extends IBaseRepository<Transaction> {
    * @param limit - Maximum number of products to return
    * @returns Promise resolving to array of product sales data
    */
-  getTopProducts(startDate: Date, endDate: Date, limit: number): Promise<Array<{
-    productId: string;
-    productName: string;
-    quantitySold: number;
-    revenue: number;
-    transactionCount: number;
-  }>>;
+  getTopProducts(
+    startDate: Date,
+    endDate: Date,
+    limit: number,
+  ): Promise<
+    {
+      productId: string;
+      productName: string;
+      quantitySold: number;
+      revenue: number;
+      transactionCount: number;
+    }[]
+  >;
 
   /**
    * Get sales by hour for a specific date
    * @param date - Date to analyze
    * @returns Promise resolving to hourly sales breakdown
    */
-  getSalesByHour(date: Date): Promise<Array<{
-    hour: number;
-    sales: number;
-    transactions: number;
-  }>>;
+  getSalesByHour(date: Date): Promise<
+    {
+      hour: number;
+      sales: number;
+      transactions: number;
+    }[]
+  >;
 
   /**
    * Get refund statistics for a date range
@@ -104,7 +116,10 @@ export interface ITransactionRepository extends IBaseRepository<Transaction> {
    * @param endDate - End date
    * @returns Promise resolving to refund statistics
    */
-  getRefundStats(startDate: Date, endDate: Date): Promise<{
+  getRefundStats(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<{
     totalRefunds: number;
     refundCount: number;
     refundRate: number;
@@ -130,7 +145,11 @@ export interface ITransactionRepository extends IBaseRepository<Transaction> {
    * @param updatedBy - User who updated the transaction
    * @returns Promise resolving to updated transaction
    */
-  updateStatus(transactionId: string, status: TransactionStatus, updatedBy?: string): Promise<Transaction>;
+  updateStatus(
+    transactionId: string,
+    status: TransactionStatus,
+    updatedBy?: string,
+  ): Promise<Transaction>;
 
   /**
    * Add payment to transaction

@@ -1,5 +1,5 @@
-import { IBaseRepository } from './base.repository.interface';
-import { Payment, PaymentStatus, PaymentMethod } from '../entities/payment.entity';
+import { IBaseRepository } from '@core/domain/interfaces/base.repository.interface';
+import { Payment, PaymentStatus, PaymentMethod } from '@core/domain/entities/payment.entity';
 
 /**
  * Payment Repository Interface
@@ -44,7 +44,10 @@ export interface IPaymentRepository extends IBaseRepository<Payment> {
   /**
    * Get payment statistics for a date range
    */
-  getStatsByDateRange(startDate: Date, endDate: Date): Promise<{
+  getStatsByDateRange(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<{
     totalAmount: number;
     totalCount: number;
     byMethod: Record<PaymentMethod, { count: number; amount: number }>;

@@ -4,9 +4,9 @@ import { Injectable } from '@angular/core';
  * Retry Strategy
  */
 export enum RetryStrategy {
-  FIXED = 'FIXED',           // Fixed delay between retries
+  FIXED = 'FIXED', // Fixed delay between retries
   EXPONENTIAL = 'EXPONENTIAL', // Exponential backoff
-  LINEAR = 'LINEAR'          // Linear backoff
+  LINEAR = 'LINEAR', // Linear backoff
 }
 
 /**
@@ -14,12 +14,12 @@ export enum RetryStrategy {
  */
 export interface RetryConfig {
   maxAttempts: number;
-  initialDelay: number;      // Initial delay in ms
-  maxDelay: number;          // Maximum delay in ms
+  initialDelay: number; // Initial delay in ms
+  maxDelay: number; // Maximum delay in ms
   strategy: RetryStrategy;
   backoffMultiplier: number; // For exponential/linear strategies
   retryableErrors?: string[]; // Specific error messages to retry
-  shouldRetry?: (error: any) => boolean; // Custom retry condition
+  shouldRetry?: (error: unknown) => boolean; // Custom retry condition
 }
 
 /**
@@ -28,7 +28,7 @@ export interface RetryConfig {
 export interface RetryResult<T> {
   success: boolean;
   result?: T;
-  error?: any;
+  error?: unknown;
   attempts: number;
   totalDelay: number;
 }
@@ -53,7 +53,7 @@ export class RetryExhaustedError extends Error {
   constructor(
     public readonly operationName: string,
     public readonly attempts: number,
-    public readonly lastError: any
+    public readonly lastError: unknown,
   ) {
     super(`Retry exhausted for ${operationName} after ${attempts} attempts`);
     this.name = 'RetryExhaustedError';
@@ -64,7 +64,7 @@ export class RetryExhaustedError extends Error {
 /**
  * Retry Service
  * Implements retry logic with various backoff strategies
- * 
+ *
  * Features:
  * - Multiple retry strategies (fixed, exponential, linear)
  * - Configurable retry conditions
@@ -72,17 +72,17 @@ export class RetryExhaustedError extends Error {
  * - Jitter support to prevent thundering herd
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class RetryService {
-  private stats = new Map<string, RetryStats>();
-  
-  private defaultConfig: RetryConfig = {
+  private readonly stats = new Map<string, RetryStats>();
+
+  private readonly defaultConfig: RetryConfig = {
     maxAttempts: 3,
     initialDelay: 1000,
     maxDelay: 30000,
     strategy: RetryStrategy.EXPONENTIAL,
-    backoffMultiplier: 2
+    backoffMultiplier: 2,
   };
 
   /**
@@ -91,25 +91,25 @@ export class RetryService {
   async execute<T>(
     operationName: string,
     fn: () => Promise<T>,
-    config?: Partial<RetryConfig>
+    config?: Partial<RetryConfig>,
   ): Promise<T> {
     const finalConfig = { ...this.defaultConfig, ...config };
-    let lastError: any;
-    let totalDelay = 0;
-    
+    let lastError: unknown;
+    let _totalDelay = 0;
+
     this.initStats(operationName);
 
     for (let attempt = 1; attempt <= finalConfig.maxAttempts; attempt++) {
       try {
         const result = await fn();
-        
+
         // Update stats on success
         this.updateStats(operationName, attempt, true);
-        
+
         return result;
       } catch (error) {
         lastError = error;
-        
+
         // Check if we should retry this error
         if (!this.shouldRetry(error, finalConfig)) {
           this.updateStats(operationName, attempt, false);
@@ -119,14 +119,14 @@ export class RetryService {
         // Don't delay after the last attempt
         if (attempt < finalConfig.maxAttempts) {
           const delay = this.calculateDelay(attempt, finalConfig);
-          totalDelay += delay;
-          
+          _totalDelay += delay;
+
           console.log(
             `[Retry:${operationName}] Attempt ${attempt}/${finalConfig.maxAttempts} failed. ` +
-            `Retrying in ${delay}ms...`,
-            { error: error instanceof Error ? error.message : error }
+              `Retrying in ${delay}ms...`,
+            { error: error instanceof Error ? error.message : error },
           );
-          
+
           await this.delay(delay);
         }
       }
@@ -136,7 +136,7 @@ export class RetryService {
     this.updateStats(operationName, finalConfig.maxAttempts, false);
     console.error(
       `[Retry:${operationName}] All ${finalConfig.maxAttempts} attempts failed`,
-      lastError
+      lastError,
     );
     throw new RetryExhaustedError(operationName, finalConfig.maxAttempts, lastError);
   }
@@ -147,13 +147,13 @@ export class RetryService {
   async executeWithExponentialBackoff<T>(
     operationName: string,
     fn: () => Promise<T>,
-    maxAttempts: number = 3,
-    initialDelay: number = 1000
+    maxAttempts = 3,
+    initialDelay = 1000,
   ): Promise<T> {
     return this.execute(operationName, fn, {
       maxAttempts,
       initialDelay,
-      strategy: RetryStrategy.EXPONENTIAL
+      strategy: RetryStrategy.EXPONENTIAL,
     });
   }
 
@@ -163,13 +163,13 @@ export class RetryService {
   async executeWithFixedDelay<T>(
     operationName: string,
     fn: () => Promise<T>,
-    maxAttempts: number = 3,
-    delay: number = 1000
+    maxAttempts = 3,
+    delay = 1000,
   ): Promise<T> {
     return this.execute(operationName, fn, {
       maxAttempts,
       initialDelay: delay,
-      strategy: RetryStrategy.FIXED
+      strategy: RetryStrategy.FIXED,
     });
   }
 
@@ -179,13 +179,13 @@ export class RetryService {
   async executeWithLinearBackoff<T>(
     operationName: string,
     fn: () => Promise<T>,
-    maxAttempts: number = 3,
-    initialDelay: number = 1000
+    maxAttempts = 3,
+    initialDelay = 1000,
   ): Promise<T> {
     return this.execute(operationName, fn, {
       maxAttempts,
       initialDelay,
-      strategy: RetryStrategy.LINEAR
+      strategy: RetryStrategy.LINEAR,
     });
   }
 
@@ -196,7 +196,7 @@ export class RetryService {
     if (operationName) {
       return this.stats.get(operationName) || this.createEmptyStats(operationName);
     }
-    
+
     const allStats: Record<string, RetryStats> = {};
     this.stats.forEach((stats, name) => {
       allStats[name] = stats;
@@ -249,7 +249,7 @@ export class RetryService {
     return Math.floor(delay);
   }
 
-  private shouldRetry(error: any, config: RetryConfig): boolean {
+  private shouldRetry(error: unknown, config: RetryConfig): boolean {
     // Use custom retry condition if provided
     if (config.shouldRetry) {
       return config.shouldRetry(error);
@@ -258,9 +258,7 @@ export class RetryService {
     // Check if error message matches retryable errors
     if (config.retryableErrors && config.retryableErrors.length > 0) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      return config.retryableErrors.some(retryable => 
-        errorMessage.includes(retryable)
-      );
+      return config.retryableErrors.some((retryable) => errorMessage.includes(retryable));
     }
 
     // Default: retry all errors except specific non-retryable ones
@@ -271,16 +269,14 @@ export class RetryService {
       'unauthorized',
       'forbidden',
       'not found',
-      'bad request'
+      'bad request',
     ];
 
-    return !nonRetryablePatterns.some(pattern => 
-      errorMessage.toLowerCase().includes(pattern)
-    );
+    return !nonRetryablePatterns.some((pattern) => errorMessage.toLowerCase().includes(pattern));
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private initStats(operationName: string): void {
@@ -295,7 +291,7 @@ export class RetryService {
       totalAttempts: 0,
       successfulRetries: 0,
       failedRetries: 0,
-      averageAttempts: 0
+      averageAttempts: 0,
     };
   }
 
@@ -322,22 +318,14 @@ export class RetryService {
  * Can be used as a method decorator to add retry logic
  */
 export function Retry(config?: Partial<RetryConfig>) {
-  return function (
-    target: any,
-    propertyKey: string,
-    descriptor: PropertyDescriptor
-  ) {
+  return function (target: object, propertyKey: string, descriptor: PropertyDescriptor) {
     const originalMethod = descriptor.value;
 
-    descriptor.value = async function (...args: any[]) {
+    descriptor.value = async function (...args: unknown[]) {
       const retryService = new RetryService();
       const operationName = `${target.constructor.name}.${propertyKey}`;
-      
-      return retryService.execute(
-        operationName,
-        () => originalMethod.apply(this, args),
-        config
-      );
+
+      return retryService.execute(operationName, () => originalMethod.apply(this, args), config);
     };
 
     return descriptor;

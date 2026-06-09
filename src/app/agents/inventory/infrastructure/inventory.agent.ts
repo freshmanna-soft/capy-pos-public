@@ -1,7 +1,7 @@
-import { Injectable, Inject } from '@angular/core';
-import { Observable, Subject, BehaviorSubject } from 'rxjs';
-import { BaseAgent } from '../../base/base-agent';
-import { IAgentMessage, IAgentResponse } from '../../base/base-agent.interface';
+import { Injectable, inject, InjectionToken } from '@angular/core';
+import { Observable, Subject } from 'rxjs';
+import { BaseAgent } from '@app/agents/base/base-agent';
+import { IAgentMessage, IAgentResponse } from '@app/agents/base/base-agent.interface';
 import {
   IInventoryAgent,
   InventoryMessageType,
@@ -13,9 +13,12 @@ import {
   IStockAuditResult,
   IBulkStockUpdate,
   IStockTransferRequest,
-} from '../domain/inventory-agent.interface';
-import { IProductRepository } from '../../../core/domain/interfaces/product.repository.interface';
-import { Product } from '../../../core/domain/entities/product.entity';
+} from '@app/agents/inventory/domain/inventory-agent.interface';
+import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
+
+export const PRODUCT_REPOSITORY_TOKEN = new InjectionToken<IProductRepository>(
+  'IProductRepository',
+);
 
 /**
  * Inventory Agent Implementation
@@ -26,18 +29,14 @@ import { Product } from '../../../core/domain/entities/product.entity';
   providedIn: 'root',
 })
 export class InventoryAgent extends BaseAgent implements IInventoryAgent {
+  private readonly productRepository = inject<IProductRepository>(PRODUCT_REPOSITORY_TOKEN);
+
   private readonly _lowStockAlerts$ = new Subject<ILowStockAlert>();
   private readonly _reorderSuggestions$ = new Subject<IReorderSuggestion>();
   private _monitoringInterval?: number;
 
-  constructor(
-    @Inject('IProductRepository') private readonly productRepository: IProductRepository
-  ) {
-    super(
-      'inventory-agent',
-      'Inventory Agent',
-      'Manages product catalog and stock levels'
-    );
+  constructor() {
+    super('inventory-agent', 'Inventory Agent', 'Manages product catalog and stock levels');
   }
 
   /**
@@ -56,10 +55,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
   protected async onStart(): Promise<void> {
     console.log('Starting Inventory Agent...');
     // Start monitoring stock levels every 5 minutes
-    this._monitoringInterval = window.setInterval(
-      () => this.monitorStockLevels(),
-      5 * 60 * 1000
-    );
+    this._monitoringInterval = +setInterval(() => this.monitorStockLevels(), 5 * 60 * 1000);
   }
 
   /**
@@ -77,18 +73,16 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
   /**
    * Handle incoming messages
    */
-  protected async handleMessage(
-    message: IAgentMessage
-  ): Promise<IAgentResponse> {
+  protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
     switch (message.type) {
       case InventoryMessageType.CHECK_STOCK:
-        return this.checkStock(message.payload);
+        return this.checkStock(message.payload as IStockCheckRequest);
 
       case InventoryMessageType.UPDATE_STOCK:
-        return this.updateStock(message.payload);
+        return this.updateStock(message.payload as IStockUpdateRequest);
 
       case InventoryMessageType.ADJUST_STOCK:
-        return this.adjustStock(message.payload);
+        return this.adjustStock(message.payload as IStockAdjustmentRequest);
 
       case InventoryMessageType.LOW_STOCK_ALERT:
         return this.getLowStockAlerts();
@@ -100,10 +94,10 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
         return this.performStockAudit();
 
       case InventoryMessageType.BULK_UPDATE:
-        return this.bulkUpdateStock(message.payload);
+        return this.bulkUpdateStock(message.payload as IBulkStockUpdate);
 
       case InventoryMessageType.STOCK_TRANSFER:
-        return this.transferStock(message.payload);
+        return this.transferStock(message.payload as IStockTransferRequest);
 
       default:
         return {
@@ -164,10 +158,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
       }
 
       // Update stock
-      await this.productRepository.updateStock(
-        request.productId,
-        request.quantity
-      );
+      await this.productRepository.updateStock(request.productId, request.quantity);
 
       // Check if low stock alert needed
       if (request.quantity <= product.lowStockThreshold) {
@@ -202,9 +193,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
   /**
    * Adjust stock with reason
    */
-  async adjustStock(
-    request: IStockAdjustmentRequest
-  ): Promise<IAgentResponse> {
+  async adjustStock(request: IStockAdjustmentRequest): Promise<IAgentResponse> {
     try {
       const product = await this.productRepository.findById(request.productId);
 
@@ -216,10 +205,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
       }
 
       // Adjust stock
-      await this.productRepository.adjustStock(
-        request.productId,
-        request.adjustment
-      );
+      await this.productRepository.adjustStock(request.productId, request.adjustment);
 
       const newStock = product.stock + request.adjustment;
 
@@ -291,29 +277,27 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
     try {
       const lowStockProducts = await this.productRepository.findLowStock();
 
-      const suggestions: IReorderSuggestion[] = lowStockProducts.map(
-        (product) => {
-          const stockRatio = product.stock / product.lowStockThreshold;
-          let priority: 'HIGH' | 'MEDIUM' | 'LOW' = 'LOW';
+      const suggestions: IReorderSuggestion[] = lowStockProducts.map((product) => {
+        const stockRatio = product.stock / product.lowStockThreshold;
+        let priority: 'HIGH' | 'MEDIUM' | 'LOW' = 'LOW';
 
-          if (product.stock === 0) {
-            priority = 'HIGH';
-          } else if (stockRatio < 0.5) {
-            priority = 'HIGH';
-          } else if (stockRatio < 1) {
-            priority = 'MEDIUM';
-          }
-
-          return {
-            productId: product.id,
-            productName: product.name,
-            currentStock: product.stock,
-            averageDailySales: 0, // TODO: Calculate from transaction history
-            suggestedQuantity: product.reorderQuantity || product.lowStockThreshold * 2,
-            priority,
-          };
+        if (product.stock === 0) {
+          priority = 'HIGH';
+        } else if (stockRatio < 0.5) {
+          priority = 'HIGH';
+        } else if (stockRatio < 1) {
+          priority = 'MEDIUM';
         }
-      );
+
+        return {
+          productId: product.id,
+          productName: product.name,
+          currentStock: product.stock,
+          averageDailySales: 0, // TODO: Calculate from transaction history
+          suggestedQuantity: product.reorderQuantity || product.lowStockThreshold * 2,
+          priority,
+        };
+      });
 
       // Sort by priority
       suggestions.sort((a, b) => {
@@ -349,7 +333,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
 
       const totalValue = allProducts.reduce(
         (sum, product) => sum + product.price * product.stock,
-        0
+        0,
       );
 
       const alerts: ILowStockAlert[] = lowStockProducts.map((product) => ({
@@ -359,16 +343,14 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
         reorderQuantity: product.reorderQuantity || 0,
       }));
 
-      const suggestions: IReorderSuggestion[] = lowStockProducts.map(
-        (product) => ({
-          productId: product.id,
-          productName: product.name,
-          currentStock: product.stock,
-          averageDailySales: 0,
-          suggestedQuantity: product.reorderQuantity || product.lowStockThreshold * 2,
-          priority: product.stock === 0 ? 'HIGH' : 'MEDIUM',
-        })
-      );
+      const suggestions: IReorderSuggestion[] = lowStockProducts.map((product) => ({
+        productId: product.id,
+        productName: product.name,
+        currentStock: product.stock,
+        averageDailySales: 0,
+        suggestedQuantity: product.reorderQuantity || product.lowStockThreshold * 2,
+        priority: product.stock === 0 ? 'HIGH' : 'MEDIUM',
+      }));
 
       const auditResult: IStockAuditResult = {
         totalProducts: allProducts.length,
@@ -436,9 +418,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
   /**
    * Transfer stock between locations
    */
-  async transferStock(
-    request: IStockTransferRequest
-  ): Promise<IAgentResponse> {
+  async transferStock(request: IStockTransferRequest): Promise<IAgentResponse> {
     try {
       // For now, just adjust the stock
       // In a multi-location system, this would transfer between locations
@@ -452,7 +432,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
       return {
         success: result.success,
         data: {
-          ...result.data,
+          ...(result.data as Record<string, unknown>),
           fromLocation: request.fromLocation,
           toLocation: request.toLocation,
           quantity: request.quantity,

@@ -1,50 +1,54 @@
-import { Injectable } from '@angular/core';
-import { BaseDexieRepository } from './base-dexie.repository';
-import { Product } from '../../domain/entities/product.entity';
-import { IProductRepository } from '../../domain/interfaces/product.repository.interface';
-import { DexieDatabase, IProductDB } from '../database/dexie-database.service';
+import { Injectable, inject } from '@angular/core';
+import { BaseDexieRepository } from '@core/infrastructure/repositories/base-dexie.repository';
+import { Product } from '@core/domain/entities/product.entity';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
+import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
+import { DexieDatabase, IProductDB } from '@core/infrastructure/database/dexie-database.service';
 
 /**
  * Dexie Product Repository
  * Implements product-specific operations using Dexie ORM
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
-export class DexieProductRepository 
-  extends BaseDexieRepository<Product, IProductDB> 
-  implements IProductRepository {
+export class DexieProductRepository
+  extends BaseDexieRepository<Product, IProductDB>
+  implements IProductRepository
+{
+  private readonly db: DexieDatabase;
 
-  constructor(private db: DexieDatabase) {
+  constructor() {
+    const db = inject(DexieDatabase);
+
     super(db.products);
+
+    this.db = db;
   }
 
   /**
    * Map database record to Product entity
    */
   protected mapToEntity(record: IProductDB): Product {
-    return new Product(
-      record.id,
-      record.name,
-      record.price,
-      record.sku,
-      record.category,
-      record.quantity, // maps to stock in Product entity
-      record.description,
-      record.imageUrl,
-      record.barcode,
-      undefined, // emoji not in DB
-      10, // lowStockThreshold - default value
-      20, // reorderQuantity - default value
-      0,  // cost - default value
-      true, // isActive - default value
-      new Date(record.createdAt),
-      new Date(record.updatedAt),
-      record.createdBy,
-      record.updatedBy,
-      record.deletedAt ? new Date(record.deletedAt) : undefined,
-      record.deletedBy
-    );
+    const builder = new ProductBuilder()
+      .withId(record.id)
+      .withName(record.name)
+      .withPrice(record.price)
+      .withSku(record.sku)
+      .withCategory(record.category)
+      .withStock(record.quantity)
+      .withCreatedAt(new Date(record.createdAt))
+      .withUpdatedAt(new Date(record.updatedAt));
+
+    if (record.description) builder.withDescription(record.description);
+    if (record.imageUrl) builder.withImageUrl(record.imageUrl);
+    if (record.barcode) builder.withBarcode(record.barcode);
+    if (record.createdBy) builder.withCreatedBy(record.createdBy);
+    if (record.updatedBy) builder.withUpdatedBy(record.updatedBy);
+    if (record.deletedAt) builder.withDeletedAt(new Date(record.deletedAt));
+    if (record.deletedBy) builder.withDeletedBy(record.deletedBy);
+
+    return builder.build();
   }
 
   /**
@@ -72,7 +76,7 @@ export class DexieProductRepository
       createdBy: entity.createdBy,
       updatedBy: entity.updatedBy,
       deletedAt: entity.deletedAt,
-      deletedBy: entity.deletedBy
+      deletedBy: entity.deletedBy,
     };
   }
 
@@ -87,38 +91,41 @@ export class DexieProductRepository
    * Find active products
    */
   async findActive(): Promise<Product[]> {
-    return this.findByIndexedField('isActive', true);
+    return this.findByIndexedField('isActive', 1);
   }
 
   /**
    * Find products by category and active status
    */
   async findByCategoryAndStatus(category: string, isActive: boolean): Promise<Product[]> {
-    return this.findByCompoundIndex(['category', 'isActive'], [category, isActive]);
+    return this.findByCompoundIndex(['category', 'isActive'], [category, isActive] as unknown as [
+      import('dexie').IndexableType,
+      import('dexie').IndexableType,
+    ]);
   }
 
   /**
    * Search products by name, SKU, or barcode
    */
-  async search(query: string, limit: number = 50): Promise<Product[]> {
+  async search(query: string, limit = 50): Promise<Product[]> {
     const lowerQuery = query.toLowerCase();
-    
+
     const records = await this.table
-      .filter(record => {
+      .filter((record) => {
         if (record.deletedAt) return false;
-        
+
         const name = record.name.toLowerCase();
         const sku = record.sku.toLowerCase();
         const barcode = (record.barcode || '').toLowerCase();
-        
-        return name.includes(lowerQuery) || 
-               sku.includes(lowerQuery) || 
-               barcode.includes(lowerQuery);
+
+        return (
+          name.includes(lowerQuery) || sku.includes(lowerQuery) || barcode.includes(lowerQuery)
+        );
       })
       .limit(limit)
       .toArray();
-    
-    return records.map(record => this.mapToEntity(record));
+
+    return records.map((record) => this.mapToEntity(record));
   }
 
   /**
@@ -126,13 +133,13 @@ export class DexieProductRepository
    */
   async findLowStock(): Promise<Product[]> {
     const records = await this.table
-      .filter(record => {
+      .filter((record) => {
         if (record.deletedAt) return false;
         return record.quantity <= 10; // default threshold
       })
       .toArray();
-    
-    return records.map(record => this.mapToEntity(record));
+
+    return records.map((record) => this.mapToEntity(record));
   }
 
   /**
@@ -161,10 +168,10 @@ export class DexieProductRepository
     // Calculate the adjustment needed
     const adjustment = quantity - product.stock;
     product.updateStock(adjustment);
-    
+
     await this.table.update(productId, {
       quantity: product.stock,
-      updatedAt: product.updatedAt
+      updatedAt: product.updatedAt,
     });
 
     return product;
@@ -180,10 +187,10 @@ export class DexieProductRepository
     }
 
     product.updateStock(adjustment);
-    
+
     await this.table.update(productId, {
       quantity: product.stock,
-      updatedAt: product.updatedAt
+      updatedAt: product.updatedAt,
     });
 
     return product;
@@ -199,16 +206,16 @@ export class DexieProductRepository
     }
 
     product.updatePrice(price);
-    
+
     const updateData: Partial<IProductDB> = {
       price: product.price,
-      updatedAt: product.updatedAt
+      updatedAt: product.updatedAt,
     };
-    
+
     if (cost !== undefined) {
       updateData.cost = cost;
     }
-    
+
     await this.table.update(productId, updateData);
 
     return product;
@@ -225,12 +232,10 @@ export class DexieProductRepository
    * Get all categories
    */
   async getCategories(): Promise<string[]> {
-    const records = await this.table
-      .filter(record => !record.deletedAt)
-      .toArray();
-    
-    const categories = new Set(records.map(r => r.category));
-    return Array.from(categories).sort();
+    const records = await this.table.filter((record) => !record.deletedAt).toArray();
+
+    const categories = new Set(records.map((r) => r.category));
+    return Array.from(categories).sort((a, b) => a.localeCompare(b));
   }
 
   /**
@@ -250,7 +255,7 @@ export class DexieProductRepository
   /**
    * Get top selling products (placeholder - requires transaction data)
    */
-  async getTopSelling(limit: number = 10): Promise<Product[]> {
+  async getTopSelling(limit = 10): Promise<Product[]> {
     // This would require joining with transaction_items table
     // For now, return products sorted by name
     return this.findSorted('name', 'asc', limit);

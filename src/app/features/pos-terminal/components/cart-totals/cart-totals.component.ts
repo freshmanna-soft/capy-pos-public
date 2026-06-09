@@ -1,6 +1,6 @@
 import { Component, ChangeDetectionStrategy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { CalculateCartTotalsUseCase } from '../../../../core/application/use-cases/calculate-cart-totals.use-case';
+
+import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
 
 /**
  * Cart Totals Component
@@ -24,7 +24,7 @@ import { CalculateCartTotalsUseCase } from '../../../../core/application/use-cas
 @Component({
   selector: 'app-cart-totals',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (!totalsUseCase.totals().isEmpty) {
@@ -78,81 +78,83 @@ import { CalculateCartTotalsUseCase } from '../../../../core/application/use-cas
       </div>
     }
   `,
-  styles: [`
-    .cart-totals {
-      padding: 1rem 1.5rem;
-      background: #f9fafb;
-      border-top: 2px solid #e5e7eb;
-      border-radius: 0 0 8px 8px;
-    }
+  styles: [
+    `
+      .cart-totals {
+        padding: 1rem 1.5rem;
+        background: #f9fafb;
+        border-top: 2px solid #e5e7eb;
+        border-radius: 0 0 8px 8px;
+      }
 
-    .totals-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.5rem 0;
-      font-size: 0.875rem;
-    }
+      .totals-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0;
+        font-size: 0.875rem;
+      }
 
-    .totals-label {
-      color: #6b7280;
-      font-weight: 500;
-    }
+      .totals-label {
+        color: #6b7280;
+        font-weight: 500;
+      }
 
-    .totals-value {
-      color: #111827;
-      font-weight: 600;
-    }
+      .totals-value {
+        color: #111827;
+        font-weight: 600;
+      }
 
-    .discount-row {
-      background: #ecfdf5;
-      margin: 0.25rem -0.5rem;
-      padding: 0.5rem;
-      border-radius: 4px;
-    }
+      .discount-row {
+        background: #ecfdf5;
+        margin: 0.25rem -0.5rem;
+        padding: 0.5rem;
+        border-radius: 4px;
+      }
 
-    .discount-label {
-      color: #059669;
-    }
+      .discount-label {
+        color: #059669;
+      }
 
-    .discount-value {
-      color: #059669;
-      font-weight: 700;
-    }
+      .discount-value {
+        color: #059669;
+        font-weight: 700;
+      }
 
-    .totals-divider {
-      height: 1px;
-      background: #d1d5db;
-      margin: 0.5rem 0;
-    }
+      .totals-divider {
+        height: 1px;
+        background: #d1d5db;
+        margin: 0.5rem 0;
+      }
 
-    .total-row {
-      padding: 0.75rem 0;
-      font-size: 1.125rem;
-    }
+      .total-row {
+        padding: 0.75rem 0;
+        font-size: 1.125rem;
+      }
 
-    .total-row .totals-label {
-      color: #111827;
-      font-weight: 700;
-    }
+      .total-row .totals-label {
+        color: #111827;
+        font-weight: 700;
+      }
 
-    .total-value {
-      font-size: 1.25rem;
-      font-weight: 800;
-      color: #667eea;
-    }
+      .total-value {
+        font-size: 1.25rem;
+        font-weight: 800;
+        color: #667eea;
+      }
 
-    .item-count-row {
-      font-size: 0.75rem;
-      padding-top: 0.25rem;
-    }
+      .item-count-row {
+        font-size: 0.75rem;
+        padding-top: 0.25rem;
+      }
 
-    .item-count-row .totals-label,
-    .item-count-row .totals-value {
-      color: #9ca3af;
-      font-weight: 400;
-    }
-  `]
+      .item-count-row .totals-label,
+      .item-count-row .totals-value {
+        color: #9ca3af;
+        font-weight: 400;
+      }
+    `,
+  ],
 })
 export class CartTotalsComponent {
   readonly totalsUseCase = inject(CalculateCartTotalsUseCase);

@@ -1,15 +1,20 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Payment, PaymentMethod, PaymentStatus } from './payment.entity';
+import { Payment, PaymentMethod, PaymentStatus } from '@core/domain/entities/payment.entity';
 
 describe('Payment Entity', () => {
   let payment: Payment;
   const testId = 'payment-123';
   const testOrderId = 'order-456';
-  const testAmount = 100.00;
+  const testAmount = 100;
   const testMethod = PaymentMethod.CREDIT_CARD;
 
   beforeEach(() => {
-    payment = new Payment(testId, testOrderId, testAmount, testMethod);
+    payment = new Payment({
+      id: testId,
+      orderId: testOrderId,
+      amount: testAmount,
+      method: testMethod,
+    });
   });
 
   // Helper to create completed payment
@@ -31,15 +36,32 @@ describe('Payment Entity', () => {
       ['zero amount', testOrderId, 0, 'Payment amount must be greater than 0'],
       ['negative amount', testOrderId, -50, 'Payment amount must be greater than 0'],
     ])('should throw error for %s', (_, orderId, amount, expectedError) => {
-      expect(() => new Payment(testId, orderId, amount, testMethod)).toThrow(expectedError);
+      expect(
+        () =>
+          new Payment({
+            id: testId,
+            orderId: orderId as string,
+            amount: amount as number,
+            method: testMethod,
+          }),
+      ).toThrow(expectedError);
     });
 
     it.each([
       ['negative refunded', -10, 'Refunded amount cannot be negative'],
       ['exceeds payment', 150, 'Refunded amount cannot exceed payment amount'],
     ])('should throw error for %s amount', (_, refundedAmount, expectedError) => {
-      expect(() => 
-        new Payment(testId, testOrderId, testAmount, testMethod, PaymentStatus.PENDING, 'USD', refundedAmount)
+      expect(
+        () =>
+          new Payment({
+            id: testId,
+            orderId: testOrderId,
+            amount: testAmount,
+            method: testMethod,
+            status: PaymentStatus.PENDING,
+            currency: 'USD',
+            refundedAmount,
+          }),
       ).toThrow(expectedError);
     });
   });
@@ -47,8 +69,22 @@ describe('Payment Entity', () => {
   describe('Payment Lifecycle', () => {
     it.each([
       ['processing', () => payment.markAsProcessing('user-1'), PaymentStatus.PROCESSING],
-      ['completed', () => { payment.markAsProcessing(); payment.markAsCompleted('user-1'); }, PaymentStatus.COMPLETED],
-      ['failed', () => { payment.markAsProcessing(); payment.markAsFailed('Test', 'user-1'); }, PaymentStatus.FAILED],
+      [
+        'completed',
+        () => {
+          payment.markAsProcessing();
+          payment.markAsCompleted('user-1');
+        },
+        PaymentStatus.COMPLETED,
+      ],
+      [
+        'failed',
+        () => {
+          payment.markAsProcessing();
+          payment.markAsFailed('Test', 'user-1');
+        },
+        PaymentStatus.FAILED,
+      ],
     ])('should transition to %s', (_, action, expectedStatus) => {
       action();
       expect(payment.status).toBe(expectedStatus);
@@ -66,9 +102,27 @@ describe('Payment Entity', () => {
     });
 
     it.each([
-      ['process non-pending', () => { payment.markAsProcessing(); payment.markAsProcessing(); }, 'Can only process pending payments'],
-      ['complete non-processing', () => payment.markAsCompleted(), 'Can only complete processing payments'],
-      ['fail completed', () => { completePayment(payment); payment.markAsFailed('Test'); }, 'Cannot fail a completed payment'],
+      [
+        'process non-pending',
+        () => {
+          payment.markAsProcessing();
+          payment.markAsProcessing();
+        },
+        'Can only process pending payments',
+      ],
+      [
+        'complete non-processing',
+        () => payment.markAsCompleted(),
+        'Can only complete processing payments',
+      ],
+      [
+        'fail completed',
+        () => {
+          completePayment(payment);
+          payment.markAsFailed('Test');
+        },
+        'Cannot fail a completed payment',
+      ],
     ])('should throw error when trying to %s', (_, action, expectedError) => {
       expect(action).toThrow(expectedError);
     });
@@ -93,11 +147,32 @@ describe('Payment Entity', () => {
     });
 
     it.each([
-      ['non-completed', () => new Payment(testId, testOrderId, testAmount, testMethod).refund(50), 'Can only refund completed payments'],
+      [
+        'non-completed',
+        () =>
+          new Payment({
+            id: testId,
+            orderId: testOrderId,
+            amount: testAmount,
+            method: testMethod,
+          }).refund(50),
+        'Can only refund completed payments',
+      ],
       ['zero amount', () => payment.refund(0), 'Refund amount must be greater than 0'],
       ['negative amount', () => payment.refund(-10), 'Refund amount must be greater than 0'],
-      ['exceeds payment', () => payment.refund(150), 'Total refund amount cannot exceed payment amount'],
-      ['total exceeds', () => { payment.refund(80); payment.refund(30); }, 'Total refund amount cannot exceed payment amount'],
+      [
+        'exceeds payment',
+        () => payment.refund(150),
+        'Total refund amount cannot exceed payment amount',
+      ],
+      [
+        'total exceeds',
+        () => {
+          payment.refund(80);
+          payment.refund(30);
+        },
+        'Total refund amount cannot exceed payment amount',
+      ],
     ])('should throw error for %s', (_, action, expectedError) => {
       expect(action).toThrow(expectedError);
     });
@@ -105,13 +180,25 @@ describe('Payment Entity', () => {
 
   describe('Status Checks', () => {
     it.each([
-      ['pending', PaymentStatus.PENDING, { isPending: true, isProcessing: false, isCompleted: false }],
-      ['processing', PaymentStatus.PROCESSING, { isPending: false, isProcessing: true, isCompleted: false }],
-      ['completed', PaymentStatus.COMPLETED, { isPending: false, isProcessing: false, isCompleted: true }],
+      [
+        'pending',
+        PaymentStatus.PENDING,
+        { isPending: true, isProcessing: false, isCompleted: false },
+      ],
+      [
+        'processing',
+        PaymentStatus.PROCESSING,
+        { isPending: false, isProcessing: true, isCompleted: false },
+      ],
+      [
+        'completed',
+        PaymentStatus.COMPLETED,
+        { isPending: false, isProcessing: false, isCompleted: true },
+      ],
     ])('should check %s status', (_, status, expected) => {
       if (status === PaymentStatus.PROCESSING) payment.markAsProcessing();
       if (status === PaymentStatus.COMPLETED) completePayment(payment);
-      
+
       expect(payment.isPending()).toBe(expected.isPending);
       expect(payment.isProcessing()).toBe(expected.isProcessing);
       expect(payment.isCompleted()).toBe(expected.isCompleted);
@@ -128,15 +215,20 @@ describe('Payment Entity', () => {
 
   describe('Card Details & Utilities', () => {
     it('should mask card number', () => {
-      const cardPayment = new Payment(testId, testOrderId, testAmount, testMethod, 
-        PaymentStatus.PENDING, 'USD', 0, new Date(), new Date(), undefined, undefined, 
-        undefined, undefined, undefined, '4242', 'Visa');
+      const cardPayment = new Payment({
+        id: testId,
+        orderId: testOrderId,
+        amount: testAmount,
+        method: testMethod,
+        cardLast4: '4242',
+        cardBrand: 'Visa',
+      });
       expect(cardPayment.getMaskedCardNumber()).toBe('**** **** **** 4242');
     });
 
     it('should calculate payment duration', async () => {
       payment.markAsProcessing();
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       payment.markAsCompleted();
       expect(payment.getPaymentDuration()).toBeGreaterThan(0);
     });
@@ -144,7 +236,7 @@ describe('Payment Entity', () => {
     it('should clone and serialize', () => {
       const cloned = payment.clone();
       expect(cloned.id).toBe(payment.id);
-      
+
       const json = payment.toJSON();
       const restored = Payment.fromJSON(json);
       expect(restored.id).toBe(payment.id);

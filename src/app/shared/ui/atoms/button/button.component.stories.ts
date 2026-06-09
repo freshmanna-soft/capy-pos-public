@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/angular';
-import { ButtonComponent } from './button.component';
+import { ButtonComponent } from '@shared/ui/atoms/button/button.component';
 
 /**
  * Button Component Stories
@@ -60,7 +60,8 @@ export const Primary: Story = {
   },
   render: (args) => ({
     props: args,
-    template: '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Primary Button</app-button>',
+    template:
+      '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Primary Button</app-button>',
   }),
 };
 
@@ -76,7 +77,8 @@ export const Secondary: Story = {
   },
   render: (args) => ({
     props: args,
-    template: '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Secondary Button</app-button>',
+    template:
+      '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Secondary Button</app-button>',
   }),
 };
 
@@ -92,7 +94,8 @@ export const Danger: Story = {
   },
   render: (args) => ({
     props: args,
-    template: '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Delete</app-button>',
+    template:
+      '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Delete</app-button>',
   }),
 };
 
@@ -108,7 +111,8 @@ export const Success: Story = {
   },
   render: (args) => ({
     props: args,
-    template: '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Save</app-button>',
+    template:
+      '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Save</app-button>',
   }),
 };
 
@@ -124,7 +128,8 @@ export const Small: Story = {
   },
   render: (args) => ({
     props: args,
-    template: '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Small Button</app-button>',
+    template:
+      '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Small Button</app-button>',
   }),
 };
 
@@ -140,7 +145,8 @@ export const Large: Story = {
   },
   render: (args) => ({
     props: args,
-    template: '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Large Button</app-button>',
+    template:
+      '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Large Button</app-button>',
   }),
 };
 
@@ -156,7 +162,8 @@ export const Disabled: Story = {
   },
   render: (args) => ({
     props: args,
-    template: '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Disabled Button</app-button>',
+    template:
+      '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Disabled Button</app-button>',
   }),
 };
 
@@ -172,7 +179,8 @@ export const Loading: Story = {
   },
   render: (args) => ({
     props: args,
-    template: '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Loading...</app-button>',
+    template:
+      '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading">Loading...</app-button>',
   }),
 };
 
@@ -189,7 +197,8 @@ export const FullWidth: Story = {
   },
   render: (args) => ({
     props: args,
-    template: '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading" [fullWidth]="fullWidth">Full Width Button</app-button>',
+    template:
+      '<app-button [variant]="variant" [size]="size" [disabled]="disabled" [loading]="loading" [fullWidth]="fullWidth">Full Width Button</app-button>',
   }),
 };
 

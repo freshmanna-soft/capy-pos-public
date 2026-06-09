@@ -3,8 +3,8 @@ import {
   UpdateDto,
   ResponseDto,
   FilterDto,
-  BulkOperationDto
-} from './base.dto';
+  BulkOperationDto,
+} from '@core/application/dtos/base.dto';
 
 /**
  * Product Data Transfer Objects
@@ -41,23 +41,24 @@ export class CreateProductDto implements CreateDto, ProductData {
     public description?: string,
     public imageUrl?: string,
     public barcode?: string,
-    public emoji?: string
+    public emoji?: string,
   ) {}
 
   /**
    * Factory method to create from plain object
    */
-  static fromPlain(data: any): CreateProductDto {
+  static fromPlain(data: unknown): CreateProductDto {
+    const d = data as Record<string, unknown>;
     return new CreateProductDto(
-      data.name,
-      data.price,
-      data.sku,
-      data.category,
-      data.stock,
-      data.description,
-      data.imageUrl,
-      data.barcode,
-      data.emoji
+      d['name'] as string,
+      d['price'] as number,
+      d['sku'] as string,
+      d['category'] as string,
+      d['stock'] as number,
+      d['description'] as string | undefined,
+      d['imageUrl'] as string | undefined,
+      d['barcode'] as string | undefined,
+      d['emoji'] as string | undefined,
     );
   }
 }
@@ -77,31 +78,32 @@ export class UpdateProductDto implements UpdateDto {
     public description?: string,
     public imageUrl?: string,
     public barcode?: string,
-    public emoji?: string
+    public emoji?: string,
   ) {}
 
   /**
    * Factory method to create from plain object
    */
-  static fromPlain(data: any): UpdateProductDto {
+  static fromPlain(data: unknown): UpdateProductDto {
+    const d = data as Record<string, unknown>;
     return new UpdateProductDto(
-      data.name,
-      data.price,
-      data.sku,
-      data.category,
-      data.stock,
-      data.description,
-      data.imageUrl,
-      data.barcode,
-      data.emoji
+      d['name'] as string | undefined,
+      d['price'] as number | undefined,
+      d['sku'] as string | undefined,
+      d['category'] as string | undefined,
+      d['stock'] as number | undefined,
+      d['description'] as string | undefined,
+      d['imageUrl'] as string | undefined,
+      d['barcode'] as string | undefined,
+      d['emoji'] as string | undefined,
     );
   }
 
   /**
-   * Check if DTO has any updates
+   * Check if DTO has unknown updates
    */
   hasUpdates(): boolean {
-    return Object.values(this).some(value => value !== undefined);
+    return Object.values(this).some((value) => value !== undefined);
   }
 }
 
@@ -127,30 +129,31 @@ export class ProductResponseDto implements ResponseDto, ProductData {
     public createdBy?: string,
     public updatedBy?: string,
     public deletedAt?: string,
-    public deletedBy?: string
+    public deletedBy?: string,
   ) {}
 
   /**
    * Factory method to create from plain object
    */
-  static fromPlain(data: any): ProductResponseDto {
+  static fromPlain(data: unknown): ProductResponseDto {
+    const d = data as Record<string, unknown>;
     return new ProductResponseDto(
-      data.id,
-      data.name,
-      data.price,
-      data.sku,
-      data.category,
-      data.stock,
-      data.createdAt,
-      data.updatedAt,
-      data.description,
-      data.imageUrl,
-      data.barcode,
-      data.emoji,
-      data.createdBy,
-      data.updatedBy,
-      data.deletedAt,
-      data.deletedBy
+      d['id'] as string,
+      d['name'] as string,
+      d['price'] as number,
+      d['sku'] as string,
+      d['category'] as string,
+      d['stock'] as number,
+      d['createdAt'] as string,
+      d['updatedAt'] as string,
+      d['description'] as string | undefined,
+      d['imageUrl'] as string | undefined,
+      d['barcode'] as string | undefined,
+      d['emoji'] as string | undefined,
+      d['createdBy'] as string | undefined,
+      d['updatedBy'] as string | undefined,
+      d['deletedAt'] as string | undefined,
+      d['deletedBy'] as string | undefined,
     );
   }
 
@@ -184,24 +187,25 @@ export class ProductFilterDto implements FilterDto {
     public minPrice?: number,
     public maxPrice?: number,
     public inStock?: boolean,
-    public sku?: string
+    public sku?: string,
   ) {}
 
   /**
    * Factory method to create from plain object
    */
-  static fromPlain(data: any): ProductFilterDto {
+  static fromPlain(data: unknown): ProductFilterDto {
+    const d = data as Record<string, unknown>;
     return new ProductFilterDto(
-      data.searchTerm,
-      data.limit,
-      data.offset,
-      data.sortBy,
-      data.sortOrder,
-      data.category,
-      data.minPrice,
-      data.maxPrice,
-      data.inStock,
-      data.sku
+      d['searchTerm'] as string | undefined,
+      d['limit'] as number | undefined,
+      d['offset'] as number | undefined,
+      d['sortBy'] as string | undefined,
+      d['sortOrder'] as 'asc' | 'desc' | undefined,
+      d['category'] as string | undefined,
+      d['minPrice'] as number | undefined,
+      d['maxPrice'] as number | undefined,
+      d['inStock'] as boolean | undefined,
+      d['sku'] as string | undefined,
     );
   }
 
@@ -230,8 +234,11 @@ export class BulkProductDto implements BulkOperationDto<CreateProductDto> {
   /**
    * Factory method to create from plain object
    */
-  static fromPlain(data: any): BulkProductDto {
-    const items = data.items.map((item: any) => CreateProductDto.fromPlain(item));
+  static fromPlain(data: unknown): BulkProductDto {
+    const d = data as Record<string, unknown>;
+    const items = (d['items'] as unknown[]).map((item: unknown) =>
+      CreateProductDto.fromPlain(item),
+    );
     return new BulkProductDto(items);
   }
 
@@ -251,20 +258,23 @@ export class BulkProductUpdateDto implements BulkOperationDto<{
   data: UpdateProductDto;
 }> {
   constructor(
-    public items: Array<{
+    public items: {
       id: string;
       data: UpdateProductDto;
-    }>
+    }[],
   ) {}
 
   /**
    * Factory method to create from plain object
    */
-  static fromPlain(data: any): BulkProductUpdateDto {
-    const items = data.items.map((item: any) => ({
-      id: item.id,
-      data: UpdateProductDto.fromPlain(item.data)
-    }));
+  static fromPlain(data: unknown): BulkProductUpdateDto {
+    const d = data as Record<string, unknown>;
+    const items = (d['items'] as Record<string, unknown>[]).map(
+      (item: Record<string, unknown>) => ({
+        id: item['id'] as string,
+        data: UpdateProductDto.fromPlain(item['data']),
+      }),
+    );
     return new BulkProductUpdateDto(items);
   }
 

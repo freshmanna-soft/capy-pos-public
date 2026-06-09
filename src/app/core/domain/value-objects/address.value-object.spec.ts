@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Address, AddressComponents } from './address.value-object';
+import { Address, AddressComponents } from '@core/domain/value-objects/address.value-object';
 
 describe('Address Value Object', () => {
   const validUSAddress: AddressComponents = {
@@ -7,7 +7,7 @@ describe('Address Value Object', () => {
     city: 'San Francisco',
     state: 'CA',
     postalCode: '94102',
-    country: 'USA'
+    country: 'USA',
   };
 
   const validUKAddress: AddressComponents = {
@@ -15,7 +15,7 @@ describe('Address Value Object', () => {
     city: 'London',
     state: 'Greater London',
     postalCode: 'SW1A 2AA',
-    country: 'UK'
+    country: 'UK',
   };
 
   const validCanadaAddress: AddressComponents = {
@@ -23,7 +23,7 @@ describe('Address Value Object', () => {
     city: 'Toronto',
     state: 'ON',
     postalCode: 'M5H 2N2',
-    country: 'Canada'
+    country: 'Canada',
   };
 
   describe('Constructor and Validation', () => {
@@ -52,7 +52,7 @@ describe('Address Value Object', () => {
         city: '  San Francisco  ',
         state: '  CA  ',
         postalCode: '  94102  ',
-        country: '  USA  '
+        country: '  USA  ',
       });
       expect(address.street).toBe('123 Main St');
       expect(address.city).toBe('San Francisco');
@@ -67,25 +67,37 @@ describe('Address Value Object', () => {
     });
 
     it('should throw error for null or undefined components', () => {
-      expect(() => new Address(null as any)).toThrow('Address components must be an object');
-      expect(() => new Address(undefined as any)).toThrow('Address components must be an object');
+      expect(() => new Address(null as unknown)).toThrow('Address components must be an object');
+      expect(() => new Address(undefined as unknown)).toThrow(
+        'Address components must be an object',
+      );
     });
 
     it('should throw error for non-object components', () => {
-      expect(() => new Address('invalid' as any)).toThrow('Address components must be an object');
-      expect(() => new Address(123 as any)).toThrow('Address components must be an object');
+      expect(() => new Address('invalid' as unknown)).toThrow(
+        'Address components must be an object',
+      );
+      expect(() => new Address(123 as unknown)).toThrow('Address components must be an object');
     });
 
     describe('Street Validation', () => {
       it('should throw error for missing street', () => {
-        expect(() => new Address({ ...validUSAddress, street: '' })).toThrow('Street address is required');
-        expect(() => new Address({ ...validUSAddress, street: '   ' })).toThrow('Street address is required');
-        expect(() => new Address({ ...validUSAddress, street: null as any })).toThrow('Street address is required');
+        expect(() => new Address({ ...validUSAddress, street: '' })).toThrow(
+          'Street address is required',
+        );
+        expect(() => new Address({ ...validUSAddress, street: '   ' })).toThrow(
+          'Street address is required',
+        );
+        expect(() => new Address({ ...validUSAddress, street: null as unknown })).toThrow(
+          'Street address is required',
+        );
       });
 
       it('should throw error for street exceeding 200 characters', () => {
         const longStreet = 'A'.repeat(201);
-        expect(() => new Address({ ...validUSAddress, street: longStreet })).toThrow('Street address cannot exceed 200 characters');
+        expect(() => new Address({ ...validUSAddress, street: longStreet })).toThrow(
+          'Street address cannot exceed 200 characters',
+        );
       });
 
       it('should accept street with 200 characters', () => {
@@ -98,12 +110,16 @@ describe('Address Value Object', () => {
       it('should throw error for missing city', () => {
         expect(() => new Address({ ...validUSAddress, city: '' })).toThrow('City is required');
         expect(() => new Address({ ...validUSAddress, city: '   ' })).toThrow('City is required');
-        expect(() => new Address({ ...validUSAddress, city: null as any })).toThrow('City is required');
+        expect(() => new Address({ ...validUSAddress, city: null as unknown })).toThrow(
+          'City is required',
+        );
       });
 
       it('should throw error for city exceeding 100 characters', () => {
         const longCity = 'A'.repeat(101);
-        expect(() => new Address({ ...validUSAddress, city: longCity })).toThrow('City cannot exceed 100 characters');
+        expect(() => new Address({ ...validUSAddress, city: longCity })).toThrow(
+          'City cannot exceed 100 characters',
+        );
       });
 
       it('should accept city with 100 characters', () => {
@@ -114,14 +130,22 @@ describe('Address Value Object', () => {
 
     describe('State Validation', () => {
       it('should throw error for missing state', () => {
-        expect(() => new Address({ ...validUSAddress, state: '' })).toThrow('State/Province is required');
-        expect(() => new Address({ ...validUSAddress, state: '   ' })).toThrow('State/Province is required');
-        expect(() => new Address({ ...validUSAddress, state: null as any })).toThrow('State/Province is required');
+        expect(() => new Address({ ...validUSAddress, state: '' })).toThrow(
+          'State/Province is required',
+        );
+        expect(() => new Address({ ...validUSAddress, state: '   ' })).toThrow(
+          'State/Province is required',
+        );
+        expect(() => new Address({ ...validUSAddress, state: null as unknown })).toThrow(
+          'State/Province is required',
+        );
       });
 
       it('should throw error for state exceeding 50 characters', () => {
         const longState = 'A'.repeat(51);
-        expect(() => new Address({ ...validUSAddress, state: longState })).toThrow('State/Province cannot exceed 50 characters');
+        expect(() => new Address({ ...validUSAddress, state: longState })).toThrow(
+          'State/Province cannot exceed 50 characters',
+        );
       });
 
       it('should accept state with 50 characters', () => {
@@ -132,14 +156,22 @@ describe('Address Value Object', () => {
 
     describe('Postal Code Validation', () => {
       it('should throw error for missing postal code', () => {
-        expect(() => new Address({ ...validUSAddress, postalCode: '' })).toThrow('Postal code is required');
-        expect(() => new Address({ ...validUSAddress, postalCode: '   ' })).toThrow('Postal code is required');
-        expect(() => new Address({ ...validUSAddress, postalCode: null as any })).toThrow('Postal code is required');
+        expect(() => new Address({ ...validUSAddress, postalCode: '' })).toThrow(
+          'Postal code is required',
+        );
+        expect(() => new Address({ ...validUSAddress, postalCode: '   ' })).toThrow(
+          'Postal code is required',
+        );
+        expect(() => new Address({ ...validUSAddress, postalCode: null as unknown })).toThrow(
+          'Postal code is required',
+        );
       });
 
       it('should throw error for postal code exceeding 20 characters', () => {
         const longPostalCode = 'A'.repeat(21);
-        expect(() => new Address({ ...validUSAddress, postalCode: longPostalCode })).toThrow('Postal code cannot exceed 20 characters');
+        expect(() => new Address({ ...validUSAddress, postalCode: longPostalCode })).toThrow(
+          'Postal code cannot exceed 20 characters',
+        );
       });
 
       it('should accept postal code with 20 characters', () => {
@@ -150,14 +182,22 @@ describe('Address Value Object', () => {
 
     describe('Country Validation', () => {
       it('should throw error for missing country', () => {
-        expect(() => new Address({ ...validUSAddress, country: '' })).toThrow('Country is required');
-        expect(() => new Address({ ...validUSAddress, country: '   ' })).toThrow('Country is required');
-        expect(() => new Address({ ...validUSAddress, country: null as any })).toThrow('Country is required');
+        expect(() => new Address({ ...validUSAddress, country: '' })).toThrow(
+          'Country is required',
+        );
+        expect(() => new Address({ ...validUSAddress, country: '   ' })).toThrow(
+          'Country is required',
+        );
+        expect(() => new Address({ ...validUSAddress, country: null as unknown })).toThrow(
+          'Country is required',
+        );
       });
 
       it('should throw error for country exceeding 100 characters', () => {
         const longCountry = 'A'.repeat(101);
-        expect(() => new Address({ ...validUSAddress, country: longCountry })).toThrow('Country cannot exceed 100 characters');
+        expect(() => new Address({ ...validUSAddress, country: longCountry })).toThrow(
+          'Country cannot exceed 100 characters',
+        );
       });
 
       it('should accept country with 100 characters', () => {
@@ -323,7 +363,7 @@ describe('Address Value Object', () => {
         city: 'San Francisco',
         state: 'CA',
         postalCode: '94102',
-        country: 'USA'
+        country: 'USA',
       });
     });
 
@@ -380,9 +420,9 @@ describe('Address Value Object', () => {
 
     it('should return false for non-Address objects', () => {
       const address = new Address(validUSAddress);
-      expect(address.equals('123 Main St' as any)).toBe(false);
-      expect(address.equals(null as any)).toBe(false);
-      expect(address.equals(undefined as any)).toBe(false);
+      expect(address.equals('123 Main St' as unknown)).toBe(false);
+      expect(address.equals(null as unknown)).toBe(false);
+      expect(address.equals(undefined as unknown)).toBe(false);
     });
   });
 
@@ -395,7 +435,7 @@ describe('Address Value Object', () => {
         city: 'San Francisco',
         state: 'CA',
         postalCode: '94102',
-        country: 'USA'
+        country: 'USA',
       });
     });
   });
@@ -450,7 +490,12 @@ describe('Address Value Object', () => {
 
     describe('createUK()', () => {
       it('should create UK address', () => {
-        const address = Address.createUK('10 Downing Street', 'London', 'Greater London', 'SW1A 2AA');
+        const address = Address.createUK(
+          '10 Downing Street',
+          'London',
+          'Greater London',
+          'SW1A 2AA',
+        );
         expect(address.street).toBe('10 Downing Street');
         expect(address.city).toBe('London');
         expect(address.state).toBe('GREATER LONDON');
@@ -470,35 +515,35 @@ describe('Address Value Object', () => {
     it('should not allow modification of street property', () => {
       const address = new Address(validUSAddress);
       expect(() => {
-        (address as any)._street = '456 Hacker St';
+        (address as unknown)._street = '456 Hacker St';
       }).toThrow();
     });
 
     it('should not allow modification of city property', () => {
       const address = new Address(validUSAddress);
       expect(() => {
-        (address as any)._city = 'Hacker City';
+        (address as unknown)._city = 'Hacker City';
       }).toThrow();
     });
 
     it('should not allow modification of state property', () => {
       const address = new Address(validUSAddress);
       expect(() => {
-        (address as any)._state = 'XX';
+        (address as unknown)._state = 'XX';
       }).toThrow();
     });
 
     it('should not allow modification of postalCode property', () => {
       const address = new Address(validUSAddress);
       expect(() => {
-        (address as any)._postalCode = '00000';
+        (address as unknown)._postalCode = '00000';
       }).toThrow();
     });
 
     it('should not allow modification of country property', () => {
       const address = new Address(validUSAddress);
       expect(() => {
-        (address as any)._country = 'HACKERLAND';
+        (address as unknown)._country = 'HACKERLAND';
       }).toThrow();
     });
   });
@@ -515,10 +560,10 @@ describe('Address Value Object', () => {
       const address1 = new Address(validUSAddress);
       const address2 = new Address(validUKAddress);
       const map = new Map<Address, string>();
-      
+
       map.set(address1, 'US Office');
       map.set(address2, 'UK Office');
-      
+
       expect(map.get(address1)).toBe('US Office');
       expect(map.get(address2)).toBe('UK Office');
       expect(map.size).toBe(2);

@@ -1,8 +1,13 @@
 import { Injectable, inject } from '@angular/core';
-import { CartService } from '../services/cart.service';
-import { CalculateCartTotalsUseCase } from './calculate-cart-totals.use-case';
-import { ITransactionRepository } from '../../domain/interfaces/transaction.repository.interface';
-import { Transaction, TransactionStatus, TransactionType, ITransactionItem } from '../../domain/entities/transaction.entity';
+import { CartService } from '@core/application/services/cart.service';
+import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
+import { ITransactionRepository } from '@core/domain/interfaces/transaction.repository.interface';
+import {
+  TransactionStatus,
+  TransactionType,
+  ITransactionItem,
+} from '@core/domain/entities/transaction.entity';
+import { TransactionBuilder } from '@core/domain/entities/transaction.builder';
 
 /**
  * Request DTO for persisting a transaction
@@ -58,12 +63,14 @@ export interface PersistTransactionResult {
  * ```
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class PersistTransactionUseCase {
   private readonly cartService = inject(CartService);
   private readonly cartTotals = inject(CalculateCartTotalsUseCase);
-  private readonly transactionRepository: ITransactionRepository = inject<ITransactionRepository>('ITransactionRepository' as never);
+  private readonly transactionRepository: ITransactionRepository = inject<ITransactionRepository>(
+    'ITransactionRepository' as never,
+  );
 
   /**
    * Executes the persist transaction use case.
@@ -82,7 +89,7 @@ export class PersistTransactionUseCase {
         transactionId,
         paymentMethod,
         timestamp: new Date(),
-        error: 'Cannot persist transaction: cart is empty'
+        error: 'Cannot persist transaction: cart is empty',
       };
     }
 
@@ -95,24 +102,25 @@ export class PersistTransactionUseCase {
 
       // Create the Transaction entity with COMPLETED status
       const now = new Date();
-      const transaction = new Transaction(
-        transactionId,
-        customerId,
-        items,
-        totals.subtotal,
-        totals.taxRate,
-        totals.taxAmount,
-        totals.discountAmount,
-        totals.total,
-        TransactionStatus.COMPLETED,
-        TransactionType.SALE,
-        0, // refundedAmount
-        now, // createdAt
-        now, // updatedAt
-        undefined, // createdBy
-        undefined, // updatedBy
-        now // completedAt
-      );
+      const builder = new TransactionBuilder()
+        .withId(transactionId)
+        .withItems(items)
+        .withSubtotal(totals.subtotal)
+        .withTaxRate(totals.taxRate)
+        .withTaxAmount(totals.taxAmount)
+        .withDiscountAmount(totals.discountAmount)
+        .withTotal(totals.total)
+        .withStatus(TransactionStatus.COMPLETED)
+        .withType(TransactionType.SALE)
+        .withCreatedAt(now)
+        .withUpdatedAt(now)
+        .withCompletedAt(now);
+
+      if (customerId) {
+        builder.withCustomerId(customerId);
+      }
+
+      const transaction = builder.build();
 
       // Persist to repository
       await this.transactionRepository.create(transaction);
@@ -121,16 +129,17 @@ export class PersistTransactionUseCase {
         success: true,
         transactionId,
         paymentMethod,
-        timestamp: now
+        timestamp: now,
       };
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error persisting transaction';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error persisting transaction';
       return {
         success: false,
         transactionId,
         paymentMethod,
         timestamp: new Date(),
-        error: errorMessage
+        error: errorMessage,
       };
     }
   }
@@ -140,12 +149,12 @@ export class PersistTransactionUseCase {
    */
   private buildTransactionItems(): ITransactionItem[] {
     const cartItems = this.cartService.items();
-    return cartItems.map(cartItem => ({
+    return cartItems.map((cartItem) => ({
       productId: cartItem.product.id,
       productName: cartItem.product.name,
       quantity: cartItem.quantity,
       unitPrice: cartItem.product.price,
-      subtotal: cartItem.product.price * cartItem.quantity
+      subtotal: cartItem.product.price * cartItem.quantity,
     }));
   }
 }

@@ -1,12 +1,16 @@
 import { TestBed } from '@angular/core/testing';
-import { CircuitBreakerService, CircuitState, CircuitBreakerError } from './circuit-breaker.service';
+import {
+  CircuitBreakerService,
+  CircuitState,
+  CircuitBreakerError,
+} from '@core/infrastructure/resilience/circuit-breaker.service';
 
 describe('CircuitBreakerService', () => {
   let service: CircuitBreakerService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [CircuitBreakerService]
+      providers: [CircuitBreakerService],
     });
     service = TestBed.inject(CircuitBreakerService);
   });
@@ -30,18 +34,18 @@ describe('CircuitBreakerService', () => {
     it('should open circuit after threshold failures', async () => {
       const breaker = service.getBreaker('test-service', {
         failureThreshold: 3,
-        timeout: 1000
+        timeout: 1000,
       });
 
       // Simulate 3 failures
       for (let i = 0; i < 3; i++) {
-        try {
-          await breaker.execute(async () => {
+        await breaker
+          .execute(async () => {
             throw new Error('Test failure');
+          })
+          .catch(() => {
+            /* Expected failure to open circuit */
           });
-        } catch (error) {
-          // Expected
-        }
       }
 
       expect(breaker.getState()).toBe(CircuitState.OPEN);
@@ -50,18 +54,18 @@ describe('CircuitBreakerService', () => {
     it('should reject requests when circuit is OPEN', async () => {
       const breaker = service.getBreaker('test-service', {
         failureThreshold: 2,
-        timeout: 5000
+        timeout: 5000,
       });
 
       // Cause circuit to open
       for (let i = 0; i < 2; i++) {
-        try {
-          await breaker.execute(async () => {
+        await breaker
+          .execute(async () => {
             throw new Error('Test failure');
+          })
+          .catch(() => {
+            /* Expected failure to open circuit */
           });
-        } catch (error) {
-          // Expected
-        }
       }
 
       // Try to execute when circuit is open
@@ -78,31 +82,31 @@ describe('CircuitBreakerService', () => {
     it('should transition to HALF_OPEN after timeout', async () => {
       const breaker = service.getBreaker('test-service', {
         failureThreshold: 2,
-        timeout: 100 // Short timeout for testing
+        timeout: 100, // Short timeout for testing
       });
 
       // Open the circuit
       for (let i = 0; i < 2; i++) {
-        try {
-          await breaker.execute(async () => {
+        await breaker
+          .execute(async () => {
             throw new Error('Test failure');
+          })
+          .catch(() => {
+            /* Expected failure to open circuit */
           });
-        } catch (error) {
-          // Expected
-        }
       }
 
       expect(breaker.getState()).toBe(CircuitState.OPEN);
 
       // Wait for timeout
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 150));
 
       // Next execution should transition to HALF_OPEN
-      try {
-        await breaker.execute(async () => 'success');
-      } catch (error) {
-        // May fail, but state should change
-      }
+      await breaker
+        .execute(async () => 'success')
+        .catch(() => {
+          /* May fail, but state should change */
+        });
 
       const state = breaker.getState();
       expect(state === CircuitState.HALF_OPEN || state === CircuitState.CLOSED).toBe(true);
@@ -112,22 +116,22 @@ describe('CircuitBreakerService', () => {
       const breaker = service.getBreaker('test-service', {
         failureThreshold: 2,
         successThreshold: 2,
-        timeout: 100
+        timeout: 100,
       });
 
       // Open the circuit
       for (let i = 0; i < 2; i++) {
-        try {
-          await breaker.execute(async () => {
+        await breaker
+          .execute(async () => {
             throw new Error('Test failure');
+          })
+          .catch(() => {
+            /* Expected failure to open circuit */
           });
-        } catch (error) {
-          // Expected
-        }
       }
 
       // Wait for timeout
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 150));
 
       // Execute successful operations
       await breaker.execute(async () => 'success1');
@@ -139,31 +143,31 @@ describe('CircuitBreakerService', () => {
     it('should reopen circuit on failure in HALF_OPEN state', async () => {
       const breaker = service.getBreaker('test-service', {
         failureThreshold: 2,
-        timeout: 100
+        timeout: 100,
       });
 
       // Open the circuit
       for (let i = 0; i < 2; i++) {
-        try {
-          await breaker.execute(async () => {
+        await breaker
+          .execute(async () => {
             throw new Error('Test failure');
+          })
+          .catch(() => {
+            /* Expected failure to open circuit */
           });
-        } catch (error) {
-          // Expected
-        }
       }
 
       // Wait for timeout
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 150));
 
       // Fail in HALF_OPEN state
-      try {
-        await breaker.execute(async () => {
+      await breaker
+        .execute(async () => {
           throw new Error('Still failing');
+        })
+        .catch(() => {
+          /* Expected failure in HALF_OPEN */
         });
-      } catch (error) {
-        // Expected
-      }
 
       expect(breaker.getState()).toBe(CircuitState.OPEN);
     });
@@ -183,17 +187,17 @@ describe('CircuitBreakerService', () => {
 
     it('should track failed executions', async () => {
       const breaker = service.getBreaker('test-service', {
-        failureThreshold: 5
+        failureThreshold: 5,
       });
 
       for (let i = 0; i < 3; i++) {
-        try {
-          await breaker.execute(async () => {
+        await breaker
+          .execute(async () => {
             throw new Error('Test failure');
+          })
+          .catch(() => {
+            /* Expected failure */
           });
-        } catch (error) {
-          // Expected
-        }
       }
 
       const stats = breaker.getStats();
@@ -203,18 +207,18 @@ describe('CircuitBreakerService', () => {
 
     it('should reset consecutive counters on state change', async () => {
       const breaker = service.getBreaker('test-service', {
-        failureThreshold: 5
+        failureThreshold: 5,
       });
 
       // Some failures
       for (let i = 0; i < 2; i++) {
-        try {
-          await breaker.execute(async () => {
+        await breaker
+          .execute(async () => {
             throw new Error('Test failure');
+          })
+          .catch(() => {
+            /* Expected failure */
           });
-        } catch (error) {
-          // Expected
-        }
       }
 
       // Then success
@@ -242,11 +246,9 @@ describe('CircuitBreakerService', () => {
     });
 
     it('should execute with custom config', async () => {
-      const result = await service.execute(
-        'test-service',
-        async () => 'success',
-        { failureThreshold: 10 }
-      );
+      const result = await service.execute('test-service', async () => 'success', {
+        failureThreshold: 10,
+      });
 
       expect(result).toBe('success');
     });
@@ -263,18 +265,18 @@ describe('CircuitBreakerService', () => {
 
     it('should reset specific breaker', async () => {
       const breaker = service.getBreaker('test-service', {
-        failureThreshold: 2
+        failureThreshold: 2,
       });
 
       // Open the circuit
       for (let i = 0; i < 2; i++) {
-        try {
-          await breaker.execute(async () => {
+        await breaker
+          .execute(async () => {
             throw new Error('Test failure');
+          })
+          .catch(() => {
+            /* Expected failure to open circuit */
           });
-        } catch (error) {
-          // Expected
-        }
       }
 
       expect(breaker.getState()).toBe(CircuitState.OPEN);
@@ -288,12 +290,20 @@ describe('CircuitBreakerService', () => {
       const breaker2 = service.getBreaker('service2', { failureThreshold: 1 });
 
       // Open both circuits
-      try {
-        await breaker1.execute(async () => { throw new Error('fail'); });
-      } catch (e) {}
-      try {
-        await breaker2.execute(async () => { throw new Error('fail'); });
-      } catch (e) {}
+      await breaker1
+        .execute(async () => {
+          throw new Error('fail');
+        })
+        .catch(() => {
+          /* expected */
+        });
+      await breaker2
+        .execute(async () => {
+          throw new Error('fail');
+        })
+        .catch(() => {
+          /* expected */
+        });
 
       service.resetAll();
 
@@ -312,7 +322,7 @@ describe('CircuitBreakerService', () => {
     it('should clear all breakers', () => {
       service.getBreaker('service1');
       service.getBreaker('service2');
-      
+
       service.clear();
 
       const allStats = service.getAllStats();
@@ -324,24 +334,36 @@ describe('CircuitBreakerService', () => {
     it('should only count recent failures within monitoring period', async () => {
       const breaker = service.getBreaker('test-service', {
         failureThreshold: 3,
-        monitoringPeriod: 200 // 200ms window
+        monitoringPeriod: 200, // 200ms window
       });
 
       // First failure
-      try {
-        await breaker.execute(async () => { throw new Error('fail'); });
-      } catch (e) {}
+      await breaker
+        .execute(async () => {
+          throw new Error('fail');
+        })
+        .catch(() => {
+          /* expected */
+        });
 
       // Wait for monitoring period to expire
-      await new Promise(resolve => setTimeout(resolve, 250));
+      await new Promise((resolve) => setTimeout(resolve, 250));
 
       // Two more failures (should not open circuit as first is outside window)
-      try {
-        await breaker.execute(async () => { throw new Error('fail'); });
-      } catch (e) {}
-      try {
-        await breaker.execute(async () => { throw new Error('fail'); });
-      } catch (e) {}
+      await breaker
+        .execute(async () => {
+          throw new Error('fail');
+        })
+        .catch(() => {
+          /* expected */
+        });
+      await breaker
+        .execute(async () => {
+          throw new Error('fail');
+        })
+        .catch(() => {
+          /* expected */
+        });
 
       expect(breaker.getState()).toBe(CircuitState.CLOSED);
     });
@@ -350,7 +372,7 @@ describe('CircuitBreakerService', () => {
   describe('Error Handling', () => {
     it('should propagate errors when circuit is closed', async () => {
       const breaker = service.getBreaker('test-service', {
-        failureThreshold: 5
+        failureThreshold: 5,
       });
 
       try {

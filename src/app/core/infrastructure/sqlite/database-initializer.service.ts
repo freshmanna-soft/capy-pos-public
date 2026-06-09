@@ -1,20 +1,20 @@
-import { Injectable } from '@angular/core';
-import { DatabaseService } from './database.service';
-import { INITIALIZE_SCHEMA } from './schema';
+import { Injectable, inject } from '@angular/core';
+import { DatabaseService } from '@core/infrastructure/sqlite/database.service';
+import { INITIALIZE_SCHEMA } from '@core/infrastructure/sqlite/schema';
 
 /**
  * Database Initializer Service
- * 
+ *
  * Handles database initialization, schema creation, and migrations.
  * Should be called during application bootstrap.
- * 
+ *
  * @class DatabaseInitializerService
  */
 @Injectable({ providedIn: 'root' })
 export class DatabaseInitializerService {
-  private initializationPromise: Promise<void> | null = null;
+  private databaseService = inject(DatabaseService);
 
-  constructor(private databaseService: DatabaseService) {}
+  private initializationPromise: Promise<void> | null = null;
 
   /**
    * Initialize the database with schema and seed data
@@ -67,7 +67,7 @@ export class DatabaseInitializerService {
   private isDatabaseInitialized(): boolean {
     try {
       const result = this.databaseService.queryOne(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='products'"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='products'",
       );
       return result !== null;
     } catch {
@@ -93,7 +93,7 @@ export class DatabaseInitializerService {
       this.databaseService.run(
         `INSERT OR REPLACE INTO _metadata (key, value, updated_at) 
          VALUES (?, ?, datetime('now'))`,
-        ['initialized', 'true']
+        ['initialized', 'true'],
       );
     } catch (error) {
       console.error('[DatabaseInitializer] Failed to mark database as initialized:', error);
@@ -106,12 +106,12 @@ export class DatabaseInitializerService {
    */
   async resetDatabase(): Promise<void> {
     console.log('[DatabaseInitializer] Resetting database...');
-    
+
     this.databaseService.clear();
     this.initializationPromise = null;
-    
+
     await this.initializeDatabase();
-    
+
     console.log('[DatabaseInitializer] Database reset complete');
   }
 
@@ -129,7 +129,7 @@ export class DatabaseInitializerService {
         products: this.getTableCount('products'),
         customers: this.getTableCount('customers'),
         transactions: this.getTableCount('transactions'),
-        payments: this.getTableCount('payments')
+        payments: this.getTableCount('payments'),
       };
       return stats;
     } catch (error) {
@@ -144,8 +144,8 @@ export class DatabaseInitializerService {
   private getTableCount(tableName: string): number {
     try {
       const result = this.databaseService.queryOne(
-        `SELECT COUNT(*) as count FROM ${tableName}`
-      );
+        `SELECT COUNT(*) as count FROM ${tableName}`,
+      ) as { count: number } | null;
       return result ? result.count : 0;
     } catch {
       return 0;
@@ -161,14 +161,14 @@ export class DatabaseInitializerService {
       metadata: {
         exportedAt: new Date().toISOString(),
         version: '1.0.0',
-        stats
+        stats,
       },
       products: this.databaseService.query('SELECT * FROM products'),
       customers: this.databaseService.query('SELECT * FROM customers'),
       transactions: this.databaseService.query('SELECT * FROM transactions'),
-      payments: this.databaseService.query('SELECT * FROM payments')
+      payments: this.databaseService.query('SELECT * FROM payments'),
     };
-    
+
     return JSON.stringify(data, null, 2);
   }
 
@@ -179,7 +179,7 @@ export class DatabaseInitializerService {
     isHealthy: boolean;
     initialized: boolean;
     canQuery: boolean;
-    stats: any;
+    stats: unknown;
   } {
     try {
       const initialized = this.isDatabaseInitialized();
@@ -190,14 +190,15 @@ export class DatabaseInitializerService {
         isHealthy: initialized && canQuery,
         initialized,
         canQuery,
-        stats
+        stats,
       };
     } catch (error) {
+      console.error('[DatabaseInitializer] Health check failed:', error);
       return {
         isHealthy: false,
         initialized: false,
         canQuery: false,
-        stats: null
+        stats: null,
       };
     }
   }

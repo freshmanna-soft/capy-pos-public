@@ -3,6 +3,6 @@
  * Centralized exports for Dexie database and related types
  */
 
-export * from './dexie-database.service';
+export * from '@core/infrastructure/database/dexie-database.service';
 
 // Made with Bob

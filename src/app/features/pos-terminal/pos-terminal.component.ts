@@ -1,30 +1,36 @@
 import { Component, ViewChild, OnInit, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { ProductSearchComponent } from './components/product-search/product-search.component';
-import { ShoppingCartComponent } from './components/shopping-cart/shopping-cart.component';
-import { CheckoutComponent, PaymentResult } from './components/checkout/checkout.component';
-import { ReceiptComponent } from './components/receipt/receipt.component';
-import { Product } from '../../core/domain/entities/product.entity';
-import { DexieDatabase } from '../../core/infrastructure/database/dexie-database.service';
-import { CartService } from '../../core/application/services/cart.service';
-import { GenerateReceiptUseCase, ReceiptData } from '../../core/application/use-cases/generate-receipt.use-case';
+
+import { ProductSearchComponent } from '@features/pos-terminal/components/product-search/product-search.component';
+import { ShoppingCartComponent } from '@features/pos-terminal/components/shopping-cart/shopping-cart.component';
+import {
+  CheckoutComponent,
+  PaymentResult,
+} from '@features/pos-terminal/components/checkout/checkout.component';
+import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
+import { Product } from '@core/domain/entities/product.entity';
+import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
+import { CartService } from '@core/application/services/cart.service';
+import {
+  GenerateReceiptUseCase,
+  ReceiptData,
+} from '@core/application/use-cases/generate-receipt.use-case';
 
 /**
  * POS Terminal Page Component
- * 
+ *
  * Main page for the Point of Sale terminal.
  * Integrates product search and shopping cart functionality.
- * 
+ *
  * Features:
  * - Product search with real-time results
  * - Shopping cart management
  * - Responsive layout (search on left, cart on right)
  * - Product selection and cart integration
- * 
+ *
  * Layout:
  * - Desktop: Two-column layout (60/40 split)
  * - Mobile: Stacked layout with tabs
- * 
+ *
  * @example
  * ```html
  * <app-pos-terminal></app-pos-terminal>
@@ -33,13 +39,7 @@ import { GenerateReceiptUseCase, ReceiptData } from '../../core/application/use-
 @Component({
   selector: 'app-pos-terminal',
   standalone: true,
-  imports: [
-    CommonModule,
-    ProductSearchComponent,
-    ShoppingCartComponent,
-    CheckoutComponent,
-    ReceiptComponent
-  ],
+  imports: [ProductSearchComponent, ShoppingCartComponent, CheckoutComponent, ReceiptComponent],
   template: `
     <div class="pos-terminal" data-testid="pos-terminal">
       <!-- Header -->
@@ -47,25 +47,35 @@ import { GenerateReceiptUseCase, ReceiptData } from '../../core/application/use-
         <div class="header-content">
           <h1 class="header-title">POS Terminal</h1>
           <div class="header-actions">
-            <button 
+            <button
               class="header-btn"
               data-testid="add-product-btn"
               (click)="handleAddProduct()"
-              aria-label="Add product">
+              aria-label="Add product"
+            >
               <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                  d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                />
               </svg>
               Add Product
             </button>
-            <button 
+            <button
               class="header-btn"
               data-testid="new-transaction-btn"
               (click)="startNewTransaction()"
-              aria-label="Start new transaction">
+              aria-label="Start new transaction"
+            >
               <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                  d="M12 4v16m8-8H4" />
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 4v16m8-8H4"
+                />
               </svg>
               New Transaction
             </button>
@@ -77,16 +87,13 @@ import { GenerateReceiptUseCase, ReceiptData } from '../../core/application/use-
       <main class="pos-content">
         <!-- Product Search Section -->
         <section class="search-section" data-testid="search-section">
-          <app-product-search
-            (productSelected)="handleProductSelected($event)">
+          <app-product-search (productSelected)="handleProductSelected($event)">
           </app-product-search>
         </section>
 
         <!-- Shopping Cart Section -->
         <aside class="cart-section" data-testid="cart-section">
-          <app-shopping-cart
-            (checkoutRequested)="openCheckout()">
-          </app-shopping-cart>
+          <app-shopping-cart (checkoutRequested)="openCheckout()"> </app-shopping-cart>
         </aside>
       </main>
 
@@ -94,7 +101,8 @@ import { GenerateReceiptUseCase, ReceiptData } from '../../core/application/use-
       @if (showCheckout()) {
         <app-checkout
           (paymentComplete)="handlePaymentComplete($event)"
-          (checkoutCancelled)="closeCheckout()" />
+          (checkoutCancelled)="closeCheckout()"
+        />
       }
 
       <!-- Receipt Overlay -->
@@ -102,182 +110,185 @@ import { GenerateReceiptUseCase, ReceiptData } from '../../core/application/use-
         <app-receipt
           [data]="receiptData()!"
           (printReceipt)="handlePrintReceipt()"
-          (newTransaction)="handleNewTransactionFromReceipt()" />
+          (newTransaction)="handleNewTransactionFromReceipt()"
+        />
       }
     </div>
   `,
-  styles: [`
-    .pos-terminal {
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      background: #f3f4f6;
-    }
-
-    .pos-header {
-      background: white;
-      border-bottom: 1px solid #e5e7eb;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-      z-index: 10;
-    }
-
-    .header-content {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      max-width: 1920px;
-      margin: 0 auto;
-      padding: 1rem 2rem;
-    }
-
-    .header-title {
-      font-size: 1.5rem;
-      font-weight: 700;
-      margin: 0;
-      color: #111827;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .header-actions {
-      display: flex;
-      gap: 0.75rem;
-    }
-
-    .header-btn {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.625rem 1.25rem;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border: none;
-      border-radius: 6px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .header-btn:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-    }
-
-    .header-btn svg {
-      width: 1.25rem;
-      height: 1.25rem;
-    }
-
-    .pos-content {
-      display: grid;
-      grid-template-columns: 1fr 400px;
-      gap: 1.5rem;
-      flex: 1;
-      max-width: 1920px;
-      margin: 0 auto;
-      padding: 1.5rem 2rem;
-      width: 100%;
-      overflow: hidden;
-    }
-
-    .search-section {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-      overflow: auto;
-    }
-
-    .search-section app-product-search {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
-
-    .cart-section {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
-
-    .cart-section app-shopping-cart {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
-
-    /* Responsive Design */
-    @media (max-width: 1280px) {
-      .pos-content {
-        grid-template-columns: 1fr 350px;
-      }
-    }
-
-    @media (max-width: 1024px) {
-      .pos-content {
-        grid-template-columns: 1fr;
-        grid-template-rows: 1fr 400px;
-      }
-
-      .cart-section {
-        border-top: 2px solid #e5e7eb;
-      }
-    }
-
-    @media (max-width: 768px) {
-      .header-content {
-        padding: 1rem;
-      }
-
-      .header-title {
-        font-size: 1.25rem;
-      }
-
-      .header-btn {
-        padding: 0.5rem 1rem;
-        font-size: 0.8125rem;
-      }
-
-      .header-btn svg {
-        width: 1rem;
-        height: 1rem;
-      }
-
-      .pos-content {
-        padding: 1rem;
-        gap: 1rem;
-        grid-template-rows: 1fr 350px;
-      }
-    }
-
-    @media (max-width: 640px) {
-      .header-content {
+  styles: [
+    `
+      .pos-terminal {
+        display: flex;
         flex-direction: column;
-        gap: 0.75rem;
-        align-items: stretch;
+        height: 100vh;
+        background: #f3f4f6;
+      }
+
+      .pos-header {
+        background: white;
+        border-bottom: 1px solid #e5e7eb;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        z-index: 10;
+      }
+
+      .header-content {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        max-width: 1920px;
+        margin: 0 auto;
+        padding: 1rem 2rem;
       }
 
       .header-title {
-        text-align: center;
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin: 0;
+        color: #111827;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
       }
 
       .header-actions {
-        justify-content: center;
+        display: flex;
+        gap: 0.75rem;
+      }
+
+      .header-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.625rem 1.25rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .header-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+      }
+
+      .header-btn svg {
+        width: 1.25rem;
+        height: 1.25rem;
       }
 
       .pos-content {
-        grid-template-rows: 1fr 300px;
+        display: grid;
+        grid-template-columns: 1fr 400px;
+        gap: 1.5rem;
+        flex: 1;
+        max-width: 1920px;
+        margin: 0 auto;
+        padding: 1.5rem 2rem;
+        width: 100%;
+        overflow: hidden;
       }
-    }
-  `]
+
+      .search-section {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: auto;
+      }
+
+      .search-section app-product-search {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      .cart-section {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      .cart-section app-shopping-cart {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      /* Responsive Design */
+      @media (max-width: 1280px) {
+        .pos-content {
+          grid-template-columns: 1fr 350px;
+        }
+      }
+
+      @media (max-width: 1024px) {
+        .pos-content {
+          grid-template-columns: 1fr;
+          grid-template-rows: 1fr 400px;
+        }
+
+        .cart-section {
+          border-top: 2px solid #e5e7eb;
+        }
+      }
+
+      @media (max-width: 768px) {
+        .header-content {
+          padding: 1rem;
+        }
+
+        .header-title {
+          font-size: 1.25rem;
+        }
+
+        .header-btn {
+          padding: 0.5rem 1rem;
+          font-size: 0.8125rem;
+        }
+
+        .header-btn svg {
+          width: 1rem;
+          height: 1rem;
+        }
+
+        .pos-content {
+          padding: 1rem;
+          gap: 1rem;
+          grid-template-rows: 1fr 350px;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .header-content {
+          flex-direction: column;
+          gap: 0.75rem;
+          align-items: stretch;
+        }
+
+        .header-title {
+          text-align: center;
+        }
+
+        .header-actions {
+          justify-content: center;
+        }
+
+        .pos-content {
+          grid-template-rows: 1fr 300px;
+        }
+      }
+    `,
+  ],
 })
 export class PosTerminalComponent implements OnInit {
   private db = inject(DexieDatabase);
   private cartService = inject(CartService);
   private generateReceipt = inject(GenerateReceiptUseCase);
-  
+
   @ViewChild(ShoppingCartComponent) shoppingCart!: ShoppingCartComponent;
 
   /** Controls visibility of the checkout overlay */
@@ -305,7 +316,7 @@ export class PosTerminalComponent implements OnInit {
   /**
    * Handles product selection from search.
    * Validates stock availability before adding to cart.
-   * 
+   *
    * Rules:
    * - Out-of-stock products (stock === 0) are rejected
    * - Products cannot exceed available stock in cart
@@ -327,7 +338,11 @@ export class PosTerminalComponent implements OnInit {
       // Check if adding would exceed available stock
       const currentQuantity = this.shoppingCart.cartService.getQuantity(product.id);
       if (currentQuantity >= product.stock) {
-        console.warn('Cannot exceed available stock for:', product.name, `(${currentQuantity}/${product.stock})`);
+        console.warn(
+          'Cannot exceed available stock for:',
+          product.name,
+          `(${currentQuantity}/${product.stock})`,
+        );
         return;
       }
 
@@ -350,7 +365,6 @@ export class PosTerminalComponent implements OnInit {
 
     // Clear the cart
     this.shoppingCart.clearCart();
-  
   }
 
   /**

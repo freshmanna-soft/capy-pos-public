@@ -1,8 +1,6 @@
 import { InjectionToken, Provider, inject } from '@angular/core';
-import { IPaymentAgent } from '../domain/payment-agent.interface';
-import { PaymentAgent } from './payment.agent';
-import { PAYMENT_REPOSITORY } from '../../../core/infrastructure/factories/repository.factory';
-import { AuditLogService } from '../../../core/infrastructure/audit';
+import { IPaymentAgent } from '@app/agents/payment/domain/payment-agent.interface';
+import { PaymentAgent } from '@app/agents/payment/infrastructure/payment.agent';
 
 /**
  * Injection token for PaymentAgent
@@ -14,15 +12,13 @@ export const PAYMENT_AGENT = new InjectionToken<IPaymentAgent>('PAYMENT_AGENT');
  * Factory function to create PaymentAgent instance
  */
 export function paymentAgentFactory(): IPaymentAgent {
-  const paymentRepository = inject(PAYMENT_REPOSITORY);
-  const auditLogService = inject(AuditLogService);
-  return new PaymentAgent(paymentRepository, auditLogService);
+  return inject(PaymentAgent);
 }
 
 /**
  * PaymentAgent Provider
  * Use this in app.config.ts or module providers
- * 
+ *
  * @example
  * ```typescript
  * export const appConfig: ApplicationConfig = {
@@ -34,7 +30,7 @@ export function paymentAgentFactory(): IPaymentAgent {
  */
 export const PAYMENT_AGENT_PROVIDER: Provider = {
   provide: PAYMENT_AGENT,
-  useFactory: paymentAgentFactory
+  useFactory: paymentAgentFactory,
 };
 
 // Made with Bob

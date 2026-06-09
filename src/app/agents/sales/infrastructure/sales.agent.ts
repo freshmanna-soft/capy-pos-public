@@ -4,10 +4,10 @@
  * Extends BaseAgent with sales-specific functionality
  */
 
-import { Injectable, Inject } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { Observable, Subject, interval, Subscription } from 'rxjs';
-import { BaseAgent } from '../../base/base-agent';
-import { IAgentMessage, IAgentResponse } from '../../base/base-agent.interface';
+import { BaseAgent } from '@app/agents/base/base-agent';
+import { IAgentMessage, IAgentResponse } from '@app/agents/base/base-agent.interface';
 import {
   ISalesAgent,
   SalesMessageType,
@@ -20,15 +20,20 @@ import {
   ISalesByPeriodRequest,
   ISalesByPeriod,
   ISalesReportRequest,
-} from '../domain/sales-agent.interface';
-import { ITransactionRepository } from '../../../core/domain/interfaces/transaction.repository.interface';
-import { IProductRepository } from '../../../core/domain/interfaces/product.repository.interface';
-import { 
-  Transaction, 
-  TransactionStatus, 
+} from '@app/agents/sales/domain/sales-agent.interface';
+import { ITransactionRepository } from '@core/domain/interfaces/transaction.repository.interface';
+import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
+import {
+  TRANSACTION_REPOSITORY,
+  PRODUCT_REPOSITORY,
+} from '@core/infrastructure/factories/repository.factory';
+import {
+  Transaction,
+  TransactionStatus,
   TransactionType,
-  ITransactionItem 
-} from '../../../core/domain/entities/transaction.entity';
+  ITransactionItem,
+} from '@core/domain/entities/transaction.entity';
+import { TransactionBuilder } from '@core/domain/entities/transaction.builder';
 
 /**
  * SalesAgent
@@ -37,14 +42,14 @@ import {
  */
 @Injectable({ providedIn: 'root' })
 export class SalesAgent extends BaseAgent implements ISalesAgent {
+  private readonly transactionRepository = inject<ITransactionRepository>(TRANSACTION_REPOSITORY);
+  private readonly productRepository = inject<IProductRepository>(PRODUCT_REPOSITORY);
+
   private readonly salesEvents$ = new Subject<Transaction>();
   private readonly dailySummaries$ = new Subject<IDailySummary>();
   private monitoringSubscription?: Subscription;
 
-  constructor(
-    @Inject('ITransactionRepository') private readonly transactionRepository: ITransactionRepository,
-    @Inject('IProductRepository') private readonly productRepository: IProductRepository
-  ) {
+  constructor() {
     super('sales-agent', 'Sales Agent', 'Manages sales transactions and analytics');
   }
 
@@ -64,7 +69,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
    */
   protected async onStart(): Promise<void> {
     console.log('SalesAgent: Starting...');
-    
+
     // Start daily summary monitoring (every hour)
     this.monitoringSubscription = interval(60 * 60 * 1000).subscribe(async () => {
       try {
@@ -85,7 +90,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
    */
   protected async onStop(): Promise<void> {
     console.log('SalesAgent: Stopping...');
-    
+
     // Stop monitoring
     if (this.monitoringSubscription) {
       this.monitoringSubscription.unsubscribe();
@@ -99,35 +104,36 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
    * Handle incoming messages
    */
   protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
+    const payload = message.payload as Record<string, unknown>;
     switch (message.type) {
       case SalesMessageType.RECORD_SALE:
-        return this.recordSale(message.payload);
-      
+        return this.recordSale(payload as unknown as IRecordSaleRequest);
+
       case SalesMessageType.PROCESS_RETURN:
-        return this.processReturn(message.payload);
-      
+        return this.processReturn(payload as unknown as IProcessReturnRequest);
+
       case SalesMessageType.VOID_TRANSACTION:
-        return this.voidTransaction(message.payload);
-      
+        return this.voidTransaction(payload as unknown as IVoidTransactionRequest);
+
       case SalesMessageType.GET_SALES_METRICS:
-        return this.getSalesMetrics(message.payload.startDate, message.payload.endDate);
-      
+        return this.getSalesMetrics(payload['startDate'] as Date, payload['endDate'] as Date);
+
       case SalesMessageType.GENERATE_REPORT:
-        return this.generateReport(message.payload);
-      
+        return this.generateReport(payload as unknown as ISalesReportRequest);
+
       case SalesMessageType.GET_DAILY_SUMMARY:
-        return this.getDailySummary(message.payload.date);
-      
+        return this.getDailySummary(payload['date'] as Date);
+
       case SalesMessageType.GET_TOP_PRODUCTS:
         return this.getTopProducts(
-          message.payload.limit,
-          message.payload.startDate,
-          message.payload.endDate
+          payload['limit'] as number,
+          payload['startDate'] as Date,
+          payload['endDate'] as Date,
         );
-      
+
       case SalesMessageType.GET_SALES_BY_PERIOD:
-        return this.getSalesByPeriod(message.payload);
-      
+        return this.getSalesByPeriod(payload as unknown as ISalesByPeriodRequest);
+
       default:
         return {
           success: false,
@@ -157,7 +163,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       const total = request.subtotal - (request.discountAmount || 0) + taxAmount;
 
       // Create transaction items
-      const items: ITransactionItem[] = request.items.map(item => ({
+      const items: ITransactionItem[] = request.items.map((item) => ({
         productId: item.productId,
         productName: item.productName,
         quantity: item.quantity,
@@ -166,29 +172,34 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       }));
 
       // Create transaction
-      const transaction = new Transaction(
-        request.transactionId,
-        request.customerId,
-        items,
-        request.subtotal,
-        request.taxRate,
-        taxAmount,
-        request.discountAmount || 0,
-        total,
-        TransactionStatus.PENDING,
-        TransactionType.SALE,
-        0,
-        new Date(),
-        new Date(),
-        request.createdBy,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        request.paymentIds,
-        request.receiptNumber,
-        request.notes
-      );
+      const builder = new TransactionBuilder()
+        .withId(request.transactionId)
+        .withItems(items)
+        .withSubtotal(request.subtotal)
+        .withTaxRate(request.taxRate)
+        .withTaxAmount(taxAmount)
+        .withDiscountAmount(request.discountAmount || 0)
+        .withTotal(total)
+        .withStatus(TransactionStatus.PENDING)
+        .withType(TransactionType.SALE);
+
+      if (request.customerId) {
+        builder.withCustomerId(request.customerId);
+      }
+      if (request.createdBy) {
+        builder.withCreatedBy(request.createdBy);
+      }
+      if (request.paymentIds) {
+        builder.withPaymentIds(request.paymentIds);
+      }
+      if (request.receiptNumber) {
+        builder.withReceiptNumber(request.receiptNumber);
+      }
+      if (request.notes) {
+        builder.withNotes(request.notes);
+      }
+
+      const transaction = builder.build();
 
       // Save transaction
       const savedTransaction = await this.transactionRepository.create(transaction);
@@ -201,7 +212,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       savedTransaction.markAsCompleted(request.createdBy);
       const completedTransaction = await this.transactionRepository.update(
         savedTransaction.id,
-        savedTransaction
+        savedTransaction,
       );
 
       // Update product stock
@@ -248,7 +259,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
 
       // Get original transaction
       const originalTransaction = await this.transactionRepository.findById(
-        request.originalTransactionId
+        request.originalTransactionId,
       );
       if (!originalTransaction) {
         throw new Error('Original transaction not found');
@@ -265,7 +276,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       const returnTotal = returnSubtotal + returnTaxAmount;
 
       // Create return transaction items
-      const returnItems: ITransactionItem[] = request.items.map(item => {
+      const returnItems: ITransactionItem[] = request.items.map((item) => {
         const originalItem = originalTransaction.getItem(item.productId);
         if (!originalItem) {
           throw new Error(`Product ${item.productId} not found in original transaction`);
@@ -280,29 +291,28 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       });
 
       // Create return transaction
-      const returnTransaction = new Transaction(
-        request.returnTransactionId,
-        originalTransaction.customerId,
-        returnItems,
-        -returnSubtotal,
-        originalTransaction.taxRate,
-        -returnTaxAmount,
-        0,
-        -returnTotal,
-        TransactionStatus.PENDING,
-        TransactionType.RETURN,
-        0,
-        new Date(),
-        new Date(),
-        request.processedBy,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        [],
-        undefined,
-        `Return for transaction ${request.originalTransactionId}. Reason: ${request.reason}`
-      );
+      const returnBuilder = new TransactionBuilder()
+        .withId(request.returnTransactionId)
+        .withItems(returnItems)
+        .withSubtotal(-returnSubtotal)
+        .withTaxRate(originalTransaction.taxRate)
+        .withTaxAmount(-returnTaxAmount)
+        .withDiscountAmount(0)
+        .withTotal(-returnTotal)
+        .withStatus(TransactionStatus.PENDING)
+        .withType(TransactionType.RETURN)
+        .withNotes(
+          `Return for transaction ${request.originalTransactionId}. Reason: ${request.reason}`,
+        );
+
+      if (originalTransaction.customerId) {
+        returnBuilder.withCustomerId(originalTransaction.customerId);
+      }
+      if (request.processedBy) {
+        returnBuilder.withCreatedBy(request.processedBy);
+      }
+
+      const returnTransaction = returnBuilder.build();
 
       // Save return transaction
       const savedReturn = await this.transactionRepository.create(returnTransaction);
@@ -365,7 +375,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       transaction.cancel(request.reason, request.voidedBy);
       const voidedTransaction = await this.transactionRepository.update(
         transaction.id,
-        transaction
+        transaction,
       );
 
       // Restore product stock if transaction was completed
@@ -399,10 +409,10 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
     try {
       // Get transactions for period
       const transactions = await this.transactionRepository.findByDateRange(startDate, endDate);
-      
+
       // Filter completed sales
       const completedSales = transactions.filter(
-        t => t.status === TransactionStatus.COMPLETED && t.type === TransactionType.SALE
+        (t) => t.status === TransactionStatus.COMPLETED && t.type === TransactionType.SALE,
       );
 
       // Calculate metrics
@@ -413,7 +423,9 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
 
       // Calculate refund metrics
       const refundedTransactions = transactions.filter(
-        t => t.status === TransactionStatus.REFUNDED || t.status === TransactionStatus.PARTIALLY_REFUNDED
+        (t) =>
+          t.status === TransactionStatus.REFUNDED ||
+          t.status === TransactionStatus.PARTIALLY_REFUNDED,
       );
       const totalRefunds = refundedTransactions.reduce((sum, t) => sum + t.refundedAmount, 0);
       const refundRate = totalSales > 0 ? refundedTransactions.length / totalSales : 0;
@@ -453,7 +465,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
   /**
    * Generate a sales report
    */
-  async generateReport(request: ISalesReportRequest): Promise<IAgentResponse<any>> {
+  async generateReport(request: ISalesReportRequest): Promise<IAgentResponse<unknown>> {
     try {
       // Get metrics for the period
       const metricsResponse = await this.getSalesMetrics(request.startDate, request.endDate);
@@ -524,24 +536,30 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
 
     // Get transactions for the day
     const transactions = await this.transactionRepository.findByDateRange(startOfDay, endOfDay);
-    
+
     // Filter completed sales
     const completedSales = transactions.filter(
-      t => t.status === TransactionStatus.COMPLETED && t.type === TransactionType.SALE
+      (t) => t.status === TransactionStatus.COMPLETED && t.type === TransactionType.SALE,
     );
 
     // Calculate totals
     const totalSales = completedSales.length;
     const totalRevenue = completedSales.reduce((sum, t) => sum + t.total, 0);
     const refundCount = transactions.filter(
-      t => t.status === TransactionStatus.REFUNDED || t.status === TransactionStatus.PARTIALLY_REFUNDED
+      (t) =>
+        t.status === TransactionStatus.REFUNDED ||
+        t.status === TransactionStatus.PARTIALLY_REFUNDED,
     ).length;
     const totalRefunds = transactions.reduce((sum, t) => sum + t.refundedAmount, 0);
     const netRevenue = totalRevenue - totalRefunds;
 
     // Get top products for the day
-    const topProductsData = await this.transactionRepository.getTopProducts(startOfDay, endOfDay, 5);
-    const topProducts = topProductsData.map(p => ({
+    const topProductsData = await this.transactionRepository.getTopProducts(
+      startOfDay,
+      endOfDay,
+      5,
+    );
+    const topProducts = topProductsData.map((p) => ({
       productId: p.productId,
       productName: p.productName,
       quantitySold: p.quantitySold,
@@ -550,7 +568,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
 
     // Get hourly breakdown
     const hourlyData = await this.transactionRepository.getSalesByHour(date);
-    const hourlyBreakdown = hourlyData.map(h => ({
+    const hourlyBreakdown = hourlyData.map((h) => ({
       hour: h.hour,
       sales: h.sales,
       transactions: h.transactions,
@@ -574,15 +592,15 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
   async getTopProducts(
     limit: number,
     startDate?: Date,
-    endDate?: Date
+    endDate?: Date,
   ): Promise<IAgentResponse<ITopProduct[]>> {
     try {
       const start = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Default: last 30 days
       const end = endDate || new Date();
 
       const topProductsData = await this.transactionRepository.getTopProducts(start, end, limit);
-      
-      const topProducts: ITopProduct[] = topProductsData.map(p => ({
+
+      const topProducts: ITopProduct[] = topProductsData.map((p) => ({
         productId: p.productId,
         productName: p.productName,
         quantitySold: p.quantitySold,
@@ -607,12 +625,14 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
   /**
    * Get sales by period
    */
-  async getSalesByPeriod(request: ISalesByPeriodRequest): Promise<IAgentResponse<ISalesByPeriod[]>> {
+  async getSalesByPeriod(
+    request: ISalesByPeriodRequest,
+  ): Promise<IAgentResponse<ISalesByPeriod[]>> {
     try {
       // Get transactions for period
       const transactions = await this.transactionRepository.findByDateRange(
         request.startDate,
-        request.endDate
+        request.endDate,
       );
 
       // Group by period
@@ -622,7 +642,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         if (transaction.status !== TransactionStatus.COMPLETED) continue;
 
         const periodKey = this.getPeriodKey(transaction.createdAt, request.groupBy);
-        
+
         if (!grouped.has(periodKey)) {
           grouped.set(periodKey, {
             period: periodKey,
@@ -635,22 +655,22 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         }
 
         const periodData = grouped.get(periodKey)!;
-        
+
         if (transaction.type === TransactionType.SALE) {
           periodData.sales++;
           periodData.revenue += transaction.total;
           periodData.transactions++;
         }
-        
+
         if (request.includeRefunds && transaction.refundedAmount > 0) {
           periodData.refunds += transaction.refundedAmount;
         }
-        
+
         periodData.netRevenue = periodData.revenue - periodData.refunds;
       }
 
-      const salesByPeriod = Array.from(grouped.values()).sort((a, b) => 
-        a.period.localeCompare(b.period)
+      const salesByPeriod = Array.from(grouped.values()).sort((a, b) =>
+        a.period.localeCompare(b.period),
       );
 
       return {
@@ -680,10 +700,11 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         return `${year}-${month}-${day} ${hour}:00`;
       case 'DAY':
         return `${year}-${month}-${day}`;
-      case 'WEEK':
+      case 'WEEK': {
         const weekStart = new Date(date);
         weekStart.setDate(date.getDate() - date.getDay());
         return `${weekStart.getFullYear()}-W${this.getWeekNumber(weekStart)}`;
+      }
       case 'MONTH':
         return `${year}-${month}`;
       default:
@@ -699,7 +720,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
     const dayNum = d.getUTCDay() || 7;
     d.setUTCDate(d.getUTCDate() + 4 - dayNum);
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
     return String(weekNo).padStart(2, '0');
   }
 

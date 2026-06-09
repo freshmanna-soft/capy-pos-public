@@ -36,8 +36,8 @@ export enum AuditStatus {
  */
 export interface AuditChange {
   field: string;
-  oldValue: any;
-  newValue: any;
+  oldValue: unknown;
+  newValue: unknown;
 }
 
 /**
@@ -54,7 +54,7 @@ export interface AuditLogEntry {
   entityId: string;
   action: AuditAction;
   status: AuditStatus;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   changes?: AuditChange[];
   ipAddress?: string;
   userAgent?: string;
@@ -88,9 +88,10 @@ class AuditDatabase extends Dexie {
 
   constructor() {
     super('AuditLogDatabase');
-    
+
     this.version(1).stores({
-      auditLogs: 'id, timestamp, userId, agentName, operation, entityType, entityId, action, status'
+      auditLogs:
+        'id, timestamp, userId, agentName, operation, entityType, entityId, action, status',
     });
   }
 }
@@ -98,7 +99,7 @@ class AuditDatabase extends Dexie {
 /**
  * Audit Log Service
  * Provides comprehensive audit logging for critical operations
- * 
+ *
  * Features:
  * - Persistent storage using Dexie
  * - Flexible querying and filtering
@@ -108,12 +109,12 @@ class AuditDatabase extends Dexie {
  * - Performance metrics
  */
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class AuditLogService {
-  private db: AuditDatabase;
+  private readonly db: AuditDatabase;
   private inMemoryCache: AuditLogEntry[] = [];
-  private maxCacheSize = 100;
+  private readonly maxCacheSize = 100;
   private sequenceCounter = 0;
 
   constructor() {
@@ -127,7 +128,7 @@ export class AuditLogService {
     const fullEntry: AuditLogEntry = {
       ...entry,
       id: this.generateId(),
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
     try {
@@ -137,7 +138,9 @@ export class AuditLogService {
       // Add to cache
       this.addToCache(fullEntry);
 
-      console.log(`[AuditLog] Logged: ${entry.action} on ${entry.entityType}:${entry.entityId} by ${entry.agentName}`);
+      console.log(
+        `[AuditLog] Logged: ${entry.action} on ${entry.entityType}:${entry.entityId} by ${entry.agentName}`,
+      );
     } catch (error) {
       console.error('[AuditLog] Failed to log entry:', error);
       // Still add to cache as fallback
@@ -153,31 +156,31 @@ export class AuditLogService {
 
     // Apply filters
     if (options.startDate) {
-      collection = collection.filter(entry => entry.timestamp >= options.startDate!);
+      collection = collection.filter((entry) => entry.timestamp >= options.startDate!);
     }
     if (options.endDate) {
-      collection = collection.filter(entry => entry.timestamp <= options.endDate!);
+      collection = collection.filter((entry) => entry.timestamp <= options.endDate!);
     }
     if (options.userId) {
-      collection = collection.filter(entry => entry.userId === options.userId);
+      collection = collection.filter((entry) => entry.userId === options.userId);
     }
     if (options.agentName) {
-      collection = collection.filter(entry => entry.agentName === options.agentName);
+      collection = collection.filter((entry) => entry.agentName === options.agentName);
     }
     if (options.operation) {
-      collection = collection.filter(entry => entry.operation === options.operation);
+      collection = collection.filter((entry) => entry.operation === options.operation);
     }
     if (options.entityType) {
-      collection = collection.filter(entry => entry.entityType === options.entityType);
+      collection = collection.filter((entry) => entry.entityType === options.entityType);
     }
     if (options.entityId) {
-      collection = collection.filter(entry => entry.entityId === options.entityId);
+      collection = collection.filter((entry) => entry.entityId === options.entityId);
     }
     if (options.action) {
-      collection = collection.filter(entry => entry.action === options.action);
+      collection = collection.filter((entry) => entry.action === options.action);
     }
     if (options.status) {
-      collection = collection.filter(entry => entry.status === options.status);
+      collection = collection.filter((entry) => entry.status === options.status);
     }
 
     // Apply pagination
@@ -206,9 +209,9 @@ export class AuditLogService {
     const results = await this.db.auditLogs
       .where('entityId')
       .equals(entityId)
-      .filter(entry => entry.entityType === entityType)
+      .filter((entry) => entry.entityType === entityType)
       .toArray();
-    
+
     // Sort in reverse chronological order (newest first), use ID as tiebreaker
     return results.sort((a, b) => {
       const timeDiff = b.timestamp.getTime() - a.timestamp.getTime();
@@ -221,14 +224,11 @@ export class AuditLogService {
   /**
    * Get user activity logs
    */
-  async getUserActivity(userId: string, limit: number = 50): Promise<AuditLogEntry[]> {
-    const results = await this.db.auditLogs
-      .where('userId')
-      .equals(userId)
-      .toArray();
-    
+  async getUserActivity(userId: string, limit = 50): Promise<AuditLogEntry[]> {
+    const results = await this.db.auditLogs.where('userId').equals(userId).toArray();
+
     // Sort in reverse chronological order (newest first), use ID as tiebreaker
-    return results
+    return [...results]
       .sort((a, b) => {
         const timeDiff = b.timestamp.getTime() - a.timestamp.getTime();
         if (timeDiff !== 0) return timeDiff;
@@ -267,15 +267,9 @@ export class AuditLogService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
 
-    const oldLogs = await this.db.auditLogs
-      .where('timestamp')
-      .below(cutoffDate)
-      .toArray();
+    const oldLogs = await this.db.auditLogs.where('timestamp').below(cutoffDate).toArray();
 
-    await this.db.auditLogs
-      .where('timestamp')
-      .below(cutoffDate)
-      .delete();
+    await this.db.auditLogs.where('timestamp').below(cutoffDate).delete();
 
     console.log(`[AuditLog] Purged ${oldLogs.length} logs older than ${olderThanDays} days`);
     return oldLogs.length;
@@ -310,7 +304,7 @@ export class AuditLogService {
       byAction,
       byStatus,
       byAgent,
-      byEntityType
+      byEntityType,
     };
   }
 
@@ -358,11 +352,11 @@ export class AuditLogService {
       'Action',
       'Status',
       'Duration (ms)',
-      'Error Message'
+      'Error Message',
     ];
 
     // CSV rows
-    const rows = logs.map(log => [
+    const rows = logs.map((log) => [
       log.id || '',
       log.timestamp.toISOString(),
       log.userId || '',
@@ -373,13 +367,13 @@ export class AuditLogService {
       log.action,
       log.status,
       log.duration?.toString() || '',
-      log.errorMessage || ''
+      log.errorMessage || '',
     ]);
 
     // Combine headers and rows
     const csvContent = [
       headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
     ].join('\n');
 
     return csvContent;

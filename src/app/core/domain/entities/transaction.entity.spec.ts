@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { 
-  Transaction, 
-  TransactionStatus, 
+import {
+  Transaction,
+  TransactionStatus,
   TransactionType,
-  ITransactionItem 
-} from './transaction.entity';
-import { Customer, CustomerStatus, CustomerTier } from './customer.entity';
-import { Product } from './product.entity';
-import { CartItem } from './cart.entity';
+  ITransactionItem,
+} from '@core/domain/entities/transaction.entity';
+import { TransactionBuilder } from '@core/domain/entities/transaction.builder';
+import { ProductBuilder } from '@core/domain/entities/product.builder';
+import { CartItem } from '@core/domain/entities/cart.entity';
 
 describe('Transaction Entity', () => {
   let mockItems: ITransactionItem[];
@@ -19,28 +19,28 @@ describe('Transaction Entity', () => {
         productId: 'prod-1',
         productName: 'Product 1',
         quantity: 2,
-        unitPrice: 10.00,
-        subtotal: 20.00
+        unitPrice: 10.0,
+        subtotal: 20.0,
       },
       {
         productId: 'prod-2',
         productName: 'Product 2',
         quantity: 1,
-        unitPrice: 15.00,
-        subtotal: 15.00
-      }
+        unitPrice: 15.0,
+        subtotal: 15.0,
+      },
     ];
 
-    transaction = new Transaction(
-      'txn-1',
-      'cust-1',
-      mockItems,
-      35.00,
-      0.08,
-      2.80,
-      0,
-      37.80
-    );
+    transaction = new TransactionBuilder()
+      .withId('txn-1')
+      .withCustomerId('cust-1')
+      .withItems(mockItems)
+      .withSubtotal(35.0)
+      .withTaxRate(0.08)
+      .withTaxAmount(2.8)
+      .withDiscountAmount(0)
+      .withTotal(37.8)
+      .build();
   });
 
   describe('Constructor and Validation', () => {
@@ -48,40 +48,39 @@ describe('Transaction Entity', () => {
       expect(transaction.id).toBe('txn-1');
       expect(transaction.customerId).toBe('cust-1');
       expect(transaction.items).toHaveLength(2);
-      expect(transaction.subtotal).toBe(35.00);
+      expect(transaction.subtotal).toBe(35.0);
       expect(transaction.taxRate).toBe(0.08);
-      expect(transaction.taxAmount).toBe(2.80);
-      expect(transaction.total).toBe(37.80);
+      expect(transaction.taxAmount).toBe(2.8);
+      expect(transaction.total).toBe(37.8);
       expect(transaction.status).toBe(TransactionStatus.PENDING);
       expect(transaction.type).toBe(TransactionType.SALE);
     });
 
     it('should throw error if no items provided', () => {
       expect(() => {
-        new Transaction(
-          'txn-1',
-          'cust-1',
-          [],
-          0,
-          0.08,
-          0,
-          0,
-          0
-        );
+        new TransactionBuilder()
+          .withId('txn-1')
+          .withCustomerId('cust-1')
+          .withItems([])
+          .withSubtotal(0)
+          .withTaxRate(0.08)
+          .withTaxAmount(0)
+          .withDiscountAmount(0)
+          .withTotal(0)
+          .build();
       }).toThrow('Transaction must have at least one item');
     });
 
     it('should create transaction without customer', () => {
-      const txn = new Transaction(
-        'txn-1',
-        undefined,
-        mockItems,
-        35.00,
-        0.08,
-        2.80,
-        0,
-        37.80
-      );
+      const txn = new TransactionBuilder()
+        .withId('txn-1')
+        .withItems(mockItems)
+        .withSubtotal(35.0)
+        .withTaxRate(0.08)
+        .withTaxAmount(2.8)
+        .withDiscountAmount(0)
+        .withTotal(37.8)
+        .build();
       expect(txn.customerId).toBeUndefined();
       expect(txn.hasCustomer()).toBe(false);
     });
@@ -117,14 +116,14 @@ describe('Transaction Entity', () => {
     });
 
     it('should process partial refund', () => {
-      transaction.refund(10.00, 'user-1');
-      expect(transaction.refundedAmount).toBe(10.00);
+      transaction.refund(10.0, 'user-1');
+      expect(transaction.refundedAmount).toBe(10.0);
       expect(transaction.status).toBe(TransactionStatus.PARTIALLY_REFUNDED);
     });
 
     it('should process full refund', () => {
-      transaction.refund(37.80, 'user-1');
-      expect(transaction.refundedAmount).toBe(37.80);
+      transaction.refund(37.8, 'user-1');
+      expect(transaction.refundedAmount).toBe(37.8);
       expect(transaction.status).toBe(TransactionStatus.REFUNDED);
     });
   });
@@ -140,44 +139,34 @@ describe('Transaction Entity', () => {
 
   describe('Factory Method - fromCartItems', () => {
     it('should create transaction from cart items', () => {
-      const product1 = new Product(
-        'prod-1',
-        'Product 1',
-        10.00,
-        'SKU-1',
-        'Category A',
-        100
-      );
-      
-      const product2 = new Product(
-        'prod-2',
-        'Product 2',
-        15.00,
-        'SKU-2',
-        'Category B',
-        50
-      );
-      
-      const cartItems = [
-        new CartItem(product1, 2),
-        new CartItem(product2, 1)
-      ];
-      
-      const txn = Transaction.fromCartItems(
-        'txn-1',
-        cartItems,
-        0.08,
-        0,
-        'cust-1',
-        'user-1'
-      );
-      
+      const product1 = new ProductBuilder()
+        .withId('prod-1')
+        .withName('Product 1')
+        .withPrice(10.0)
+        .withSku('SKU-1')
+        .withCategory('Category A')
+        .withStock(100)
+        .build();
+
+      const product2 = new ProductBuilder()
+        .withId('prod-2')
+        .withName('Product 2')
+        .withPrice(15.0)
+        .withSku('SKU-2')
+        .withCategory('Category B')
+        .withStock(50)
+        .build();
+
+      const cartItems = [new CartItem(product1, 2), new CartItem(product2, 1)];
+
+      const txn = Transaction.fromCartItems('txn-1', cartItems, 0.08, 0, 'cust-1', 'user-1');
+
       expect(txn.id).toBe('txn-1');
       expect(txn.customerId).toBe('cust-1');
       expect(txn.items).toHaveLength(2);
-      expect(txn.subtotal).toBe(35.00);
-      expect(txn.taxAmount).toBeCloseTo(2.80, 2);
-      expect(txn.total).toBeCloseTo(37.80, 2);
+      expect(txn.subtotal).toBe(35.0);
+      expect(txn.taxAmount).toBeCloseTo(2.8, 2);
+      expect(txn.total).toBeCloseTo(37.8, 2);
       expect(txn.status).toBe(TransactionStatus.PENDING);
       expect(txn.createdBy).toBe('user-1');
     });

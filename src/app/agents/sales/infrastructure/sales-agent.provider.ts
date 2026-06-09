@@ -4,8 +4,8 @@
  */
 
 import { Provider, InjectionToken } from '@angular/core';
-import { SalesAgent } from './sales.agent';
-import { ISalesAgent } from '../domain/sales-agent.interface';
+import { SalesAgent } from '@app/agents/sales/infrastructure/sales.agent';
+import { ISalesAgent } from '@app/agents/sales/domain/sales-agent.interface';
 
 /**
  * Injection token for ISalesAgent

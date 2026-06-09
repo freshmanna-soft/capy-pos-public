@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Phone } from './phone.value-object';
+import { Phone } from '@core/domain/value-objects/phone.value-object';
 
 describe('Phone Value Object', () => {
   describe('Constructor and Validation', () => {
@@ -25,8 +25,10 @@ describe('Phone Value Object', () => {
     });
 
     it('should throw error for null or undefined', () => {
-      expect(() => new Phone(null as any)).toThrow('Phone number must be a non-empty string');
-      expect(() => new Phone(undefined as any)).toThrow('Phone number must be a non-empty string');
+      expect(() => new Phone(null as unknown)).toThrow('Phone number must be a non-empty string');
+      expect(() => new Phone(undefined as unknown)).toThrow(
+        'Phone number must be a non-empty string',
+      );
     });
 
     it('should throw error for empty string', () => {
@@ -35,8 +37,8 @@ describe('Phone Value Object', () => {
     });
 
     it('should throw error for non-string values', () => {
-      expect(() => new Phone(123 as any)).toThrow('Phone number must be a non-empty string');
-      expect(() => new Phone({} as any)).toThrow('Phone number must be a non-empty string');
+      expect(() => new Phone(123 as unknown)).toThrow('Phone number must be a non-empty string');
+      expect(() => new Phone({} as unknown)).toThrow('Phone number must be a non-empty string');
     });
 
     it('should throw error for phone number with less than 10 digits', () => {
@@ -49,11 +51,15 @@ describe('Phone Value Object', () => {
     });
 
     it('should throw error for multiple + symbols', () => {
-      expect(() => new Phone('+1+5551234567')).toThrow('Phone number can only have one + symbol at the start');
+      expect(() => new Phone('+1+5551234567')).toThrow(
+        'Phone number can only have one + symbol at the start',
+      );
     });
 
     it('should throw error for + not at start', () => {
-      expect(() => new Phone('1+5551234567')).toThrow('+ symbol must be at the start of the phone number');
+      expect(() => new Phone('1+5551234567')).toThrow(
+        '+ symbol must be at the start of the phone number',
+      );
     });
 
     it('should accept various valid formats', () => {
@@ -221,9 +227,9 @@ describe('Phone Value Object', () => {
 
     it('should return false for non-Phone objects', () => {
       const phone = new Phone('+1-555-123-4567');
-      expect(phone.equals('+1-555-123-4567' as any)).toBe(false);
-      expect(phone.equals(null as any)).toBe(false);
-      expect(phone.equals(undefined as any)).toBe(false);
+      expect(phone.equals('+1-555-123-4567' as unknown)).toBe(false);
+      expect(phone.equals(null as unknown)).toBe(false);
+      expect(phone.equals(undefined as unknown)).toBe(false);
     });
   });
 
@@ -305,21 +311,21 @@ describe('Phone Value Object', () => {
     it('should not allow modification of value property', () => {
       const phone = new Phone('+1-555-123-4567');
       expect(() => {
-        (phone as any)._value = '+1-999-999-9999';
+        (phone as unknown)._value = '+1-999-999-9999';
       }).toThrow();
     });
 
     it('should not allow modification of countryCode property', () => {
       const phone = new Phone('+1-555-123-4567');
       expect(() => {
-        (phone as any)._countryCode = '+44';
+        (phone as unknown)._countryCode = '+44';
       }).toThrow();
     });
 
     it('should not allow modification of number property', () => {
       const phone = new Phone('+1-555-123-4567');
       expect(() => {
-        (phone as any)._number = '9999999999';
+        (phone as unknown)._number = '9999999999';
       }).toThrow();
     });
   });
@@ -336,10 +342,10 @@ describe('Phone Value Object', () => {
       const phone1 = new Phone('+1-555-123-4567');
       const phone2 = new Phone('+1-555-987-6543');
       const map = new Map<Phone, string>();
-      
+
       map.set(phone1, 'John Doe');
       map.set(phone2, 'Jane Smith');
-      
+
       expect(map.get(phone1)).toBe('John Doe');
       expect(map.get(phone2)).toBe('Jane Smith');
       expect(map.size).toBe(2);
@@ -366,7 +372,7 @@ describe('Phone Value Object', () => {
       const phone1 = new Phone('+44-20-1234-5678');
       const phone2 = new Phone('+44 (20) 1234 5678');
       const phone3 = new Phone('+442012345678');
-      
+
       expect(phone1.equals(phone2)).toBe(true);
       expect(phone2.equals(phone3)).toBe(true);
     });

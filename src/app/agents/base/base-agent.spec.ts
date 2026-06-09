@@ -1,6 +1,5 @@
-import { TestBed } from '@angular/core/testing';
-import { BaseAgent } from './base-agent';
-import { AgentStatus, IAgentMessage, IAgentResponse } from './base-agent.interface';
+import { BaseAgent } from '@app/agents/base/base-agent';
+import { AgentStatus, IAgentMessage, IAgentResponse } from '@app/agents/base/base-agent.interface';
 
 /**
  * Mock Agent for Testing
@@ -32,7 +31,7 @@ class MockAgent extends BaseAgent {
     return {
       success: true,
       data: { echo: message.payload },
-      metadata: { agentId: this.id }
+      metadata: { agentId: this.id },
     };
   }
 }
@@ -66,7 +65,7 @@ describe('BaseAgent', () => {
 
     it('should not initialize twice', async () => {
       await agent.initialize();
-      const firstCall = agent.initializeCalled;
+      const _firstCall = agent.initializeCalled;
       agent.initializeCalled = false;
       await agent.initialize();
       expect(agent.initializeCalled).toBe(false);
@@ -119,7 +118,7 @@ describe('BaseAgent', () => {
         id: 'msg-1',
         type: 'TEST',
         payload: { data: 'test' },
-        timestamp: new Date()
+        timestamp: new Date(),
       };
 
       const response = await agent.processMessage(message);
@@ -131,8 +130,8 @@ describe('BaseAgent', () => {
     it('should validate message structure', async () => {
       const invalidMessage = {
         type: 'TEST',
-        payload: {}
-      } as any;
+        payload: {},
+      } as unknown;
 
       const response = await agent.processMessage(invalidMessage);
       expect(response.success).toBe(false);
@@ -144,7 +143,7 @@ describe('BaseAgent', () => {
         id: 'msg-1',
         type: 'TEST',
         payload: {},
-        timestamp: new Date()
+        timestamp: new Date(),
       };
 
       const emittedPromise = new Promise<IAgentMessage>((resolve) => {
@@ -163,14 +162,14 @@ describe('BaseAgent', () => {
         id: 'msg-1',
         type: 'TEST',
         payload: {},
-        timestamp: new Date()
+        timestamp: new Date(),
       };
 
       const statusChanges: AgentStatus[] = [];
-      agent.status$.subscribe(status => statusChanges.push(status));
+      agent.status$.subscribe((status) => statusChanges.push(status));
 
       await agent.processMessage(message);
-      
+
       expect(statusChanges).toContain(AgentStatus.PROCESSING);
       expect(statusChanges).toContain(AgentStatus.COMPLETED);
     });
@@ -180,7 +179,7 @@ describe('BaseAgent', () => {
     it('should report healthy status when initialized', async () => {
       await agent.initialize();
       const health = await agent.getHealth();
-      
+
       expect(health.healthy).toBe(true);
       expect(health.status).toBe(AgentStatus.IDLE);
       expect(health.errorCount).toBe(0);
@@ -194,17 +193,17 @@ describe('BaseAgent', () => {
     it('should track last activity', async () => {
       await agent.initialize();
       await agent.start();
-      
+
       const message: IAgentMessage = {
         id: 'msg-1',
         type: 'TEST',
         payload: {},
-        timestamp: new Date()
+        timestamp: new Date(),
       };
-      
+
       await agent.processMessage(message);
       const health = await agent.getHealth();
-      
+
       expect(health.lastActivity).toBeDefined();
     });
   });
@@ -212,9 +211,9 @@ describe('BaseAgent', () => {
   describe('Status Observable', () => {
     it('should emit status changes', async () => {
       const statuses: AgentStatus[] = [];
-      
+
       const statusPromise = new Promise<void>((resolve) => {
-        agent.status$.subscribe(status => {
+        agent.status$.subscribe((status) => {
           statuses.push(status);
           if (statuses.length === 2) {
             resolve();
@@ -224,7 +223,7 @@ describe('BaseAgent', () => {
 
       await agent.initialize();
       await statusPromise;
-      
+
       expect(statuses[0]).toBe(AgentStatus.IDLE);
       expect(statuses[1]).toBe(AgentStatus.PROCESSING);
     });
