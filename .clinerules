@@ -48,19 +48,23 @@ A ticket/story is **NOT considered done** until ALL of the following criteria ar
    - Entity name: The Process ID
    - Entity type: `workflow-process`
    - Observations: story ID, issue number, start timestamp, status "in-progress", assigned to "cline-agent"
-3. **Transition issue from "Todo" to "In Progress"**: 
-   - First remove the "todo" label (if present): `gh issue edit [issue-number] --remove-label "todo"`
-   - Then add "in-progress": `gh issue edit [issue-number] --add-label "in-progress"`
-4. **Assign the issue**: `gh issue edit [issue-number] --add-assignee @me` (prevents others from picking it up)
-5. **Log in memory**: Create a relation from the Process ID to the story entity
+3. **Move card on Project Board to "In Progress"**:
+   - Get the item ID: `gh project item-list 1 --owner @me --format json | jq '.items[] | select(.content.number == [issue-number]) | .id'`
+   - Move to In Progress: `gh project item-edit --project-id MDk6UHJvamVjdFYyOTA2MTc= --id [ITEM_ID] --field-id MDI2OlByb2plY3RWMlNpbmdsZVNlbGVjdEZpZWxkMTE0MDMzNw== --single-select-option-id 47fc9ee4`
+4. **Add Process ID label for audit**: `gh issue edit [issue-number] --add-label "PID-[YYYYMMDD]-[ticket-id]"` (creates traceability between issue and process)
+5. **Assign the issue**: `gh issue edit [issue-number] --add-assignee @me` (prevents others from picking it up)
+6. **Log in memory**: Create a relation from the Process ID to the story entity
 
 **Example:**
 ```bash
 # 1. Process ID: PID-20260608-S2-3
 # 2. Save to memory (knowledge graph)
-# 3. Transition issue (remove todo, add in-progress)
-gh issue edit 9 --remove-label "todo" --add-label "in-progress"
-# 4. Assign
+# 3. Move card on board to "In Progress"
+ITEM_ID=$(gh project item-list 1 --owner @me --format json | jq -r '.items[] | select(.content.number == 9) | .id')
+gh project item-edit --project-id MDk6UHJvamVjdFYyOTA2MTc= --id $ITEM_ID --field-id MDI2OlByb2plY3RWMlNpbmdsZVNlbGVjdEZpZWxkMTE0MDMzNw== --single-select-option-id 47fc9ee4
+# 4. Add Process ID label for audit
+gh issue edit 9 --add-label "PID-20260608-S2-3"
+# 5. Assign
 gh issue edit 9 --add-assignee @me
 ```
 
@@ -128,7 +132,7 @@ When starting any new ticket/feature, consult these agents in order:
 - Never put domain logic in components or infrastructure
 - Never use `any` type — use generics, unknown, or proper typing
 - Never create circular dependencies between agents/modules
-- **Never skip moving the card across the board** — issue labels MUST be updated at EVERY phase transition (see below)
+- **Never skip moving the card across the board** — you MUST use `gh project item-edit` to transition the Status field at EVERY phase transition (labels alone do NOT move cards)
 - Never skip consulting the **fullstack-dev** agent during the Building phase
 - Never use long PR descriptions — PR `--body` must be ≤ 200 characters
 
@@ -145,20 +149,33 @@ When starting any new ticket/feature, consult these agents in order:
 
 ---
 
-## 🎯 GitHub Issue Status Tracking
+## 🎯 GitHub Project Board & Issue Status Tracking
 
-**MANDATORY**: Update GitHub issue status at each phase transition:
+> ⚠️ **IMPORTANT**: Labels alone do NOT move cards on the GitHub Projects board. The board uses a **Status field** (SingleSelect) to visually transition items between columns. You MUST use `gh project item-edit` to move cards.
 
-| Phase Transition | Command | Labels |
-|-----------------|---------|--------|
-| Pick up story | `gh issue edit [#] --remove-label "todo" --add-label "in-progress"` | Remove `todo`, add `in-progress` |
-| Create PR | `gh issue edit [#] --add-label "in-review" --remove-label "in-progress"` | Remove `in-progress`, add `in-review` |
-| Both reviews approved | `gh issue edit [#] --add-label "ready-to-merge" --remove-label "in-review"` | Remove `in-review`, add `ready-to-merge` |
-| After merge | `gh issue close [#] --comment "Completed in PR #[pr-number]"` | closed |
+### Project Board IDs (Reference)
+- **Project ID:** `MDk6UHJvamVjdFYyOTA2MTc=`
+- **Status Field ID:** `MDI2OlByb2plY3RWMlNpbmdsZVNlbGVjdEZpZWxkMTE0MDMzNw==`
+- **Status Options:**
+  - Todo: `f75ad846`
+  - In Progress: `47fc9ee4`
+  - Done: `98236657`
 
-> ⚠️ **CRITICAL**: You MUST remove the previous phase label when adding the new one. Cards must move cleanly across the board — never have two status labels simultaneously.
+### How to get the Item ID for an issue:
+```bash
+ITEM_ID=$(gh project item-list 1 --owner @me --format json | jq -r '.items[] | select(.content.number == [ISSUE_NUMBER]) | .id')
+```
 
-> 💡 **Tip**: Always update the issue status to keep the project board in sync with actual progress.
+### Phase Transitions (MANDATORY at each step):
+
+| Phase Transition | Board Command | Label Command |
+|-----------------|---------------|---------------|
+| Pick up story | `gh project item-edit --project-id MDk6UHJvamVjdFYyOTA2MTc= --id $ITEM_ID --field-id MDI2OlByb2plY3RWMlNpbmdsZVNlbGVjdEZpZWxkMTE0MDMzNw== --single-select-option-id 47fc9ee4` | `gh issue edit [#] --add-label "in-progress"` |
+| After merge | `gh project item-edit --project-id MDk6UHJvamVjdFYyOTA2MTc= --id $ITEM_ID --field-id MDI2OlByb2plY3RWMlNpbmdsZVNlbGVjdEZpZWxkMTE0MDMzNw== --single-select-option-id 98236657` | `gh issue close [#] --comment "Completed in PR #[pr-number]"` |
+
+> ⚠️ **CRITICAL**: You MUST execute the `gh project item-edit` command to visually move the card on the board. Labels are for audit/filtering only — they do NOT move cards.
+
+> 💡 **Tip**: Always get the ITEM_ID first, then use it for board transitions.
 
 ---
 
