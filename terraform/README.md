@@ -244,7 +244,7 @@ terraform:
 
 - [IBM Cloud Code Engine Docs](https://cloud.ibm.com/docs/codeengine)
 - [Terraform IBM Provider](https://registry.terraform.io/providers/IBM-Cloud/ibm/latest/docs)
-- [Project Architecture](../ARCHITECTURE.md)
+- [Project Architecture](../docs/ARCHITECTURE.md)
 
 ## License
 MIT License - See LICENSE file for details

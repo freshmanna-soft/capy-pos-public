@@ -176,7 +176,7 @@ npm run storybook
 ## 📚 Documentation
 
 - [Architecture](./ARCHITECTURE.md)
-- [Terraform Setup](./terraform/README.md)
+- [Terraform Setup](../terraform/README.md)
 - [API Documentation](./docs/api/)
 
 ## 🆘 Support
