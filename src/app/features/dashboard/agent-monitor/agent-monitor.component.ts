@@ -9,6 +9,7 @@ import {
   CircuitBreakerStats,
 } from '@core/infrastructure/resilience/circuit-breaker.service';
 import { TelemetryService, MetricSummary } from '@core/infrastructure/telemetry/telemetry.service';
+import { LowStockWidgetComponent } from '../low-stock-widget/low-stock-widget.component';
 
 interface AgentStatus {
   id: string;
@@ -25,9 +26,14 @@ interface AgentStatus {
 @Component({
   selector: 'app-agent-monitor',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, LowStockWidgetComponent],
   template: `
     <div class="agent-monitor">
+      <!-- Low Stock Alerts Widget -->
+      <div class="widget-row" data-testid="dashboard-widgets">
+        <app-low-stock-widget></app-low-stock-widget>
+      </div>
+
       <header class="monitor-header">
         <h1>Agent Monitoring Dashboard</h1>
         <div class="header-stats">

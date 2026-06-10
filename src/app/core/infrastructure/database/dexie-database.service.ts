@@ -178,6 +178,13 @@ export interface ISyncQueueDB {
   updatedAt: Date;
 }
 
+export interface ISettingsDB {
+  id: string;
+  key: string;
+  value: string;
+  updatedAt: Date;
+}
+
 /**
  * Dexie Database Service
  * Provides ORM-like interface for IndexedDB
@@ -199,6 +206,7 @@ export class DexieDatabase extends Dexie {
   rewards!: Table<IRewardDB, string>;
   rewardRedemptions!: Table<IRewardRedemptionDB, string>;
   syncQueue!: Table<ISyncQueueDB, string>;
+  settings!: Table<ISettingsDB, string>;
 
   constructor() {
     super('CapyPOSDB');
@@ -237,6 +245,11 @@ export class DexieDatabase extends Dexie {
 
       // Sync queue table with indexes
       syncQueue: 'id, entityType, entityId, status, createdAt, [entityType+status]',
+    });
+
+    // Version 2: Add settings table for app configuration
+    this.version(2).stores({
+      settings: 'id, key',
     });
 
     // Map tables to classes (optional, for better type safety)
