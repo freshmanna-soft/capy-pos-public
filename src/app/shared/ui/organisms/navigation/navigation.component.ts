@@ -220,6 +220,7 @@ export class NavigationComponent {
 
   readonly navItems = [
     { id: 'pos', path: '/pos', label: 'POS Terminal', icon: '🛒', exact: false },
+    { id: 'history', path: '/history', label: 'Transactions', icon: '🧾', exact: false },
     { id: 'inventory', path: '/inventory', label: 'Inventory', icon: '📦', exact: false },
     { id: 'customers', path: '/customers', label: 'Customers', icon: '👥', exact: false },
     { id: 'reports', path: '/reports', label: 'Reports', icon: '📊', exact: false },

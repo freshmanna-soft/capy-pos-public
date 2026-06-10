@@ -1,0 +1,31 @@
+#!/usr/bin/env sh
+
+echo "🧪 Running E2E Playwright tests before push..."
+echo "   This gate ensures no disconnected features or UX regressions are pushed."
+echo ""
+
+# Run unit tests first (fast gate)
+npm run test:unit
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "❌ Unit tests failed. Push aborted."
+  echo "   Fix failing tests before pushing."
+  exit 1
+fi
+
+# Run E2E Playwright tests (navigation integrity + persona workflows)
+npm run test:e2e:gate
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "❌ E2E Playwright tests failed. Push aborted."
+  echo "   Possible issues:"
+  echo "   - Disconnected feature (route without navigation link)"
+  echo "   - UX regression (search results clearing on selection)"
+  echo "   - Broken persona workflow"
+  echo ""
+  echo "   Run 'npm run test:e2e' locally to debug."
+  exit 1
+fi
+
+echo ""
+echo "✅ All tests passed. Push proceeding."

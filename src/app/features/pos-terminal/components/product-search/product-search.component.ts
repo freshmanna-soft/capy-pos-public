@@ -431,8 +431,9 @@ export class ProductSearchComponent implements OnInit {
   }
 
   /**
-   * Select a product and emit event
-   * Clears search after selection
+   * Select a product and emit event.
+   * Products remain visible after selection so cashiers can quickly add multiple items.
+   * Only the search query input is cleared if the user explicitly presses Escape.
    */
   selectProduct(product: Product): void {
     if (product.stock === 0) {
@@ -440,7 +441,8 @@ export class ProductSearchComponent implements OnInit {
     }
 
     this.productSelected.emit(product);
-    this.clearSearch();
+    // Do NOT clear search results - keep products visible for rapid multi-item selection
+    // This supports the cashier workflow where multiple items are added in quick succession
   }
 
   /**

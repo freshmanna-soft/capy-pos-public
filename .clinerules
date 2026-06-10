@@ -274,6 +274,87 @@ git commit -m "docs: add E2E evidence for S[sprint]-[story]"
 
 ---
 
+## 📝 Commit Message Convention (Conventional Commits)
+
+> ⚠️ **ENFORCED**: Commit messages are validated by commitlint via a Husky `commit-msg` hook. Non-conforming commits will be rejected.
+
+### Format
+```
+<type>(<scope>): <subject>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Types (required)
+| Type | Description |
+|------|-------------|
+| `feat` | A new feature |
+| `fix` | A bug fix |
+| `docs` | Documentation only changes |
+| `style` | Formatting changes (no code logic change) |
+| `refactor` | Code change that neither fixes a bug nor adds a feature |
+| `perf` | Performance improvement |
+| `test` | Adding or correcting tests |
+| `build` | Build system or external dependency changes |
+| `ci` | CI configuration changes |
+| `chore` | Other changes (tooling, config, etc.) |
+| `revert` | Reverts a previous commit |
+
+### Scopes (optional, domain-specific)
+- **Features**: `pos`, `inventory`, `customers`, `reports`, `dashboard`, `settings`, `history`
+- **Domains**: `auth`, `payments`, `agents`, `navigation`, `search`, `cart`
+- **Testing**: `e2e`, `unit`
+- **Infrastructure**: `infra`, `db`, `ui`
+
+### Rules
+1. **Type is required** and must be lowercase
+2. **Subject is required** and must not end with a period
+3. **Subject max length**: 100 characters
+4. **Header max length**: 120 characters (type + scope + subject)
+5. **Scope is optional** but must be lowercase if provided
+6. **Body** should explain WHY, not WHAT (the diff shows what changed)
+7. **Breaking changes** must include `BREAKING CHANGE:` in the footer
+
+### Examples
+```bash
+# Feature
+feat(pos): add product search with debounce and category filter
+
+# Bug fix
+fix(search): prevent results from clearing on product selection
+
+# Tests
+test(e2e): add persona-based navigation accessibility tests
+
+# Documentation
+docs: update PROJECT_STATUS with sprint 3 completion
+
+# Refactoring
+refactor(cart): extract total calculation to domain service
+
+# Build/tooling
+chore: add commitlint and conventional commits enforcement
+
+# With body and footer
+feat(reports): add daily sales reporting with date filter
+
+Implements revenue summary, transaction count, average value,
+and payment method breakdown (cash vs card).
+
+Closes #24
+```
+
+### Anti-Patterns (will be REJECTED by hook):
+- ❌ `Updated stuff` — no type prefix
+- ❌ `Feat: add thing` — type must be lowercase
+- ❌ `fix: ` — empty subject
+- ❌ `fix: added the thing.` — subject ends with period
+- ❌ `fix(POS): thing` — scope must be lowercase
+
+---
+
 ## 🎯 GitHub Project Board & Issue Status Tracking
 
 > ⚠️ **IMPORTANT**: Labels alone do NOT move cards on the GitHub Projects board. The board uses a **Status field** (SingleSelect) to visually transition items between columns. You MUST use `gh project item-edit` to move cards.
@@ -312,3 +393,73 @@ ITEM_ID=$(gh project item-list 1 --owner @me --format json | jq -r '.items[] | s
 | Building | fullstack-dev → qa-tester → devops |
 | Reviewing (PR) | architect (REQUIRED) → tech-lead (REQUIRED) → code-reviewer → qa-tester → product-owner |
 | Shipping | devops → marketing → scrum-master |
+
+---
+
+## 🔗 No Disconnected Features Rule (Navigation Integrity)
+
+> ⚠️ **CRITICAL**: Every routable feature MUST be reachable from the application UI. A route without a corresponding navigation link is a **BLOCKER** that prevents the story from being marked as done.
+
+### Requirements:
+
+1. **Route-to-Navigation Parity**: Every entry in `app.routes.ts` MUST have a corresponding navigation link in the navigation component (`src/app/shared/ui/organisms/navigation/navigation.component.ts`). No orphan routes allowed.
+
+2. **E2E Navigation Accessibility Test**: The persona-based E2E test suite (`tests/e2e/persona-workflows.spec.ts`) includes a "Navigation Accessibility" describe block that validates ALL routes are reachable from the UI. This test MUST pass before any PR can be merged.
+
+3. **New Route Checklist** — When adding a new route, you MUST:
+   - [ ] Add the route to `app.routes.ts`
+   - [ ] Add a navigation link in the navigation component's `navItems` array
+   - [ ] Add the route to the E2E navigation accessibility test
+   - [ ] Verify the link is visible and clickable on both desktop and mobile viewports
+   - [ ] Consult the **UX Lead** agent to confirm navigation placement and labeling
+
+4. **Review Gate**: During PR review, the **Architect** and **Tech Lead** MUST verify:
+   - [ ] No new routes exist without navigation links
+   - [ ] No existing navigation links are broken or removed without route removal
+   - [ ] The E2E persona navigation test passes with all routes covered
+
+5. **Anti-Pattern Detection**: If a route is added without a navigation link, the PR MUST be rejected with a BLOCKER comment. This is non-negotiable.
+
+### Validation Command:
+```bash
+# Quick check: count routes vs navigation items (should match, excluding redirects)
+ROUTES=$(grep -c "path:" src/app/app.routes.ts)
+NAV_ITEMS=$(grep -c "path:" src/app/shared/ui/organisms/navigation/navigation.component.ts)
+echo "Routes: $ROUTES | Nav Items: $NAV_ITEMS"
+```
+
+---
+
+## 🛡️ UX Workflow Integrity Rules (Regression Prevention)
+
+> ⚠️ **CRITICAL**: User workflows must never be broken by implementation choices. These rules prevent UX regressions that degrade the user experience.
+
+### Rule 1: Product Search Must Persist After Selection
+- When a user selects a product from search results (e.g., to add to cart), the search results MUST remain visible
+- The `selectProduct()` method MUST NOT call `clearSearch()` or reset the results array
+- Rationale: Cashiers add multiple items in rapid succession; clearing results forces re-searching
+- **Regression test**: `BUG-001` in `tests/e2e/persona-workflows.spec.ts`
+
+### Rule 2: No Silent State Destruction
+- User-visible state (search results, form inputs, selections) MUST NOT be cleared as a side effect of an unrelated action
+- If state needs to be cleared, it must be an explicit user action (e.g., pressing Escape, clicking a "Clear" button)
+- Any method that clears user-visible state must be documented with a comment explaining WHY
+
+### Rule 3: Persona-Based E2E Tests Are Mandatory for UX Features
+- Every user-facing feature MUST have at least one persona-based E2E test
+- Personas represent real user archetypes (e.g., Maria the Cashier, Carlos the Manager, Ana the Inventory Clerk)
+- Tests must validate the complete workflow, not just individual actions
+- The **QA Tester** agent must validate test coverage against persona workflows
+
+### Rule 4: UX Lead Sign-Off Required for Navigation Changes
+- Any change to navigation structure, order, labels, or icons requires **UX Lead** consultation
+- Mobile viewport must be tested (navigation must work on ≤ 430px width)
+- Navigation changes must not break existing user mental models
+
+### Anti-Patterns (BLOCKERS if found in PR):
+- ❌ Clearing search results on product selection
+- ❌ Hiding UI elements as a side effect of unrelated actions
+- ❌ Adding routes without navigation links
+- ❌ Removing navigation links without removing routes
+- ❌ Breaking mobile navigation layout
+- ❌ Changing navigation order without UX Lead approval
