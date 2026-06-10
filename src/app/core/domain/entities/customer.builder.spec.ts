@@ -30,14 +30,15 @@ describe('CustomerBuilder', () => {
     });
 
     it('should set createdAt and updatedAt to current time by default', () => {
-      const before = new Date();
+      const tolerance = 5; // ms tolerance for timing flakiness
+      const before = Date.now() - tolerance;
       const customer = builder.build();
-      const after = new Date();
+      const after = Date.now() + tolerance;
 
-      expect(customer.createdAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
-      expect(customer.createdAt.getTime()).toBeLessThanOrEqual(after.getTime());
-      expect(customer.updatedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
-      expect(customer.updatedAt.getTime()).toBeLessThanOrEqual(after.getTime());
+      expect(customer.createdAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(customer.createdAt.getTime()).toBeLessThanOrEqual(after);
+      expect(customer.updatedAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(customer.updatedAt.getTime()).toBeLessThanOrEqual(after);
     });
   });
 

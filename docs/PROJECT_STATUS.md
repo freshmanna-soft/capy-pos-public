@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 (S2-1 through S2-3)**, **Sprint 3 (S3-1 through S3-4)**, and is actively working on **Sprint 4**. S4-1 (Inventory Management CRUD), S4-2 (Customer Management CRUD), S4-3 (Low Stock Alerts), and S4-4 (Auto Stock Adjustment) are complete and merged. The infrastructure layer is **100% complete** with enterprise-grade services. **All 1250 unit tests pass across 47 files.** Sprint 4 is **in progress** with 16/19 committed story points delivered.
+The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 (S2-1 through S2-3)**, **Sprint 3 (S3-1 through S3-4)**, and **Sprint 4 (S4-1 through S4-5)**. All 4 sprints are **100% COMPLETE**. The infrastructure layer is **100% complete** with enterprise-grade services. **All 1250+ unit tests pass across 47 files. All 160 E2E tests pass.** Sprint 4 delivered 19/19 committed story points.
 
 **Last Updated:** June 9, 2026
 
@@ -44,7 +44,7 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 ### 📊 Board Columns
 - **Todo:** 0
 - **In Progress:** 0
-- **Done:** 13
+- **Done:** 18
 
 ---
 
@@ -154,11 +154,11 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 
 ---
 
-## 🎯 Sprint 4 — IN PROGRESS (Jun 9-22, 2026)
+## ✅ Sprint 4 — COMPLETED (Jun 9, 2026)
 
 **Sprint Goal:** Inventory management and customer management with persistent storage
 **Team Capacity:** ~21 story points | **Committed:** 19 pts + 3 stretch = 22 total
-**Kickoff:** Jun 9, 2026 — All agents notified ✅
+**Velocity:** 22 pts (100% — all committed + stretch delivered)
 
 | Ticket | Title | Size | Priority | Status | Persona Stakeholder |
 |--------|-------|------|----------|--------|---------------------|
@@ -166,7 +166,9 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 | S4-2 (#36) | Customer Management CRUD with Persistent Storage | M (5 pts) | P0 | ✅ Done (PR #42) | Sofia |
 | S4-3 (#37) | Low Stock Alerts and Notifications | S (3 pts) | P1 | ✅ Done (PR #44) | Carlos, Ana |
 | S4-4 (#38) | Automatic Stock Adjustment on Sale Completion | S (3 pts) | P0 | ✅ Done (PR #43) | Maria, Ana |
-| S4-5 (#39) | E2E Tests: Inventory and Customer Management Workflows | S (3 pts) | P2 (Stretch) | 🟡 Todo | Carlos |
+| S4-5 (#39) | E2E Tests: Inventory and Customer Management Workflows | S (3 pts) | P2 (Stretch) | ✅ Done (PR #46) | Carlos |
+
+**Total Delivered:** 22 pts (19 committed + 3 stretch)
 
 ### 👥 Persona Stakeholders (Sprint Review Demo)
 
@@ -268,8 +270,8 @@ src/app/
 ## 📝 Git Status
 
 - **Current Branch:** `main`
-- **Main Branch:** Up to date with Sprint 1 + Sprint 2 + Sprint 3 + S4-1 + S4-2 + S4-3 + S4-4
-- **Last Merged PR:** #44 ([S4-3] Low stock alerts with configurable threshold)
+- **Main Branch:** Up to date with Sprint 1 + Sprint 2 + Sprint 3 + Sprint 4 (ALL COMPLETE)
+- **Last Merged PR:** #46 ([S4-5] E2E Tests: Inventory and Customer Management Workflows)
 - **Unpushed commits on main:** 0
 
 ---
@@ -281,3 +283,6 @@ src/app/
 | Sprint 1 | 21 pts | 21 pts | 100% | All 6 stories delivered |
 | Sprint 2 | 24 pts | 24 pts | 100% | All 6 stories delivered |
 | Sprint 3 | 11 pts (+2 stretch) | 13 pts | 100% | All 4 stories delivered (incl. stretch) |
+| Sprint 4 | 19 pts (+3 stretch) | 22 pts | 100% | All 5 stories delivered (incl. stretch) |
+
+**Cumulative:** 80 story points delivered across 4 sprints with 100% velocity
