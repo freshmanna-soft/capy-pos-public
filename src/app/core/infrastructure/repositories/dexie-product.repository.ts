@@ -89,9 +89,16 @@ export class DexieProductRepository
 
   /**
    * Find active products
+   * Note: Dexie stores isActive as boolean true, not number 1
    */
   async findActive(): Promise<Product[]> {
-    return this.findByIndexedField('isActive', 1);
+    const records = await this.table
+      .filter(
+        (record) =>
+          !record.deletedAt && (record.isActive === true || (record.isActive as unknown) === 1),
+      )
+      .toArray();
+    return records.map((record) => this.mapToEntity(record));
   }
 
   /**
