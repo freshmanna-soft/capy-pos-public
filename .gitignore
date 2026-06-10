@@ -52,6 +52,7 @@ terraform/**/.terraform/
 *.tfstate.backup
 *.tfplan
 .terraform.lock.hcl
+terraform/terraform.tfvars
 
 # =============================================================================
 # IDEs and editors
