@@ -14,6 +14,7 @@ import {
   GenerateReceiptUseCase,
   ReceiptData,
 } from '@core/application/use-cases/generate-receipt.use-case';
+import { AdjustStockOnSaleUseCase } from '@core/application/use-cases/adjust-stock-on-sale.use-case';
 
 /**
  * POS Terminal Page Component
@@ -288,6 +289,7 @@ export class PosTerminalComponent implements OnInit {
   private db = inject(DexieDatabase);
   private cartService = inject(CartService);
   private generateReceipt = inject(GenerateReceiptUseCase);
+  private adjustStock = inject(AdjustStockOnSaleUseCase);
 
   @ViewChild(ShoppingCartComponent) shoppingCart!: ShoppingCartComponent;
 
@@ -393,12 +395,41 @@ export class PosTerminalComponent implements OnInit {
 
   /**
    * Handles successful payment completion.
-   * Generates receipt BEFORE clearing cart to capture item snapshot.
+   * Generates receipt and adjusts stock BEFORE clearing cart to capture item snapshot.
+   * Stock adjustment is fire-and-forget — sale completes even if adjustment fails.
    */
   handlePaymentComplete(result: PaymentResult): void {
+    // Capture cart items BEFORE clearing for stock adjustment
+    const cartItems = this.cartService.items();
+    const stockAdjustmentItems = cartItems.map((item) => ({
+      productId: item.product.id,
+      quantity: item.quantity,
+    }));
+
     // Generate receipt from current cart state BEFORE clearing
     const receipt = this.generateReceipt.execute(result);
     this.receiptData.set(receipt);
+
+    // Adjust stock levels (fire-and-forget, sale completes regardless)
+    this.adjustStock
+      .execute(stockAdjustmentItems)
+      .then((adjustmentResult) => {
+        if (!adjustmentResult.success) {
+          console.error(
+            '[POS] Stock adjustment partially failed. Manual reconciliation needed:',
+            adjustmentResult.failedAdjustments,
+          );
+        } else {
+          console.log(
+            '[POS] Stock adjusted successfully for',
+            adjustmentResult.adjustedProducts.length,
+            'products',
+          );
+        }
+      })
+      .catch((error) => {
+        console.error('[POS] Stock adjustment failed entirely:', error);
+      });
 
     this.lastPayment.set(result);
     this.showCheckout.set(false);

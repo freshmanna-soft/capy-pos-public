@@ -94,6 +94,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     findAll: vi.fn().mockResolvedValue([]),
     findById: vi.fn().mockResolvedValue(null),
     getCategories: vi.fn().mockResolvedValue([]),
+    adjustStock: vi.fn().mockResolvedValue(null),
   };
 
   beforeEach(async () => {

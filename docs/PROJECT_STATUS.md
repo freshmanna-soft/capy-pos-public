@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 (S2-1 through S2-3)**, **Sprint 3 (S3-1 through S3-4)**, and is actively working on **Sprint 4**. S4-1 (Inventory Management CRUD) is complete and merged. The infrastructure layer is **100% complete** with enterprise-grade services. **All 1100+ unit tests pass.** Sprint 4 is **in progress** with 8/19 committed story points delivered.
+The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 (S2-1 through S2-3)**, **Sprint 3 (S3-1 through S3-4)**, and is actively working on **Sprint 4**. S4-1 (Inventory Management CRUD) and S4-2 (Customer Management CRUD) are complete and merged. The infrastructure layer is **100% complete** with enterprise-grade services. **All 1192+ unit tests pass.** Sprint 4 is **in progress** with 13/19 committed story points delivered.
 
 **Last Updated:** June 9, 2026
 
@@ -95,6 +95,7 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 - ✅ `GetTransactionHistoryUseCase` - Transaction history with pagination
 - ✅ `GetDailySalesReportUseCase` - Daily sales reporting with aggregation
 - ✅ `ManageInventoryUseCase` - Full CRUD with search, filter, stock adjustment (S4-1)
+- ✅ `ManageCustomersUseCase` - Full CRUD with search, email uniqueness, loyalty (S4-2)
 
 ### 3. Infrastructure Layer (100% Complete)
 
@@ -162,7 +163,7 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 | Ticket | Title | Size | Priority | Status | Persona Stakeholder |
 |--------|-------|------|----------|--------|---------------------|
 | S4-1 (#35) | Inventory Management CRUD with Persistent Storage | L (8 pts) | P0 | ✅ Done (PR #40) | Carlos, Ana |
-| S4-2 (#36) | Customer Management CRUD with Persistent Storage | M (5 pts) | P0 | 🟡 Todo | Sofia |
+| S4-2 (#36) | Customer Management CRUD with Persistent Storage | M (5 pts) | P0 | ✅ Done (PR #42) | Sofia |
 | S4-3 (#37) | Low Stock Alerts and Notifications | S (3 pts) | P1 | 🟡 Todo | Carlos, Ana |
 | S4-4 (#38) | Automatic Stock Adjustment on Sale Completion | S (3 pts) | P0 | 🟡 Todo | Maria, Ana |
 | S4-5 (#39) | E2E Tests: Inventory and Customer Management Workflows | S (3 pts) | P2 (Stretch) | 🟡 Todo | Carlos |
@@ -267,8 +268,8 @@ src/app/
 ## 📝 Git Status
 
 - **Current Branch:** `main`
-- **Main Branch:** Up to date with Sprint 1 + Sprint 2 + Sprint 3 + S4-1
-- **Last Merged PR:** #40 ([S4-1] Inventory Management CRUD with Persistent Storage)
+- **Main Branch:** Up to date with Sprint 1 + Sprint 2 + Sprint 3 + S4-1 + S4-2
+- **Last Merged PR:** #42 ([S4-2] Customer Management CRUD with Persistent Storage)
 - **Unpushed commits on main:** 0
 
 ---
