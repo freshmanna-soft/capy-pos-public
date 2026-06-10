@@ -24,6 +24,7 @@ AGENTS=(
   "devops"
   "ux-lead"
   "marketing"
+  "manager"
 )
 
 BUILT=0

@@ -1,5 +1,6 @@
 import { Injectable, inject, signal, computed } from '@angular/core';
 import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
+import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 import { Product } from '@core/domain/entities/product.entity';
 
 /**
@@ -89,9 +90,8 @@ export interface ProductSummaryDTO {
   providedIn: 'root',
 })
 export class ManageInventoryUseCase {
-  private readonly productRepository: IProductRepository = inject<IProductRepository>(
-    'IProductRepository' as never,
-  );
+  private readonly productRepository: IProductRepository =
+    inject<IProductRepository>(PRODUCT_REPOSITORY);
 
   /** Loading state signal */
   private readonly _loading = signal<boolean>(false);

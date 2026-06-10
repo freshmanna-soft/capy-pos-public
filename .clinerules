@@ -197,6 +197,8 @@ rm -f /tmp/gh-comment-body.md
 - Never skip consulting the **fullstack-dev** agent during the Building phase
 - Never use long PR descriptions — PR `--body` must be ≤ 200 characters
 - **Never complete a story without E2E evidence** — you MUST capture a screenshot or E2E test result proving the feature works before marking a story as done
+- **Never skip Husky git hooks** — Do NOT use `--no-verify` on `git push` or `git commit` unless explicitly told to by the user. If the pre-push hook fails, FIX the failing tests. If you believe skipping is necessary, ASK the user first.
+- **Never use `--body` with multi-line content in `gh pr create`** — ALWAYS use `--body-file` with a temp file (see PR Creation Rule below). The `--body` flag breaks on backticks, `!`, `$`, newlines, and markdown code blocks in zsh.
 
 ---
 
@@ -463,3 +465,171 @@ echo "Routes: $ROUTES | Nav Items: $NAV_ITEMS"
 - ❌ Removing navigation links without removing routes
 - ❌ Breaking mobile navigation layout
 - ❌ Changing navigation order without UX Lead approval
+
+---
+
+## 📋 PR Creation Rule (`gh pr create`)
+
+> ⚠️ **CRITICAL**: Never pass PR body content directly via `--body` in `gh pr create`. Multi-line markdown with backticks, `!`, `$`, newlines, and code blocks WILL break zsh shell parsing. This was learned the hard way — the shell enters `dquote>` mode and the command never completes.
+
+### ❌ NEVER do this:
+```bash
+gh pr create --title "fix(tests): ..." --body "## Summary\n\nLong markdown with \`code\` and **bold**..."
+```
+
+### ✅ ALWAYS do this:
+```bash
+# 1. Write PR body to a temp file
+cat > /tmp/gh-pr-body.md << 'EOF'
+## Summary
+Short description of what this PR does.
+
+### Changes
+- Change 1
+- Change 2
+
+### Test Results
+- Unit tests: 40 files, 1135 tests ✅
+- E2E tests: 160 tests ✅
+EOF
+
+# 2. Create PR using --body-file
+gh pr create \
+  --title "fix(tests): resolve failing tests" \
+  --body-file /tmp/gh-pr-body.md \
+  --base main
+
+# 3. Clean up
+rm -f /tmp/gh-pr-body.md
+```
+
+### Rules:
+1. **Always use `--body-file`** for `gh pr create` with any multi-line content
+2. **Always use heredoc with single-quoted delimiter** (`<< 'EOF'`) to prevent interpolation
+3. **PR title must be ≤ 120 characters** and follow conventional commits format
+4. **Never inline markdown** in `--body` — even "simple" markdown can contain breaking chars
+5. **For truly simple PRs** (single line, no special chars): `--body 'Simple one-liner'` with single quotes is acceptable
+
+---
+
+## 🪝 After Hook (MANDATORY — Execute AFTER completing any work)
+
+> ⚠️ **CRITICAL**: After completing ANY story, fix, or significant work session, you MUST save findings and checkpoints to the Knowledge Graph Memory. This ensures continuity across sessions and prevents knowledge loss.
+
+### Steps (in order):
+
+1. **Save completion status to memory**: Update the Process ID entity with:
+   - Status: "completed" or "in-progress" (if paused)
+   - Completion timestamp
+   - PR number (if created)
+   - Key findings or decisions made
+
+2. **Save technical findings**: Create entities for any:
+   - Bugs discovered (type: `bug-finding`)
+   - Architecture decisions (type: `architecture-decision`)
+   - Patterns learned (type: `pattern-learned`)
+   - Retro items (type: `retro-item`)
+
+3. **Save checkpoint if paused**: If work is interrupted or context is running low:
+   - Create a `checkpoint` entity with current state
+   - Include: what's done, what's remaining, key file paths, blockers
+
+4. **Update PROJECT_STATUS.md** if sprint progress changed
+
+### When to Execute:
+- ✅ After a PR is created
+- ✅ After a PR is merged
+- ✅ After fixing bugs or tech debt
+- ✅ Before context window runs out (save checkpoint)
+- ✅ After any significant discovery or decision
+
+### Example:
+```
+Entity: "finding-di-token-mismatch"
+Type: "bug-finding"
+Observations:
+  - "ManageInventoryUseCase used string token 'IProductRepository' instead of PRODUCT_REPOSITORY InjectionToken"
+  - "Root cause: inconsistency between repository.factory.ts tokens and use-case inject() calls"
+  - "Fix: always use InjectionToken objects from repository.factory.ts, never string tokens"
+  - "Affected: agent.registry.spec.ts, manage-inventory.use-case.ts, manage-inventory.use-case.spec.ts"
+  - "Date: 2026-06-09"
+```
+
+### Anti-Patterns:
+- ❌ Completing work without saving to memory
+- ❌ Losing context between sessions because findings weren't persisted
+- ❌ Repeating the same debugging because root cause wasn't documented
+- ❌ Not saving checkpoints when context is running low
+
+---
+
+## 🎫 GitHub Issue Creation Rule (Sprint Story Creation)
+
+> ⚠️ **CRITICAL**: Never pass issue body content directly via `--body` in `gh issue create`. Multi-line markdown with code blocks, special characters, and Gherkin syntax WILL break shell parsing. Always use `--body-file`.
+
+### ✅ ALWAYS use this approach:
+
+```bash
+# 1. Write the issue body to a temporary file
+cat > /tmp/gh-issue-[story-id].md << 'EOF'
+## User Story
+As a [role], I want [feature], so that [benefit].
+
+## Acceptance Criteria
+
+```gherkin
+Feature: [Feature Name]
+
+Scenario: [Scenario description]
+  Given [precondition]
+  When [action]
+  Then [expected result]
+```
+
+## Technical Notes
+- [Implementation details]
+
+## Definition of Done
+- [ ] All acceptance criteria satisfied
+- [ ] Unit tests with >= 80% coverage
+- [ ] PR reviewed by Architect and Tech Lead
+EOF
+
+# 2. Create the issue using --body-file (NEVER --body for multi-line content)
+gh issue create \
+  --title "[S[sprint]-[story]] Feature Title" \
+  --body-file /tmp/gh-issue-[story-id].md \
+  --label "sprint:[N]" \
+  --label "size:[S|M|L]" \
+  --label "agent:[agent-name]" \
+  --label "priority:[high|medium|critical]"
+
+# 3. Clean up
+rm -f /tmp/gh-issue-[story-id].md
+```
+
+### Rules:
+1. **Always use `--body-file`** instead of `--body` for `gh issue create` with multi-line content
+2. **Always use a heredoc with single-quoted delimiter** (`<< 'EOF'`) to prevent shell interpolation
+3. **Use separate `--label` flags** for each label (NOT comma-separated in a single flag)
+4. **Create missing labels first** if they don't exist: `gh label create "sprint:N" --description "Sprint N" --color "0E8A16"`
+5. **Verify labels exist** before creating issues: `gh label list --limit 50`
+6. **Title format**: `[S{sprint}-{story}] Short descriptive title`
+
+### Sprint Planning Workflow:
+```bash
+# 1. Read knowledge graph memory for backlog context
+# 2. Consult product-owner agent for story definitions
+# 3. Create label(s) if needed for new sprint
+gh label create "sprint:N" --description "Sprint N: Theme" --color "0E8A16"
+# 4. Write each story to /tmp/gh-issue-s[N]-[M].md
+# 5. Create issues one by one with --body-file
+# 6. Save sprint entities + relations to knowledge graph
+# 7. Add issues to project board
+```
+
+### Anti-Patterns (will FAIL):
+- ❌ `gh issue create --body "long markdown..."` — breaks on special chars
+- ❌ `--label "sprint:4,size:L,agent:inventory"` — comma-separated labels don't work
+- ❌ Creating issues without checking if labels exist first
+- ❌ Using `--body` with Gherkin code blocks (backticks break shell)

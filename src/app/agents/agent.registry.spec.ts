@@ -10,7 +10,12 @@ import { IntegrationAgent } from '@app/agents/integration/infrastructure/integra
 import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
 import { ITransactionRepository } from '@core/domain/interfaces/transaction.repository.interface';
 import { IPaymentRepository } from '@core/domain/interfaces/payment.repository.interface';
-import { PAYMENT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import {
+  PAYMENT_REPOSITORY,
+  PRODUCT_REPOSITORY,
+  TRANSACTION_REPOSITORY,
+} from '@core/infrastructure/factories/repository.factory';
+import { PRODUCT_REPOSITORY_TOKEN } from '@app/agents/inventory/infrastructure/inventory.agent';
 import { AuditLogService } from '@core/infrastructure/audit/audit-log.service';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 
@@ -50,16 +55,19 @@ describe('AgentRegistry', () => {
       providers: [
         AuditLogService,
         EventBusService,
-        // Provide mock repositories with string-based tokens (for InventoryAgent, SalesAgent)
+        // Provide mock repositories with InjectionTokens
         {
-          provide: 'IProductRepository',
+          provide: PRODUCT_REPOSITORY_TOKEN,
           useValue: mockProductRepository,
         },
         {
-          provide: 'ITransactionRepository',
+          provide: PRODUCT_REPOSITORY,
+          useValue: mockProductRepository,
+        },
+        {
+          provide: TRANSACTION_REPOSITORY,
           useValue: mockTransactionRepository,
         },
-        // Provide mock repository with InjectionToken (for PaymentAgent)
         {
           provide: PAYMENT_REPOSITORY,
           useValue: mockPaymentRepository,
@@ -71,28 +79,7 @@ describe('AgentRegistry', () => {
         AnalyticsAgent,
         CustomerAgent,
         IntegrationAgent,
-        // Provide AgentRegistry with explicit factory
-        {
-          provide: AgentRegistry,
-          useFactory: (
-            inventory: InventoryAgent,
-            sales: SalesAgent,
-            payment: PaymentAgent,
-            analytics: AnalyticsAgent,
-            customer: CustomerAgent,
-            integration: IntegrationAgent,
-          ) => {
-            return new AgentRegistry(inventory, sales, payment, analytics, customer, integration);
-          },
-          deps: [
-            InventoryAgent,
-            SalesAgent,
-            PaymentAgent,
-            AnalyticsAgent,
-            CustomerAgent,
-            IntegrationAgent,
-          ],
-        },
+        AgentRegistry,
       ],
     });
 

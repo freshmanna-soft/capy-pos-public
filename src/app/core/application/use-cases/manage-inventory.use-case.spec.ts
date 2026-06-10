@@ -6,6 +6,7 @@ import {
   UpdateProductRequest,
 } from './manage-inventory.use-case';
 import { Product } from '@core/domain/entities/product.entity';
+import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 
 describe('ManageInventoryUseCase', () => {
   let useCase: ManageInventoryUseCase;
@@ -54,7 +55,7 @@ describe('ManageInventoryUseCase', () => {
     TestBed.configureTestingModule({
       providers: [
         ManageInventoryUseCase,
-        { provide: 'IProductRepository' as never, useValue: mockRepository },
+        { provide: PRODUCT_REPOSITORY, useValue: mockRepository },
       ],
     });
 

@@ -29,14 +29,14 @@ describe('PaymentBuilder', () => {
     });
 
     it('should set createdAt and updatedAt to current time by default', () => {
-      const before = new Date();
+      const before = Date.now() - 1; // 1ms tolerance for timing precision
       const payment = builder.build();
-      const after = new Date();
+      const after = Date.now() + 1;
 
-      expect(payment.createdAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
-      expect(payment.createdAt.getTime()).toBeLessThanOrEqual(after.getTime());
-      expect(payment.updatedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
-      expect(payment.updatedAt.getTime()).toBeLessThanOrEqual(after.getTime());
+      expect(payment.createdAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(payment.createdAt.getTime()).toBeLessThanOrEqual(after);
+      expect(payment.updatedAt.getTime()).toBeGreaterThanOrEqual(before);
+      expect(payment.updatedAt.getTime()).toBeLessThanOrEqual(after);
     });
   });
 

@@ -222,12 +222,13 @@ describe('ProductSearchComponent', () => {
       expect(emitSpy).not.toHaveBeenCalled();
     });
 
-    it('should clear search after selection', () => {
+    it('should keep search results visible after selection for rapid multi-item workflow', () => {
       component.searchQuery.set('coffee');
       component.searchResults.set(mockProducts);
       component.selectProduct(mockProducts[0]);
-      expect(component.searchQuery()).toBe('');
-      expect(component.searchResults()).toEqual([]);
+      // Results stay visible to support cashier rapid multi-item selection
+      expect(component.searchQuery()).toBe('coffee');
+      expect(component.searchResults()).toEqual(mockProducts);
     });
   });
 
