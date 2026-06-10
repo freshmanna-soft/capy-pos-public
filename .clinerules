@@ -43,6 +43,17 @@ A ticket/story is **NOT considered done** until ALL of the following criteria ar
 
 **Steps (in order):**
 
+0. **Read Knowledge Graph Memory** *(CRITICAL — Learn from previous work)*:
+   - Use `read_graph` or `search_nodes` to retrieve ALL `pattern-learned`, `bug-finding`, and `checkpoint` entities
+   - Review findings for environment constraints (e.g., `main` is a protected branch — NEVER push directly)
+   - Review any checkpoints from previous sessions to avoid repeating mistakes
+   - Apply learned patterns to the current task BEFORE writing any code
+   - **Known constraints to always remember:**
+     - `main` branch is PROTECTED — changes require PRs, direct push will be REJECTED
+     - Always use `--body-file` for `gh` commands with markdown content
+     - Always chain `&& echo "GH_CMD_DONE"` on `gh` commands to detect completion (see `gh` CLI Completion Detection Rule)
+   > 💡 This step prevents repeating the same mistakes across sessions. If you've hit a blocker before, memory will tell you.
+
 1. **Generate a Process ID**: Create a unique process identifier in format `PID-[YYYYMMDD]-[ticket-id]` (e.g., `PID-20260608-S2-3`)
 2. **Save to Knowledge Graph Memory**: Create an entity in memory with:
    - Entity name: The Process ID
@@ -57,6 +68,10 @@ A ticket/story is **NOT considered done** until ALL of the following criteria ar
 
 **Example:**
 ```bash
+# 0. Read memory for lessons learned
+# Use MCP: read_graph or search_nodes("pattern-learned") + search_nodes("protected branch")
+# Review all findings before proceeding — apply constraints to current task
+
 # 1. Process ID: PID-20260608-S2-3
 # 2. Save to memory (knowledge graph)
 # 3. Move card on board to "In Progress"
@@ -68,7 +83,7 @@ gh issue edit 9 --add-label "PID-20260608-S2-3"
 gh issue edit 9 --add-assignee @me
 ```
 
-> 💡 This hook ensures every story has a traceable process ID, is assigned, and is tracked in memory from the moment work begins.
+> 💡 This hook ensures every story has a traceable process ID, is assigned, and is tracked in memory from the moment work begins. Step 0 ensures you NEVER repeat past mistakes.
 
 ---
 
@@ -184,6 +199,57 @@ EOF
 gh issue comment [issue-number] --body-file /tmp/gh-comment-body.md
 rm -f /tmp/gh-comment-body.md
 ```
+
+---
+
+## 🔍 `gh` CLI Completion Detection Rule
+
+> ⚠️ **CRITICAL**: Some `gh` CLI commands (especially `gh pr comment`, `gh issue comment`, `gh pr create`) do not produce clear terminal output upon completion. This makes it impossible to detect whether the command finished or is still running. Always use the completion detection pattern below.
+
+### Problem:
+- `gh pr comment` and `gh issue comment` output a URL on success but sometimes the terminal reports them as "still running"
+- `gh project item-edit` produces no output at all on success
+- Without a clear completion signal, you cannot proceed to the next step confidently
+
+### ✅ ALWAYS chain `&& echo "GH_CMD_DONE"` on `gh` commands:
+
+```bash
+# ✅ Correct — completion is detectable
+gh pr comment 34 --body-file /tmp/gh-comment-body.md && echo "GH_CMD_DONE"
+
+gh issue comment 37 --body-file /tmp/gh-comment-body.md && echo "GH_CMD_DONE"
+
+gh pr create --title "feat(pos): add feature" --body-file /tmp/gh-pr-body.md --base main && echo "GH_CMD_DONE"
+
+gh project item-edit --project-id MDk6UHJvamVjdFYyOTA2MTc= --id $ITEM_ID --field-id MDI2OlByb2plY3RWMlNpbmdsZVNlbGVjdEZpZWxkMTE0MDMzNw== --single-select-option-id 98236657 && echo "GH_CMD_DONE"
+
+gh issue close 37 --comment 'Completed in PR #44' && echo "GH_CMD_DONE"
+
+gh pr merge 44 --squash --delete-branch && echo "GH_CMD_DONE"
+```
+
+### Rules:
+1. **Always append `&& echo "GH_CMD_DONE"`** to ANY `gh` command that modifies state (comments, creates, edits, merges, closes)
+2. **If you see `GH_CMD_DONE` in the output** → the command completed successfully
+3. **If you do NOT see `GH_CMD_DONE`** → the command either failed or is still running; check for error messages
+4. **For read-only commands** (`gh issue list`, `gh pr list`, `gh project item-list`), the echo is optional but recommended
+5. **Combine with `2>&1`** when you need to capture errors: `gh pr comment 34 --body-file /tmp/body.md 2>&1 && echo "GH_CMD_DONE"`
+
+### Quick Reference:
+| Command | Completion Pattern |
+|---------|-------------------|
+| `gh pr comment` | `gh pr comment [#] --body-file [file] && echo "GH_CMD_DONE"` |
+| `gh issue comment` | `gh issue comment [#] --body-file [file] && echo "GH_CMD_DONE"` |
+| `gh pr create` | `gh pr create --title "..." --body-file [file] --base main && echo "GH_CMD_DONE"` |
+| `gh pr merge` | `gh pr merge [#] --squash --delete-branch && echo "GH_CMD_DONE"` |
+| `gh issue close` | `gh issue close [#] --comment '...' && echo "GH_CMD_DONE"` |
+| `gh issue edit` | `gh issue edit [#] --add-label "..." && echo "GH_CMD_DONE"` |
+| `gh project item-edit` | `gh project item-edit ... && echo "GH_CMD_DONE"` |
+
+### Anti-Patterns:
+- ❌ Running `gh` commands without completion detection — you won't know if they finished
+- ❌ Assuming a command completed because no error appeared — some commands produce no output
+- ❌ Moving to the next step without confirming `GH_CMD_DONE` appeared in output
 
 ---
 

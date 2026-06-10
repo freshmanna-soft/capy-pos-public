@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 (S2-1 through S2-3)**, **Sprint 3 (S3-1 through S3-4)**, and is actively working on **Sprint 4**. S4-1 (Inventory Management CRUD) and S4-2 (Customer Management CRUD) are complete and merged. The infrastructure layer is **100% complete** with enterprise-grade services. **All 1192+ unit tests pass.** Sprint 4 is **in progress** with 13/19 committed story points delivered.
+The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 (S2-1 through S2-3)**, **Sprint 3 (S3-1 through S3-4)**, and is actively working on **Sprint 4**. S4-1 (Inventory Management CRUD), S4-2 (Customer Management CRUD), S4-3 (Low Stock Alerts), and S4-4 (Auto Stock Adjustment) are complete and merged. The infrastructure layer is **100% complete** with enterprise-grade services. **All 1250 unit tests pass across 47 files.** Sprint 4 is **in progress** with 16/19 committed story points delivered.
 
 **Last Updated:** June 9, 2026
 
@@ -164,8 +164,8 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 |--------|-------|------|----------|--------|---------------------|
 | S4-1 (#35) | Inventory Management CRUD with Persistent Storage | L (8 pts) | P0 | ✅ Done (PR #40) | Carlos, Ana |
 | S4-2 (#36) | Customer Management CRUD with Persistent Storage | M (5 pts) | P0 | ✅ Done (PR #42) | Sofia |
-| S4-3 (#37) | Low Stock Alerts and Notifications | S (3 pts) | P1 | 🟡 Todo | Carlos, Ana |
-| S4-4 (#38) | Automatic Stock Adjustment on Sale Completion | S (3 pts) | P0 | 🟡 Todo | Maria, Ana |
+| S4-3 (#37) | Low Stock Alerts and Notifications | S (3 pts) | P1 | ✅ Done (PR #44) | Carlos, Ana |
+| S4-4 (#38) | Automatic Stock Adjustment on Sale Completion | S (3 pts) | P0 | ✅ Done (PR #43) | Maria, Ana |
 | S4-5 (#39) | E2E Tests: Inventory and Customer Management Workflows | S (3 pts) | P2 (Stretch) | 🟡 Todo | Carlos |
 
 ### 👥 Persona Stakeholders (Sprint Review Demo)
@@ -268,8 +268,8 @@ src/app/
 ## 📝 Git Status
 
 - **Current Branch:** `main`
-- **Main Branch:** Up to date with Sprint 1 + Sprint 2 + Sprint 3 + S4-1 + S4-2
-- **Last Merged PR:** #42 ([S4-2] Customer Management CRUD with Persistent Storage)
+- **Main Branch:** Up to date with Sprint 1 + Sprint 2 + Sprint 3 + S4-1 + S4-2 + S4-3 + S4-4
+- **Last Merged PR:** #44 ([S4-3] Low stock alerts with configurable threshold)
 - **Unpushed commits on main:** 0
 
 ---
