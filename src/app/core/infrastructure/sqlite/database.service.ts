@@ -11,6 +11,7 @@ import initSqlJs, { BindParams, Database, SqlJsStatic } from 'sql.js';
  */
 @Injectable({ providedIn: 'root' })
 export class DatabaseService {
+  private static readonly DB_STORAGE_KEY = 'capy-pos-db';
   private SQL: SqlJsStatic | null = null;
   private db: Database | null = null;
   private initialized = false;
@@ -31,7 +32,7 @@ export class DatabaseService {
       });
 
       // Try to load existing database from localStorage
-      const savedDb = localStorage.getItem('capy-pos-db');
+      const savedDb = localStorage.getItem(DatabaseService.DB_STORAGE_KEY);
 
       if (savedDb) {
         // Load existing database
@@ -84,8 +85,7 @@ export class DatabaseService {
         stmt.free();
         return results;
       } else {
-        const results = db.exec(sql);
-        return results;
+        return db.exec(sql);
       }
     } catch (error) {
       console.error('[DatabaseService] Query execution failed:', error);
@@ -210,7 +210,7 @@ export class DatabaseService {
     try {
       const data = this.db.export();
       const base64 = this.uint8ArrayToBase64(data);
-      localStorage.setItem('capy-pos-db', base64);
+      localStorage.setItem(DatabaseService.DB_STORAGE_KEY, base64);
     } catch (error) {
       console.error('[DatabaseService] Failed to save database:', error);
     }
@@ -225,7 +225,7 @@ export class DatabaseService {
       this.db = null;
     }
 
-    localStorage.removeItem('capy-pos-db');
+    localStorage.removeItem(DatabaseService.DB_STORAGE_KEY);
     this.initialized = false;
   }
 

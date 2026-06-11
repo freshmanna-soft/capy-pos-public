@@ -8,6 +8,8 @@ import {
   StockAdjustment,
 } from '@core/domain/rules/inventory.service.interface';
 
+const CURRENT_STOCK_LABEL = 'Current stock';
+
 /**
  * Inventory Service Implementation
  *
@@ -34,7 +36,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
   ): StockAvailability {
     this.validateRequired(productId, 'Product ID');
     this.validatePositive(requestedQuantity, 'Requested quantity');
-    this.validateNonNegative(currentStock, 'Current stock');
+    this.validateNonNegative(currentStock, CURRENT_STOCK_LABEL);
 
     const available = currentStock;
     const isAvailable = available >= requestedQuantity;
@@ -60,7 +62,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
   ): StockReservation {
     this.validateRequired(productId, 'Product ID');
     this.validatePositive(quantity, 'Quantity');
-    this.validateNonNegative(currentStock, 'Current stock');
+    this.validateNonNegative(currentStock, CURRENT_STOCK_LABEL);
     this.validateNonNegative(reservedStock, 'Reserved stock');
     this.validatePositive(durationMinutes, 'Duration');
 
@@ -108,7 +110,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     reason: string,
   ): StockAdjustment {
     this.validateRequired(productId, 'Product ID');
-    this.validateNonNegative(currentStock, 'Current stock');
+    this.validateNonNegative(currentStock, CURRENT_STOCK_LABEL);
     this.validateRequired(reason, 'Reason');
 
     const newQuantity = currentStock + adjustmentAmount;
@@ -135,7 +137,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
    */
   checkLowStock(productId: string, currentStock: number, threshold: number): LowStockThreshold {
     this.validateRequired(productId, 'Product ID');
-    this.validateNonNegative(currentStock, 'Current stock');
+    this.validateNonNegative(currentStock, CURRENT_STOCK_LABEL);
     this.validateNonNegative(threshold, 'Threshold');
 
     return {
@@ -150,7 +152,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
    * Calculate available stock after reservations
    */
   calculateAvailableStock(currentStock: number, reservedStock: number): number {
-    this.validateNonNegative(currentStock, 'Current stock');
+    this.validateNonNegative(currentStock, CURRENT_STOCK_LABEL);
     this.validateNonNegative(reservedStock, 'Reserved stock');
 
     if (reservedStock > currentStock) {
@@ -167,7 +169,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
    * Validate if a stock operation is allowed
    */
   canFulfillOrder(currentStock: number, requestedQuantity: number, reservedStock: number): boolean {
-    this.validateNonNegative(currentStock, 'Current stock');
+    this.validateNonNegative(currentStock, CURRENT_STOCK_LABEL);
     this.validatePositive(requestedQuantity, 'Requested quantity');
     this.validateNonNegative(reservedStock, 'Reserved stock');
 

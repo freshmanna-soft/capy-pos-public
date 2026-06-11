@@ -1,6 +1,7 @@
 import {
   ApplicationConfig,
   provideBrowserGlobalErrorListeners,
+  provideZonelessChangeDetection,
   APP_INITIALIZER,
 } from '@angular/core';
 import { provideRouter } from '@angular/router';
@@ -68,6 +69,7 @@ export function initializeAgents(registry: AgentRegistry) {
 
 export const appConfig: ApplicationConfig = {
   providers: [
+    provideZonelessChangeDetection(),
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes),
     {

@@ -16,6 +16,8 @@ import { DatabaseService } from '@core/infrastructure/sqlite/database.service';
  * @extends BaseSQLiteRepository<Product>
  * @implements IProductRepository
  */
+const NOT_IMPLEMENTED_MSG = 'Method not implemented - use DexieProductRepository instead';
+
 @Injectable({ providedIn: 'root' })
 export class SQLiteProductRepository
   extends BaseSQLiteRepository<Product>
@@ -178,35 +180,35 @@ export class SQLiteProductRepository
    * Find active products (stub - not implemented for SQLite)
    */
   async findActive(): Promise<Product[]> {
-    throw new Error('Method not implemented - use DexieProductRepository instead');
+    throw new Error(NOT_IMPLEMENTED_MSG);
   }
 
   /**
    * Update product stock (stub - not implemented for SQLite)
    */
   async updateStock(_productId: string, _quantity: number): Promise<Product> {
-    throw new Error('Method not implemented - use DexieProductRepository instead');
+    throw new Error(NOT_IMPLEMENTED_MSG);
   }
 
   /**
    * Adjust product stock (stub - not implemented for SQLite)
    */
   async adjustStock(_productId: string, _adjustment: number): Promise<Product> {
-    throw new Error('Method not implemented - use DexieProductRepository instead');
+    throw new Error(NOT_IMPLEMENTED_MSG);
   }
 
   /**
    * Update product price (stub - not implemented for SQLite)
    */
   async updatePrice(_productId: string, _price: number, _cost?: number): Promise<Product> {
-    throw new Error('Method not implemented - use DexieProductRepository instead');
+    throw new Error(NOT_IMPLEMENTED_MSG);
   }
 
   /**
    * Get all categories (stub - not implemented for SQLite)
    */
   async getCategories(): Promise<string[]> {
-    throw new Error('Method not implemented - use DexieProductRepository instead');
+    throw new Error(NOT_IMPLEMENTED_MSG);
   }
 }
 

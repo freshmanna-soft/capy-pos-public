@@ -12,7 +12,7 @@ import { INITIALIZE_SCHEMA } from '@core/infrastructure/sqlite/schema';
  */
 @Injectable({ providedIn: 'root' })
 export class DatabaseInitializerService {
-  private databaseService = inject(DatabaseService);
+  private readonly databaseService = inject(DatabaseService);
 
   private initializationPromise: Promise<void> | null = null;
 
@@ -125,13 +125,12 @@ export class DatabaseInitializerService {
     payments: number;
   } {
     try {
-      const stats = {
+      return {
         products: this.getTableCount('products'),
         customers: this.getTableCount('customers'),
         transactions: this.getTableCount('transactions'),
         payments: this.getTableCount('payments'),
       };
-      return stats;
     } catch (error) {
       console.error('[DatabaseInitializer] Failed to get database stats:', error);
       return { products: 0, customers: 0, transactions: 0, payments: 0 };

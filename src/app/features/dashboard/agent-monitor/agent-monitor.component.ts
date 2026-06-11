@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil, interval } from 'rxjs';
 import { AgentRegistry } from '@app/agents/agent.registry';
@@ -39,19 +39,19 @@ interface AgentStatus {
         <div class="header-stats">
           <div class="stat">
             <span class="stat-label">Total Agents</span>
-            <span class="stat-value">{{ agents.length }}</span>
+            <span class="stat-value">{{ agents().length }}</span>
           </div>
           <div class="stat">
             <span class="stat-label">Running</span>
-            <span class="stat-value success">{{ runningAgents }}</span>
+            <span class="stat-value success">{{ runningAgents() }}</span>
           </div>
           <div class="stat">
             <span class="stat-label">Messages</span>
-            <span class="stat-value">{{ eventBusStats.totalMessages }}</span>
+            <span class="stat-value">{{ eventBusStats().totalMessages }}</span>
           </div>
           <div class="stat">
             <span class="stat-label">Audit Logs</span>
-            <span class="stat-value">{{ auditStats.totalLogs }}</span>
+            <span class="stat-value">{{ auditStats().totalLogs }}</span>
           </div>
         </div>
       </header>
@@ -61,7 +61,7 @@ interface AgentStatus {
         <section class="monitor-section agents-section">
           <h2>Agents</h2>
           <div class="agent-list">
-            @for (agent of agents; track agent) {
+            @for (agent of agents(); track agent) {
               <div
                 class="agent-card"
                 [class.running]="agent.isRunning"
@@ -91,7 +91,7 @@ interface AgentStatus {
         <section class="monitor-section circuit-breakers-section">
           <h2>Circuit Breakers</h2>
           <div class="circuit-breaker-list">
-            @for (cb of circuitBreakers | keyvalue; track cb) {
+            @for (cb of circuitBreakers() | keyvalue; track cb) {
               <div
                 class="circuit-breaker-card"
                 [class.open]="cb.value.state === 'OPEN'"
@@ -118,7 +118,7 @@ interface AgentStatus {
                 </div>
               </div>
             }
-            @if ((circuitBreakers | keyvalue).length === 0) {
+            @if ((circuitBreakers() | keyvalue).length === 0) {
               <div class="empty-state">No circuit breakers active</div>
             }
           </div>
@@ -128,7 +128,7 @@ interface AgentStatus {
         <section class="monitor-section metrics-section">
           <h2>Metrics</h2>
           <div class="metrics-list">
-            @for (metric of metrics | keyvalue; track metric) {
+            @for (metric of metrics() | keyvalue; track metric) {
               <div class="metric-card">
                 <h3>{{ metric.key }}</h3>
                 <div class="metric-stats">
@@ -157,7 +157,7 @@ interface AgentStatus {
                 </div>
               </div>
             }
-            @if ((metrics | keyvalue).length === 0) {
+            @if ((metrics() | keyvalue).length === 0) {
               <div class="empty-state">No metrics collected</div>
             }
           </div>
@@ -167,7 +167,7 @@ interface AgentStatus {
         <section class="monitor-section audit-logs-section">
           <h2>Recent Audit Logs</h2>
           <div class="audit-log-list">
-            @for (log of recentAuditLogs; track log) {
+            @for (log of recentAuditLogs(); track log) {
               <div
                 class="audit-log-entry"
                 [class.success]="log.status === 'SUCCESS'"
@@ -191,7 +191,7 @@ interface AgentStatus {
                 </div>
               </div>
             }
-            @if (recentAuditLogs.length === 0) {
+            @if (recentAuditLogs().length === 0) {
               <div class="empty-state">No audit logs</div>
             }
           </div>
@@ -204,7 +204,7 @@ interface AgentStatus {
             <div class="stat-card">
               <h3>By Type</h3>
               <div class="stat-list">
-                @for (type of eventBusStats.byType | keyvalue; track type) {
+                @for (type of eventBusStats().byType | keyvalue; track type) {
                   <div class="stat-item">
                     <span>{{ type.key }}:</span>
                     <span>{{ type.value }}</span>
@@ -215,7 +215,7 @@ interface AgentStatus {
             <div class="stat-card">
               <h3>By Source</h3>
               <div class="stat-list">
-                @for (source of eventBusStats.bySource | keyvalue; track source) {
+                @for (source of eventBusStats().bySource | keyvalue; track source) {
                   <div class="stat-item">
                     <span>{{ source.key }}:</span>
                     <span>{{ source.value }}</span>
@@ -226,7 +226,7 @@ interface AgentStatus {
             <div class="stat-card">
               <h3>By Priority</h3>
               <div class="stat-list">
-                @for (priority of eventBusStats.byPriority | keyvalue; track priority) {
+                @for (priority of eventBusStats().byPriority | keyvalue; track priority) {
                   <div class="stat-item">
                     <span>{{ priority.key }}:</span>
                     <span>{{ priority.value }}</span>
@@ -523,28 +523,27 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   private readonly circuitBreakerService = inject(CircuitBreakerService);
   private readonly telemetry = inject(TelemetryService);
 
-  private readonly cdr = inject(ChangeDetectorRef);
   private readonly destroy$ = new Subject<void>();
 
-  agents: AgentStatus[] = [];
-  runningAgents = 0;
-  circuitBreakers: Record<string, CircuitBreakerStats> = {};
-  metrics: Record<string, MetricSummary> = {};
-  recentAuditLogs: AuditLogEntry[] = [];
-  eventBusStats: {
+  agents = signal<AgentStatus[]>([]);
+  runningAgents = signal(0);
+  circuitBreakers = signal<Record<string, CircuitBreakerStats>>({});
+  metrics = signal<Record<string, MetricSummary>>({});
+  recentAuditLogs = signal<AuditLogEntry[]>([]);
+  eventBusStats = signal<{
     totalMessages: number;
     byType: Record<string, number>;
     bySource: Record<string, number>;
     byPriority: Record<string, number>;
-  } = {
+  }>({
     totalMessages: 0,
     byType: {},
     bySource: {},
     byPriority: {},
-  };
-  auditStats: { totalLogs: number } = {
+  });
+  auditStats = signal<{ totalLogs: number }>({
     totalLogs: 0,
-  };
+  });
 
   ngOnInit(): void {
     this.loadAgentStatus();
@@ -585,27 +584,26 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
       };
     });
 
-    this.agents = await Promise.all(agentPromises);
-    this.runningAgents = this.agents.filter((a) => a.isRunning).length;
-    this.cdr.detectChanges();
+    const results = await Promise.all(agentPromises);
+    this.agents.set(results);
+    this.runningAgents.set(results.filter((a) => a.isRunning).length);
   }
 
   private loadCircuitBreakers(): void {
-    this.circuitBreakers = this.circuitBreakerService.getAllStats();
+    this.circuitBreakers.set(this.circuitBreakerService.getAllStats());
   }
 
   private loadMetrics(): void {
-    this.metrics = this.telemetry.getAllMetricSummaries();
+    this.metrics.set(this.telemetry.getAllMetricSummaries());
   }
 
   private async loadAuditLogs(): Promise<void> {
-    this.recentAuditLogs = this.auditLog.getRecentLogs(10);
-    this.auditStats = await this.auditLog.getStatistics();
-    this.cdr.detectChanges();
+    this.recentAuditLogs.set(this.auditLog.getRecentLogs(10));
+    this.auditStats.set(await this.auditLog.getStatistics());
   }
 
   private loadEventBusStats(): void {
-    this.eventBusStats = this.eventBus.getStatistics();
+    this.eventBusStats.set(this.eventBus.getStatistics());
   }
 }
 

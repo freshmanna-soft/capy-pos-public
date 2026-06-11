@@ -128,8 +128,7 @@ export class ApiProductRepository implements IProductRepository {
 
   async getCategories(): Promise<string[]> {
     try {
-      const response = await firstValueFrom(this.http.get<string[]>(`${this.apiUrl}/categories`));
-      return response;
+      return await firstValueFrom(this.http.get<string[]>(`${this.apiUrl}/categories`));
     } catch (error) {
       console.error('Error fetching categories:', error);
       throw new Error('Failed to fetch categories from API', { cause: error });

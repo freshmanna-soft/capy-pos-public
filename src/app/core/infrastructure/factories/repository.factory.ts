@@ -55,6 +55,7 @@ export const REPOSITORY_CONFIG = new InjectionToken<RepositoryConfig>('REPOSITOR
   providedIn: 'root',
 })
 export class RepositoryFactory {
+  private static readonly API_NOT_IMPLEMENTED = 'API repository not yet implemented';
   private readonly dexieProductRepo = inject(DexieProductRepository);
   private readonly dexieCustomerRepo = inject(DexieCustomerRepository);
   private readonly dexieTransactionRepo = inject(DexieTransactionRepository);
@@ -73,7 +74,7 @@ export class RepositoryFactory {
       case RepositoryType.API:
         // Future: Return API implementation
         // return new ApiProductRepository(config.apiBaseUrl);
-        throw new Error('API repository not yet implemented');
+        throw new Error(RepositoryFactory.API_NOT_IMPLEMENTED);
 
       default:
         throw new Error(`Unknown repository type: ${config.type}`);
@@ -93,7 +94,7 @@ export class RepositoryFactory {
       case RepositoryType.API:
         // Future: Return API implementation
         // return new ApiCustomerRepository(config.apiBaseUrl);
-        throw new Error('API repository not yet implemented');
+        throw new Error(RepositoryFactory.API_NOT_IMPLEMENTED);
 
       default:
         throw new Error(`Unknown repository type: ${config.type}`);
@@ -113,7 +114,7 @@ export class RepositoryFactory {
       case RepositoryType.API:
         // Future: Return API implementation
         // return new ApiTransactionRepository(config.apiBaseUrl);
-        throw new Error('API repository not yet implemented');
+        throw new Error(RepositoryFactory.API_NOT_IMPLEMENTED);
 
       default:
         throw new Error(`Unknown repository type: ${config.type}`);
@@ -133,7 +134,7 @@ export class RepositoryFactory {
       case RepositoryType.API:
         // Future: Return API implementation
         // return new ApiPaymentRepository(config.apiBaseUrl);
-        throw new Error('API repository not yet implemented');
+        throw new Error(RepositoryFactory.API_NOT_IMPLEMENTED);
 
       default:
         throw new Error(`Unknown repository type: ${config.type}`);

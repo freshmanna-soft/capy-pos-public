@@ -254,7 +254,7 @@ export class DexieCustomerRepository
   }> {
     const allCustomers = await this.findAll();
 
-    const stats = {
+    return {
       total: allCustomers.length,
       active: allCustomers.filter((c) => c.status === CustomerStatus.ACTIVE).length,
       vip: allCustomers.filter((c) => c.status === CustomerStatus.VIP).length,
@@ -267,8 +267,6 @@ export class DexieCustomerRepository
           .length,
       },
     };
-
-    return stats;
   }
 
   /**
