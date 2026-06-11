@@ -184,16 +184,8 @@ export class ManageCustomersUseCase {
         }
       }
 
-      // Apply updates
-      if (request.name !== undefined) existing.name = request.name;
-      if (request.email !== undefined) existing.email = request.email;
-      if (request.phone !== undefined) existing.phone = request.phone;
-      if (request.address !== undefined) existing.address = request.address;
-      if (request.city !== undefined) existing.city = request.city;
-      if (request.state !== undefined) existing.state = request.state;
-      if (request.zipCode !== undefined) existing.zipCode = request.zipCode;
-      if (request.country !== undefined) existing.country = request.country;
-      if (request.notes !== undefined) existing.notes = request.notes;
+      // Apply updates using field mapping to reduce complexity
+      this.applyUpdates(existing, request);
 
       existing.updatedAt = new Date();
 
@@ -280,6 +272,28 @@ export class ManageCustomersUseCase {
    */
   selectCustomer(customer: CustomerSummaryDTO | null): void {
     this._selectedCustomer.set(customer);
+  }
+
+  /**
+   * Applies partial updates from the request to the existing customer entity
+   */
+  private applyUpdates(existing: Customer, request: UpdateCustomerRequest): void {
+    const updatableFields: (keyof UpdateCustomerRequest)[] = [
+      'name',
+      'email',
+      'phone',
+      'address',
+      'city',
+      'state',
+      'zipCode',
+      'country',
+      'notes',
+    ];
+    for (const field of updatableFields) {
+      if (request[field] !== undefined) {
+        (existing as unknown as Record<string, unknown>)[field] = request[field];
+      }
+    }
   }
 
   /**

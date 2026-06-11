@@ -182,9 +182,9 @@ describe('RetryService', () => {
         startTimes.push(Date.now());
         attempts++;
         if (attempts < 3) {
-          throw new Error('Retry me');
+          throw new Error('Retry me (exponential)');
         }
-        return 'success';
+        return 'exponential-success';
       };
 
       await service.execute('test-op', fn, {
@@ -213,9 +213,9 @@ describe('RetryService', () => {
         startTimes.push(Date.now());
         attempts++;
         if (attempts < 3) {
-          throw new Error('Retry me');
+          throw new Error('Retry me (linear)');
         }
-        return 'success';
+        return 'linear-success';
       };
 
       await service.execute('test-op', fn, {
@@ -264,56 +264,56 @@ describe('RetryService', () => {
   });
 
   describe('Convenience Methods', () => {
-    it('should execute with exponential backoff', async () => {
+    function createFailOnceFn() {
       let attempts = 0;
-      const fn = async () => {
-        attempts++;
-        if (attempts < 2) {
-          throw new Error('Retry me');
-        }
-        return 'success';
+      return {
+        fn: async () => {
+          attempts++;
+          if (attempts < 2) {
+            throw new Error('Retry me');
+          }
+          return 'success';
+        },
+        getAttempts: () => attempts,
       };
+    }
+
+    it('should execute with exponential backoff', async () => {
+      const { fn, getAttempts } = createFailOnceFn();
 
       const result = await service.executeWithExponentialBackoff('test-op', fn, 3, 10);
 
       expect(result).toBe('success');
-      expect(attempts).toBe(2);
+      expect(getAttempts()).toBe(2);
     });
 
     it('should execute with fixed delay', async () => {
-      let attempts = 0;
-      const fn = async () => {
-        attempts++;
-        if (attempts < 2) {
-          throw new Error('Retry me');
-        }
-        return 'success';
-      };
+      const { fn, getAttempts } = createFailOnceFn();
 
       const result = await service.executeWithFixedDelay('test-op', fn, 3, 10);
 
       expect(result).toBe('success');
-      expect(attempts).toBe(2);
+      expect(getAttempts()).toBe(2);
     });
 
     it('should execute with linear backoff', async () => {
-      let attempts = 0;
-      const fn = async () => {
-        attempts++;
-        if (attempts < 2) {
-          throw new Error('Retry me');
-        }
-        return 'success';
-      };
+      const { fn, getAttempts } = createFailOnceFn();
 
       const result = await service.executeWithLinearBackoff('test-op', fn, 3, 10);
 
       expect(result).toBe('success');
-      expect(attempts).toBe(2);
+      expect(getAttempts()).toBe(2);
     });
   });
 
   describe('Statistics', () => {
+    interface RetryStats {
+      successfulRetries: number;
+      failedRetries: number;
+      totalAttempts: number;
+      averageAttempts: number;
+    }
+
     it('should track successful retries', async () => {
       let attempts = 0;
       const fn = async () => {
@@ -329,7 +329,7 @@ describe('RetryService', () => {
         initialDelay: 10,
       });
 
-      const stats = service.getStats('test-op') as unknown;
+      const stats = service.getStats('test-op') as RetryStats;
       expect(stats.successfulRetries).toBe(1);
       expect(stats.failedRetries).toBe(0);
       expect(stats.totalAttempts).toBe(3);
@@ -349,7 +349,7 @@ describe('RetryService', () => {
         // Expected
       }
 
-      const stats = service.getStats('test-op') as unknown;
+      const stats = service.getStats('test-op') as RetryStats;
       expect(stats.successfulRetries).toBe(0);
       expect(stats.failedRetries).toBe(1);
       expect(stats.totalAttempts).toBe(3);
@@ -374,7 +374,7 @@ describe('RetryService', () => {
       };
       await service.execute('test-op', fn2, { maxAttempts: 3, initialDelay: 10 });
 
-      const stats = service.getStats('test-op') as unknown;
+      const stats = service.getStats('test-op') as RetryStats;
       expect(stats.averageAttempts).toBe(2.5); // (2 + 3) / 2
     });
 
@@ -384,7 +384,7 @@ describe('RetryService', () => {
       await service.execute('op1', fn);
       await service.execute('op2', fn);
 
-      const allStats = service.getStats() as Record<string, unknown>;
+      const allStats = service.getStats() as Record<string, RetryStats>;
       expect(Object.keys(allStats).length).toBe(2);
       expect(allStats['op1']).toBeDefined();
       expect(allStats['op2']).toBeDefined();
@@ -398,8 +398,8 @@ describe('RetryService', () => {
       await service.execute('op2', fn);
 
       // Verify both have stats before clearing
-      const statsBefore1 = service.getStats('op1') as unknown;
-      const statsBefore2 = service.getStats('op2') as unknown;
+      const statsBefore1 = service.getStats('op1') as RetryStats;
+      const statsBefore2 = service.getStats('op2') as RetryStats;
       expect(statsBefore1.totalAttempts).toBeGreaterThan(0);
       expect(statsBefore2.totalAttempts).toBeGreaterThan(0);
 
@@ -407,8 +407,8 @@ describe('RetryService', () => {
       service.clearStats('op1');
 
       // Verify op1 is cleared but op2 is not
-      const stats1 = service.getStats('op1') as unknown;
-      const stats2 = service.getStats('op2') as unknown;
+      const stats1 = service.getStats('op1') as RetryStats;
+      const stats2 = service.getStats('op2') as RetryStats;
 
       expect(stats1.totalAttempts).toBe(0); // Cleared
       expect(stats2.totalAttempts).toBeGreaterThan(0); // Not cleared
@@ -422,31 +422,25 @@ describe('RetryService', () => {
 
       service.clearStats();
 
-      const allStats = service.getStats() as Record<string, unknown>;
+      const allStats = service.getStats() as Record<string, RetryStats>;
       expect(Object.keys(allStats).length).toBe(0);
     });
   });
 
   describe('Error Handling', () => {
     it('should handle non-Error objects', async () => {
-      const fn = async () => {
+      const fn = async (): Promise<string> => {
         throw 'String error';
       };
 
-      try {
-        await service.execute('test-op', fn, {
-          maxAttempts: 2,
-          initialDelay: 10,
-        });
-        expect(true).toBe(false); // Should not reach here
-      } catch (error) {
-        expect(error).toBeInstanceOf(RetryExhaustedError);
-      }
+      await expect(
+        service.execute('test-op', fn, { maxAttempts: 2, initialDelay: 10 }),
+      ).rejects.toBeInstanceOf(RetryExhaustedError);
     });
 
     it('should preserve original error in RetryExhaustedError', async () => {
       const originalError = new Error('Original error');
-      const fn = async () => {
+      const fn = async (): Promise<string> => {
         throw originalError;
       };
 
@@ -455,7 +449,7 @@ describe('RetryService', () => {
           maxAttempts: 2,
           initialDelay: 10,
         });
-        expect(true).toBe(false); // Should not reach here
+        expect.fail('Should not reach here');
       } catch (error) {
         expect(error).toBeInstanceOf(RetryExhaustedError);
         expect((error as RetryExhaustedError).lastError).toBe(originalError);

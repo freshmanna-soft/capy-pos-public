@@ -74,6 +74,67 @@ describe('PricingService', () => {
     });
   });
 
+  describe('applyDiscount() - Buy X Get Y', () => {
+    it('should apply buy 2 get 1 free discount', () => {
+      const subtotal = new Money(30, 'USD'); // 3 items at $10 each
+      const discount: Discount = {
+        type: DiscountType.BUY_X_GET_Y,
+        value: 0,
+        buyQuantity: 2,
+        getQuantity: 1,
+      };
+      const result = pricingService.applyDiscount(subtotal, 3, discount);
+      // 1 set of (2+1), 1 free item = $10 off
+      expect(result.amount).toBe(20.0);
+    });
+
+    it('should not apply buy x get y when quantity is insufficient', () => {
+      const subtotal = new Money(20, 'USD'); // 2 items at $10 each
+      const discount: Discount = {
+        type: DiscountType.BUY_X_GET_Y,
+        value: 0,
+        buyQuantity: 3,
+        getQuantity: 1,
+      };
+      const result = pricingService.applyDiscount(subtotal, 2, discount);
+      expect(result.amount).toBe(20.0); // No discount applied
+    });
+  });
+
+  describe('applyDiscount() - Minimum Quantity', () => {
+    it('should not apply discount when quantity is below minQuantity', () => {
+      const subtotal = new Money(20, 'USD');
+      const discount: Discount = {
+        type: DiscountType.PERCENTAGE,
+        value: 10,
+        minQuantity: 5,
+      };
+      const result = pricingService.applyDiscount(subtotal, 2, discount);
+      expect(result.amount).toBe(20.0); // No discount
+    });
+
+    it('should apply discount when quantity meets minQuantity', () => {
+      const subtotal = new Money(50, 'USD');
+      const discount: Discount = {
+        type: DiscountType.PERCENTAGE,
+        value: 10,
+        minQuantity: 5,
+      };
+      const result = pricingService.applyDiscount(subtotal, 5, discount);
+      expect(result.amount).toBe(45.0);
+    });
+
+    it('should return subtotal for unknown discount type', () => {
+      const subtotal = new Money(100, 'USD');
+      const discount: Discount = {
+        type: 'UNKNOWN' as DiscountType,
+        value: 10,
+      };
+      const result = pricingService.applyDiscount(subtotal, 1, discount);
+      expect(result.amount).toBe(100.0);
+    });
+  });
+
   describe('applyDiscount() - Fixed Amount', () => {
     it('should apply $5 fixed discount', () => {
       const subtotal = new Money(100, 'USD');
@@ -98,12 +159,67 @@ describe('PricingService', () => {
       expect(result.amount).toBe(8.0);
     });
 
+    it('should calculate inclusive tax', () => {
+      const subtotal = new Money(108, 'USD');
+      const taxConfig: TaxConfig = { rate: 0.08, name: 'VAT', inclusive: true };
+      const result = pricingService.calculateTax(subtotal, taxConfig);
+      expect(result.amount).toBe(8.0);
+    });
+
     it('should throw error for negative tax rate', () => {
       const subtotal = new Money(100, 'USD');
       const taxConfig: TaxConfig = { rate: -0.05, name: 'Invalid Tax' };
       expect(() => pricingService.calculateTax(subtotal, taxConfig)).toThrow(
         '[PricingService] tax rate must be non-negative',
       );
+    });
+  });
+
+  describe('calculateTotal()', () => {
+    it('should add tax to subtotal for exclusive tax', () => {
+      const subtotal = new Money(100, 'USD');
+      const taxConfig: TaxConfig = { rate: 0.08, name: 'Sales Tax' };
+      const result = pricingService.calculateTotal(subtotal, taxConfig);
+      expect(result.amount).toBe(108.0);
+    });
+
+    it('should return subtotal as-is for inclusive tax', () => {
+      const subtotal = new Money(108, 'USD');
+      const taxConfig: TaxConfig = { rate: 0.08, name: 'VAT', inclusive: true };
+      const result = pricingService.calculateTotal(subtotal, taxConfig);
+      expect(result.amount).toBe(108.0);
+    });
+  });
+
+  describe('calculateBulkPrice()', () => {
+    it('should apply bulk pricing tier when quantity qualifies', () => {
+      const basePrice = new Money(10, 'USD');
+      const tiers = [
+        { minQuantity: 10, discountPercentage: 10 },
+        { minQuantity: 50, discountPercentage: 20 },
+      ];
+      const result = pricingService.calculateBulkPrice(basePrice, 15, tiers);
+      // 15 * $10 = $150, 10% off = $135
+      expect(result.amount).toBe(135.0);
+    });
+
+    it('should apply highest applicable tier', () => {
+      const basePrice = new Money(10, 'USD');
+      const tiers = [
+        { minQuantity: 10, discountPercentage: 10 },
+        { minQuantity: 50, discountPercentage: 20 },
+      ];
+      const result = pricingService.calculateBulkPrice(basePrice, 60, tiers);
+      // 60 * $10 = $600, 20% off = $480
+      expect(result.amount).toBe(480.0);
+    });
+
+    it('should return full price when no tier applies', () => {
+      const basePrice = new Money(10, 'USD');
+      const tiers = [{ minQuantity: 10, discountPercentage: 10 }];
+      const result = pricingService.calculateBulkPrice(basePrice, 5, tiers);
+      // 5 * $10 = $50, no tier applies
+      expect(result.amount).toBe(50.0);
     });
   });
 

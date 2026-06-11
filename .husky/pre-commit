@@ -1,1 +1,22 @@
+#!/usr/bin/env sh
+
+# Run lint-staged (eslint --fix + prettier on staged files)
 npx lint-staged
+
+# Run SonarJS quality gate on staged TypeScript files
+echo ""
+echo "🔍 Running SonarJS quality gate..."
+STAGED_TS=$(git diff --cached --name-only --diff-filter=ACM | grep '\.ts$' | grep '^src/' || true)
+
+if [ -n "$STAGED_TS" ]; then
+  npx eslint --no-error-on-unmatched-pattern --config eslint.sonar.config.js --max-warnings 0 $STAGED_TS
+  if [ $? -ne 0 ]; then
+    echo ""
+    echo "❌ SonarJS quality gate failed. Commit aborted."
+    echo "   Fix the sonar issues above before committing."
+    exit 1
+  fi
+  echo "✅ SonarJS quality gate passed."
+else
+  echo "   No staged TypeScript files to check."
+fi

@@ -196,20 +196,8 @@ export class ManageInventoryUseCase {
         throw new EntityNotFoundException('Product', request.id);
       }
 
-      // Apply updates to the entity
-      if (request.name !== undefined) existing.name = request.name;
-      if (request.sku !== undefined) existing.sku = request.sku;
-      if (request.category !== undefined) existing.category = request.category;
-      if (request.price !== undefined) existing.price = request.price;
-      if (request.cost !== undefined) existing.cost = request.cost;
-      if (request.stock !== undefined) existing.stock = request.stock;
-      if (request.description !== undefined) existing.description = request.description;
-      if (request.emoji !== undefined) existing.emoji = request.emoji;
-      if (request.barcode !== undefined) existing.barcode = request.barcode;
-      if (request.lowStockThreshold !== undefined)
-        existing.lowStockThreshold = request.lowStockThreshold;
-      if (request.reorderQuantity !== undefined) existing.reorderQuantity = request.reorderQuantity;
-      if (request.isActive !== undefined) existing.isActive = request.isActive;
+      // Apply updates using field mapping to reduce complexity
+      this.applyProductUpdates(existing, request);
 
       existing.updatedAt = new Date();
 
@@ -274,6 +262,31 @@ export class ManageInventoryUseCase {
       const message = error instanceof Error ? error.message : 'Failed to adjust stock';
       this._error.set(message);
       return null;
+    }
+  }
+
+  /**
+   * Applies partial updates from the request to the existing product entity
+   */
+  private applyProductUpdates(existing: Product, request: UpdateProductRequest): void {
+    const updatableFields: (keyof UpdateProductRequest)[] = [
+      'name',
+      'sku',
+      'category',
+      'price',
+      'cost',
+      'stock',
+      'description',
+      'emoji',
+      'barcode',
+      'lowStockThreshold',
+      'reorderQuantity',
+      'isActive',
+    ];
+    for (const field of updatableFields) {
+      if (request[field] !== undefined) {
+        (existing as unknown as Record<string, unknown>)[field] = request[field];
+      }
     }
   }
 

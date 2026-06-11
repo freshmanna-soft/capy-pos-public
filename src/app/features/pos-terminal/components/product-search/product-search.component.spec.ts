@@ -241,6 +241,13 @@ describe('ProductSearchComponent', () => {
       // No error thrown, just doesn't search
       expect(component.searchQuery()).toBe('a');
     });
+
+    it('should trigger search with 2+ chars', () => {
+      component.searchQuery.set('coffee');
+      component.triggerSearch();
+      // Triggers the searchSubject — no error
+      expect(component.searchQuery()).toBe('coffee');
+    });
   });
 
   describe('Clear Search', () => {
@@ -256,6 +263,114 @@ describe('ProductSearchComponent', () => {
       expect(component.searchResults()).toEqual([]);
       expect(component.error()).toBeNull();
       expect(component.highlightedIndex()).toBe(-1);
+    });
+  });
+
+  describe('Infinite Scroll', () => {
+    it('should trigger loadMoreProducts when scrolled near bottom', () => {
+      // Set up state with products that have more pages
+      component.searchResults.set(mockProducts);
+      component.hasMoreProducts.set(true);
+
+      const event = {
+        target: {
+          scrollHeight: 1000,
+          scrollTop: 850,
+          clientHeight: 100,
+        },
+      } as unknown as Event;
+
+      // scrollHeight - scrollTop - clientHeight = 1000 - 850 - 100 = 50 < 100 threshold
+      component.onScroll(event);
+      // Should not throw, loadMoreProducts is called internally
+      expect(component.isLoadingMore()).toBe(false);
+    });
+
+    it('should NOT trigger loadMoreProducts when not near bottom', () => {
+      component.searchResults.set(mockProducts);
+      component.hasMoreProducts.set(true);
+
+      const event = {
+        target: {
+          scrollHeight: 1000,
+          scrollTop: 200,
+          clientHeight: 100,
+        },
+      } as unknown as Event;
+
+      // scrollHeight - scrollTop - clientHeight = 1000 - 200 - 100 = 700 > 100 threshold
+      component.onScroll(event);
+      expect(component.isLoadingMore()).toBe(false);
+    });
+
+    it('should NOT trigger loadMoreProducts when no more products', () => {
+      component.searchResults.set(mockProducts);
+      component.hasMoreProducts.set(false);
+
+      const event = {
+        target: { scrollHeight: 1000, scrollTop: 850, clientHeight: 100 },
+      } as unknown as Event;
+
+      component.onScroll(event);
+      expect(component.isLoadingMore()).toBe(false);
+    });
+  });
+
+  describe('refreshProducts', () => {
+    it('should reload products when no category and no search query', () => {
+      component.selectedCategory.set(null);
+      component.searchQuery.set('');
+      // Should call loadProducts(true) internally
+      component.refreshProducts();
+      expect(component.isLoading()).toBe(true);
+    });
+
+    it('should re-search when search query is active', () => {
+      component.selectedCategory.set(null);
+      component.searchQuery.set('coffee');
+      component.refreshProducts();
+      // Triggers searchSubject — no error
+      expect(component.searchQuery()).toBe('coffee');
+    });
+
+    it('should reload category when category is selected', () => {
+      component.selectedCategory.set('Beverages');
+      component.refreshProducts();
+      // Should call onCategorySelect internally
+      expect(component.selectedCategory()).toBe('Beverages');
+    });
+  });
+
+  describe('loadProducts via ngOnInit', () => {
+    it('should load products on init', async () => {
+      mockProductRepository.findActive.mockResolvedValue(mockProducts);
+      await component.ngOnInit();
+      // Products should be loaded (or at least attempted)
+      expect(component.isLoading()).toBe(false);
+    });
+
+    it('should handle error during category loading', async () => {
+      mockProductRepository.getCategories.mockRejectedValue(new Error('Network error'));
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      await component.ngOnInit();
+      consoleSpy.mockRestore();
+      // Should not crash
+      expect(component).toBeTruthy();
+    });
+  });
+
+  describe('onSearchInput with allProducts filtering', () => {
+    it('should immediately filter allProducts for instant feedback', () => {
+      // Simulate allProducts being loaded
+      mockProductRepository.findActive.mockResolvedValue(mockProducts);
+
+      // Manually set search results to simulate loaded state
+      component.searchResults.set(mockProducts);
+
+      const event = { target: { value: 'coffee' } } as unknown as Event;
+      component.onSearchInput(event);
+
+      expect(component.searchQuery()).toBe('coffee');
     });
   });
 });

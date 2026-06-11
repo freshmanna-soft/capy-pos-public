@@ -143,8 +143,7 @@ export class PricingService extends BaseDomainService implements IPricingService
     if (taxConfig.inclusive) {
       // Tax is already included in the price
       // Calculate the tax portion: subtotal * (rate / (1 + rate))
-      const taxAmount = subtotal.multiply(taxConfig.rate / (1 + taxConfig.rate));
-      return taxAmount;
+      return subtotal.multiply(taxConfig.rate / (1 + taxConfig.rate));
     }
 
     // Tax is added on top of the price

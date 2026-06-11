@@ -97,8 +97,17 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     adjustStock: vi.fn().mockResolvedValue(null),
   };
 
+  const mockTransactionRepository = {
+    save: vi.fn().mockResolvedValue(undefined),
+    findAll: vi.fn().mockResolvedValue([]),
+    findById: vi.fn().mockResolvedValue(null),
+  };
+
   beforeEach(async () => {
     vi.useFakeTimers();
+
+    // Mock scrollTo for jsdom (not available in test environment)
+    Element.prototype.scrollTo = vi.fn();
 
     await TestBed.configureTestingModule({
       imports: [
@@ -112,6 +121,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
         CartService,
         { provide: DexieDatabase, useValue: mockDexieDatabase },
         { provide: PRODUCT_REPOSITORY, useValue: mockProductRepository },
+        { provide: 'ITransactionRepository', useValue: mockTransactionRepository },
       ],
     }).compileComponents();
 
@@ -285,6 +295,98 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
 
       expect(cartService.isEmpty()).toBe(true);
       expect(cartService.items().length).toBe(0);
+    });
+  });
+
+  describe('startNewTransaction', () => {
+    it('should clear the cart via shoppingCart component', () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      addProduct(mockProducts.coffee);
+      addProduct(mockProducts.tea);
+      expect(cartService.items().length).toBe(2);
+
+      component.startNewTransaction();
+
+      expect(cartService.isEmpty()).toBe(true);
+    });
+
+    it('should log error if shoppingCart is not initialized', () => {
+      const errorSpy = vi.spyOn(console, 'error');
+      // Temporarily remove the ViewChild reference
+      const originalCart = component.shoppingCart;
+      (component as never as { shoppingCart: undefined }).shoppingCart = undefined;
+
+      component.startNewTransaction();
+
+      expect(errorSpy).toHaveBeenCalledWith('Shopping cart not initialized');
+      // Restore
+      (component as never as { shoppingCart: typeof originalCart }).shoppingCart = originalCart;
+    });
+  });
+
+  describe('handleAddProduct', () => {
+    it('should log "Add Product button clicked"', () => {
+      const logSpy = vi.spyOn(console, 'log');
+
+      component.handleAddProduct();
+
+      expect(logSpy).toHaveBeenCalledWith('Add Product button clicked');
+    });
+  });
+
+  describe('openCheckout', () => {
+    it('should set showCheckout to true when cart is not empty', () => {
+      addProduct(mockProducts.coffee);
+      expect(component.showCheckout()).toBe(false);
+
+      component.openCheckout();
+
+      expect(component.showCheckout()).toBe(true);
+    });
+
+    it('should NOT set showCheckout to true when cart is empty', () => {
+      expect(cartService.isEmpty()).toBe(true);
+
+      component.openCheckout();
+
+      expect(component.showCheckout()).toBe(false);
+    });
+  });
+
+  describe('closeCheckout', () => {
+    it('should set showCheckout to false', () => {
+      addProduct(mockProducts.coffee);
+      component.openCheckout();
+      expect(component.showCheckout()).toBe(true);
+
+      component.closeCheckout();
+
+      expect(component.showCheckout()).toBe(false);
+    });
+  });
+
+  describe('handlePrintReceipt', () => {
+    it('should call window.print()', () => {
+      const printSpy = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+
+      component.handlePrintReceipt();
+
+      expect(printSpy).toHaveBeenCalled();
+      printSpy.mockRestore();
+    });
+  });
+
+  describe('handleProductSelected edge cases', () => {
+    it('should log error if shoppingCart is not initialized', () => {
+      const errorSpy = vi.spyOn(console, 'error');
+      const originalCart = component.shoppingCart;
+      (component as never as { shoppingCart: undefined }).shoppingCart = undefined;
+
+      component.handleProductSelected(mockProducts.coffee);
+      vi.advanceTimersByTime(0);
+
+      expect(errorSpy).toHaveBeenCalledWith('Shopping cart not initialized');
+      (component as never as { shoppingCart: typeof originalCart }).shoppingCart = originalCart;
     });
   });
 

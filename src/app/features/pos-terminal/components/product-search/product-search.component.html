@@ -1,0 +1,121 @@
+<div class="product-search-container">
+  <!-- Category Filter -->
+  <div class="category-filter" data-testid="category-filter">
+    <button
+      class="category-chip"
+      [class.active]="selectedCategory() === null"
+      (click)="onCategorySelect(null)"
+      data-testid="category-all"
+    >
+      All
+    </button>
+    @for (category of categories(); track category) {
+      <button
+        class="category-chip"
+        [class.active]="selectedCategory() === category"
+        (click)="onCategorySelect(category)"
+        [attr.data-testid]="'category-' + category"
+      >
+        {{ category }}
+      </button>
+    }
+  </div>
+
+  <!-- Search Input -->
+  <div class="search-input-wrapper">
+    <input
+      #searchInput
+      data-testid="product-search"
+      type="search"
+      [value]="searchQuery()"
+      (input)="onSearchInput($event)"
+      (keydown)="onKeyDown($event)"
+      placeholder="Search products..."
+      class="search-input"
+      role="combobox"
+      [attr.aria-autocomplete]="'list'"
+      [attr.aria-expanded]="searchResults().length > 0"
+      [attr.aria-controls]="'search-results'"
+      [attr.aria-activedescendant]="highlightedIndex() >= 0 ? 'result-' + highlightedIndex() : null"
+    />
+
+    <button
+      data-testid="search-button"
+      class="search-button"
+      (click)="triggerSearch()"
+      [disabled]="isLoading()"
+    >
+      @if (!isLoading()) {
+        <span>🔍</span>
+      }
+      @if (isLoading()) {
+        <span class="spinner">⏳</span>
+      }
+    </button>
+  </div>
+
+  <!-- Loading Indicator -->
+  @if (isLoading() && searchResults().length === 0) {
+    <div data-testid="search-loading" class="loading-indicator">Searching...</div>
+  }
+
+  <!-- Error Message -->
+  @if (error()) {
+    <div data-testid="search-error" class="error-message" role="alert">
+      {{ error() }}
+    </div>
+  }
+
+  <!-- Product Results -->
+  @if (searchResults().length > 0 && !isLoading()) {
+    <div class="search-results-list" id="search-results" role="listbox" (scroll)="onScroll($event)">
+      @for (product of searchResults(); track product.id; let i = $index) {
+        <div
+          [id]="'result-' + i"
+          data-testid="product-result"
+          class="product-result"
+          [class.highlighted]="highlightedIndex() === i"
+          [class.out-of-stock]="product.stock === 0"
+          (click)="selectProduct(product)"
+          (keydown.enter)="selectProduct(product)"
+          (mouseenter)="highlightedIndex.set(i)"
+          role="option"
+          tabindex="0"
+          [attr.aria-selected]="highlightedIndex() === i"
+          [attr.aria-disabled]="product.stock === 0"
+        >
+          <div class="product-info">
+            <span class="product-name">{{ product.name }}</span>
+            <span class="product-price">${{ product.price.toFixed(2) }}</span>
+          </div>
+          <div class="product-meta">
+            <span class="product-sku">{{ product.sku }}</span>
+            <span
+              data-testid="stock-status"
+              class="stock-status"
+              [class.in-stock]="product.stock > 0"
+              [class.out-of-stock]="product.stock === 0"
+            >
+              {{ product.stock > 0 ? 'In Stock (' + product.stock + ')' : 'Out of Stock' }}
+            </span>
+          </div>
+        </div>
+      }
+
+      <!-- Infinite scroll loading indicator -->
+      @if (isLoadingMore()) {
+        <div class="loading-more">Loading more products...</div>
+      }
+    </div>
+
+    <!-- Product count -->
+    <div class="product-count">
+      Showing {{ searchResults().length }} {{ hasMoreProducts() ? 'of more' : '' }} products
+    </div>
+  }
+
+  <!-- No Results -->
+  @if (searchQuery().length >= 2 && searchResults().length === 0 && !isLoading() && !error()) {
+    <div data-testid="no-results" class="no-results" role="status">No products found</div>
+  }
+</div>

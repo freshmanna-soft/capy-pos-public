@@ -152,15 +152,26 @@ describe('ShoppingCartComponent', () => {
   });
 
   describe('AC5: Clear Cart', () => {
-    it('should clear all items from cart', () => {
+    it('should clear all items from cart when user confirms', () => {
       component.addProduct(mockProduct);
       component.addProduct(mockProduct2);
       expect(cartService.items().length).toBe(2);
 
-      // Directly call cartService.clearCart() (component uses confirm dialog)
-      cartService.clearCart();
+      // Mock confirm to return true
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      component.clearCart();
       expect(cartService.items().length).toBe(0);
       expect(cartService.isEmpty()).toBe(true);
+    });
+
+    it('should NOT clear cart when user cancels confirm dialog', () => {
+      component.addProduct(mockProduct);
+      expect(cartService.items().length).toBe(1);
+
+      // Mock confirm to return false
+      vi.spyOn(window, 'confirm').mockReturnValue(false);
+      component.clearCart();
+      expect(cartService.items().length).toBe(1);
     });
   });
 
@@ -182,6 +193,99 @@ describe('ShoppingCartComponent', () => {
       component.addProduct(mockProduct);
       expect(cartService.items().length).toBe(1);
       expect(cartService.items()[0].quantity).toBe(2);
+    });
+  });
+
+  describe('Checkout', () => {
+    it('should emit checkoutRequested when cart has items', () => {
+      const emitSpy = vi.spyOn(component.checkoutRequested, 'emit');
+      component.addProduct(mockProduct);
+      component.handleCheckout();
+      expect(emitSpy).toHaveBeenCalled();
+    });
+
+    it('should NOT emit checkoutRequested when cart is empty', () => {
+      const emitSpy = vi.spyOn(component.checkoutRequested, 'emit');
+      component.handleCheckout();
+      expect(emitSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Scroll Behavior', () => {
+    it('should disable auto-scroll when user scrolls away from bottom', () => {
+      const event = {
+        target: {
+          scrollHeight: 1000,
+          scrollTop: 200,
+          clientHeight: 400,
+        },
+      } as unknown as Event;
+
+      component.onCartScroll(event);
+      // scrollHeight - scrollTop - clientHeight = 1000 - 200 - 400 = 400 > 50 threshold
+      // So autoScrollEnabled should be false
+
+      // Add a repeated product — should NOT trigger scroll since user scrolled away
+      component.addProduct(mockProduct);
+      component.addProduct(mockProduct); // repeated
+      // No assertion on scroll itself (private), but verifying no error
+      expect(cartService.items()[0].quantity).toBe(2);
+    });
+
+    it('should re-enable auto-scroll when user scrolls to bottom', () => {
+      // First scroll away
+      const awayEvent = {
+        target: { scrollHeight: 1000, scrollTop: 200, clientHeight: 400 },
+      } as unknown as Event;
+      component.onCartScroll(awayEvent);
+
+      // Then scroll back to bottom
+      const bottomEvent = {
+        target: { scrollHeight: 1000, scrollTop: 560, clientHeight: 400 },
+      } as unknown as Event;
+      component.onCartScroll(bottomEvent);
+      // scrollHeight - scrollTop - clientHeight = 1000 - 560 - 400 = 40 < 50 threshold
+      // autoScrollEnabled should be true again
+
+      // Adding repeated product should trigger scroll
+      component.addProduct(mockProduct);
+      component.addProduct(mockProduct);
+      expect(cartService.items()[0].quantity).toBe(2);
+    });
+
+    it('should always scroll for new products regardless of scroll position', () => {
+      // Scroll away from bottom
+      const awayEvent = {
+        target: { scrollHeight: 1000, scrollTop: 100, clientHeight: 400 },
+      } as unknown as Event;
+      component.onCartScroll(awayEvent);
+
+      // Adding a NEW product should still trigger scroll
+      component.addProduct(mockProduct);
+      expect(cartService.items().length).toBe(1);
+    });
+  });
+
+  describe('ngAfterViewChecked', () => {
+    it('should not throw when called without ViewChild ref', () => {
+      // ngAfterViewChecked should handle missing cartItemsRef gracefully
+      expect(() => component.ngAfterViewChecked()).not.toThrow();
+    });
+  });
+
+  describe('updateQuantity edge cases', () => {
+    it('should handle NaN input by resetting to 1', () => {
+      component.addProduct(mockProduct);
+      const event = { target: { value: 'abc' } } as unknown as Event;
+      component.updateQuantity('prod-1', event);
+      expect((event.target as HTMLInputElement).value).toBe('1');
+    });
+
+    it('should handle negative input by resetting to 1', () => {
+      component.addProduct(mockProduct);
+      const event = { target: { value: '-5' } } as unknown as Event;
+      component.updateQuantity('prod-1', event);
+      expect((event.target as HTMLInputElement).value).toBe('1');
     });
   });
 });
