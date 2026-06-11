@@ -190,6 +190,10 @@ test.describe('Persona: Maria the Cashier - POS Workflow', () => {
     const categoryFilter = page.locator('[data-testid="category-filter"]');
     await expect(categoryFilter).toBeVisible();
 
+    // First ensure products are loaded by waiting for initial load
+    // The component loads all products on init, so wait for them to appear
+    await page.waitForSelector('[data-testid="product-result"]', { timeout: 10000 });
+
     // Click on a category chip (not "All")
     const categoryChips = page.locator('.category-chip:not([data-testid="category-all"])');
     const chipCount = await categoryChips.count();
@@ -197,8 +201,11 @@ test.describe('Persona: Maria the Cashier - POS Workflow', () => {
     if (chipCount > 0) {
       await categoryChips.first().click();
 
-      // Should show filtered results
-      await page.waitForSelector('[data-testid="product-result"]', { timeout: 5000 });
+      // Wait for the async category filter to complete and results to render
+      // Use a polling assertion which retries automatically
+      await expect(page.locator('[data-testid="product-result"]').first()).toBeVisible({
+        timeout: 10000,
+      });
       const results = await page.locator('[data-testid="product-result"]').count();
       expect(results).toBeGreaterThan(0);
     }
