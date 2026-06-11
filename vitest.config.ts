@@ -1,7 +1,9 @@
 import { defineConfig } from 'vitest/config';
+import angular from '@analogjs/vite-plugin-angular';
 import { resolve } from 'path';
 
 export default defineConfig({
+  plugins: [angular()],
   resolve: {
     alias: [
       { find: '@app', replacement: resolve(__dirname, 'src/app') },
@@ -30,5 +32,3 @@ export default defineConfig({
     },
   },
 });
-
-// Made with Bob
