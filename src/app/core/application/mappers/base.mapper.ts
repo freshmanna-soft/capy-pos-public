@@ -1,4 +1,5 @@
 import { ResponseDto, CreateDto, UpdateDto } from '@core/application/dtos/base.dto';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 /**
  * Abstract Base Mapper
@@ -61,7 +62,7 @@ export abstract class BaseMapper<
    * Common utility for all mappers
    */
   protected generateId(): string {
-    return crypto.randomUUID();
+    return generateUUID();
   }
 
   /**

@@ -2,6 +2,8 @@ import { Injectable, inject, signal, computed } from '@angular/core';
 import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
 import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 import { Product } from '@core/domain/entities/product.entity';
+import { generateUUID } from '@core/domain/utils/uuid';
+import { EntityNotFoundException } from '@core/domain/exceptions';
 
 /**
  * DTO for creating a new product
@@ -144,7 +146,7 @@ export class ManageInventoryUseCase {
     this._error.set(null);
 
     try {
-      const id = crypto.randomUUID();
+      const id = generateUUID();
       const product = new Product(
         id,
         request.name,
@@ -191,7 +193,7 @@ export class ManageInventoryUseCase {
     try {
       const existing = await this.productRepository.findById(request.id);
       if (!existing) {
-        throw new Error(`Product with id ${request.id} not found`);
+        throw new EntityNotFoundException('Product', request.id);
       }
 
       // Apply updates to the entity

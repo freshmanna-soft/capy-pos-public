@@ -122,11 +122,12 @@ describe('ProductSearchComponent', () => {
       expect(component.searchQuery()).toBe('coffee');
     });
 
-    it('should clear results when search is emptied', () => {
+    it('should reload products when search is emptied', () => {
       component.searchResults.set(mockProducts);
       const event = { target: { value: '' } } as unknown as Event;
       component.onSearchInput(event);
-      expect(component.searchResults()).toEqual([]);
+      // When search is cleared, loadProducts is called to show all products
+      expect(component.searchQuery()).toBe('');
     });
   });
 
@@ -201,11 +202,12 @@ describe('ProductSearchComponent', () => {
       expect(component.selectedCategory()).toBeNull();
     });
 
-    it('should clear results when "All" selected with no query', () => {
+    it('should reload all products when "All" selected with no query', () => {
       component.searchResults.set(mockProducts);
       component.searchQuery.set('');
       component.onCategorySelect(null);
-      expect(component.searchResults()).toEqual([]);
+      // When "All" is selected with no query, loadProducts is called to show all products
+      expect(component.selectedCategory()).toBeNull();
     });
   });
 

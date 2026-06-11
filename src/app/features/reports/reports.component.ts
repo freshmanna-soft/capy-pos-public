@@ -180,7 +180,7 @@ type DatePreset = 'today' | 'yesterday' | 'custom';
         <!-- Payment Breakdown -->
         <div class="bg-white rounded-lg shadow-sm border p-5" data-testid="payment-breakdown">
           <h2 class="text-lg font-semibold text-gray-900 mb-4">Payment Method Breakdown</h2>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <!-- Cash -->
             <div
               class="flex items-center justify-between p-4 bg-green-50 rounded-lg"
@@ -216,6 +216,25 @@ type DatePreset = 'today' | 'yesterday' | 'custom';
               </div>
               <p class="text-lg font-bold text-blue-700" data-testid="card-total">
                 {{ formatCurrency(useCase.result()!.paymentBreakdown.card) }}
+              </p>
+            </div>
+
+            <!-- Mobile -->
+            <div
+              class="flex items-center justify-between p-4 bg-violet-50 rounded-lg"
+              data-testid="breakdown-mobile"
+            >
+              <div class="flex items-center gap-3">
+                <span class="text-2xl">📱</span>
+                <div>
+                  <p class="font-medium text-gray-900">Mobile</p>
+                  <p class="text-sm text-gray-500" data-testid="mobile-count">
+                    {{ useCase.result()!.paymentBreakdown.mobileCount }} transactions
+                  </p>
+                </div>
+              </div>
+              <p class="text-lg font-bold text-violet-700" data-testid="mobile-total">
+                {{ formatCurrency(useCase.result()!.paymentBreakdown.mobile) }}
               </p>
             </div>
           </div>

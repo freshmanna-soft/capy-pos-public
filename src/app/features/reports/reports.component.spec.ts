@@ -34,8 +34,10 @@ describe('ReportsComponent', () => {
     paymentBreakdown: {
       cash: 120.5,
       card: 125.25,
+      mobile: 0,
       cashCount: 2,
       cardCount: 3,
+      mobileCount: 0,
     },
     startDate: new Date('2026-06-09T00:00:00'),
     endDate: new Date('2026-06-09T23:59:59.999'),
@@ -255,7 +257,14 @@ describe('ReportsComponent', () => {
         transactionCount: 0,
         totalRevenue: 0,
         averageTransactionValue: 0,
-        paymentBreakdown: { cash: 0, card: 0, cashCount: 0, cardCount: 0 },
+        paymentBreakdown: {
+          cash: 0,
+          card: 0,
+          mobile: 0,
+          cashCount: 0,
+          cardCount: 0,
+          mobileCount: 0,
+        },
       });
       fixture.detectChanges();
       const el = fixture.nativeElement.querySelector('[data-testid="empty-state"]');

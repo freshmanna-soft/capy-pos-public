@@ -314,7 +314,7 @@ describe('GetDailySalesReportUseCase', () => {
 
       await useCase.execute({ startDate: today, endDate: endOfToday });
 
-      expect(useCase.error()).toBe('Database connection failed');
+      expect(useCase.error()).toBe('Failed to generate daily sales report');
     });
 
     it('should set loading to false when error occurs', async () => {
@@ -340,13 +340,13 @@ describe('GetDailySalesReportUseCase', () => {
 
       await useCase.execute({ startDate: today, endDate: endOfToday });
 
-      expect(useCase.error()).toBe('Unknown error generating daily sales report');
+      expect(useCase.error()).toBe('Failed to generate daily sales report');
     });
 
     it('should clear previous error on new execution', async () => {
       mockRepository.findByDateRange.mockRejectedValueOnce(new Error('First error'));
       await useCase.execute({ startDate: today, endDate: endOfToday });
-      expect(useCase.error()).toBe('First error');
+      expect(useCase.error()).toBe('Failed to generate daily sales report');
 
       mockRepository.findByDateRange.mockResolvedValueOnce([]);
       await useCase.execute({ startDate: today, endDate: endOfToday });

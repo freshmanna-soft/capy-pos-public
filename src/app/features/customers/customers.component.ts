@@ -1022,19 +1022,23 @@ export class CustomersComponent implements OnInit {
     this.formErrors.set({});
   }
 
-  openEditForm(customer: CustomerSummaryDTO): void {
+  async openEditForm(customer: CustomerSummaryDTO): Promise<void> {
     this.formMode.set('edit');
     this.editingCustomerId.set(customer.id);
+
+    // Fetch full customer details to populate all fields (address, notes, etc.)
+    const fullCustomer = await this.customersUseCase.getCustomerById(customer.id);
+
     this.formData.set({
-      name: customer.name,
-      email: customer.email,
-      phone: customer.phone,
-      address: '',
-      city: '',
-      state: '',
-      zipCode: '',
-      country: '',
-      notes: '',
+      name: fullCustomer?.name ?? customer.name,
+      email: fullCustomer?.email ?? customer.email,
+      phone: fullCustomer?.phone ?? customer.phone,
+      address: fullCustomer?.address ?? '',
+      city: fullCustomer?.city ?? '',
+      state: fullCustomer?.state ?? '',
+      zipCode: fullCustomer?.zipCode ?? '',
+      country: fullCustomer?.country ?? '',
+      notes: fullCustomer?.notes ?? '',
     });
     this.formErrors.set({});
   }

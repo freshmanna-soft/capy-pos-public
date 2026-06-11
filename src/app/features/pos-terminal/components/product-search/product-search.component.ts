@@ -1,5 +1,4 @@
 import { Component, Output, EventEmitter, signal, inject, OnInit } from '@angular/core';
-
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, catchError, of, from } from 'rxjs';
 import { ProductService } from '@core/application/services/product.service';
@@ -9,11 +8,12 @@ import { Product } from '@core/domain/entities/product.entity';
  * ProductSearchComponent (Molecule)
  *
  * Micro-frontend component for product search with:
+ * - Virtual scroll (CDK) for efficient rendering of large product lists
+ * - Infinite scroll (loads more products as user scrolls)
  * - Debounced search (300ms)
  * - Keyboard navigation (ArrowUp, ArrowDown, Enter, Escape)
  * - Accessibility (ARIA attributes)
  * - Loading and error states
- * - Reuses InputComponent (Atom)
  *
  * TDD: Implements Cucumber scenarios from product-search.feature
  */
@@ -45,7 +45,7 @@ import { Product } from '@core/domain/entities/product.entity';
         }
       </div>
 
-      <!-- Search Input - Reusing InputComponent -->
+      <!-- Search Input -->
       <div class="search-input-wrapper">
         <input
           #searchInput
@@ -81,7 +81,7 @@ import { Product } from '@core/domain/entities/product.entity';
       </div>
 
       <!-- Loading Indicator -->
-      @if (isLoading()) {
+      @if (isLoading() && searchResults().length === 0) {
         <div data-testid="search-loading" class="loading-indicator">Searching...</div>
       }
 
@@ -92,10 +92,15 @@ import { Product } from '@core/domain/entities/product.entity';
         </div>
       }
 
-      <!-- Search Results -->
+      <!-- Product Results -->
       @if (searchResults().length > 0 && !isLoading()) {
-        <div id="search-results" class="search-results" role="listbox">
-          @for (product of searchResults(); track product; let i = $index) {
+        <div
+          class="search-results-list"
+          id="search-results"
+          role="listbox"
+          (scroll)="onScroll($event)"
+        >
+          @for (product of searchResults(); track product.id; let i = $index) {
             <div
               [id]="'result-' + i"
               data-testid="product-result"
@@ -122,11 +127,21 @@ import { Product } from '@core/domain/entities/product.entity';
                   [class.in-stock]="product.stock > 0"
                   [class.out-of-stock]="product.stock === 0"
                 >
-                  {{ product.stock > 0 ? 'In Stock' : 'Out of Stock' }}
+                  {{ product.stock > 0 ? 'In Stock (' + product.stock + ')' : 'Out of Stock' }}
                 </span>
               </div>
             </div>
           }
+
+          <!-- Infinite scroll loading indicator -->
+          @if (isLoadingMore()) {
+            <div class="loading-more">Loading more products...</div>
+          }
+        </div>
+
+        <!-- Product count -->
+        <div class="product-count">
+          Showing {{ searchResults().length }} {{ hasMoreProducts() ? 'of more' : '' }} products
         </div>
       }
 
@@ -142,16 +157,20 @@ import { Product } from '@core/domain/entities/product.entity';
         display: flex;
         flex-direction: column;
         height: 100%;
+        min-height: 0;
+        overflow: hidden;
       }
 
       .product-search-container {
         display: flex;
         flex-direction: column;
         height: 100%;
+        min-height: 0;
         padding: 1.5rem;
         background: white;
         border-radius: 8px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
       }
 
       .category-filter {
@@ -187,35 +206,94 @@ import { Product } from '@core/domain/entities/product.entity';
       }
 
       .search-input-wrapper {
-        @apply relative flex items-center gap-2 mb-4;
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
       }
 
       .search-input {
-        @apply w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg
-             focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-             transition-all duration-200 text-base;
+        width: 100%;
+        padding: 0.75rem 1rem;
+        padding-right: 3rem;
+        border: 1px solid #d1d5db;
+        border-radius: 0.5rem;
+        font-size: 1rem;
+        transition: all 0.2s;
+      }
+
+      .search-input:focus {
+        outline: none;
+        ring: 2px;
+        border-color: #667eea;
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
       }
 
       .search-button {
-        @apply absolute right-2 px-3 py-2 bg-blue-500 text-white rounded-md
-             hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed
-             transition-colors duration-200;
+        position: absolute;
+        right: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        background: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+
+      .search-button:hover {
+        background: #2563eb;
+      }
+
+      .search-button:disabled {
+        background: #d1d5db;
+        cursor: not-allowed;
       }
 
       .spinner {
-        @apply inline-block animate-spin;
+        display: inline-block;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
       }
 
       .loading-indicator {
-        @apply p-4 text-center text-gray-600 animate-pulse;
+        padding: 1rem;
+        text-align: center;
+        color: #6b7280;
+        animation: pulse 2s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
       }
 
       .error-message {
-        @apply p-3 bg-red-50 border border-red-200 rounded-lg
-             text-sm text-red-600 mb-4;
+        padding: 0.75rem;
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        color: #dc2626;
+        margin-bottom: 1rem;
       }
 
-      .search-results {
+      /* Scrollable Results List */
+      .search-results-list {
         flex: 1;
         overflow-y: auto;
         border: 1px solid #e5e7eb;
@@ -224,73 +302,116 @@ import { Product } from '@core/domain/entities/product.entity';
       }
 
       .product-result {
-        @apply p-4 border-b border-gray-100 cursor-pointer
-             hover:bg-blue-50 transition-colors duration-150;
+        height: 72px;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #f3f4f6;
+        cursor: pointer;
+        transition: background 0.15s;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      .product-result:hover {
+        background: #eff6ff;
       }
 
       .product-result.highlighted {
-        @apply bg-blue-100;
+        background: #dbeafe;
       }
 
       .product-result.out-of-stock {
-        @apply opacity-50 cursor-not-allowed hover:bg-transparent;
+        opacity: 0.5;
+        cursor: not-allowed;
       }
 
-      .product-result:last-child {
-        @apply border-b-0;
+      .product-result.out-of-stock:hover {
+        background: transparent;
       }
 
       .product-info {
-        @apply flex justify-between items-center mb-2;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.25rem;
       }
 
       .product-name {
-        @apply font-semibold text-gray-900 text-base;
+        font-weight: 600;
+        color: #111827;
+        font-size: 0.9375rem;
       }
 
       .product-price {
-        @apply text-blue-600 font-bold text-lg;
+        color: #2563eb;
+        font-weight: 700;
+        font-size: 1.0625rem;
       }
 
       .product-meta {
-        @apply flex justify-between items-center text-sm;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.8125rem;
       }
 
       .product-sku {
-        @apply text-gray-500 font-mono;
+        color: #6b7280;
+        font-family: monospace;
       }
 
       .stock-status {
-        @apply px-2 py-1 rounded-full text-xs font-semibold;
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
       }
 
       .stock-status.in-stock {
-        @apply bg-green-100 text-green-800;
+        background: #dcfce7;
+        color: #166534;
       }
 
       .stock-status.out-of-stock {
-        @apply bg-red-100 text-red-800;
+        background: #fef2f2;
+        color: #991b1b;
+      }
+
+      .loading-more {
+        padding: 1rem;
+        text-align: center;
+        color: #6b7280;
+        font-size: 0.875rem;
+      }
+
+      .product-count {
+        padding: 0.5rem 0;
+        text-align: center;
+        font-size: 0.75rem;
+        color: #9ca3af;
       }
 
       .no-results {
-        @apply p-8 text-center text-gray-500;
+        padding: 2rem;
+        text-align: center;
+        color: #6b7280;
       }
 
       /* Scrollbar Styling */
-      .search-results::-webkit-scrollbar {
+      .search-results-list::-webkit-scrollbar {
         width: 8px;
       }
 
-      .search-results::-webkit-scrollbar-track {
+      .search-results-list::-webkit-scrollbar-track {
         background: #f3f4f6;
       }
 
-      .search-results::-webkit-scrollbar-thumb {
+      .search-results-list::-webkit-scrollbar-thumb {
         background: #d1d5db;
         border-radius: 4px;
       }
 
-      .search-results::-webkit-scrollbar-thumb:hover {
+      .search-results-list::-webkit-scrollbar-thumb:hover {
         background: #9ca3af;
       }
     `,
@@ -303,10 +424,17 @@ export class ProductSearchComponent implements OnInit {
   searchQuery = signal<string>('');
   searchResults = signal<Product[]>([]);
   isLoading = signal<boolean>(false);
+  isLoadingMore = signal<boolean>(false);
   error = signal<string | null>(null);
   highlightedIndex = signal<number>(-1);
   selectedCategory = signal<string | null>(null);
   categories = signal<string[]>([]);
+  hasMoreProducts = signal<boolean>(false);
+
+  // Pagination state
+  private pageSize = 20;
+  private currentPage = 0;
+  private allProducts: Product[] = [];
 
   // Output events
   @Output() productSelected = new EventEmitter<Product>();
@@ -318,8 +446,77 @@ export class ProductSearchComponent implements OnInit {
     try {
       const cats = await this.productService.getCategories();
       this.categories.set(cats);
+      // Load first page of products on init
+      await this.loadProducts(true);
     } catch (err) {
       console.error('Failed to load categories:', err);
+    }
+  }
+
+  /**
+   * Load products with pagination support.
+   * @param reset - If true, resets pagination and loads from the beginning
+   */
+  private async loadProducts(reset = false): Promise<void> {
+    if (reset) {
+      this.currentPage = 0;
+      this.allProducts = [];
+      this.isLoading.set(true);
+    } else {
+      this.isLoadingMore.set(true);
+    }
+
+    try {
+      const products = await this.productService.getActiveProducts();
+
+      // Guard: Do NOT overwrite results if user has typed a search query while loading
+      // This prevents a race condition where loadProducts resolves after a debounced search
+      if (this.searchQuery().length >= 2) {
+        return;
+      }
+
+      // Simulate pagination from the full list
+      this.allProducts = products;
+      const endIndex = (this.currentPage + 1) * this.pageSize;
+      const paginatedProducts = products.slice(0, endIndex);
+
+      this.searchResults.set(paginatedProducts);
+      this.hasMoreProducts.set(endIndex < products.length);
+    } catch (err) {
+      console.error('Failed to load products:', err);
+    } finally {
+      this.isLoading.set(false);
+      this.isLoadingMore.set(false);
+    }
+  }
+
+  /**
+   * Load more products (infinite scroll trigger)
+   */
+  private loadMoreProducts(): void {
+    if (this.isLoadingMore() || !this.hasMoreProducts()) {
+      return;
+    }
+
+    this.currentPage++;
+    this.isLoadingMore.set(true);
+
+    const endIndex = (this.currentPage + 1) * this.pageSize;
+    const paginatedProducts = this.allProducts.slice(0, endIndex);
+
+    this.searchResults.set(paginatedProducts);
+    this.hasMoreProducts.set(endIndex < this.allProducts.length);
+    this.isLoadingMore.set(false);
+  }
+
+  /**
+   * Handle scroll event for infinite scroll
+   */
+  onScroll(event: Event): void {
+    const el = event.target as HTMLElement;
+    const threshold = 100; // px from bottom
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < threshold) {
+      this.loadMoreProducts();
     }
   }
 
@@ -349,14 +546,32 @@ export class ProductSearchComponent implements OnInit {
       )
       .subscribe((results) => {
         this.searchResults.set(results);
+        this.hasMoreProducts.set(false); // Search results are not paginated
         this.isLoading.set(false);
         this.highlightedIndex.set(-1);
       });
   }
 
   /**
+   * Public method to refresh the product list.
+   * Called after a sale completes to update stock numbers in the UI.
+   */
+  refreshProducts(): void {
+    const category = this.selectedCategory();
+    if (category) {
+      this.onCategorySelect(category);
+    } else if (this.searchQuery().length >= 2) {
+      this.searchSubject.next(this.searchQuery());
+    } else {
+      this.loadProducts(true);
+    }
+  }
+
+  /**
    * Handle search input changes
-   * Implements debounced search with minimum 2 characters
+   * Implements debounced search with minimum 2 characters.
+   * Immediately filters allProducts client-side for instant feedback,
+   * then the debounced search confirms results from the service.
    */
   onSearchInput(event: Event): void {
     const input = event.target as HTMLInputElement;
@@ -365,13 +580,27 @@ export class ProductSearchComponent implements OnInit {
     this.searchQuery.set(query);
 
     if (query.length === 0) {
-      this.searchResults.set([]);
       this.error.set(null);
+      // Reload all products when search is cleared
+      this.loadProducts(true);
       return;
     }
 
     if (query.length < 2) {
       return; // Don't search with less than 2 characters
+    }
+
+    // Immediately filter allProducts client-side for instant visual feedback.
+    // This prevents a race condition where the UI shows ALL products (from ngOnInit)
+    // before the debounced search narrows results down after 300ms.
+    if (this.allProducts.length > 0) {
+      const lowerQuery = query.toLowerCase();
+      const filtered = this.allProducts.filter(
+        (p) =>
+          p.name.toLowerCase().includes(lowerQuery) || p.sku.toLowerCase().includes(lowerQuery),
+      );
+      this.searchResults.set(filtered);
+      this.hasMoreProducts.set(false);
     }
 
     this.searchSubject.next(query);
@@ -474,6 +703,7 @@ export class ProductSearchComponent implements OnInit {
         )
         .subscribe((results) => {
           this.searchResults.set(results);
+          this.hasMoreProducts.set(false);
           this.isLoading.set(false);
           this.highlightedIndex.set(-1);
         });
@@ -483,10 +713,9 @@ export class ProductSearchComponent implements OnInit {
       if (query.length >= 2) {
         this.searchSubject.next(query);
       } else {
-        this.searchResults.set([]);
+        // Load all products when "All" is selected with no search query
+        this.loadProducts(true);
       }
     }
   }
 }
-
-// Made with Bob

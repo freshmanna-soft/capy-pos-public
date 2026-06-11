@@ -1,4 +1,5 @@
 import { IBuilder } from './builder.interface';
+import { generateUUID } from '../utils/uuid';
 
 /**
  * AbstractEntityBuilder
@@ -16,7 +17,7 @@ export abstract class AbstractEntityBuilder<
   T,
   Self extends AbstractEntityBuilder<T, Self>,
 > implements IBuilder<T> {
-  protected _id: string = crypto.randomUUID();
+  protected _id: string = generateUUID();
   protected _createdAt: Date = new Date();
   protected _updatedAt: Date = new Date();
   protected _createdBy?: string;

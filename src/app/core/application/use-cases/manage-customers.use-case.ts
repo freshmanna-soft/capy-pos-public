@@ -2,6 +2,8 @@ import { Injectable, inject, signal, computed } from '@angular/core';
 import { ICustomerRepository } from '@core/domain/interfaces/customer.repository.interface';
 import { CUSTOMER_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 import { Customer, CustomerStatus } from '@core/domain/entities/customer.entity';
+import { generateUUID } from '@core/domain/utils/uuid';
+import { EntityNotFoundException, DuplicateEntityException } from '@core/domain/exceptions';
 
 /**
  * DTO for creating a new customer
@@ -127,10 +129,10 @@ export class ManageCustomersUseCase {
       // Validate email uniqueness
       const existingByEmail = await this.customerRepository.findByEmail(request.email);
       if (existingByEmail) {
-        throw new Error('A customer with this email already exists');
+        throw new DuplicateEntityException('Customer', 'email', request.email);
       }
 
-      const id = crypto.randomUUID();
+      const id = generateUUID();
       const customer = new Customer({
         id,
         name: request.name,
@@ -171,14 +173,14 @@ export class ManageCustomersUseCase {
     try {
       const existing = await this.customerRepository.findById(request.id);
       if (!existing) {
-        throw new Error(`Customer with id ${request.id} not found`);
+        throw new EntityNotFoundException('Customer', request.id);
       }
 
       // Check email uniqueness if email is being changed
       if (request.email && request.email !== existing.email) {
         const existingByEmail = await this.customerRepository.findByEmail(request.email);
         if (existingByEmail) {
-          throw new Error('A customer with this email already exists');
+          throw new DuplicateEntityException('Customer', 'email', request.email);
         }
       }
 
@@ -259,6 +261,17 @@ export class ManageCustomersUseCase {
       this._error.set(message);
       this._loading.set(false);
       return [];
+    }
+  }
+
+  /**
+   * Gets full customer details by ID (includes address, notes, etc.)
+   */
+  async getCustomerById(customerId: string): Promise<Customer | null> {
+    try {
+      return await this.customerRepository.findById(customerId);
+    } catch {
+      return null;
     }
   }
 

@@ -8,6 +8,7 @@ import {
   ITransactionItem,
 } from '@core/domain/entities/transaction.entity';
 import { TransactionBuilder } from '@core/domain/entities/transaction.builder';
+import { EmptyCartException, TransactionPersistenceException } from '@core/application/exceptions';
 
 /**
  * Request DTO for persisting a transaction
@@ -84,12 +85,13 @@ export class PersistTransactionUseCase {
 
     // Validate cart is not empty
     if (this.cartService.isEmpty()) {
+      const exception = new EmptyCartException();
       return {
         success: false,
         transactionId,
         paymentMethod,
         timestamp: new Date(),
-        error: 'Cannot persist transaction: cart is empty',
+        error: exception.message,
       };
     }
 
@@ -116,6 +118,10 @@ export class PersistTransactionUseCase {
         .withUpdatedAt(now)
         .withCompletedAt(now);
 
+      // Set payment IDs with method encoded for later inference
+      const paymentId = `PAY-${paymentMethod.toUpperCase()}-${transactionId}`;
+      builder.withPaymentIds([paymentId]);
+
       if (customerId) {
         builder.withCustomerId(customerId);
       }
@@ -132,14 +138,13 @@ export class PersistTransactionUseCase {
         timestamp: now,
       };
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error persisting transaction';
+      const exception = new TransactionPersistenceException(transactionId, error);
       return {
         success: false,
         transactionId,
         paymentMethod,
         timestamp: new Date(),
-        error: errorMessage,
+        error: exception.message,
       };
     }
   }

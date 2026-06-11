@@ -31,7 +31,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Build Angular app
-        run: npx ng build --configuration=production --base-href /capy-pos/
+        run: npx ng build --configuration=production --base-href /capy-pos-public/
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

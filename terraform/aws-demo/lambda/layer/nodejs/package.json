@@ -1,0 +1,11 @@
+{
+  "name": "capy-pos-demo-lambda-layer",
+  "version": "1.0.0",
+  "description": "Shared dependencies for Capy-POS demo Lambda functions",
+  "dependencies": {
+    "aws-xray-sdk-core": "^3.6.0",
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "uuid": "^9.0.0"
+  }
+}

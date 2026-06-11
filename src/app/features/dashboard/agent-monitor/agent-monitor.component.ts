@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil, interval } from 'rxjs';
 import { AgentRegistry } from '@app/agents/agent.registry';
@@ -523,6 +523,7 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   private readonly circuitBreakerService = inject(CircuitBreakerService);
   private readonly telemetry = inject(TelemetryService);
 
+  private readonly cdr = inject(ChangeDetectorRef);
   private readonly destroy$ = new Subject<void>();
 
   agents: AgentStatus[] = [];
@@ -574,17 +575,19 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
 
     const agentPromises = allAgents.map(async (agent) => {
       const health = await agent.getHealth();
+      const status = agent.getStatus();
       return {
         id: agent.id,
         name: agent.name,
-        state: agent.getStatus(),
-        isRunning: health.healthy && agent.getStatus() === 'PROCESSING',
+        state: status,
+        isRunning: health.healthy,
         lastActivity: health.lastActivity,
       };
     });
 
     this.agents = await Promise.all(agentPromises);
     this.runningAgents = this.agents.filter((a) => a.isRunning).length;
+    this.cdr.detectChanges();
   }
 
   private loadCircuitBreakers(): void {
@@ -598,6 +601,7 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   private async loadAuditLogs(): Promise<void> {
     this.recentAuditLogs = this.auditLog.getRecentLogs(10);
     this.auditStats = await this.auditLog.getStatistics();
+    this.cdr.detectChanges();
   }
 
   private loadEventBusStats(): void {

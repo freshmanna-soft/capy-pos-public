@@ -65,6 +65,7 @@ describe('CustomersComponent', () => {
       updateCustomer: vi.fn().mockResolvedValue(mockCustomers[0]),
       deleteCustomer: vi.fn().mockResolvedValue(true),
       searchCustomers: vi.fn().mockResolvedValue(mockCustomers),
+      getCustomerById: vi.fn().mockResolvedValue(mockCustomers[0]),
       selectCustomer: vi.fn(),
     };
 
@@ -172,8 +173,8 @@ describe('CustomersComponent', () => {
       expect(component.formData().phone).toBe('');
     });
 
-    it('should open edit form with customer data', () => {
-      component.openEditForm(mockCustomers[0]);
+    it('should open edit form with customer data', async () => {
+      await component.openEditForm(mockCustomers[0]);
       expect(component.formMode()).toBe('edit');
       expect(component.editingCustomerId()).toBe('c1');
       expect(component.formData().name).toBe('Maria Garcia');
@@ -238,7 +239,7 @@ describe('CustomersComponent', () => {
     });
 
     it('should call updateCustomer on valid edit form', async () => {
-      component.openEditForm(mockCustomers[0]);
+      await component.openEditForm(mockCustomers[0]);
       component.updateFormField('name', 'Updated Maria');
 
       await component.saveCustomer();

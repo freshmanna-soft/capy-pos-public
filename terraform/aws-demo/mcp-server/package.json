@@ -1,0 +1,13 @@
+{
+  "name": "aws-xray-troubleshooter-mcp",
+  "version": "1.0.0",
+  "description": "MCP Server that uses AWS X-Ray traces to diagnose application failures with AI",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

@@ -65,12 +65,16 @@ export class CartService {
     const existingItemIndex = currentItems.findIndex((item) => item.product.id === product.id);
 
     if (existingItemIndex >= 0) {
-      // Product exists, increase quantity
-      const updatedItems = [...currentItems];
-      updatedItems[existingItemIndex] = {
-        ...updatedItems[existingItemIndex],
-        quantity: updatedItems[existingItemIndex].quantity + 1,
+      // Product exists: increase quantity and move to end of list
+      const updatedItem = {
+        ...currentItems[existingItemIndex],
+        quantity: currentItems[existingItemIndex].quantity + 1,
       };
+      const updatedItems = [
+        ...currentItems.slice(0, existingItemIndex),
+        ...currentItems.slice(existingItemIndex + 1),
+        updatedItem,
+      ];
       this._items.set(updatedItems);
     } else {
       // New product, add to cart

@@ -1,6 +1,7 @@
 import { Injectable, inject, signal, computed } from '@angular/core';
 import { ITransactionRepository } from '@core/domain/interfaces/transaction.repository.interface';
 import { Transaction, TransactionStatus } from '@core/domain/entities/transaction.entity';
+import { InvalidDateRangeException, ReportGenerationException } from '@core/application/exceptions';
 
 /**
  * Request DTO for daily sales report
@@ -20,10 +21,14 @@ export interface PaymentBreakdown {
   cash: number;
   /** Total revenue from card payments */
   card: number;
+  /** Total revenue from mobile payments */
+  mobile: number;
   /** Number of cash transactions */
   cashCount: number;
   /** Number of card transactions */
   cardCount: number;
+  /** Number of mobile transactions */
+  mobileCount: number;
 }
 
 /**
@@ -96,6 +101,11 @@ export class GetDailySalesReportUseCase {
     try {
       const { startDate, endDate } = request;
 
+      // Validate date range
+      if (startDate > endDate) {
+        throw new InvalidDateRangeException(startDate, endDate);
+      }
+
       // Fetch all transactions in the date range
       const allTransactions = await this.transactionRepository.findByDateRange(startDate, endDate);
 
@@ -112,16 +122,25 @@ export class GetDailySalesReportUseCase {
 
       return result;
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error generating daily sales report';
-      this._error.set(errorMessage);
+      const exception =
+        error instanceof InvalidDateRangeException
+          ? error
+          : new ReportGenerationException('daily sales', error);
+      this._error.set(exception.message);
       this._loading.set(false);
 
       const emptyResult: DailySalesReportResult = {
         totalRevenue: 0,
         transactionCount: 0,
         averageTransactionValue: 0,
-        paymentBreakdown: { cash: 0, card: 0, cashCount: 0, cardCount: 0 },
+        paymentBreakdown: {
+          cash: 0,
+          card: 0,
+          mobile: 0,
+          cashCount: 0,
+          cardCount: 0,
+          mobileCount: 0,
+        },
         startDate: request.startDate,
         endDate: request.endDate,
       };
@@ -161,8 +180,10 @@ export class GetDailySalesReportUseCase {
   private calculatePaymentBreakdown(transactions: Transaction[]): PaymentBreakdown {
     let cash = 0;
     let card = 0;
+    let mobile = 0;
     let cashCount = 0;
     let cardCount = 0;
+    let mobileCount = 0;
 
     for (const transaction of transactions) {
       const method = this.inferPaymentMethod(transaction);
@@ -173,10 +194,13 @@ export class GetDailySalesReportUseCase {
       } else if (method === 'card') {
         card += transaction.total;
         cardCount++;
+      } else if (method === 'mobile') {
+        mobile += transaction.total;
+        mobileCount++;
       }
     }
 
-    return { cash, card, cashCount, cardCount };
+    return { cash, card, mobile, cashCount, cardCount, mobileCount };
   }
 
   /**
@@ -189,6 +213,7 @@ export class GetDailySalesReportUseCase {
     const firstPaymentId = paymentIds[0];
     if (firstPaymentId.includes('CASH')) return 'cash';
     if (firstPaymentId.includes('CARD')) return 'card';
+    if (firstPaymentId.includes('MOBILE')) return 'mobile';
 
     return 'other';
   }

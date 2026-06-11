@@ -222,7 +222,7 @@ describe('PersistTransactionUseCase', () => {
 
       // Assert
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Cannot persist transaction: cart is empty');
+      expect(result.error).toBe('Cannot process transaction: cart is empty');
       expect(mockRepository['create']).not.toHaveBeenCalled();
     });
 
@@ -243,7 +243,7 @@ describe('PersistTransactionUseCase', () => {
 
       // Assert
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Database connection failed');
+      expect(result.error).toBe("Failed to persist transaction 'TXN-TEST-007'");
       expect(result.transactionId).toBe('TXN-TEST-007');
     });
 

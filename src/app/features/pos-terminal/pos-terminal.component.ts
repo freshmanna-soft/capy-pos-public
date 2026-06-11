@@ -191,14 +191,15 @@ import { AdjustStockOnSaleUseCase } from '@core/application/use-cases/adjust-sto
         margin: 0 auto;
         padding: 1.5rem 2rem;
         width: 100%;
+        min-height: 0;
         overflow: hidden;
       }
 
       .search-section {
         display: flex;
         flex-direction: column;
-        height: 100%;
-        overflow: auto;
+        min-height: 0;
+        overflow-y: auto;
       }
 
       .search-section app-product-search {
@@ -210,7 +211,8 @@ import { AdjustStockOnSaleUseCase } from '@core/application/use-cases/adjust-sto
       .cart-section {
         display: flex;
         flex-direction: column;
-        height: 100%;
+        min-height: 0;
+        overflow: hidden;
       }
 
       .cart-section app-shopping-cart {
@@ -292,6 +294,7 @@ export class PosTerminalComponent implements OnInit {
   private adjustStock = inject(AdjustStockOnSaleUseCase);
 
   @ViewChild(ShoppingCartComponent) shoppingCart!: ShoppingCartComponent;
+  @ViewChild(ProductSearchComponent) productSearch!: ProductSearchComponent;
 
   /** Controls visibility of the checkout overlay */
   readonly showCheckout = signal(false);
@@ -410,7 +413,7 @@ export class PosTerminalComponent implements OnInit {
     const receipt = this.generateReceipt.execute(result);
     this.receiptData.set(receipt);
 
-    // Adjust stock levels (fire-and-forget, sale completes regardless)
+    // Adjust stock levels and refresh product list on success
     this.adjustStock
       .execute(stockAdjustmentItems)
       .then((adjustmentResult) => {
@@ -425,6 +428,10 @@ export class PosTerminalComponent implements OnInit {
             adjustmentResult.adjustedProducts.length,
             'products',
           );
+        }
+        // Refresh product search to show updated stock numbers
+        if (this.productSearch) {
+          this.productSearch.refreshProducts();
         }
       })
       .catch((error) => {

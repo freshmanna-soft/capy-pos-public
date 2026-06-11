@@ -226,7 +226,7 @@ describe('ManageInventoryUseCase', () => {
       const result = await useCase.updateProduct(request);
 
       expect(result).toBeNull();
-      expect(useCase.error()).toBe('Product with id nonexistent not found');
+      expect(useCase.error()).toBe("Product with id 'nonexistent' not found");
     });
 
     it('should only update provided fields', async () => {

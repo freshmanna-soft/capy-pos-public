@@ -161,7 +161,7 @@ describe('ManageCustomersUseCase', () => {
       const result = await useCase.createCustomer(validRequest);
 
       expect(result).toBeNull();
-      expect(useCase.error()).toBe('A customer with this email already exists');
+      expect(useCase.error()).toBe("Customer with email 'jane@example.com' already exists");
       expect(mockRepository.create).not.toHaveBeenCalled();
     });
 
@@ -227,7 +227,7 @@ describe('ManageCustomersUseCase', () => {
       const result = await useCase.updateCustomer({ id: 'nonexistent', name: 'Test' });
 
       expect(result).toBeNull();
-      expect(useCase.error()).toBe('Customer with id nonexistent not found');
+      expect(useCase.error()).toBe("Customer with id 'nonexistent' not found");
     });
 
     it('should check email uniqueness on email change', async () => {
@@ -238,7 +238,7 @@ describe('ManageCustomersUseCase', () => {
       const result = await useCase.updateCustomer({ id: 'cust-1', email: 'taken@test.com' });
 
       expect(result).toBeNull();
-      expect(useCase.error()).toBe('A customer with this email already exists');
+      expect(useCase.error()).toBe("Customer with email 'taken@test.com' already exists");
     });
 
     it('should not check email uniqueness if email unchanged', async () => {
