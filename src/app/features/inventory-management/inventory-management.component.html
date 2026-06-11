@@ -4,7 +4,7 @@
     <div class="header-left">
       <h1 class="page-title">📦 Inventory Management</h1>
       <p class="page-subtitle">
-        {{ filteredProducts().length }} of {{ inventoryUseCase.products().length }} products
+        {{ filteredProducts().length }} of {{ inventoryFacade.products().length }} products
       </p>
     </div>
     <div class="header-actions">
@@ -15,10 +15,10 @@
   </div>
 
   <!-- Error Banner -->
-  @if (inventoryUseCase.error()) {
+  @if (inventoryFacade.error()) {
     <div class="error-banner" data-testid="error-banner">
       <span class="error-icon">❌</span>
-      <span class="error-text">{{ inventoryUseCase.error() }}</span>
+      <span class="error-text">{{ inventoryFacade.error() }}</span>
       <button class="error-dismiss" (click)="dismissError()">Dismiss</button>
     </div>
   }
@@ -87,7 +87,7 @@
                 list="category-suggestions"
               />
               <datalist id="category-suggestions">
-                @for (cat of inventoryUseCase.categories(); track cat) {
+                @for (cat of inventoryFacade.categories(); track cat) {
                   <option [value]="cat"></option>
                 }
               </datalist>
@@ -190,11 +190,11 @@
           <button
             class="btn-save"
             (click)="saveProduct()"
-            [disabled]="inventoryUseCase.loading()"
+            [disabled]="inventoryFacade.loading()"
             data-testid="btn-save"
           >
             {{
-              inventoryUseCase.loading()
+              inventoryFacade.loading()
                 ? 'Saving...'
                 : formMode() === 'create'
                   ? 'Create Product'
@@ -248,7 +248,7 @@
         data-testid="category-filter"
       >
         <option value="">All Categories</option>
-        @for (cat of inventoryUseCase.categories(); track cat) {
+        @for (cat of inventoryFacade.categories(); track cat) {
           <option [value]="cat">{{ cat }}</option>
         }
       </select>
@@ -267,7 +267,7 @@
   </div>
 
   <!-- Loading State -->
-  @if (inventoryUseCase.loading() && inventoryUseCase.products().length === 0) {
+  @if (inventoryFacade.loading() && inventoryFacade.products().length === 0) {
     <div class="loading-state" data-testid="loading-state">
       <span>Loading inventory...</span>
     </div>

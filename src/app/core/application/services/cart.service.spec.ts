@@ -13,7 +13,7 @@ describe('CartService', () => {
     product1 = new ProductBuilder()
       .withId('prod-1')
       .withName('Coffee')
-      .withPrice(5.0)
+      .withPrice(5)
       .withSku('COF-001')
       .withCategory('Beverages')
       .withStock(50)

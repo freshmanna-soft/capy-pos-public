@@ -12,13 +12,16 @@ import { Product } from '@core/domain/entities/product.entity';
 import { ProductBuilder } from '@core/domain/entities/product.builder';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
 import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import { PosFacade } from '@core/application/facades';
+import { GenerateReceiptUseCase } from '@core/application/use-cases/generate-receipt.use-case';
+import { AdjustStockOnSaleUseCase } from '@core/application/use-cases/adjust-stock-on-sale.use-case';
 
 /**
  * Unit Tests for PosTerminalComponent - S1-4: Add to Cart Interaction
  * Sprint 1 - Issue #4: Add to Cart Interaction
  *
  * Tests the integration between ProductSearch/ProductGrid and ShoppingCart
- * via the PosTerminalComponent orchestrator.
+ * via the PosTerminalComponent orchestrator (now using PosFacade).
  *
  * Acceptance Criteria:
  * - AC1: Clicking a product in the grid adds it to the cart
@@ -94,7 +97,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     findAll: vi.fn().mockResolvedValue([]),
     findById: vi.fn().mockResolvedValue(null),
     getCategories: vi.fn().mockResolvedValue([]),
-    adjustStock: vi.fn().mockResolvedValue(null),
+    adjustStock: vi.fn().mockResolvedValue({ id: '1', stock: 49 }),
   };
 
   const mockTransactionRepository = {
@@ -119,6 +122,9 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       ],
       providers: [
         CartService,
+        GenerateReceiptUseCase,
+        AdjustStockOnSaleUseCase,
+        PosFacade,
         { provide: DexieDatabase, useValue: mockDexieDatabase },
         { provide: PRODUCT_REPOSITORY, useValue: mockProductRepository },
         { provide: 'ITransactionRepository', useValue: mockTransactionRepository },
@@ -299,8 +305,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
   });
 
   describe('startNewTransaction', () => {
-    it('should clear the cart via shoppingCart component', () => {
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
+    it('should clear the cart via PosFacade', () => {
       addProduct(mockProducts.coffee);
       addProduct(mockProducts.tea);
       expect(cartService.items().length).toBe(2);
@@ -308,19 +313,6 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       component.startNewTransaction();
 
       expect(cartService.isEmpty()).toBe(true);
-    });
-
-    it('should log error if shoppingCart is not initialized', () => {
-      const errorSpy = vi.spyOn(console, 'error');
-      // Temporarily remove the ViewChild reference
-      const originalCart = component.shoppingCart;
-      (component as never as { shoppingCart: undefined }).shoppingCart = undefined;
-
-      component.startNewTransaction();
-
-      expect(errorSpy).toHaveBeenCalledWith('Shopping cart not initialized');
-      // Restore
-      (component as never as { shoppingCart: typeof originalCart }).shoppingCart = originalCart;
     });
   });
 
@@ -393,25 +385,32 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
   describe('S3-2: Receipt Generation after Payment', () => {
     const mockPaymentResult: PaymentResult = {
       method: 'cash',
-      amount: 50.0,
+      amount: 50,
       change: 35.9,
       transactionId: 'TXN-TEST-001',
       timestamp: new Date('2026-06-08T14:30:00'),
     };
 
-    it('should show receipt after payment completes', () => {
+    it('should show receipt after payment completes', async () => {
       addProduct(mockProducts.coffee);
       component.handlePaymentComplete(mockPaymentResult);
+
+      // handlePaymentComplete is async (uses .then()), flush microtasks
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(component.showReceipt()).toBe(true);
       expect(component.showCheckout()).toBe(false);
     });
 
-    it('should generate receipt data with cart items before clearing', () => {
+    it('should generate receipt data with cart items before clearing', async () => {
       addProduct(mockProducts.coffee);
       addProduct(mockProducts.tea);
 
       component.handlePaymentComplete(mockPaymentResult);
+
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       const receipt = component.receiptData();
       expect(receipt).not.toBeNull();
@@ -420,10 +419,13 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       expect(receipt!.items[1].product.name).toBe('Green Tea');
     });
 
-    it('should include correct totals in receipt', () => {
+    it('should include correct totals in receipt', async () => {
       addProduct(mockProducts.coffee); // 12.99
 
       component.handlePaymentComplete(mockPaymentResult);
+
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       const receipt = component.receiptData();
       expect(receipt!.subtotal).toBeCloseTo(12.99, 2);
@@ -432,38 +434,50 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       expect(receipt!.total).toBeCloseTo(12.99 + 12.99 * 0.085, 2);
     });
 
-    it('should include payment details in receipt', () => {
+    it('should include payment details in receipt', async () => {
       addProduct(mockProducts.coffee);
 
       component.handlePaymentComplete(mockPaymentResult);
 
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
       const receipt = component.receiptData();
       expect(receipt!.payment.method).toBe('cash');
-      expect(receipt!.payment.amount).toBe(50.0);
+      expect(receipt!.payment.amount).toBe(50);
       expect(receipt!.payment.change).toBe(35.9);
       expect(receipt!.payment.transactionId).toBe('TXN-TEST-001');
     });
 
-    it('should clear cart after generating receipt', () => {
+    it('should clear cart after generating receipt', async () => {
       addProduct(mockProducts.coffee);
       addProduct(mockProducts.tea);
 
       component.handlePaymentComplete(mockPaymentResult);
 
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
       expect(cartService.isEmpty()).toBe(true);
     });
 
-    it('should store lastPayment signal', () => {
+    it('should store lastPayment signal', async () => {
       addProduct(mockProducts.coffee);
 
       component.handlePaymentComplete(mockPaymentResult);
+
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(component.lastPayment()).toBe(mockPaymentResult);
     });
 
-    it('should dismiss receipt and reset state on new transaction', () => {
+    it('should dismiss receipt and reset state on new transaction', async () => {
       addProduct(mockProducts.coffee);
       component.handlePaymentComplete(mockPaymentResult);
+
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(component.showReceipt()).toBe(true);
 
@@ -474,12 +488,15 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       expect(component.lastPayment()).toBeNull();
     });
 
-    it('should handle receipt with multiple quantities', () => {
+    it('should handle receipt with multiple quantities', async () => {
       addProduct(mockProducts.coffee);
       addProduct(mockProducts.coffee);
       addProduct(mockProducts.coffee);
 
       component.handlePaymentComplete(mockPaymentResult);
+
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       const receipt = component.receiptData();
       expect(receipt!.items).toHaveLength(1);
