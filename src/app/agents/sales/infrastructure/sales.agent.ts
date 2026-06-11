@@ -35,6 +35,8 @@ import {
 } from '@core/domain/entities/transaction.entity';
 import { TransactionBuilder } from '@core/domain/entities/transaction.builder';
 
+const UNKNOWN_ERROR = 'Unknown error';
+
 /**
  * SalesAgent
  * Concrete implementation of ISalesAgent
@@ -233,7 +235,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         },
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = error instanceof Error ? error.message : UNKNOWN_ERROR;
       return {
         success: false,
         error: `Failed to record sale: ${errorMessage}`,
@@ -344,7 +346,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         },
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = error instanceof Error ? error.message : UNKNOWN_ERROR;
       return {
         success: false,
         error: `Failed to process return: ${errorMessage}`,
@@ -394,7 +396,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         },
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = error instanceof Error ? error.message : UNKNOWN_ERROR;
       return {
         success: false,
         error: `Failed to void transaction: ${errorMessage}`,
@@ -454,7 +456,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         data: metrics,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = error instanceof Error ? error.message : UNKNOWN_ERROR;
       return {
         success: false,
         error: `Failed to get sales metrics: ${errorMessage}`,
@@ -498,7 +500,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         },
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = error instanceof Error ? error.message : UNKNOWN_ERROR;
       return {
         success: false,
         error: `Failed to generate report: ${errorMessage}`,
@@ -517,7 +519,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         data: summary,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = error instanceof Error ? error.message : UNKNOWN_ERROR;
       return {
         success: false,
         error: `Failed to get daily summary: ${errorMessage}`,
@@ -614,7 +616,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         data: topProducts,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = error instanceof Error ? error.message : UNKNOWN_ERROR;
       return {
         success: false,
         error: `Failed to get top products: ${errorMessage}`,
@@ -678,7 +680,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         data: salesByPeriod,
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = error instanceof Error ? error.message : UNKNOWN_ERROR;
       return {
         success: false,
         error: `Failed to get sales by period: ${errorMessage}`,

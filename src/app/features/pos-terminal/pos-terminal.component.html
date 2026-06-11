@@ -1,0 +1,72 @@
+<div class="pos-terminal" data-testid="pos-terminal">
+  <!-- Header -->
+  <header class="pos-header">
+    <div class="header-content">
+      <h1 class="header-title">POS Terminal</h1>
+      <div class="header-actions">
+        <button
+          class="header-btn"
+          data-testid="add-product-btn"
+          (click)="handleAddProduct()"
+          aria-label="Add product"
+        >
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+            />
+          </svg>
+          Add Product
+        </button>
+        <button
+          class="header-btn"
+          data-testid="new-transaction-btn"
+          (click)="startNewTransaction()"
+          aria-label="Start new transaction"
+        >
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 4v16m8-8H4"
+            />
+          </svg>
+          New Transaction
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="pos-content">
+    <!-- Product Search Section -->
+    <section class="search-section" data-testid="search-section">
+      <app-product-search (productSelected)="handleProductSelected($event)"> </app-product-search>
+    </section>
+
+    <!-- Shopping Cart Section -->
+    <aside class="cart-section" data-testid="cart-section">
+      <app-shopping-cart (checkoutRequested)="openCheckout()"> </app-shopping-cart>
+    </aside>
+  </main>
+
+  <!-- Checkout Overlay -->
+  @if (showCheckout()) {
+    <app-checkout
+      (paymentComplete)="handlePaymentComplete($event)"
+      (checkoutCancelled)="closeCheckout()"
+    />
+  }
+
+  <!-- Receipt Overlay -->
+  @if (showReceipt() && receiptData()) {
+    <app-receipt
+      [data]="receiptData()!"
+      (printReceipt)="handlePrintReceipt()"
+      (newTransaction)="handleNewTransactionFromReceipt()"
+    />
+  }
+</div>

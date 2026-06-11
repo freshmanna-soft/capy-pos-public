@@ -154,13 +154,14 @@ export class CircuitBreaker {
     this.consecutiveFailures = 0;
     this.lastSuccessTime = new Date();
 
-    if (this.state === CircuitState.HALF_OPEN) {
-      if (this.consecutiveSuccesses >= this.config.successThreshold) {
-        this.state = CircuitState.CLOSED;
-        this.failures = 0;
-        this.failureTimestamps = [];
-        console.log(`[CircuitBreaker:${this.name}] Closed after successful recovery`);
-      }
+    if (
+      this.state === CircuitState.HALF_OPEN &&
+      this.consecutiveSuccesses >= this.config.successThreshold
+    ) {
+      this.state = CircuitState.CLOSED;
+      this.failures = 0;
+      this.failureTimestamps = [];
+      console.log(`[CircuitBreaker:${this.name}] Closed after successful recovery`);
     }
   }
 
@@ -184,15 +185,15 @@ export class CircuitBreaker {
       this.state = CircuitState.OPEN;
       this.nextAttemptTime = new Date(Date.now() + this.config.timeout);
       console.log(`[CircuitBreaker:${this.name}] Reopened after failure in HALF_OPEN`);
-    } else if (this.state === CircuitState.CLOSED) {
-      // Check if we should open the circuit
-      if (this.failureTimestamps.length >= this.config.failureThreshold) {
-        this.state = CircuitState.OPEN;
-        this.nextAttemptTime = new Date(Date.now() + this.config.timeout);
-        console.log(
-          `[CircuitBreaker:${this.name}] Opened after ${this.failureTimestamps.length} failures`,
-        );
-      }
+    } else if (
+      this.state === CircuitState.CLOSED &&
+      this.failureTimestamps.length >= this.config.failureThreshold
+    ) {
+      this.state = CircuitState.OPEN;
+      this.nextAttemptTime = new Date(Date.now() + this.config.timeout);
+      console.log(
+        `[CircuitBreaker:${this.name}] Opened after ${this.failureTimestamps.length} failures`,
+      );
     }
   }
 

@@ -371,12 +371,9 @@ export class AuditLogService {
     ]);
 
     // Combine headers and rows
-    const csvContent = [
-      headers.join(','),
-      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
-    ].join('\n');
-
-    return csvContent;
+    return [headers.join(','), ...rows.map((row) => row.map((cell) => `"${cell}"`).join(','))].join(
+      '\n',
+    );
   }
 }
 

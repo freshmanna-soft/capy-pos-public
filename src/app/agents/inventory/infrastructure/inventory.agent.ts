@@ -25,6 +25,8 @@ export const PRODUCT_REPOSITORY_TOKEN = new InjectionToken<IProductRepository>(
  * Handles all inventory management operations
  * Extends BaseAgent for lifecycle management
  */
+const UNKNOWN_ERROR = 'Unknown error';
+
 @Injectable({
   providedIn: 'root',
 })
@@ -138,7 +140,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : UNKNOWN_ERROR,
       };
     }
   }
@@ -185,7 +187,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : UNKNOWN_ERROR,
       };
     }
   }
@@ -235,7 +237,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : UNKNOWN_ERROR,
       };
     }
   }
@@ -265,7 +267,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : UNKNOWN_ERROR,
       };
     }
   }
@@ -316,7 +318,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : UNKNOWN_ERROR,
       };
     }
   }
@@ -371,7 +373,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : UNKNOWN_ERROR,
       };
     }
   }
@@ -410,7 +412,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : UNKNOWN_ERROR,
       };
     }
   }
@@ -444,7 +446,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: error instanceof Error ? error.message : UNKNOWN_ERROR,
       };
     }
   }
