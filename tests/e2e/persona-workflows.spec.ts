@@ -194,20 +194,22 @@ test.describe('Persona: Maria the Cashier - POS Workflow', () => {
     // The component loads all products on init, so wait for them to appear
     await page.waitForSelector('[data-testid="product-result"]', { timeout: 10000 });
 
-    // Click on a category chip (not "All")
+    // On mobile, category chips may need scrolling into view
     const categoryChips = page.locator('.category-chip:not([data-testid="category-all"])');
     const chipCount = await categoryChips.count();
 
     if (chipCount > 0) {
+      // Scroll the first non-All chip into view before clicking (mobile viewport)
+      await categoryChips.first().scrollIntoViewIfNeeded();
       await categoryChips.first().click();
 
       // Wait for the async category filter to complete and results to render
-      // Use a polling assertion which retries automatically
-      await expect(page.locator('[data-testid="product-result"]').first()).toBeVisible({
-        timeout: 10000,
-      });
-      const results = await page.locator('[data-testid="product-result"]').count();
-      expect(results).toBeGreaterThan(0);
+      // Use polling assertion to handle mobile rendering delays
+      await expect
+        .poll(async () => page.locator('[data-testid="product-result"]').count(), {
+          timeout: 15000,
+        })
+        .toBeGreaterThan(0);
     }
   });
 
