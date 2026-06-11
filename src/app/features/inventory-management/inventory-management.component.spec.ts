@@ -1,16 +1,14 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { InventoryManagementComponent } from './inventory-management.component';
-import {
-  ManageInventoryUseCase,
-  ProductSummaryDTO,
-} from '@core/application/use-cases/manage-inventory.use-case';
+import { ProductSummaryDTO } from '@core/application/use-cases/manage-inventory.use-case';
+import { InventoryFacade } from '@core/application/facades';
 import { signal, computed } from '@angular/core';
 
 describe('InventoryManagementComponent', () => {
   let component: InventoryManagementComponent;
   let fixture: ComponentFixture<InventoryManagementComponent>;
-  let mockUseCase: Partial<ManageInventoryUseCase>;
+  let mockFacade: Partial<InventoryFacade>;
 
   const mockProducts: ProductSummaryDTO[] = [
     {
@@ -19,7 +17,7 @@ describe('InventoryManagementComponent', () => {
       sku: 'SKU-001',
       category: 'Beverages',
       price: 4.5,
-      cost: 2.0,
+      cost: 2,
       stock: 50,
       emoji: '☕',
       isActive: true,
@@ -32,7 +30,7 @@ describe('InventoryManagementComponent', () => {
       name: 'Muffin',
       sku: 'SKU-002',
       category: 'Food',
-      price: 3.0,
+      price: 3,
       cost: 1.5,
       stock: 3,
       emoji: '🧁',
@@ -47,7 +45,7 @@ describe('InventoryManagementComponent', () => {
       sku: 'SKU-003',
       category: 'Beverages',
       price: 3.5,
-      cost: 1.0,
+      cost: 1,
       stock: 15,
       emoji: '🍵',
       isActive: true,
@@ -63,12 +61,12 @@ describe('InventoryManagementComponent', () => {
     const loadingSignal = signal<boolean>(false);
     const errorSignal = signal<string | null>(null);
 
-    mockUseCase = {
+    mockFacade = {
       products: computed(() => productsSignal()),
       categories: computed(() => categoriesSignal()),
       loading: computed(() => loadingSignal()),
       error: computed(() => errorSignal()),
-      loadProducts: vi.fn().mockResolvedValue(mockProducts),
+      loadProducts: vi.fn().mockResolvedValue(undefined),
       createProduct: vi.fn().mockResolvedValue(mockProducts[0]),
       updateProduct: vi.fn().mockResolvedValue(mockProducts[0]),
       deleteProduct: vi.fn().mockResolvedValue(true),
@@ -77,7 +75,7 @@ describe('InventoryManagementComponent', () => {
 
     await TestBed.configureTestingModule({
       imports: [InventoryManagementComponent],
-      providers: [{ provide: ManageInventoryUseCase, useValue: mockUseCase }],
+      providers: [{ provide: InventoryFacade, useValue: mockFacade }],
     }).compileComponents();
 
     fixture = TestBed.createComponent(InventoryManagementComponent);
@@ -90,7 +88,7 @@ describe('InventoryManagementComponent', () => {
   });
 
   it('should call loadProducts on init', () => {
-    expect(mockUseCase.loadProducts).toHaveBeenCalledTimes(1);
+    expect(mockFacade.loadProducts).toHaveBeenCalledTimes(1);
   });
 
   describe('Filtering', () => {
@@ -253,7 +251,7 @@ describe('InventoryManagementComponent', () => {
 
       await component.saveProduct();
 
-      expect(mockUseCase.createProduct).toHaveBeenCalledTimes(1);
+      expect(mockFacade.createProduct).toHaveBeenCalledTimes(1);
       expect(component.formMode()).toBe('closed');
     });
 
@@ -263,7 +261,7 @@ describe('InventoryManagementComponent', () => {
 
       await component.saveProduct();
 
-      expect(mockUseCase.updateProduct).toHaveBeenCalledTimes(1);
+      expect(mockFacade.updateProduct).toHaveBeenCalledTimes(1);
       expect(component.formMode()).toBe('closed');
     });
   });
@@ -283,25 +281,25 @@ describe('InventoryManagementComponent', () => {
     it('should confirm delete and call use case', async () => {
       component.requestDelete('p1');
       await component.confirmDelete();
-      expect(mockUseCase.deleteProduct).toHaveBeenCalledWith('p1');
+      expect(mockFacade.deleteProduct).toHaveBeenCalledWith('p1');
       expect(component.deleteConfirmId()).toBeNull();
     });
 
     it('should not call delete if no id set', async () => {
       await component.confirmDelete();
-      expect(mockUseCase.deleteProduct).not.toHaveBeenCalled();
+      expect(mockFacade.deleteProduct).not.toHaveBeenCalled();
     });
   });
 
   describe('Stock Adjustment', () => {
     it('should call adjustStock with positive delta', () => {
       component.adjustStock('p1', 1);
-      expect(mockUseCase.adjustStock).toHaveBeenCalledWith('p1', 1);
+      expect(mockFacade.adjustStock).toHaveBeenCalledWith('p1', 1);
     });
 
     it('should call adjustStock with negative delta', () => {
       component.adjustStock('p1', -1);
-      expect(mockUseCase.adjustStock).toHaveBeenCalledWith('p1', -1);
+      expect(mockFacade.adjustStock).toHaveBeenCalledWith('p1', -1);
     });
   });
 

@@ -9,12 +9,12 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
-  ManageCustomersUseCase,
   CustomerSummaryDTO,
   CreateCustomerRequest,
   UpdateCustomerRequest,
 } from '@core/application/use-cases/manage-customers.use-case';
 import { CustomerStatus } from '@core/domain/entities/customer.entity';
+import { CustomerFacade } from '@core/application/facades';
 
 type FormMode = 'closed' | 'create' | 'edit';
 
@@ -58,7 +58,7 @@ interface CustomerFormData {
   styleUrl: './customers.component.scss',
 })
 export class CustomersComponent implements OnInit {
-  readonly customersUseCase = inject(ManageCustomersUseCase);
+  protected readonly customerFacade = inject(CustomerFacade);
 
   // Filter signals
   readonly searchQuery = signal('');
@@ -75,7 +75,7 @@ export class CustomersComponent implements OnInit {
 
   // Computed values
   readonly filteredCustomers = computed(() => {
-    let result = this.customersUseCase.customers();
+    let result = this.customerFacade.customers();
     const query = this.searchQuery().toLowerCase().trim();
     const status = this.statusFilter();
 
@@ -96,20 +96,19 @@ export class CustomersComponent implements OnInit {
   });
 
   readonly activeCount = computed(
-    () =>
-      this.customersUseCase.customers().filter((c) => c.status === CustomerStatus.ACTIVE).length,
+    () => this.customerFacade.customers().filter((c) => c.status === CustomerStatus.ACTIVE).length,
   );
 
   readonly vipCount = computed(
-    () => this.customersUseCase.customers().filter((c) => c.status === CustomerStatus.VIP).length,
+    () => this.customerFacade.customers().filter((c) => c.status === CustomerStatus.VIP).length,
   );
 
   readonly totalLoyaltyPoints = computed(() =>
-    this.customersUseCase.customers().reduce((sum, c) => sum + c.loyaltyPoints, 0),
+    this.customerFacade.customers().reduce((sum, c) => sum + c.loyaltyPoints, 0),
   );
 
   ngOnInit(): void {
-    this.customersUseCase.loadCustomers();
+    this.customerFacade.loadCustomers();
   }
 
   // Helper methods
@@ -123,7 +122,7 @@ export class CustomersComponent implements OnInit {
   }
 
   dismissError(): void {
-    this.customersUseCase.loadCustomers();
+    this.customerFacade.loadCustomers();
   }
 
   // Form operations
@@ -139,7 +138,7 @@ export class CustomersComponent implements OnInit {
     this.editingCustomerId.set(customer.id);
 
     // Fetch full customer details to populate all fields (address, notes, etc.)
-    const fullCustomer = await this.customersUseCase.getCustomerById(customer.id);
+    const fullCustomer = await this.customerFacade.getCustomerById(customer.id);
 
     this.formData.set({
       name: fullCustomer?.name ?? customer.name,
@@ -194,7 +193,7 @@ export class CustomersComponent implements OnInit {
         notes: data.notes.trim() || undefined,
       };
 
-      const result = await this.customersUseCase.createCustomer(request);
+      const result = await this.customerFacade.createCustomer(request);
       if (result) {
         this.closeForm();
       }
@@ -215,7 +214,7 @@ export class CustomersComponent implements OnInit {
         notes: data.notes.trim(),
       };
 
-      const result = await this.customersUseCase.updateCustomer(request);
+      const result = await this.customerFacade.updateCustomer(request);
       if (result) {
         this.closeForm();
       }
@@ -235,7 +234,7 @@ export class CustomersComponent implements OnInit {
     const id = this.deleteConfirmId();
     if (!id) return;
 
-    await this.customersUseCase.deleteCustomer(id);
+    await this.customerFacade.deleteCustomer(id);
     this.deleteConfirmId.set(null);
   }
 

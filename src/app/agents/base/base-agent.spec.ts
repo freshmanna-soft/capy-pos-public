@@ -133,7 +133,7 @@ describe('BaseAgent', () => {
         payload: {},
       } as unknown;
 
-      const response = await agent.processMessage(invalidMessage);
+      const response = await agent.processMessage(invalidMessage as IAgentMessage);
       expect(response.success).toBe(false);
       expect(response.error).toContain('id');
     });

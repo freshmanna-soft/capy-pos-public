@@ -9,11 +9,11 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
-  ManageInventoryUseCase,
   ProductSummaryDTO,
   CreateProductRequest,
   UpdateProductRequest,
 } from '@core/application/use-cases/manage-inventory.use-case';
+import { InventoryFacade } from '@core/application/facades';
 
 type StockStatus = 'healthy' | 'warning' | 'critical';
 type FormMode = 'closed' | 'create' | 'edit';
@@ -60,7 +60,7 @@ interface ProductFormData {
   styleUrl: './inventory-management.component.scss',
 })
 export class InventoryManagementComponent implements OnInit {
-  readonly inventoryUseCase = inject(ManageInventoryUseCase);
+  protected readonly inventoryFacade = inject(InventoryFacade);
 
   // Filter signals
   readonly searchQuery = signal('');
@@ -78,7 +78,7 @@ export class InventoryManagementComponent implements OnInit {
 
   // Computed values
   readonly filteredProducts = computed(() => {
-    let result = this.inventoryUseCase.products();
+    let result = this.inventoryFacade.products();
     const query = this.searchQuery().toLowerCase().trim();
     const category = this.categoryFilter();
     const stockStatus = this.stockFilter();
@@ -101,23 +101,23 @@ export class InventoryManagementComponent implements OnInit {
   });
 
   readonly lowStockCount = computed(
-    () => this.inventoryUseCase.products().filter((p) => p.stock < 5).length,
+    () => this.inventoryFacade.products().filter((p) => p.stock < 5).length,
   );
 
   readonly warningCount = computed(
-    () => this.inventoryUseCase.products().filter((p) => p.stock >= 5 && p.stock <= 20).length,
+    () => this.inventoryFacade.products().filter((p) => p.stock >= 5 && p.stock <= 20).length,
   );
 
   readonly healthyCount = computed(
-    () => this.inventoryUseCase.products().filter((p) => p.stock > 20).length,
+    () => this.inventoryFacade.products().filter((p) => p.stock > 20).length,
   );
 
   readonly totalStock = computed(() =>
-    this.inventoryUseCase.products().reduce((sum, p) => sum + p.stock, 0),
+    this.inventoryFacade.products().reduce((sum, p) => sum + p.stock, 0),
   );
 
   ngOnInit(): void {
-    this.inventoryUseCase.loadProducts();
+    this.inventoryFacade.loadProducts();
   }
 
   // Stock status helpers
@@ -135,7 +135,7 @@ export class InventoryManagementComponent implements OnInit {
 
   // Stock adjustment
   adjustStock(productId: string, delta: number): void {
-    this.inventoryUseCase.adjustStock(productId, delta);
+    this.inventoryFacade.adjustStock(productId, delta);
   }
 
   // Filter actions
@@ -147,7 +147,7 @@ export class InventoryManagementComponent implements OnInit {
 
   dismissError(): void {
     // Clear error by reloading
-    this.inventoryUseCase.loadProducts();
+    this.inventoryFacade.loadProducts();
   }
 
   // Form operations
@@ -218,7 +218,7 @@ export class InventoryManagementComponent implements OnInit {
         reorderQuantity: Number(data.reorderQuantity),
       };
 
-      const result = await this.inventoryUseCase.createProduct(request);
+      const result = await this.inventoryFacade.createProduct(request);
       if (result) {
         this.closeForm();
       }
@@ -241,7 +241,7 @@ export class InventoryManagementComponent implements OnInit {
         reorderQuantity: Number(data.reorderQuantity),
       };
 
-      const result = await this.inventoryUseCase.updateProduct(request);
+      const result = await this.inventoryFacade.updateProduct(request);
       if (result) {
         this.closeForm();
       }
@@ -261,7 +261,7 @@ export class InventoryManagementComponent implements OnInit {
     const id = this.deleteConfirmId();
     if (!id) return;
 
-    await this.inventoryUseCase.deleteProduct(id);
+    await this.inventoryFacade.deleteProduct(id);
     this.deleteConfirmId.set(null);
   }
 

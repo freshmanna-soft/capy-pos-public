@@ -74,8 +74,8 @@ export class CircuitBreaker {
   private failureTimestamps: number[] = [];
 
   constructor(
-    private name: string,
-    private config: CircuitBreakerConfig,
+    private readonly name: string,
+    private readonly config: CircuitBreakerConfig,
   ) {}
 
   /**
@@ -213,9 +213,9 @@ export class CircuitBreaker {
   providedIn: 'root',
 })
 export class CircuitBreakerService {
-  private breakers = new Map<string, CircuitBreaker>();
+  private readonly breakers = new Map<string, CircuitBreaker>();
 
-  private defaultConfig: CircuitBreakerConfig = {
+  private readonly defaultConfig: CircuitBreakerConfig = {
     failureThreshold: 5,
     successThreshold: 2,
     timeout: 60000, // 1 minute

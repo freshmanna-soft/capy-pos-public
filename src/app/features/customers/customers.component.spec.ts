@@ -1,17 +1,15 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CustomersComponent } from './customers.component';
-import {
-  ManageCustomersUseCase,
-  CustomerSummaryDTO,
-} from '@core/application/use-cases/manage-customers.use-case';
+import { CustomerSummaryDTO } from '@core/application/use-cases/manage-customers.use-case';
 import { CustomerStatus } from '@core/domain/entities/customer.entity';
+import { CustomerFacade } from '@core/application/facades';
 import { signal, computed } from '@angular/core';
 
 describe('CustomersComponent', () => {
   let component: CustomersComponent;
   let fixture: ComponentFixture<CustomersComponent>;
-  let mockUseCase: Partial<ManageCustomersUseCase>;
+  let mockFacade: Partial<CustomerFacade>;
 
   const mockCustomers: CustomerSummaryDTO[] = [
     {
@@ -53,25 +51,22 @@ describe('CustomersComponent', () => {
     const customersSignal = signal<CustomerSummaryDTO[]>(mockCustomers);
     const loadingSignal = signal<boolean>(false);
     const errorSignal = signal<string | null>(null);
-    const selectedSignal = signal<CustomerSummaryDTO | null>(null);
 
-    mockUseCase = {
+    mockFacade = {
       customers: computed(() => customersSignal()),
       loading: computed(() => loadingSignal()),
       error: computed(() => errorSignal()),
-      selectedCustomer: computed(() => selectedSignal()),
       loadCustomers: vi.fn().mockResolvedValue(mockCustomers),
       createCustomer: vi.fn().mockResolvedValue(mockCustomers[0]),
       updateCustomer: vi.fn().mockResolvedValue(mockCustomers[0]),
       deleteCustomer: vi.fn().mockResolvedValue(true),
       searchCustomers: vi.fn().mockResolvedValue(mockCustomers),
       getCustomerById: vi.fn().mockResolvedValue(mockCustomers[0]),
-      selectCustomer: vi.fn(),
     };
 
     await TestBed.configureTestingModule({
       imports: [CustomersComponent],
-      providers: [{ provide: ManageCustomersUseCase, useValue: mockUseCase }],
+      providers: [{ provide: CustomerFacade, useValue: mockFacade }],
     }).compileComponents();
 
     fixture = TestBed.createComponent(CustomersComponent);
@@ -84,7 +79,7 @@ describe('CustomersComponent', () => {
   });
 
   it('should call loadCustomers on init', () => {
-    expect(mockUseCase.loadCustomers).toHaveBeenCalledTimes(1);
+    expect(mockFacade.loadCustomers).toHaveBeenCalledTimes(1);
   });
 
   describe('Filtering', () => {
@@ -223,7 +218,7 @@ describe('CustomersComponent', () => {
       await component.saveCustomer();
 
       expect(component.formErrors()['email']).toBeUndefined();
-      expect(mockUseCase.createCustomer).toHaveBeenCalledTimes(1);
+      expect(mockFacade.createCustomer).toHaveBeenCalledTimes(1);
     });
 
     it('should call createCustomer on valid create form', async () => {
@@ -234,7 +229,7 @@ describe('CustomersComponent', () => {
 
       await component.saveCustomer();
 
-      expect(mockUseCase.createCustomer).toHaveBeenCalledTimes(1);
+      expect(mockFacade.createCustomer).toHaveBeenCalledTimes(1);
       expect(component.formMode()).toBe('closed');
     });
 
@@ -244,7 +239,7 @@ describe('CustomersComponent', () => {
 
       await component.saveCustomer();
 
-      expect(mockUseCase.updateCustomer).toHaveBeenCalledTimes(1);
+      expect(mockFacade.updateCustomer).toHaveBeenCalledTimes(1);
       expect(component.formMode()).toBe('closed');
     });
 
@@ -257,7 +252,7 @@ describe('CustomersComponent', () => {
 
       await component.saveCustomer();
 
-      expect(mockUseCase.updateCustomer).not.toHaveBeenCalled();
+      expect(mockFacade.updateCustomer).not.toHaveBeenCalled();
     });
   });
 
@@ -276,13 +271,13 @@ describe('CustomersComponent', () => {
     it('should confirm delete and call use case', async () => {
       component.requestDelete('c1');
       await component.confirmDelete();
-      expect(mockUseCase.deleteCustomer).toHaveBeenCalledWith('c1');
+      expect(mockFacade.deleteCustomer).toHaveBeenCalledWith('c1');
       expect(component.deleteConfirmId()).toBeNull();
     });
 
     it('should not call delete if no id set', async () => {
       await component.confirmDelete();
-      expect(mockUseCase.deleteCustomer).not.toHaveBeenCalled();
+      expect(mockFacade.deleteCustomer).not.toHaveBeenCalled();
     });
   });
 
@@ -290,7 +285,7 @@ describe('CustomersComponent', () => {
     it('should call loadCustomers on dismissError', () => {
       component.dismissError();
       // Called once on init + once on dismiss
-      expect(mockUseCase.loadCustomers).toHaveBeenCalledTimes(2);
+      expect(mockFacade.loadCustomers).toHaveBeenCalledTimes(2);
     });
   });
 });
