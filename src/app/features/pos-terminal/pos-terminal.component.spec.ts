@@ -504,4 +504,78 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       expect(receipt!.subtotal).toBeCloseTo(12.99 * 3, 2);
     });
   });
+
+  describe('Mobile Cart', () => {
+    it('should toggle mobileCartOpen from false to true', () => {
+      expect(component.mobileCartOpen()).toBe(false);
+
+      component.toggleMobileCart();
+
+      expect(component.mobileCartOpen()).toBe(true);
+    });
+
+    it('should toggle mobileCartOpen from true to false', () => {
+      component.toggleMobileCart(); // open
+      expect(component.mobileCartOpen()).toBe(true);
+
+      component.toggleMobileCart(); // close
+
+      expect(component.mobileCartOpen()).toBe(false);
+    });
+
+    it('should close mobile cart via closeMobileCart', () => {
+      component.toggleMobileCart(); // open
+      expect(component.mobileCartOpen()).toBe(true);
+
+      component.closeMobileCart();
+
+      expect(component.mobileCartOpen()).toBe(false);
+    });
+
+    it('should be a no-op when closeMobileCart is called while already closed', () => {
+      expect(component.mobileCartOpen()).toBe(false);
+
+      component.closeMobileCart();
+
+      expect(component.mobileCartOpen()).toBe(false);
+    });
+  });
+
+  describe('ngOnInit error path', () => {
+    it('should log error when database initialization fails', async () => {
+      const errorSpy = vi.spyOn(console, 'error');
+      mockDexieDatabase.initializeWithSeedData.mockRejectedValueOnce(new Error('DB init failed'));
+
+      // Re-trigger ngOnInit
+      component.ngOnInit();
+
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(errorSpy).toHaveBeenCalledWith('Failed to initialize database:', expect.any(Error));
+    });
+  });
+
+  describe('handlePaymentComplete error path', () => {
+    it('should log error when checkout fails', async () => {
+      const errorSpy = vi.spyOn(console, 'error');
+      vi.spyOn(component['posFacade'], 'checkout').mockRejectedValueOnce(
+        new Error('Checkout error')
+      );
+
+      addProduct(mockProducts.coffee);
+      component.handlePaymentComplete({
+        method: 'cash',
+        amount: 50,
+        change: 37.01,
+        transactionId: 'TXN-FAIL',
+        timestamp: new Date(),
+      });
+
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(errorSpy).toHaveBeenCalledWith('[POS] Checkout failed:', expect.any(Error));
+    });
+  });
 });

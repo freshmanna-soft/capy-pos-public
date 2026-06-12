@@ -374,5 +374,152 @@ describe('ProductSearchComponent', () => {
 
       expect(component.searchQuery()).toBe('coffee');
     });
+
+    it('should filter allProducts and set hasMoreProducts to false when allProducts is populated', async () => {
+      // First load products so allProducts is populated
+      mockProductRepository.findActive.mockResolvedValue(mockProducts);
+      component.ngOnInit();
+      await new Promise(process.nextTick);
+
+      // Now search — should filter allProducts client-side
+      const event = { target: { value: 'Organic' } } as unknown as Event;
+      component.onSearchInput(event);
+
+      // allProducts is populated, so client-side filtering happens
+      expect(component.searchQuery()).toBe('Organic');
+      expect(component.hasMoreProducts()).toBe(false);
+      // Should have filtered to only 'Organic Coffee'
+      expect(component.searchResults().length).toBe(1);
+      expect(component.searchResults()[0].name).toBe('Organic Coffee');
+    });
+
+    it('should filter by SKU when allProducts is populated', async () => {
+      mockProductRepository.findActive.mockResolvedValue(mockProducts);
+      component.ngOnInit();
+      await new Promise(process.nextTick);
+
+      const event = { target: { value: 'COF' } } as unknown as Event;
+      component.onSearchInput(event);
+
+      expect(component.searchResults().length).toBe(1);
+      expect(component.searchResults()[0].sku).toBe('COF-001');
+    });
+  });
+
+  describe('onCategorySelect error handling', () => {
+    it('should set error when getProductsByCategory rejects', async () => {
+      mockProductRepository.findByCategory.mockRejectedValue(new Error('Category fetch failed'));
+
+      component.onCategorySelect('InvalidCategory');
+
+      // Wait for the observable to resolve
+      await new Promise(process.nextTick);
+
+      expect(component.error()).toBe('Category fetch failed');
+      expect(component.searchResults()).toEqual([]);
+      expect(component.isLoading()).toBe(false);
+    });
+
+    it('should set default error message when error has no message', async () => {
+      mockProductRepository.findByCategory.mockRejectedValue({});
+
+      component.onCategorySelect('BadCategory');
+      await new Promise(process.nextTick);
+
+      expect(component.error()).toBe('Unable to filter by category');
+    });
+
+    it('should re-trigger search when deselecting category with active search query', () => {
+      component.searchQuery.set('coffee');
+      component.selectedCategory.set('Beverages');
+
+      component.onCategorySelect(null);
+
+      expect(component.selectedCategory()).toBeNull();
+      // searchSubject.next is called with the query — no error
+      expect(component.searchQuery()).toBe('coffee');
+    });
+  });
+
+  describe('loadProducts error and edge cases', () => {
+    it('should handle error during loadProducts', async () => {
+      mockProductRepository.findActive.mockRejectedValue(new Error('DB error'));
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      component.ngOnInit();
+      await new Promise(process.nextTick);
+
+      expect(component.isLoading()).toBe(false);
+      consoleSpy.mockRestore();
+    });
+
+    it('should not overwrite results if user typed a search query while loading', async () => {
+      // Simulate slow product load
+      mockProductRepository.findActive.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(() => resolve(mockProducts), 100);
+          })
+      );
+
+      component.ngOnInit();
+      // User types before products finish loading
+      component.searchQuery.set('coffee');
+      component.searchResults.set([mockProducts[0]]);
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      // Results should NOT be overwritten because searchQuery >= 2 chars
+      expect(component.searchResults()).toEqual([mockProducts[0]]);
+    });
+  });
+
+  describe('loadMoreProducts via infinite scroll', () => {
+    it('should load more products when scrolled near bottom and hasMore is true', async () => {
+      // Load products first to populate allProducts with many items
+      const manyProducts = Array.from({ length: 30 }, (_, i) =>
+        new ProductBuilder()
+          .withId(`${i}`)
+          .withName(`Product ${i}`)
+          .withPrice(i + 1)
+          .withSku(`SKU-${i}`)
+          .withCategory('General')
+          .withStock(10)
+          .build()
+      );
+      mockProductRepository.findActive.mockResolvedValue(manyProducts);
+      component.ngOnInit();
+      await new Promise(process.nextTick);
+
+      // After loading, hasMoreProducts should be true (30 > 20 pageSize)
+      expect(component.hasMoreProducts()).toBe(true);
+      expect(component.searchResults().length).toBe(20);
+
+      // Trigger scroll near bottom
+      const event = {
+        target: { scrollHeight: 1000, scrollTop: 850, clientHeight: 100 },
+      } as unknown as Event;
+      component.onScroll(event);
+
+      // Should have loaded more
+      expect(component.searchResults().length).toBe(30);
+      expect(component.hasMoreProducts()).toBe(false);
+    });
+  });
+
+  describe('debounced search error handling', () => {
+    it('should set error when search service rejects', async () => {
+      mockProductRepository.search.mockRejectedValue(new Error('Search failed'));
+
+      // Trigger search via searchSubject
+      component.searchQuery.set('test query');
+      component.triggerSearch();
+
+      // Wait for debounce (300ms) + microtask
+      await new Promise((resolve) => setTimeout(resolve, 350));
+
+      expect(component.error()).toBe('Search failed');
+      expect(component.isLoading()).toBe(false);
+    });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { productMapper } from '@core/application/mappers/product.mapper';
+import { productMapper, ProductMapper } from '@core/application/mappers/product.mapper';
 import { Product } from '@core/domain/entities/product.entity';
 import { ProductBuilder } from '@core/domain/entities/product.builder';
 import {
@@ -285,6 +285,189 @@ describe('ProductMapper', () => {
     it('should handle empty array', () => {
       const products = productMapper.fromResponseDtoList([]);
       expect(products).toHaveLength(0);
+    });
+  });
+
+  describe('applyUpdate with all optional fields', () => {
+    it('should update sku when provided', () => {
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Product')
+        .withPrice(10)
+        .withSku('OLD-SKU')
+        .withCategory('Cat')
+        .withStock(5)
+        .build();
+
+      const updateDto = new UpdateProductDto(undefined, undefined, 'NEW-SKU');
+      const updated = productMapper.applyUpdate(product, updateDto);
+
+      expect(updated.sku).toBe('NEW-SKU');
+    });
+
+    it('should update category when provided', () => {
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Product')
+        .withPrice(10)
+        .withSku('SKU-1')
+        .withCategory('OldCat')
+        .withStock(5)
+        .build();
+
+      const updateDto = new UpdateProductDto(undefined, undefined, undefined, 'NewCat');
+      const updated = productMapper.applyUpdate(product, updateDto);
+
+      expect(updated.category).toBe('NewCat');
+    });
+
+    it('should update description when provided', () => {
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Product')
+        .withPrice(10)
+        .withSku('SKU-1')
+        .withCategory('Cat')
+        .withStock(5)
+        .withDescription('Old desc')
+        .build();
+
+      const updateDto = new UpdateProductDto(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'New desc'
+      );
+      const updated = productMapper.applyUpdate(product, updateDto);
+
+      expect(updated.description).toBe('New desc');
+    });
+
+    it('should update imageUrl when provided', () => {
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Product')
+        .withPrice(10)
+        .withSku('SKU-1')
+        .withCategory('Cat')
+        .withStock(5)
+        .build();
+
+      const updateDto = new UpdateProductDto(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'https://new.img/pic.png'
+      );
+      const updated = productMapper.applyUpdate(product, updateDto);
+
+      expect(updated.imageUrl).toBe('https://new.img/pic.png');
+    });
+
+    it('should update barcode when provided', () => {
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Product')
+        .withPrice(10)
+        .withSku('SKU-1')
+        .withCategory('Cat')
+        .withStock(5)
+        .build();
+
+      const updateDto = new UpdateProductDto(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        '9876543210'
+      );
+      const updated = productMapper.applyUpdate(product, updateDto);
+
+      expect(updated.barcode).toBe('9876543210');
+    });
+
+    it('should update emoji when provided', () => {
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Product')
+        .withPrice(10)
+        .withSku('SKU-1')
+        .withCategory('Cat')
+        .withStock(5)
+        .withEmoji('🔵')
+        .build();
+
+      const updateDto = new UpdateProductDto(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        '🟢'
+      );
+      const updated = productMapper.applyUpdate(product, updateDto);
+
+      expect(updated.emoji).toBe('🟢');
+    });
+
+    it('should update all optional fields simultaneously', () => {
+      const product = new ProductBuilder()
+        .withId('test-id')
+        .withName('Product')
+        .withPrice(10)
+        .withSku('SKU-1')
+        .withCategory('Cat')
+        .withStock(5)
+        .build();
+
+      const updateDto = new UpdateProductDto(
+        'New Name',
+        99.99,
+        'NEW-SKU',
+        'NewCat',
+        100,
+        'New desc',
+        'https://img.com/new.png',
+        '1111111111',
+        '🎉'
+      );
+      const updated = productMapper.applyUpdate(product, updateDto);
+
+      expect(updated.name).toBe('New Name');
+      expect(updated.price).toBe(99.99);
+      expect(updated.sku).toBe('NEW-SKU');
+      expect(updated.category).toBe('NewCat');
+      expect(updated.stock).toBe(100);
+      expect(updated.description).toBe('New desc');
+      expect(updated.imageUrl).toBe('https://img.com/new.png');
+      expect(updated.barcode).toBe('1111111111');
+      expect(updated.emoji).toBe('🎉');
+    });
+  });
+
+  describe('singleton getInstance', () => {
+    it('should return the same instance on multiple calls', () => {
+      const instance1 = ProductMapper.getInstance();
+      const instance2 = ProductMapper.getInstance();
+
+      expect(instance1).toBe(instance2);
+    });
+
+    it('should return the same instance as the exported productMapper', () => {
+      const instance = ProductMapper.getInstance();
+
+      expect(instance).toBe(productMapper);
     });
   });
 

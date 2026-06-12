@@ -268,4 +268,19 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
       expect(loading).toBeFalsy();
     });
   });
+
+  describe('Public API Methods', () => {
+    it('should set products via setProducts method', () => {
+      component.setProducts(mockProducts);
+      expect(component.products()).toEqual(mockProducts);
+    });
+
+    it('should set loading via setLoading method', () => {
+      component.setLoading(true);
+      expect(component.isLoading()).toBe(true);
+
+      component.setLoading(false);
+      expect(component.isLoading()).toBe(false);
+    });
+  });
 });
