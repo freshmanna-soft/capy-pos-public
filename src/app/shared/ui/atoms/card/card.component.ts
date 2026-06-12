@@ -1,15 +1,16 @@
-import { Component, Input } from '@angular/core';
+import { Component, computed, input } from '@angular/core';
 
 /**
  * Card Component (Atom)
  * Reusable card container for content grouping
+ * Uses Angular Signals API (input/computed)
  */
 @Component({
   selector: 'app-card',
   standalone: true,
   imports: [],
   template: `
-    <div [class]="cardClasses">
+    <div [class]="cardClasses()">
       <ng-content></ng-content>
     </div>
   `,
@@ -43,29 +44,29 @@ import { Component, Input } from '@angular/core';
   ],
 })
 export class CardComponent {
-  @Input() padding: 'none' | 'sm' | 'md' | 'lg' = 'md';
-  @Input() hover = false;
-  @Input() clickable = false;
+  // Signal-based inputs
+  readonly padding = input<'none' | 'sm' | 'md' | 'lg'>('md');
+  readonly hover = input(false);
+  readonly clickable = input(false);
 
-  get cardClasses(): string {
+  // Computed classes based on input signals
+  readonly cardClasses = computed(() => {
     const classes = ['card'];
 
-    if (this.padding === 'md') {
+    if (this.padding() === 'md') {
       classes.push('card-padded');
-    } else if (this.padding !== 'none') {
-      classes.push(`card-${this.padding}`);
+    } else if (this.padding() !== 'none') {
+      classes.push(`card-${this.padding()}`);
     }
 
-    if (this.hover) {
+    if (this.hover()) {
       classes.push('card-hover');
     }
 
-    if (this.clickable) {
+    if (this.clickable()) {
       classes.push('card-clickable');
     }
 
     return classes.join(' ');
-  }
+  });
 }
-
-// Made with Bob

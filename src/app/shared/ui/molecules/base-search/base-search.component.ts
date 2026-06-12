@@ -1,4 +1,4 @@
-import { Output, EventEmitter, signal, OnDestroy, Directive } from '@angular/core';
+import { output, signal, OnDestroy, Directive } from '@angular/core';
 import {
   Observable,
   Subject,
@@ -51,7 +51,7 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
   protected maxResults = 50;
 
   // Output events
-  @Output() itemSelected = new EventEmitter<T>();
+  readonly itemSelected = output<T>();
 
   // Search subject for debouncing
   private readonly searchSubject = new Subject<string>();
@@ -89,9 +89,9 @@ export abstract class BaseSearchComponent<T> implements OnDestroy {
               this.error.set(errorMessage);
               this.onSearchError(err);
               return of([]);
-            }),
+            })
           );
-        }),
+        })
       )
       .subscribe((results) => {
         const filteredResults = this.filterResults(results as T[]);

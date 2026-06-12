@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>Capy-POS</title>
@@ -7,7 +7,7 @@
       // GitHub Pages SPA redirect
       // Redirects all 404s to index.html for Angular routing
       var pathSegmentsToKeep = 1; // Keep /capy-pos/ prefix
-      var l = window.location;
+      var l = globalThis.location;
       l.replace(
         l.protocol +
           '//' +
@@ -23,9 +23,9 @@
             .split('/')
             .slice(pathSegmentsToKeep)
             .join('/')
-            .replace(/&/g, '~and~') +
-          (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
-          l.hash,
+            .replaceAll('&', '~and~') +
+          (l.search ? '&' + l.search.slice(1).replaceAll('&', '~and~') : '') +
+          l.hash
       );
     </script>
   </head>

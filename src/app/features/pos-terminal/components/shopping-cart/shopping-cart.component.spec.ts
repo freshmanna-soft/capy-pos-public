@@ -158,7 +158,7 @@ describe('ShoppingCartComponent', () => {
       expect(cartService.items().length).toBe(2);
 
       // Mock confirm to return true
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
       component.clearCart();
       expect(cartService.items().length).toBe(0);
       expect(cartService.isEmpty()).toBe(true);
@@ -169,7 +169,7 @@ describe('ShoppingCartComponent', () => {
       expect(cartService.items().length).toBe(1);
 
       // Mock confirm to return false
-      vi.spyOn(window, 'confirm').mockReturnValue(false);
+      vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
       component.clearCart();
       expect(cartService.items().length).toBe(1);
     });
@@ -266,10 +266,10 @@ describe('ShoppingCartComponent', () => {
     });
   });
 
-  describe('ngAfterViewChecked', () => {
-    it('should not throw when called without ViewChild ref', () => {
-      // ngAfterViewChecked should handle missing cartItemsRef gracefully
-      expect(() => component.ngAfterViewChecked()).not.toThrow();
+  describe('Auto-scroll on item addition', () => {
+    it('should not throw when adding product without ViewChild ref', () => {
+      // scrollToBottomAfterRender should handle missing cartItemsRef gracefully
+      expect(() => component.addProduct(mockProduct)).not.toThrow();
     });
   });
 

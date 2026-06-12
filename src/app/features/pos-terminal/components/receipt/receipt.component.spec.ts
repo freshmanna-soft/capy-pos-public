@@ -1,9 +1,11 @@
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { Component, viewChild } from '@angular/core';
 import {
   ReceiptComponent,
   ReceiptData,
 } from '@features/pos-terminal/components/receipt/receipt.component';
 import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
+import { Product } from '@core/domain/entities/product.entity';
 
 /**
  * Unit Tests for ReceiptComponent
@@ -20,8 +22,23 @@ import { PaymentResult } from '@features/pos-terminal/components/checkout/checko
  * compatibility with Vitest JIT compilation (NG0315/NG0950).
  * Template rendering is covered by E2E tests.
  */
+/**
+ * Test host component to provide signal inputs to ReceiptComponent
+ */
+@Component({
+  standalone: true,
+  imports: [ReceiptComponent],
+  template: `<app-receipt [data]="receiptData" />`,
+})
+class TestHostComponent {
+  receiptData!: ReceiptData;
+  readonly receipt = viewChild.required(ReceiptComponent);
+}
+
 describe('ReceiptComponent', () => {
   let component: ReceiptComponent;
+  let hostFixture: ComponentFixture<TestHostComponent>;
+  let host: TestHostComponent;
 
   const mockPayment: PaymentResult = {
     method: 'cash',
@@ -42,22 +59,22 @@ describe('ReceiptComponent', () => {
           sku: 'COF-001',
           stock: 50,
           category: 'Beverages',
-        } as unknown,
+        } as unknown as Product,
         quantity: 2,
       },
       {
         product: {
           id: '2',
           name: 'Muffin',
-          price: 3.0,
+          price: 3,
           sku: 'MUF-001',
           stock: 30,
           category: 'Food',
-        } as unknown,
+        } as unknown as Product,
         quantity: 1,
       },
     ],
-    subtotal: 12.0,
+    subtotal: 12,
     tax: 1.02,
     taxRate: 0.085,
     total: 13.02,
@@ -65,13 +82,14 @@ describe('ReceiptComponent', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      imports: [ReceiptComponent],
+      imports: [TestHostComponent],
     });
 
-    const fixture = TestBed.createComponent(ReceiptComponent);
-    component = fixture.componentInstance;
-    component.data = mockReceiptData;
-    fixture.detectChanges();
+    hostFixture = TestBed.createComponent(TestHostComponent);
+    host = hostFixture.componentInstance;
+    host.receiptData = mockReceiptData;
+    hostFixture.detectChanges();
+    component = host.receipt();
   });
 
   describe('Component Creation', () => {
@@ -80,7 +98,7 @@ describe('ReceiptComponent', () => {
     });
 
     it('should have data input defined', () => {
-      expect(component.data).toBeDefined();
+      expect(component.data()).toBeDefined();
     });
 
     it('should have printReceipt output defined', () => {
@@ -136,7 +154,7 @@ describe('ReceiptComponent', () => {
 
     it('should define ReceiptData interface with totals', () => {
       const data: ReceiptData = mockReceiptData;
-      expect(data.subtotal).toBe(12.0);
+      expect(data.subtotal).toBe(12);
       expect(data.tax).toBe(1.02);
       expect(data.taxRate).toBe(0.085);
       expect(data.total).toBe(13.02);

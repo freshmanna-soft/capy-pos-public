@@ -2,7 +2,8 @@ import {
   ApplicationConfig,
   provideBrowserGlobalErrorListeners,
   provideZonelessChangeDetection,
-  APP_INITIALIZER,
+  inject,
+  provideAppInitializer,
 } from '@angular/core';
 import { provideRouter } from '@angular/router';
 
@@ -17,73 +18,45 @@ import { SALES_AGENT_PROVIDERS } from '@app/agents/sales/infrastructure';
 import { PAYMENT_AGENT_PROVIDER } from '@app/agents/payment/infrastructure/payment-agent.provider';
 import { AgentRegistry } from '@app/agents/agent.registry';
 
-/**
- * Initialize Dexie database on application startup
- */
-export function initializeDexieDatabase(db: DexieDatabase) {
-  return async () => {
-    try {
-      // Open the database
-      await db.open();
-      console.log('Dexie database opened successfully');
-
-      // Initialize with seed data if needed
-      await db.initializeWithSeedData();
-      console.log('Database initialized with seed data');
-
-      // Log database stats
-      const stats = await db.getStats();
-      console.log('Database statistics:', stats);
-    } catch (error) {
-      console.error('Failed to initialize Dexie database:', error);
-      throw error;
-    }
-  };
-}
-
-/**
- * Initialize agents on application startup using AgentRegistry
- */
-export function initializeAgents(registry: AgentRegistry) {
-  return async () => {
-    try {
-      console.log('Initializing agents via AgentRegistry...');
-
-      // Initialize and start all agents through registry
-      await registry.initializeAll();
-      await registry.startAll();
-
-      // Log agent statistics
-      const stats = registry.getStatistics();
-      console.log('Agent statistics:', stats);
-
-      // Check health
-      const allHealthy = await registry.areAllHealthy();
-      console.log('All agents healthy:', allHealthy);
-    } catch (error) {
-      console.error('Failed to initialize agents:', error);
-      throw error;
-    }
-  };
-}
-
 export const appConfig: ApplicationConfig = {
   providers: [
     provideZonelessChangeDetection(),
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes),
-    {
-      provide: APP_INITIALIZER,
-      useFactory: initializeDexieDatabase,
-      deps: [DexieDatabase],
-      multi: true,
-    },
-    {
-      provide: APP_INITIALIZER,
-      useFactory: initializeAgents,
-      deps: [AgentRegistry],
-      multi: true,
-    },
+    provideAppInitializer(async () => {
+      const db = inject(DexieDatabase);
+      try {
+        await db.open();
+        console.log('Dexie database opened successfully');
+
+        await db.initializeWithSeedData();
+        console.log('Database initialized with seed data');
+
+        const stats = await db.getStats();
+        console.log('Database statistics:', stats);
+      } catch (error) {
+        console.error('Failed to initialize Dexie database:', error);
+        throw error;
+      }
+    }),
+    provideAppInitializer(async () => {
+      const registry = inject(AgentRegistry);
+      try {
+        console.log('Initializing agents via AgentRegistry...');
+
+        await registry.initializeAll();
+        await registry.startAll();
+
+        const stats = registry.getStatistics();
+        console.log('Agent statistics:', stats);
+
+        const allHealthy = await registry.areAllHealthy();
+        console.log('All agents healthy:', allHealthy);
+      } catch (error) {
+        console.error('Failed to initialize agents:', error);
+        throw error;
+      }
+    }),
     // Repository providers with dependency injection
     ...REPOSITORY_PROVIDERS,
     // String-based token alias for PersistTransactionUseCase compatibility

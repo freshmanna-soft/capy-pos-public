@@ -158,7 +158,7 @@ describe('CartTotalsComponent', () => {
 
     it('should display fixed discount', () => {
       cartService.addProduct(mockProduct1);
-      totalsUseCase.applyDiscount({ type: 'fixed', value: 5.0, label: '$5 Off' });
+      totalsUseCase.applyDiscount({ type: 'fixed', value: 5, label: '$5 Off' });
       fixture.detectChanges();
 
       const discountEl = fixture.nativeElement.querySelector('[data-testid="totals-discount"]');
@@ -169,7 +169,7 @@ describe('CartTotalsComponent', () => {
 
     it('should hide discount after removal', () => {
       cartService.addProduct(mockProduct1);
-      totalsUseCase.applyDiscount({ type: 'fixed', value: 5.0, label: '$5 Off' });
+      totalsUseCase.applyDiscount({ type: 'fixed', value: 5, label: '$5 Off' });
       fixture.detectChanges();
 
       expect(fixture.nativeElement.querySelector('[data-testid="totals-discount"]')).toBeTruthy();

@@ -1,4 +1,4 @@
-import { Component, Output, EventEmitter, signal, inject, OnInit } from '@angular/core';
+import { Component, output, signal, inject, OnInit } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, catchError, of, from } from 'rxjs';
 import { ProductService } from '@core/application/services/product.service';
@@ -25,7 +25,7 @@ import { Product } from '@core/domain/entities/product.entity';
   styleUrl: './product-search.component.scss',
 })
 export class ProductSearchComponent implements OnInit {
-  private productService = inject(ProductService);
+  private readonly productService = inject(ProductService);
 
   // Signals for reactive state
   searchQuery = signal<string>('');
@@ -39,25 +39,26 @@ export class ProductSearchComponent implements OnInit {
   hasMoreProducts = signal<boolean>(false);
 
   // Pagination state
-  private pageSize = 20;
+  private readonly pageSize = 20;
   private currentPage = 0;
   private allProducts: Product[] = [];
 
   // Output events
-  @Output() productSelected = new EventEmitter<Product>();
+  readonly productSelected = output<Product>();
 
   // Search subject for debouncing
-  private searchSubject = new Subject<string>();
+  private readonly searchSubject = new Subject<string>();
 
-  async ngOnInit() {
-    try {
-      const cats = await this.productService.getCategories();
-      this.categories.set(cats);
-      // Load first page of products on init
-      await this.loadProducts(true);
-    } catch (err) {
-      console.error('Failed to load categories:', err);
-    }
+  ngOnInit(): void {
+    this.productService
+      .getCategories()
+      .then((cats) => {
+        this.categories.set(cats);
+        return this.loadProducts(true);
+      })
+      .catch((err) => {
+        console.error('Failed to load categories:', err);
+      });
   }
 
   /**
@@ -146,10 +147,10 @@ export class ProductSearchComponent implements OnInit {
             catchError((err) => {
               this.error.set(err.message || 'Unable to search products');
               return of([]);
-            }),
+            })
           );
         }),
-        takeUntilDestroyed(), // Automatically unsubscribe when component is destroyed
+        takeUntilDestroyed() // Automatically unsubscribe when component is destroyed
       )
       .subscribe((results) => {
         this.searchResults.set(results);
@@ -203,8 +204,7 @@ export class ProductSearchComponent implements OnInit {
     if (this.allProducts.length > 0) {
       const lowerQuery = query.toLowerCase();
       const filtered = this.allProducts.filter(
-        (p) =>
-          p.name.toLowerCase().includes(lowerQuery) || p.sku.toLowerCase().includes(lowerQuery),
+        (p) => p.name.toLowerCase().includes(lowerQuery) || p.sku.toLowerCase().includes(lowerQuery)
       );
       this.searchResults.set(filtered);
       this.hasMoreProducts.set(false);
@@ -306,7 +306,7 @@ export class ProductSearchComponent implements OnInit {
           catchError((err) => {
             this.error.set(err.message || 'Unable to filter by category');
             return of([]);
-          }),
+          })
         )
         .subscribe((results) => {
           this.searchResults.set(results);

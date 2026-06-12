@@ -103,7 +103,9 @@ describe('ProductSearchComponent', () => {
     });
 
     it('should load categories on init', async () => {
-      await component.ngOnInit();
+      component.ngOnInit();
+      // Flush microtask queue — ngOnInit fires a promise chain internally
+      await new Promise(process.nextTick);
       expect(component.categories()).toEqual(['Beverages', 'Snacks', 'Dairy']);
     });
   });

@@ -184,7 +184,7 @@ import { Customer } from '@core/domain/entities/customer.entity';
   ],
 })
 export class CustomerSearchComponent extends BaseSearchComponent<Customer> {
-  private customerService = inject(CustomerService);
+  private readonly customerService = inject(CustomerService);
 
   // Override debounce time for customers (faster response)
   protected override debounceTime = 200;
@@ -230,7 +230,7 @@ export class CustomerSearchComponent extends BaseSearchComponent<Customer> {
       customer.name,
       'with',
       customer.loyaltyPoints,
-      'points',
+      'points'
     );
   }
 }

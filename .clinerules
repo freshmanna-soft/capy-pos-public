@@ -699,3 +699,53 @@ gh label create "sprint:N" --description "Sprint N: Theme" --color "0E8A16"
 - ❌ `--label "sprint:4,size:L,agent:inventory"` — comma-separated labels don't work
 - ❌ Creating issues without checking if labels exist first
 - ❌ Using `--body` with Gherkin code blocks (backticks break shell)
+
+---
+
+## 🚨 File-First Rule for `--body-file` Content (MANDATORY)
+
+> ⚠️ **CRITICAL DIRECTIVE**: NEVER use shell heredoc (`cat > /tmp/file << 'EOF' ... EOF`) to create content for `--body-file` arguments. This approach is UNRELIABLE — it causes race conditions, shell escaping failures, and interrupted commands.
+
+### ❌ NEVER do this (heredoc in shell):
+```bash
+cat > /tmp/gh-pr-body.md << 'EOF'
+## Summary
+Some markdown content...
+EOF
+gh pr create --title "..." --body-file /tmp/gh-pr-body.md --base main
+```
+
+### ✅ ALWAYS do this instead — use `write_to_file` tool:
+
+**Step 1**: Use the `write_to_file` tool to create the file:
+```
+Tool: write_to_file
+Path: /tmp/gh-pr-body.md
+Content: (your full markdown content)
+```
+
+**Step 2**: In a SEPARATE `execute_command`, reference the file:
+```bash
+gh pr create --title "feat(pos): add feature" --body-file /tmp/gh-pr-body.md --base main && echo "GH_CMD_DONE"
+```
+
+### Rules:
+1. **ALWAYS use `write_to_file` tool** to create ANY file that will be used with `--body-file`
+2. **NEVER use heredoc** (`<< 'EOF'`) in `execute_command` to create markdown files
+3. **ALWAYS separate into two steps**: (1) write file with tool, (2) run gh command
+4. **This applies to ALL `gh` commands**: `gh pr create`, `gh pr comment`, `gh issue comment`, `gh issue create`
+5. **No exceptions** — even for "simple" content, always use `write_to_file` first
+
+### Why:
+- Heredoc in shell commands is unreliable in automated contexts
+- Race conditions between file creation and `gh` reading the file
+- Special characters in markdown break shell parsing unpredictably
+- `write_to_file` guarantees the file exists with correct content before the `gh` command runs
+
+### Quick Reference:
+| Action | Step 1 (write_to_file) | Step 2 (execute_command) |
+|--------|----------------------|------------------------|
+| Create PR | Write `/tmp/gh-pr-body.md` | `gh pr create --body-file /tmp/gh-pr-body.md` |
+| PR Comment | Write `/tmp/gh-comment.md` | `gh pr comment [#] --body-file /tmp/gh-comment.md` |
+| Issue Comment | Write `/tmp/gh-comment.md` | `gh issue comment [#] --body-file /tmp/gh-comment.md` |
+| Create Issue | Write `/tmp/gh-issue.md` | `gh issue create --body-file /tmp/gh-issue.md` |

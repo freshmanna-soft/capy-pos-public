@@ -1,11 +1,13 @@
-import { Component, Input, Output, EventEmitter, forwardRef } from '@angular/core';
+import { Component, computed, forwardRef, input, output, signal } from '@angular/core';
 
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 /**
  * Input Component (Atom)
  * Reusable input field following Atomic Design principles
- * Supports form control integration
+ * Supports form control integration via ControlValueAccessor
+ * Uses Angular Signals API (input/output/computed)
  */
 @Component({
   selector: 'app-input',
@@ -20,43 +22,43 @@ import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
   ],
   template: `
     <div class="input-wrapper">
-      @if (label) {
-        <label [for]="id" class="input-label">
-          {{ label }}
-          @if (required) {
+      @if (label()) {
+        <label [for]="id()" class="input-label">
+          {{ label() }}
+          @if (required()) {
             <span class="text-red-500">*</span>
           }
         </label>
       }
 
       <div class="input-container">
-        @if (prefix) {
-          <span class="input-prefix">{{ prefix }}</span>
+        @if (prefix()) {
+          <span class="input-prefix">{{ prefix() }}</span>
         }
 
         <input
-          [id]="id"
-          [type]="type"
-          [placeholder]="placeholder"
-          [disabled]="disabled"
-          [readonly]="readonly"
-          [class]="inputClasses"
-          [value]="value"
+          [id]="id()"
+          [type]="type()"
+          [placeholder]="placeholder()"
+          [disabled]="disabled()"
+          [readonly]="readonly()"
+          [class]="inputClasses()"
+          [value]="value()"
           (input)="onInput($event)"
           (blur)="onTouched()"
           (focus)="focused.emit($event)"
         />
 
-        @if (suffix) {
-          <span class="input-suffix">{{ suffix }}</span>
+        @if (suffix()) {
+          <span class="input-suffix">{{ suffix() }}</span>
         }
       </div>
 
-      @if (error) {
-        <span class="input-error">{{ error }}</span>
+      @if (error()) {
+        <span class="input-error">{{ error() }}</span>
       }
-      @if (hint && !error) {
-        <span class="input-hint">{{ hint }}</span>
+      @if (hint() && !error()) {
+        <span class="input-hint">{{ hint() }}</span>
       }
     </div>
   `,
@@ -117,24 +119,52 @@ import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
   ],
 })
 export class InputComponent implements ControlValueAccessor {
-  @Input() id = `input-${Math.random().toString(36).substr(2, 9)}`;
-  @Input() type: 'text' | 'email' | 'password' | 'number' | 'tel' | 'url' | 'search' = 'text';
-  @Input() label = '';
-  @Input() placeholder = '';
-  @Input() hint = '';
-  @Input() error = '';
-  @Input() prefix = '';
-  @Input() suffix = '';
-  @Input() size: 'sm' | 'md' | 'lg' = 'md';
-  @Input() disabled = false;
-  @Input() readonly = false;
-  @Input() required = false;
+  // Signal-based inputs
+  readonly id = input<string>(`input-${generateUUID().slice(0, 9)}`);
+  readonly type = input<'text' | 'email' | 'password' | 'number' | 'tel' | 'url' | 'search'>(
+    'text'
+  );
+  readonly label = input('');
+  readonly placeholder = input('');
+  readonly hint = input('');
+  readonly error = input('');
+  readonly prefix = input('');
+  readonly suffix = input('');
+  readonly size = input<'sm' | 'md' | 'lg'>('md');
+  readonly disabled = signal(false);
+  readonly readonly = input(false);
+  readonly required = input(false);
 
-  @Output() focused = new EventEmitter<FocusEvent>();
-  @Output() blurred = new EventEmitter<FocusEvent>();
-  @Output() valueChange = new EventEmitter<string>();
+  // Signal-based outputs
+  readonly focused = output<FocusEvent>();
+  readonly blurred = output<FocusEvent>();
+  readonly valueChange = output<string>();
 
-  value = '';
+  // Internal state
+  readonly value = signal('');
+
+  // Computed classes based on input signals
+  readonly inputClasses = computed(() => {
+    const classes = ['input'];
+
+    if (this.size() !== 'md') {
+      classes.push(`input-${this.size()}`);
+    }
+
+    if (this.error()) {
+      classes.push('input-error-state');
+    }
+
+    if (this.prefix()) {
+      classes.push('pl-8');
+    }
+
+    if (this.suffix()) {
+      classes.push('pr-8');
+    }
+
+    return classes.join(' ');
+  });
 
   // ControlValueAccessor implementation
   // eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -142,37 +172,15 @@ export class InputComponent implements ControlValueAccessor {
   // eslint-disable-next-line @typescript-eslint/no-empty-function
   onTouched: () => void = () => {};
 
-  get inputClasses(): string {
-    const classes = ['input'];
-
-    if (this.size !== 'md') {
-      classes.push(`input-${this.size}`);
-    }
-
-    if (this.error) {
-      classes.push('input-error-state');
-    }
-
-    if (this.prefix) {
-      classes.push('pl-8');
-    }
-
-    if (this.suffix) {
-      classes.push('pr-8');
-    }
-
-    return classes.join(' ');
-  }
-
   onInput(event: Event): void {
     const input = event.target as HTMLInputElement;
-    this.value = input.value;
-    this.onChange(this.value);
-    this.valueChange.emit(this.value);
+    this.value.set(input.value);
+    this.onChange(input.value);
+    this.valueChange.emit(input.value);
   }
 
   writeValue(value: string): void {
-    this.value = value || '';
+    this.value.set(value || '');
   }
 
   registerOnChange(fn: (value: string) => void): void {
@@ -184,8 +192,6 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabled = isDisabled;
+    this.disabled.set(isDisabled);
   }
 }
-
-// Made with Bob

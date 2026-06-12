@@ -5,7 +5,9 @@ import {
   output,
   ViewChild,
   ElementRef,
-  AfterViewChecked,
+  effect,
+  Injector,
+  afterNextRender,
 } from '@angular/core';
 
 import { Product } from '@core/domain/entities/product.entity';
@@ -260,6 +262,7 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
 
       .cart-items {
         flex: 1;
+        min-height: 0;
         overflow-y: auto;
         padding: 1rem;
         scroll-behavior: smooth;
@@ -465,11 +468,12 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
     `,
   ],
 })
-export class ShoppingCartComponent implements AfterViewChecked {
+export class ShoppingCartComponent {
   public cartService = inject(CartService);
+  private readonly injector = inject(Injector);
 
   /** Reference to the scrollable cart items container */
-  @ViewChild('cartItemsContainer') private cartItemsRef!: ElementRef<HTMLElement>;
+  @ViewChild('cartItemsContainer') private readonly cartItemsRef!: ElementRef<HTMLElement>;
 
   /** Emitted when user clicks checkout with items in cart */
   readonly checkoutRequested = output<void>();
@@ -477,18 +481,41 @@ export class ShoppingCartComponent implements AfterViewChecked {
   /** Whether auto-scroll is enabled (disabled when user manually scrolls) */
   private autoScrollEnabled = true;
 
-  /** Flag to trigger scroll after view updates */
-  private shouldScrollToBottom = false;
-
   /** Track known product IDs to detect truly new items */
-  private knownProductIds = new Set<string>();
+  private readonly knownProductIds = new Set<string>();
 
-  ngAfterViewChecked(): void {
-    if (this.shouldScrollToBottom && this.cartItemsRef) {
-      const el = this.cartItemsRef.nativeElement;
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-      this.shouldScrollToBottom = false;
-    }
+  /** Previous total quantity to detect additions (including repeated items) */
+  private previousTotalQuantity = 0;
+
+  constructor() {
+    // React to cart items changes (covers both direct CartService calls and addProduct method)
+    effect(() => {
+      const items = this.cartService.items();
+      const currentTotalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+
+      if (currentTotalQuantity > this.previousTotalQuantity && items.length > 0) {
+        // Items were added or quantity increased — schedule scroll after DOM renders
+        this.scrollToBottomAfterRender();
+      }
+
+      this.previousTotalQuantity = currentTotalQuantity;
+    });
+  }
+
+  /**
+   * Schedules a scroll-to-bottom after the next render cycle.
+   * Uses afterNextRender to ensure the DOM has been updated with new items.
+   */
+  private scrollToBottomAfterRender(): void {
+    afterNextRender(
+      () => {
+        if (this.cartItemsRef) {
+          const el = this.cartItemsRef.nativeElement;
+          el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+        }
+      },
+      { injector: this.injector }
+    );
   }
 
   /**
@@ -506,27 +533,11 @@ export class ShoppingCartComponent implements AfterViewChecked {
   /**
    * Public method to add a product to the cart.
    * Called from parent component (POS Terminal).
-   * Always scrolls to bottom since the added/updated item is moved to the end.
-   * User scroll override is respected only when adding the same item repeatedly.
-   * Adding a different product always re-enables auto-scroll.
+   * The effect() on cartService.items() handles auto-scrolling reactively.
    */
   addProduct(product: Product): void {
-    const isNewProduct = !this.knownProductIds.has(product.id);
-    this.cartService.addProduct(product);
-
-    // Update known product IDs
     this.knownProductIds.add(product.id);
-
-    // Always scroll to bottom: item is always at the end (new or moved)
-    // Exception: user scrolled away AND it's a repeated item they already saw
-    if (isNewProduct) {
-      // New product always triggers scroll and re-enables auto-scroll
-      this.autoScrollEnabled = true;
-      this.shouldScrollToBottom = true;
-    } else if (this.autoScrollEnabled) {
-      // Repeated item: only scroll if user hasn't overridden
-      this.shouldScrollToBottom = true;
-    }
+    this.cartService.addProduct(product);
   }
 
   /**
@@ -534,9 +545,9 @@ export class ShoppingCartComponent implements AfterViewChecked {
    */
   updateQuantity(productId: string, event: Event): void {
     const input = event.target as HTMLInputElement;
-    const newQuantity = parseInt(input.value, 10);
+    const newQuantity = Number.parseInt(input.value, 10);
 
-    if (isNaN(newQuantity) || newQuantity < 1) {
+    if (Number.isNaN(newQuantity) || newQuantity < 1) {
       input.value = '1';
       return;
     }

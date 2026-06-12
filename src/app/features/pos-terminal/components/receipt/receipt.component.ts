@@ -1,4 +1,4 @@
-import { Component, ChangeDetectionStrategy, EventEmitter, Input, Output } from '@angular/core';
+import { Component, ChangeDetectionStrategy, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
 import { CartItem } from '@core/application/services/cart.service.interface';
@@ -46,7 +46,7 @@ export interface ReceiptData {
           <!-- Store Info -->
           <div class="store-info">
             <span class="store-name">🦫 Capy-POS</span>
-            <span class="store-date">{{ data.payment.timestamp | date: 'medium' }}</span>
+            <span class="store-date">{{ data().payment.timestamp | date: 'medium' }}</span>
           </div>
 
           <div class="divider"></div>
@@ -55,7 +55,7 @@ export interface ReceiptData {
           <div class="transaction-id">
             <span class="id-label">Transaction</span>
             <span class="id-value" data-testid="transaction-id">{{
-              data.payment.transactionId
+              data().payment.transactionId
             }}</span>
           </div>
 
@@ -63,7 +63,7 @@ export interface ReceiptData {
 
           <!-- Items -->
           <div class="receipt-items">
-            @for (item of data.items; track item.product.id) {
+            @for (item of data().items; track item.product.id) {
               <div class="receipt-item">
                 <div class="item-info">
                   <span class="item-name">{{ item.product.name }}</span>
@@ -80,15 +80,15 @@ export interface ReceiptData {
           <div class="receipt-totals">
             <div class="total-row">
               <span>Subtotal</span>
-              <span>{{ data.subtotal | currency }}</span>
+              <span>{{ data().subtotal | currency }}</span>
             </div>
             <div class="total-row">
-              <span>Tax ({{ (data.taxRate * 100).toFixed(1) }}%)</span>
-              <span>{{ data.tax | currency }}</span>
+              <span>Tax ({{ (data().taxRate * 100).toFixed(1) }}%)</span>
+              <span>{{ data().tax | currency }}</span>
             </div>
             <div class="total-row grand-total">
               <span>Total</span>
-              <span data-testid="receipt-total">{{ data.total | currency }}</span>
+              <span data-testid="receipt-total">{{ data().total | currency }}</span>
             </div>
           </div>
 
@@ -99,17 +99,17 @@ export interface ReceiptData {
             <div class="payment-row">
               <span>Payment Method</span>
               <span class="payment-method" data-testid="receipt-method">
-                {{ getMethodLabel(data.payment.method) }}
+                {{ getMethodLabel(data().payment.method) }}
               </span>
             </div>
             <div class="payment-row">
               <span>Amount Paid</span>
-              <span>{{ data.payment.amount | currency }}</span>
+              <span>{{ data().payment.amount | currency }}</span>
             </div>
-            @if (data.payment.change !== undefined && data.payment.change! > 0) {
+            @if (data().payment.change !== undefined && data().payment.change! > 0) {
               <div class="payment-row change">
                 <span>Change</span>
-                <span data-testid="receipt-change">{{ data.payment.change! | currency }}</span>
+                <span data-testid="receipt-change">{{ data().payment.change! | currency }}</span>
               </div>
             }
           </div>
@@ -350,10 +350,10 @@ export interface ReceiptData {
   ],
 })
 export class ReceiptComponent {
-  @Input() data!: ReceiptData;
+  readonly data = input.required<ReceiptData>();
 
-  @Output() printReceipt = new EventEmitter<void>();
-  @Output() newTransaction = new EventEmitter<void>();
+  readonly printReceipt = output<void>();
+  readonly newTransaction = output<void>();
 
   getMethodLabel(method: string): string {
     const labels: Record<string, string> = {

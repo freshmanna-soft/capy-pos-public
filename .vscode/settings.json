@@ -3,5 +3,6 @@
     "sonarlint.connectedMode.project": {
         "connectionId": "javierbritopacheco",
         "projectKey": "javierbritopacheco_capy-pos-public"
-    }
+    },
+    "scss.lint.unknownAtRules": "ignore",
 }

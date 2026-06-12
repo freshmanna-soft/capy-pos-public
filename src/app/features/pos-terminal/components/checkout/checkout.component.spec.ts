@@ -151,7 +151,7 @@ describe('CheckoutComponent', () => {
       completeProcessing: vi.fn(() => {
         mockIsProcessing.set(false);
       }),
-    } as unknown as Partial<ProcessCashPaymentUseCase>;
+    };
 
     mockCardPaymentUseCase = {
       validation: mockCardValidation,
@@ -229,7 +229,7 @@ describe('CheckoutComponent', () => {
         itemCount: 2,
         isEmpty: false,
       }),
-    } as unknown as Partial<CalculateCartTotalsUseCase>;
+    };
 
     mockPersistTransaction = {
       execute: vi.fn().mockResolvedValue({
@@ -238,7 +238,7 @@ describe('CheckoutComponent', () => {
         paymentMethod: 'cash',
         timestamp: new Date(),
       }),
-    } as unknown as Partial<PersistTransactionUseCase>;
+    };
 
     await TestBed.configureTestingModule({
       imports: [CheckoutComponent],

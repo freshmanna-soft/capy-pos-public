@@ -68,21 +68,18 @@
 
   <!-- Product Results -->
   @if (searchResults().length > 0 && !isLoading()) {
-    <div class="search-results-list" id="search-results" role="listbox" (scroll)="onScroll($event)">
+    <div class="search-results-list" id="search-results" (scroll)="onScroll($event)">
       @for (product of searchResults(); track product.id; let i = $index) {
-        <div
+        <button
+          type="button"
           [id]="'result-' + i"
           data-testid="product-result"
           class="product-result"
           [class.highlighted]="highlightedIndex() === i"
           [class.out-of-stock]="product.stock === 0"
+          [disabled]="product.stock === 0"
           (click)="selectProduct(product)"
-          (keydown.enter)="selectProduct(product)"
           (mouseenter)="highlightedIndex.set(i)"
-          role="option"
-          tabindex="0"
-          [attr.aria-selected]="highlightedIndex() === i"
-          [attr.aria-disabled]="product.stock === 0"
         >
           <div class="product-info">
             <span class="product-name">{{ product.name }}</span>
@@ -99,7 +96,7 @@
               {{ product.stock > 0 ? 'In Stock (' + product.stock + ')' : 'Out of Stock' }}
             </span>
           </div>
-        </div>
+        </button>
       }
 
       <!-- Infinite scroll loading indicator -->
@@ -116,6 +113,6 @@
 
   <!-- No Results -->
   @if (searchQuery().length >= 2 && searchResults().length === 0 && !isLoading() && !error()) {
-    <div data-testid="no-results" class="no-results" role="status">No products found</div>
+    <output data-testid="no-results" class="no-results">No products found</output>
   }
 </div>

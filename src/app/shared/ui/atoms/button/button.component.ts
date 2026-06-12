@@ -1,9 +1,10 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, computed, input, output } from '@angular/core';
 
 /**
  * Button Component (Atom)
  * Reusable button following Atomic Design principles
  * Can be used across all microservices agents
+ * Uses Angular Signals API (input/output/computed)
  */
 @Component({
   selector: 'app-button',
@@ -11,12 +12,12 @@ import { Component, Input, Output, EventEmitter } from '@angular/core';
   imports: [],
   template: `
     <button
-      [type]="type"
-      [disabled]="disabled || loading"
-      [class]="buttonClasses"
+      [type]="type()"
+      [disabled]="disabled() || loading()"
+      [class]="buttonClasses()"
       (click)="handleClick($event)"
     >
-      @if (loading) {
+      @if (loading()) {
         <span class="spinner"></span>
       }
       <ng-content></ng-content>
@@ -67,34 +68,35 @@ import { Component, Input, Output, EventEmitter } from '@angular/core';
   ],
 })
 export class ButtonComponent {
-  @Input() type: 'button' | 'submit' | 'reset' = 'button';
-  @Input() variant: 'primary' | 'secondary' | 'danger' | 'success' = 'primary';
-  @Input() size: 'sm' | 'md' | 'lg' = 'md';
-  @Input() disabled = false;
-  @Input() loading = false;
-  @Input() fullWidth = false;
+  // Signal-based inputs
+  readonly type = input<'button' | 'submit' | 'reset'>('button');
+  readonly variant = input<'primary' | 'secondary' | 'danger' | 'success'>('primary');
+  readonly size = input<'sm' | 'md' | 'lg'>('md');
+  readonly disabled = input(false);
+  readonly loading = input(false);
+  readonly fullWidth = input(false);
 
-  @Output() clicked = new EventEmitter<MouseEvent>();
+  // Signal-based output
+  readonly clicked = output<MouseEvent>();
 
-  get buttonClasses(): string {
-    const classes = ['btn', `btn-${this.variant}`];
+  // Computed classes based on input signals
+  readonly buttonClasses = computed(() => {
+    const classes = ['btn', `btn-${this.variant()}`];
 
-    if (this.size !== 'md') {
-      classes.push(`btn-${this.size}`);
+    if (this.size() !== 'md') {
+      classes.push(`btn-${this.size()}`);
     }
 
-    if (this.fullWidth) {
+    if (this.fullWidth()) {
       classes.push('w-full');
     }
 
     return classes.join(' ');
-  }
+  });
 
   handleClick(event: MouseEvent): void {
-    if (!this.disabled && !this.loading) {
+    if (!this.disabled() && !this.loading()) {
       this.clicked.emit(event);
     }
   }
 }
-
-// Made with Bob

@@ -1,4 +1,4 @@
-import { Component, Output, EventEmitter, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, output, signal, ChangeDetectionStrategy } from '@angular/core';
 
 import { Product } from '@core/domain/entities/product.entity';
 
@@ -379,8 +379,8 @@ export class ProductGridComponent {
   isLoading = signal<boolean>(false);
   viewMode = signal<'grid' | 'list'>('grid');
 
-  // Output event
-  @Output() productSelected = new EventEmitter<Product>();
+  // Signal-based output
+  readonly productSelected = output<Product>();
 
   /**
    * Set products to display

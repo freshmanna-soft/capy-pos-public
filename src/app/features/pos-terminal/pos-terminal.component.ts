@@ -52,14 +52,16 @@ export class PosTerminalComponent implements OnInit {
   /** Receipt data for display after payment */
   readonly receiptData = signal<ReceiptData | null>(null);
 
-  async ngOnInit(): Promise<void> {
+  ngOnInit(): void {
     // Initialize database with seed data if empty
-    try {
-      await this.posFacade.initializeDatabase();
-      console.log('Database initialized with seed data');
-    } catch (error: unknown) {
-      console.error('Failed to initialize database:', error);
-    }
+    this.posFacade
+      .initializeDatabase()
+      .then(() => {
+        console.log('Database initialized with seed data');
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to initialize database:', error);
+      });
   }
 
   /**
@@ -144,7 +146,7 @@ export class PosTerminalComponent implements OnInit {
    * Handles print receipt action from receipt component
    */
   handlePrintReceipt(): void {
-    window.print();
+    globalThis.print();
   }
 
   /**

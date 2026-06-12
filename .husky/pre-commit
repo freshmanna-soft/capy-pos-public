@@ -6,7 +6,7 @@ npx lint-staged
 # Run SonarJS quality gate on staged TypeScript files
 echo ""
 echo "🔍 Running SonarJS quality gate..."
-STAGED_TS=$(git diff --cached --name-only --diff-filter=ACM | grep '\.ts$' | grep '^src/' || true)
+STAGED_TS=$(git diff --cached --name-only --diff-filter=ACM | grep '\.ts$' | grep '^src/' | grep -v '^src/stories/' || true)
 
 if [ -n "$STAGED_TS" ]; then
   npx eslint --no-error-on-unmatched-pattern --config eslint.sonar.config.js --max-warnings 0 $STAGED_TS

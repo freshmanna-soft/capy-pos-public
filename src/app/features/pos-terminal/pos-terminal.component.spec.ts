@@ -359,7 +359,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
 
   describe('handlePrintReceipt', () => {
     it('should call window.print()', () => {
-      const printSpy = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+      const printSpy = vi.spyOn(globalThis, 'print').mockImplementation(() => undefined);
 
       component.handlePrintReceipt();
 

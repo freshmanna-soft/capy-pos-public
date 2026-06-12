@@ -1,15 +1,16 @@
-import { Component, Input } from '@angular/core';
+import { Component, computed, input } from '@angular/core';
 
 /**
  * Badge Component (Atom)
  * Reusable badge for status indicators, counts, and labels
+ * Uses Angular Signals API (input/computed)
  */
 @Component({
   selector: 'app-badge',
   standalone: true,
   imports: [],
   template: `
-    <span [class]="badgeClasses">
+    <span [class]="badgeClasses()">
       <ng-content></ng-content>
     </span>
   `,
@@ -59,23 +60,25 @@ import { Component, Input } from '@angular/core';
   ],
 })
 export class BadgeComponent {
-  @Input() variant: 'primary' | 'secondary' | 'success' | 'warning' | 'danger' | 'info' = 'primary';
-  @Input() size: 'sm' | 'md' | 'lg' = 'md';
-  @Input() dot = false;
+  // Signal-based inputs
+  readonly variant = input<'primary' | 'secondary' | 'success' | 'warning' | 'danger' | 'info'>(
+    'primary'
+  );
+  readonly size = input<'sm' | 'md' | 'lg'>('md');
+  readonly dot = input(false);
 
-  get badgeClasses(): string {
-    const classes = ['badge', `badge-${this.variant}`];
+  // Computed classes based on input signals
+  readonly badgeClasses = computed(() => {
+    const classes = ['badge', `badge-${this.variant()}`];
 
-    if (this.size !== 'md') {
-      classes.push(`badge-${this.size}`);
+    if (this.size() !== 'md') {
+      classes.push(`badge-${this.size()}`);
     }
 
-    if (this.dot) {
+    if (this.dot()) {
       classes.push('badge-dot');
     }
 
     return classes.join(' ');
-  }
+  });
 }
-
-// Made with Bob
