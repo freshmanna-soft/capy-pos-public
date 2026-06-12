@@ -45,13 +45,13 @@ describe('CartService', () => {
 
     it('should throw error when adding null product', () => {
       expect(() => cartService.addProduct(null as unknown as Product)).toThrow(
-        'Cannot add null or undefined product to cart',
+        'Cannot add null or undefined product to cart'
       );
     });
 
     it('should throw error when adding undefined product', () => {
       expect(() => cartService.addProduct(undefined as unknown as Product)).toThrow(
-        'Cannot add null or undefined product to cart',
+        'Cannot add null or undefined product to cart'
       );
     });
   });
@@ -65,7 +65,7 @@ describe('CartService', () => {
 
     it('should throw error for non-existent product', () => {
       expect(() => cartService.increaseQuantity('non-existent')).toThrow(
-        'Product with ID non-existent not found in cart',
+        'Product with ID non-existent not found in cart'
       );
     });
   });
@@ -87,7 +87,7 @@ describe('CartService', () => {
 
     it('should throw error for non-existent product', () => {
       expect(() => cartService.decreaseQuantity('non-existent')).toThrow(
-        'Product with ID non-existent not found in cart',
+        'Product with ID non-existent not found in cart'
       );
     });
   });
@@ -112,7 +112,7 @@ describe('CartService', () => {
 
     it('should throw error for non-existent product', () => {
       expect(() => cartService.updateQuantity('non-existent', 5)).toThrow(
-        'Product with ID non-existent not found in cart',
+        'Product with ID non-existent not found in cart'
       );
     });
   });

@@ -59,7 +59,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
     super(
       'payment-agent',
       'PaymentAgent',
-      'Handles payment processing, validation, and reconciliation',
+      'Handles payment processing, validation, and reconciliation'
     );
   }
 
@@ -616,10 +616,10 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
     const successfulPayments = payments.filter((p) => p.status === PaymentStatus.COMPLETED).length;
     const failedPayments = payments.filter((p) => p.status === PaymentStatus.FAILED).length;
     const refundedPayments = payments.filter(
-      (p) => p.status === PaymentStatus.REFUNDED || p.status === PaymentStatus.PARTIALLY_REFUNDED,
+      (p) => p.status === PaymentStatus.REFUNDED || p.status === PaymentStatus.PARTIALLY_REFUNDED
     ).length;
     const voidedPayments = payments.filter(
-      (p) => p.status === PaymentStatus.FAILED && p.failureReason?.includes('Voided'),
+      (p) => p.status === PaymentStatus.FAILED && p.failureReason?.includes('Voided')
     ).length;
 
     // Check for discrepancies
@@ -641,11 +641,11 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
    * Generate payment report
    */
   async generatePaymentReport(
-    request: GeneratePaymentReportRequest,
+    request: GeneratePaymentReportRequest
   ): Promise<GeneratePaymentReportResponse> {
     const payments = await this.paymentRepository.findByDateRange(
       request.startDate,
-      request.endDate,
+      request.endDate
     );
 
     // Calculate summary
@@ -699,7 +699,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
 
     // Calculate voids
     const voidPayments = payments.filter(
-      (p) => p.status === PaymentStatus.FAILED && p.failureReason?.includes('Voided'),
+      (p) => p.status === PaymentStatus.FAILED && p.failureReason?.includes('Voided')
     );
     const voids = {
       count: voidPayments.length,
@@ -731,7 +731,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
 
   private async processCashPayment(
     _payment: Payment,
-    _request: ProcessPaymentRequest,
+    _request: ProcessPaymentRequest
   ): Promise<string> {
     // Cash payments are immediately successful
     return 'CASH-' + Date.now();
@@ -739,7 +739,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
 
   private async processCardPayment(
     payment: Payment,
-    request: ProcessPaymentRequest,
+    request: ProcessPaymentRequest
   ): Promise<string> {
     // Simulate card processing
     // In production, integrate with payment gateway (Stripe, Square, etc.)
@@ -755,7 +755,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
 
   private async processWalletPayment(
     _payment: Payment,
-    _request: ProcessPaymentRequest,
+    _request: ProcessPaymentRequest
   ): Promise<string> {
     // Simulate wallet processing
     await this.delay(800);
@@ -764,7 +764,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
 
   private async processGiftCardPayment(
     _payment: Payment,
-    _request: ProcessPaymentRequest,
+    _request: ProcessPaymentRequest
   ): Promise<string> {
     // Simulate gift card processing
     await this.delay(500);
@@ -785,7 +785,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
   private validateCardPayment(
     request: ValidatePaymentRequest,
     errors: string[],
-    warnings: string[],
+    warnings: string[]
   ): void {
     if (!request.cardNumber) {
       errors.push('Card number is required');

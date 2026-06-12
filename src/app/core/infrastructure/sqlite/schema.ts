@@ -1,6 +1,6 @@
 /**
  * Database Schema
- * 
+ *
  * Defines the SQLite database schema for the Capy-POS system.
  * Includes tables for products, customers, transactions, payments, and more.
  */

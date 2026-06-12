@@ -1,9 +1,9 @@
- /**
+/**
  * Lambda: Sell Product
- * 
+ *
  * Responsibility: Process a product sale (decrement stock, create transaction)
  * Route: POST /api/products/{id}/sell
- * 
+ *
  * Failure Scenarios (when ENABLE_FAILURE=true):
  *   - Sells product even with 0 stock → throws ConditionalCheckFailedException
  */
@@ -30,10 +30,12 @@ exports.handler = async (event) => {
 
   try {
     // Fetch current product
-    const productResult = await docClient.send(new GetCommand({
-      TableName: PRODUCTS_TABLE,
-      Key: { id: productId }
-    }));
+    const productResult = await docClient.send(
+      new GetCommand({
+        TableName: PRODUCTS_TABLE,
+        Key: { id: productId },
+      })
+    );
 
     const product = productResult.Item;
     if (!product) {
@@ -45,7 +47,7 @@ exports.handler = async (event) => {
     if (failureMode && product.stock <= 0) {
       const error = new Error(
         `FAILURE_SCENARIO: Stock already at ${product.stock} for product ${product.id}. ` +
-        `ConditionalCheckFailed equivalent.`
+          `ConditionalCheckFailed equivalent.`
       );
       error.code = 'ConditionalCheckFailedException';
       error.productId = product.id;
@@ -53,7 +55,7 @@ exports.handler = async (event) => {
       log('error', 'FAILURE_SCENARIO: Negative stock condition', {
         scenario: 'negative-stock',
         productId: product.id,
-        stock: product.stock
+        stock: product.stock,
       });
       throw error;
     }
@@ -63,23 +65,25 @@ exports.handler = async (event) => {
       log('warn', 'Insufficient stock', {
         productId,
         available: product.stock,
-        requested: quantity
+        requested: quantity,
       });
       return response(400, {
         error: 'Insufficient stock',
         productId,
         available: product.stock,
-        requested: quantity
+        requested: quantity,
       });
     }
 
     // Decrement stock
-    await docClient.send(new UpdateCommand({
-      TableName: PRODUCTS_TABLE,
-      Key: { id: productId },
-      UpdateExpression: 'SET stock = stock - :qty',
-      ExpressionAttributeValues: { ':qty': quantity }
-    }));
+    await docClient.send(
+      new UpdateCommand({
+        TableName: PRODUCTS_TABLE,
+        Key: { id: productId },
+        UpdateExpression: 'SET stock = stock - :qty',
+        ExpressionAttributeValues: { ':qty': quantity },
+      })
+    );
 
     // Create transaction record
     const transaction = {
@@ -90,39 +94,40 @@ exports.handler = async (event) => {
       unitPrice: product.price,
       total: product.price * quantity,
       type: 'sale',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
-    await docClient.send(new PutCommand({
-      TableName: TRANSACTIONS_TABLE,
-      Item: transaction
-    }));
+    await docClient.send(
+      new PutCommand({
+        TableName: TRANSACTIONS_TABLE,
+        Item: transaction,
+      })
+    );
 
     log('info', 'Sale completed successfully', {
       transactionId: transaction.id,
       productId,
       quantity,
-      total: transaction.total
+      total: transaction.total,
     });
 
     return response(200, {
       message: 'Sale completed',
       transaction,
-      remainingStock: product.stock - quantity
+      remainingStock: product.stock - quantity,
     });
-
   } catch (error) {
     log('error', 'SellProduct failed', {
       error: error.message,
       code: error.code,
       productId,
-      stack: error.stack
+      stack: error.stack,
     });
     return response(500, {
       error: 'Sale failed',
       message: error.message,
       code: error.code || 'UNKNOWN',
-      traceId: process.env._X_AMZN_TRACE_ID || 'unavailable'
+      traceId: process.env._X_AMZN_TRACE_ID || 'unavailable',
     });
   }
 };

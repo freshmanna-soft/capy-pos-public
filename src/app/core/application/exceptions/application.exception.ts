@@ -44,12 +44,12 @@ export class EmptyCartException extends ApplicationException {
 export class TransactionPersistenceException extends ApplicationException {
   constructor(
     public readonly transactionId: string,
-    cause?: unknown,
+    cause?: unknown
   ) {
     super(
       'TRANSACTION_PERSISTENCE_FAILED',
       `Failed to persist transaction '${transactionId}'`,
-      cause,
+      cause
     );
     this.name = 'TransactionPersistenceException';
     Object.setPrototypeOf(this, TransactionPersistenceException.prototype);
@@ -64,7 +64,7 @@ export class TransactionPersistenceException extends ApplicationException {
 export class ReportGenerationException extends ApplicationException {
   constructor(
     public readonly reportType: string,
-    cause?: unknown,
+    cause?: unknown
   ) {
     super('REPORT_GENERATION_FAILED', `Failed to generate ${reportType} report`, cause);
     this.name = 'ReportGenerationException';
@@ -82,12 +82,12 @@ export class RepositoryUnavailableException extends ApplicationException {
   constructor(
     public readonly repositoryName: string,
     public readonly operation: string,
-    cause?: unknown,
+    cause?: unknown
   ) {
     super(
       'REPOSITORY_UNAVAILABLE',
       `Repository '${repositoryName}' unavailable during '${operation}' operation`,
-      cause,
+      cause
     );
     this.name = 'RepositoryUnavailableException';
     Object.setPrototypeOf(this, RepositoryUnavailableException.prototype);
@@ -102,11 +102,11 @@ export class RepositoryUnavailableException extends ApplicationException {
 export class InvalidDateRangeException extends ApplicationException {
   constructor(
     public readonly startDate: Date,
-    public readonly endDate: Date,
+    public readonly endDate: Date
   ) {
     super(
       'INVALID_DATE_RANGE',
-      `Invalid date range: start (${startDate.toISOString()}) must be before end (${endDate.toISOString()})`,
+      `Invalid date range: start (${startDate.toISOString()}) must be before end (${endDate.toISOString()})`
     );
     this.name = 'InvalidDateRangeException';
     Object.setPrototypeOf(this, InvalidDateRangeException.prototype);

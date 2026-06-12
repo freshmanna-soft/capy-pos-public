@@ -1,10 +1,10 @@
 /**
  * AWS X-Ray Troubleshooter MCP Server
- * 
+ *
  * This MCP server provides a tool that takes an AWS X-Ray Trace ID,
  * fetches the trace data and related CloudWatch logs, analyzes the
  * failure, and returns a human-readable diagnosis.
- * 
+ *
  * Tools:
  *   - troubleshoot_trace: Diagnose a failure from an X-Ray trace ID
  *   - toggle_failure: Enable/disable failure mode on the demo API
@@ -13,10 +13,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { execSync } from 'child_process';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
@@ -30,7 +27,7 @@ function awsCli(command) {
   try {
     const result = execSync(`aws ${command} --region ${REGION} --output json --no-cli-pager`, {
       encoding: 'utf-8',
-      timeout: 30000
+      timeout: 30000,
     });
     return JSON.parse(result);
   } catch (error) {
@@ -42,7 +39,7 @@ function awsCliRaw(command) {
   try {
     return execSync(`aws ${command} --region ${REGION} --no-cli-pager`, {
       encoding: 'utf-8',
-      timeout: 30000
+      timeout: 30000,
     });
   } catch (error) {
     return `ERROR: ${error.message}`;
@@ -55,58 +52,66 @@ function awsCliRaw(command) {
 
 async function troubleshootTrace(traceId) {
   const steps = [];
-  
+
   // Step 1: Fetch the trace
   steps.push('## 🔍 Step 1: Fetching X-Ray Trace');
   steps.push(`Trace ID: \`${traceId}\``);
   steps.push('');
-  
+
   const traceData = awsCli(`xray batch-get-traces --trace-ids "${traceId}"`);
-  
+
   if (traceData.error) {
     return `❌ Failed to fetch trace: ${traceData.error}`;
   }
-  
+
   const traces = traceData.Traces || [];
   if (traces.length === 0) {
     return `❌ No trace found for ID: ${traceId}. The trace may not have been indexed yet (X-Ray can take up to 30 seconds).`;
   }
-  
+
   const trace = traces[0];
   const segments = trace.Segments || [];
-  
+
   steps.push(`Found ${segments.length} segment(s) in trace.`);
   steps.push('');
-  
+
   // Step 2: Analyze segments for errors
   steps.push('## 🧩 Step 2: Analyzing Trace Segments');
   steps.push('');
-  
+
   let errorSegments = [];
   let rootCause = null;
   let duration = 0;
-  
+
   for (const segment of segments) {
     const doc = JSON.parse(segment.Document);
     const segDuration = ((doc.end_time || 0) - (doc.start_time || 0)).toFixed(3);
     duration = Math.max(duration, parseFloat(segDuration));
-    
-    const status = doc.error ? '❌ ERROR' : doc.fault ? '💥 FAULT' : doc.throttle ? '⚠️ THROTTLE' : '✅ OK';
+
+    const status = doc.error
+      ? '❌ ERROR'
+      : doc.fault
+        ? '💥 FAULT'
+        : doc.throttle
+          ? '⚠️ THROTTLE'
+          : '✅ OK';
     steps.push(`| Segment: **${doc.name}** | Status: ${status} | Duration: ${segDuration}s |`);
-    
+
     if (doc.error || doc.fault) {
       errorSegments.push(doc);
-      
+
       // Look for cause
       if (doc.cause) {
         rootCause = doc.cause;
       }
-      
+
       // Check subsegments
       if (doc.subsegments) {
         for (const sub of doc.subsegments) {
           if (sub.error || sub.fault) {
-            steps.push(`  └─ Subsegment: **${sub.name}** | ${sub.fault ? '💥 FAULT' : '❌ ERROR'} | ${((sub.end_time || 0) - (sub.start_time || 0)).toFixed(3)}s`);
+            steps.push(
+              `  └─ Subsegment: **${sub.name}** | ${sub.fault ? '💥 FAULT' : '❌ ERROR'} | ${((sub.end_time || 0) - (sub.start_time || 0)).toFixed(3)}s`
+            );
             if (sub.cause) {
               rootCause = sub.cause;
             }
@@ -115,19 +120,19 @@ async function troubleshootTrace(traceId) {
       }
     }
   }
-  
+
   steps.push('');
-  
+
   // Step 3: Fetch related CloudWatch logs
   steps.push('## 📋 Step 3: Fetching Related CloudWatch Logs');
   steps.push('');
-  
+
   // Get logs from around the time of the trace (last 5 minutes)
-  const startTime = Date.now() - (5 * 60 * 1000);
+  const startTime = Date.now() - 5 * 60 * 1000;
   const logsData = awsCli(
     `logs filter-log-events --log-group-name "${LOG_GROUP}" --start-time ${startTime} --filter-pattern "ERROR" --limit 10`
   );
-  
+
   if (logsData.events && logsData.events.length > 0) {
     steps.push(`Found ${logsData.events.length} error log event(s):`);
     steps.push('');
@@ -147,7 +152,7 @@ async function troubleshootTrace(traceId) {
     steps.push('```');
   } else {
     steps.push('No recent error logs found (or log group not accessible).');
-    
+
     // Try fetching all recent logs with the trace ID
     const traceLogsData = awsCli(
       `logs filter-log-events --log-group-name "${LOG_GROUP}" --start-time ${startTime} --filter-pattern "${traceId.replace('1-', '')}" --limit 5`
@@ -162,13 +167,13 @@ async function troubleshootTrace(traceId) {
       steps.push('```');
     }
   }
-  
+
   steps.push('');
-  
+
   // Step 4: Diagnosis
   steps.push('## 🩺 Step 4: Diagnosis');
   steps.push('');
-  
+
   if (errorSegments.length === 0 && duration < 25) {
     steps.push('✅ **No errors detected in this trace.** The request completed successfully.');
     steps.push(`Total duration: ${duration.toFixed(3)}s`);
@@ -176,7 +181,9 @@ async function troubleshootTrace(traceId) {
     // Timeout scenario
     steps.push('### 🕐 Root Cause: Lambda Timeout');
     steps.push('');
-    steps.push(`The request took **${duration.toFixed(1)}s** which exceeds or approaches the Lambda timeout (30s).`);
+    steps.push(
+      `The request took **${duration.toFixed(1)}s** which exceeds or approaches the Lambda timeout (30s).`
+    );
     steps.push('');
     steps.push('**What happened:**');
     steps.push('1. The Lambda function received the request');
@@ -192,22 +199,24 @@ async function troubleshootTrace(traceId) {
     // Error scenario
     const errorDoc = errorSegments[0];
     const httpStatus = errorDoc?.http?.response?.status;
-    
+
     if (httpStatus === 500) {
       steps.push('### 💥 Root Cause: Application Error (500)');
       steps.push('');
       steps.push('The Lambda function threw an unhandled exception.');
       steps.push('');
-      
+
       if (rootCause?.exceptions) {
         for (const ex of rootCause.exceptions) {
           steps.push(`**Exception:** ${ex.type || 'Error'}`);
           steps.push(`**Message:** ${ex.message || 'Unknown'}`);
         }
       }
-      
+
       steps.push('');
-      steps.push('**Likely scenario:** ConditionalCheckFailedException — attempted to sell a product with 0 stock while failure mode is enabled.');
+      steps.push(
+        '**Likely scenario:** ConditionalCheckFailedException — attempted to sell a product with 0 stock while failure mode is enabled.'
+      );
       steps.push('');
       steps.push('**Fix:**');
       steps.push('- Disable failure mode: `POST /api/fail/toggle`');
@@ -222,11 +231,13 @@ async function troubleshootTrace(traceId) {
       }
     }
   }
-  
+
   steps.push('');
   steps.push('---');
-  steps.push(`*Analysis performed at ${new Date().toISOString()} using AWS X-Ray + CloudWatch Logs*`);
-  
+  steps.push(
+    `*Analysis performed at ${new Date().toISOString()} using AWS X-Ray + CloudWatch Logs*`
+  );
+
   return steps.join('\n');
 }
 
@@ -238,20 +249,20 @@ async function getRecentTraces() {
   const steps = [];
   steps.push('## 📊 Recent Error Traces (last 5 minutes)');
   steps.push('');
-  
+
   const startTime = Math.floor((Date.now() - 5 * 60 * 1000) / 1000);
   const endTime = Math.floor(Date.now() / 1000);
-  
+
   const summaries = awsCli(
     `xray get-trace-summaries --start-time ${startTime} --end-time ${endTime} --filter-expression "responsetime > 5 OR error = true OR fault = true"`
   );
-  
+
   if (summaries.error) {
     return `❌ Failed to fetch trace summaries: ${summaries.error}`;
   }
-  
+
   const traces = summaries.TraceSummaries || [];
-  
+
   if (traces.length === 0) {
     steps.push('No error traces found in the last 5 minutes.');
     steps.push('');
@@ -261,12 +272,12 @@ async function getRecentTraces() {
     steps.push('3. Or fetch products (will timeout): `curl <API_URL>/api/products`');
     return steps.join('\n');
   }
-  
+
   steps.push(`Found **${traces.length}** trace(s) with errors or high latency:`);
   steps.push('');
   steps.push('| # | Trace ID | Duration | Status | Has Error |');
   steps.push('|---|----------|----------|--------|-----------|');
-  
+
   for (let i = 0; i < Math.min(traces.length, 10); i++) {
     const t = traces[i];
     const dur = (t.Duration || 0).toFixed(2);
@@ -274,10 +285,10 @@ async function getRecentTraces() {
     const hasError = t.HasError || t.HasFault ? '❌ Yes' : '✅ No';
     steps.push(`| ${i + 1} | \`${t.Id}\` | ${dur}s | ${status} | ${hasError} |`);
   }
-  
+
   steps.push('');
   steps.push('**Use `troubleshoot_trace` with any Trace ID above to get a full diagnosis.**');
-  
+
   return steps.join('\n');
 }
 
@@ -286,10 +297,7 @@ async function getRecentTraces() {
 // =============================================================================
 
 async function toggleFailure(enable) {
-  const functionNames = [
-    'capy-pos-demo-get-products',
-    'capy-pos-demo-sell-product'
-  ];
+  const functionNames = ['capy-pos-demo-get-products', 'capy-pos-demo-sell-product'];
 
   const newValue = enable ? 'true' : 'false';
   const results = [];
@@ -322,7 +330,7 @@ async function toggleFailure(enable) {
   }
 
   const status = enable ? 'ENABLED 💥' : 'DISABLED ✅';
-  return `## Failure Mode: ${status}\n\nUpdated Lambda environment variables:\n${results.map(r => `- ${r}`).join('\n')}\n\n${enable ? '**Now trigger failures:**\n- `GET /api/products` → 25s timeout\n- `POST /api/products/prod-010/sell` → negative stock error' : 'All endpoints will respond normally.'}`;
+  return `## Failure Mode: ${status}\n\nUpdated Lambda environment variables:\n${results.map((r) => `- ${r}`).join('\n')}\n\n${enable ? '**Now trigger failures:**\n- `GET /api/products` → 25s timeout\n- `POST /api/products/prod-010/sell` → negative stock error' : 'All endpoints will respond normally.'}`;
 }
 
 // =============================================================================
@@ -347,42 +355,46 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'troubleshoot_trace',
-        description: 'Diagnose an application failure using an AWS X-Ray Trace ID. Fetches the trace, analyzes segments for errors/faults, retrieves related CloudWatch logs, and provides a root cause diagnosis with suggested fixes.',
+        description:
+          'Diagnose an application failure using an AWS X-Ray Trace ID. Fetches the trace, analyzes segments for errors/faults, retrieves related CloudWatch logs, and provides a root cause diagnosis with suggested fixes.',
         inputSchema: {
           type: 'object',
           properties: {
             traceId: {
               type: 'string',
-              description: 'The AWS X-Ray Trace ID (format: 1-xxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx). You can find this in the API response X-Trace-Id header or in the AWS Console.'
-            }
+              description:
+                'The AWS X-Ray Trace ID (format: 1-xxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx). You can find this in the API response X-Trace-Id header or in the AWS Console.',
+            },
           },
-          required: ['traceId']
-        }
+          required: ['traceId'],
+        },
       },
       {
         name: 'get_recent_traces',
-        description: 'Get recent X-Ray traces that have errors, faults, or high latency (last 5 minutes). Use this to find trace IDs to troubleshoot.',
+        description:
+          'Get recent X-Ray traces that have errors, faults, or high latency (last 5 minutes). Use this to find trace IDs to troubleshoot.',
         inputSchema: {
           type: 'object',
           properties: {},
-          required: []
-        }
+          required: [],
+        },
       },
       {
         name: 'toggle_failure',
-        description: 'Toggle the failure mode on the Capy-POS demo Lambda functions. When enabled, get-products and sell-product will simulate failure scenarios (timeouts, stock errors, data corruption).',
+        description:
+          'Toggle the failure mode on the Capy-POS demo Lambda functions. When enabled, get-products and sell-product will simulate failure scenarios (timeouts, stock errors, data corruption).',
         inputSchema: {
           type: 'object',
           properties: {
             enable: {
               type: 'boolean',
-              description: 'Set to true to enable failure mode, false to disable it.'
-            }
+              description: 'Set to true to enable failure mode, false to disable it.',
+            },
           },
-          required: ['enable']
-        }
-      }
-    ]
+          required: ['enable'],
+        },
+      },
+    ],
   };
 });
 

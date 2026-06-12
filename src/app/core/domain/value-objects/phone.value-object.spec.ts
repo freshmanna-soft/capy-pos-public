@@ -27,7 +27,7 @@ describe('Phone Value Object', () => {
     it('should throw error for null or undefined', () => {
       expect(() => new Phone(null as unknown)).toThrow('Phone number must be a non-empty string');
       expect(() => new Phone(undefined as unknown)).toThrow(
-        'Phone number must be a non-empty string',
+        'Phone number must be a non-empty string'
       );
     });
 
@@ -52,13 +52,13 @@ describe('Phone Value Object', () => {
 
     it('should throw error for multiple + symbols', () => {
       expect(() => new Phone('+1+5551234567')).toThrow(
-        'Phone number can only have one + symbol at the start',
+        'Phone number can only have one + symbol at the start'
       );
     });
 
     it('should throw error for + not at start', () => {
       expect(() => new Phone('1+5551234567')).toThrow(
-        '+ symbol must be at the start of the phone number',
+        '+ symbol must be at the start of the phone number'
       );
     });
 

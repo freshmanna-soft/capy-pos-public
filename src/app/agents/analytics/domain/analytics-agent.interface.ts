@@ -15,7 +15,7 @@ export interface IAnalyticsAgent extends IBaseAgent {
    * Generate inventory analytics
    */
   generateInventoryAnalytics(
-    request: InventoryAnalyticsRequest,
+    request: InventoryAnalyticsRequest
   ): Promise<InventoryAnalyticsResponse>;
 
   /**

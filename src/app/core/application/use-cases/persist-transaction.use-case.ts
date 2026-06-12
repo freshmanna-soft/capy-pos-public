@@ -70,7 +70,7 @@ export class PersistTransactionUseCase {
   private readonly cartService = inject(CartService);
   private readonly cartTotals = inject(CalculateCartTotalsUseCase);
   private readonly transactionRepository: ITransactionRepository = inject<ITransactionRepository>(
-    'ITransactionRepository' as never,
+    'ITransactionRepository' as never
   );
 
   /**

@@ -75,7 +75,7 @@ export abstract class AbstractPayment extends BaseEntity implements IRefundable,
       props.createdAt ?? new Date(),
       props.updatedAt ?? new Date(),
       props.createdBy,
-      props.updatedBy,
+      props.updatedBy
     );
     this.orderId = props.orderId;
     this.amount = props.amount;

@@ -120,7 +120,10 @@ test.describe('Navigation Accessibility - All Features Reachable', () => {
 
     for (const link of requiredNavLinks) {
       const navLink = page.locator(`[data-testid="${link.testId}"]`).first();
-      await expect(navLink, `Navigation link "${link.label}" (${link.testId}) must exist`).toBeAttached();
+      await expect(
+        navLink,
+        `Navigation link "${link.label}" (${link.testId}) must exist`
+      ).toBeAttached();
     }
   });
 

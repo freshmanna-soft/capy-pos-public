@@ -70,7 +70,7 @@ export abstract class BaseEntity implements IEntity, IAuditable, ISerializable<B
     public readonly createdAt: Date = new Date(),
     public updatedAt: Date = new Date(),
     public createdBy?: string,
-    public updatedBy?: string,
+    public updatedBy?: string
   ) {
     this.validateId();
   }
@@ -162,7 +162,7 @@ export abstract class SoftDeletableEntity extends BaseEntity implements ISoftDel
     createdBy?: string,
     updatedBy?: string,
     public deletedAt?: Date,
-    public deletedBy?: string,
+    public deletedBy?: string
   ) {
     super(id, createdAt, updatedAt, createdBy, updatedBy);
   }

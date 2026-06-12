@@ -69,13 +69,13 @@ describe('Address Value Object', () => {
     it('should throw error for null or undefined components', () => {
       expect(() => new Address(null as unknown)).toThrow('Address components must be an object');
       expect(() => new Address(undefined as unknown)).toThrow(
-        'Address components must be an object',
+        'Address components must be an object'
       );
     });
 
     it('should throw error for non-object components', () => {
       expect(() => new Address('invalid' as unknown)).toThrow(
-        'Address components must be an object',
+        'Address components must be an object'
       );
       expect(() => new Address(123 as unknown)).toThrow('Address components must be an object');
     });
@@ -83,20 +83,20 @@ describe('Address Value Object', () => {
     describe('Street Validation', () => {
       it('should throw error for missing street', () => {
         expect(() => new Address({ ...validUSAddress, street: '' })).toThrow(
-          'Street address is required',
+          'Street address is required'
         );
         expect(() => new Address({ ...validUSAddress, street: '   ' })).toThrow(
-          'Street address is required',
+          'Street address is required'
         );
         expect(() => new Address({ ...validUSAddress, street: null as unknown })).toThrow(
-          'Street address is required',
+          'Street address is required'
         );
       });
 
       it('should throw error for street exceeding 200 characters', () => {
         const longStreet = 'A'.repeat(201);
         expect(() => new Address({ ...validUSAddress, street: longStreet })).toThrow(
-          'Street address cannot exceed 200 characters',
+          'Street address cannot exceed 200 characters'
         );
       });
 
@@ -111,14 +111,14 @@ describe('Address Value Object', () => {
         expect(() => new Address({ ...validUSAddress, city: '' })).toThrow('City is required');
         expect(() => new Address({ ...validUSAddress, city: '   ' })).toThrow('City is required');
         expect(() => new Address({ ...validUSAddress, city: null as unknown })).toThrow(
-          'City is required',
+          'City is required'
         );
       });
 
       it('should throw error for city exceeding 100 characters', () => {
         const longCity = 'A'.repeat(101);
         expect(() => new Address({ ...validUSAddress, city: longCity })).toThrow(
-          'City cannot exceed 100 characters',
+          'City cannot exceed 100 characters'
         );
       });
 
@@ -131,20 +131,20 @@ describe('Address Value Object', () => {
     describe('State Validation', () => {
       it('should throw error for missing state', () => {
         expect(() => new Address({ ...validUSAddress, state: '' })).toThrow(
-          'State/Province is required',
+          'State/Province is required'
         );
         expect(() => new Address({ ...validUSAddress, state: '   ' })).toThrow(
-          'State/Province is required',
+          'State/Province is required'
         );
         expect(() => new Address({ ...validUSAddress, state: null as unknown })).toThrow(
-          'State/Province is required',
+          'State/Province is required'
         );
       });
 
       it('should throw error for state exceeding 50 characters', () => {
         const longState = 'A'.repeat(51);
         expect(() => new Address({ ...validUSAddress, state: longState })).toThrow(
-          'State/Province cannot exceed 50 characters',
+          'State/Province cannot exceed 50 characters'
         );
       });
 
@@ -157,20 +157,20 @@ describe('Address Value Object', () => {
     describe('Postal Code Validation', () => {
       it('should throw error for missing postal code', () => {
         expect(() => new Address({ ...validUSAddress, postalCode: '' })).toThrow(
-          'Postal code is required',
+          'Postal code is required'
         );
         expect(() => new Address({ ...validUSAddress, postalCode: '   ' })).toThrow(
-          'Postal code is required',
+          'Postal code is required'
         );
         expect(() => new Address({ ...validUSAddress, postalCode: null as unknown })).toThrow(
-          'Postal code is required',
+          'Postal code is required'
         );
       });
 
       it('should throw error for postal code exceeding 20 characters', () => {
         const longPostalCode = 'A'.repeat(21);
         expect(() => new Address({ ...validUSAddress, postalCode: longPostalCode })).toThrow(
-          'Postal code cannot exceed 20 characters',
+          'Postal code cannot exceed 20 characters'
         );
       });
 
@@ -183,20 +183,20 @@ describe('Address Value Object', () => {
     describe('Country Validation', () => {
       it('should throw error for missing country', () => {
         expect(() => new Address({ ...validUSAddress, country: '' })).toThrow(
-          'Country is required',
+          'Country is required'
         );
         expect(() => new Address({ ...validUSAddress, country: '   ' })).toThrow(
-          'Country is required',
+          'Country is required'
         );
         expect(() => new Address({ ...validUSAddress, country: null as unknown })).toThrow(
-          'Country is required',
+          'Country is required'
         );
       });
 
       it('should throw error for country exceeding 100 characters', () => {
         const longCountry = 'A'.repeat(101);
         expect(() => new Address({ ...validUSAddress, country: longCountry })).toThrow(
-          'Country cannot exceed 100 characters',
+          'Country cannot exceed 100 characters'
         );
       });
 
@@ -494,7 +494,7 @@ describe('Address Value Object', () => {
           '10 Downing Street',
           'London',
           'Greater London',
-          'SW1A 2AA',
+          'SW1A 2AA'
         );
         expect(address.street).toBe('10 Downing Street');
         expect(address.city).toBe('London');

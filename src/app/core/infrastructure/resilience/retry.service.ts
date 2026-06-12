@@ -53,7 +53,7 @@ export class RetryExhaustedError extends Error {
   constructor(
     public readonly operationName: string,
     public readonly attempts: number,
-    public readonly lastError: unknown,
+    public readonly lastError: unknown
   ) {
     super(`Retry exhausted for ${operationName} after ${attempts} attempts`);
     this.name = 'RetryExhaustedError';
@@ -91,7 +91,7 @@ export class RetryService {
   async execute<T>(
     operationName: string,
     fn: () => Promise<T>,
-    config?: Partial<RetryConfig>,
+    config?: Partial<RetryConfig>
   ): Promise<T> {
     const finalConfig = { ...this.defaultConfig, ...config };
     let lastError: unknown;
@@ -124,7 +124,7 @@ export class RetryService {
           console.log(
             `[Retry:${operationName}] Attempt ${attempt}/${finalConfig.maxAttempts} failed. ` +
               `Retrying in ${delay}ms...`,
-            { error: error instanceof Error ? error.message : error },
+            { error: error instanceof Error ? error.message : error }
           );
 
           await this.delay(delay);
@@ -136,7 +136,7 @@ export class RetryService {
     this.updateStats(operationName, finalConfig.maxAttempts, false);
     console.error(
       `[Retry:${operationName}] All ${finalConfig.maxAttempts} attempts failed`,
-      lastError,
+      lastError
     );
     throw new RetryExhaustedError(operationName, finalConfig.maxAttempts, lastError);
   }
@@ -148,7 +148,7 @@ export class RetryService {
     operationName: string,
     fn: () => Promise<T>,
     maxAttempts = 3,
-    initialDelay = 1000,
+    initialDelay = 1000
   ): Promise<T> {
     return this.execute(operationName, fn, {
       maxAttempts,
@@ -164,7 +164,7 @@ export class RetryService {
     operationName: string,
     fn: () => Promise<T>,
     maxAttempts = 3,
-    delay = 1000,
+    delay = 1000
   ): Promise<T> {
     return this.execute(operationName, fn, {
       maxAttempts,
@@ -180,7 +180,7 @@ export class RetryService {
     operationName: string,
     fn: () => Promise<T>,
     maxAttempts = 3,
-    initialDelay = 1000,
+    initialDelay = 1000
   ): Promise<T> {
     return this.execute(operationName, fn, {
       maxAttempts,

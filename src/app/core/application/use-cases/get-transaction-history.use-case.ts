@@ -75,7 +75,7 @@ export interface GetTransactionHistoryResult {
 })
 export class GetTransactionHistoryUseCase {
   private readonly transactionRepository: ITransactionRepository = inject<ITransactionRepository>(
-    'ITransactionRepository' as never,
+    'ITransactionRepository' as never
   );
 
   /** Loading state signal */
@@ -138,7 +138,7 @@ export class GetTransactionHistoryUseCase {
 
       // Map to summary DTOs
       const transactions: TransactionSummaryDTO[] = paginatedTransactions.map((t) =>
-        this.mapToSummary(t),
+        this.mapToSummary(t)
       );
 
       const result: GetTransactionHistoryResult = {

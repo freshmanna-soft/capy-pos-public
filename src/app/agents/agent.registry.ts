@@ -178,7 +178,7 @@ export class AgentRegistry {
             observer.next({ agentId: agent.id, status });
           });
           return () => subscription.unsubscribe();
-        }),
+        })
     );
 
     return merge(...statusObservables);

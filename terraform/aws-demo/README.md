@@ -10,6 +10,7 @@
 4. **An AI agent (MCP Server)** that takes a Trace ID and diagnoses the root cause
 
 ### The Flow (Live Demo)
+
 ```
 User triggers failure → Gets Trace ID → Passes to AI Agent → Agent diagnoses root cause
 ```
@@ -50,12 +51,12 @@ User triggers failure → Gets Trace ID → Passes to AI Agent → Agent diagnos
 
 ### Single-Responsibility Lambdas
 
-| Lambda | Route | Purpose |
-|--------|-------|---------|
-| `capy-pos-demo-get-products` | `GET /api/products` | List all products |
-| `capy-pos-demo-sell-product` | `POST /api/products/{id}/sell` | Process a sale |
-| `capy-pos-demo-get-transactions` | `GET /api/transactions` | List transactions |
-| `capy-pos-demo-health` | `GET /api/health` | Health check |
+| Lambda                           | Route                          | Purpose           |
+| -------------------------------- | ------------------------------ | ----------------- |
+| `capy-pos-demo-get-products`     | `GET /api/products`            | List all products |
+| `capy-pos-demo-sell-product`     | `POST /api/products/{id}/sell` | Process a sale    |
+| `capy-pos-demo-get-transactions` | `GET /api/transactions`        | List transactions |
+| `capy-pos-demo-health`           | `GET /api/health`              | Health check      |
 
 Each Lambda has its own CloudWatch Log Group and X-Ray tracing enabled independently.
 
@@ -64,12 +65,14 @@ Each Lambda has its own CloudWatch Log Group and X-Ray tracing enabled independe
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - AWS CLI configured (`aws configure`)
 - Terraform >= 1.5
 - Node.js >= 20
 - Angular CLI (`npm install -g @angular/cli`)
 
 ### Deploy (One Command)
+
 ```bash
 cd terraform/aws-demo
 chmod +x scripts/deploy.sh scripts/seed-data.sh
@@ -77,6 +80,7 @@ chmod +x scripts/deploy.sh scripts/seed-data.sh
 ```
 
 ### Teardown (One Command)
+
 ```bash
 cd terraform/aws-demo
 terraform destroy -auto-approve
@@ -87,6 +91,7 @@ terraform destroy -auto-approve
 ## 🧪 Demo Script (For the Talk)
 
 ### Act 1: Show the App Working
+
 ```bash
 # Health check
 curl $API_URL/api/health
@@ -99,6 +104,7 @@ curl -X POST $API_URL/api/products/prod-001/sell
 ```
 
 ### Act 2: Enable Failures
+
 Use the MCP tool or Terraform variable:
 
 ```bash
@@ -116,6 +122,7 @@ aws lambda update-function-configuration \
 ```
 
 ### Act 3: Trigger a Failure
+
 ```bash
 # This will fail — product has 0 stock + failure mode catches it
 curl -X POST $API_URL/api/products/prod-010/sell
@@ -129,21 +136,26 @@ curl $API_URL/api/products
 ```
 
 ### Act 4: AI Diagnoses the Problem
+
 Use the MCP tool in your AI assistant:
+
 ```
 "Hey, I got this error. The trace ID is 1-xxxxxxxx-xxxxxxxxxxxxxxxxxxxx. Can you troubleshoot it?"
 ```
 
 The AI agent will:
+
 1. Fetch the X-Ray trace (`aws xray batch-get-traces`)
 2. Analyze segments for errors/faults
 3. Fetch related CloudWatch logs
 4. Return a diagnosis with root cause + fix
 
 ### Act 5: Disable Failures
+
 ```
 "Can you disable the failure mode?"
 ```
+
 The AI calls `toggle_failure` with `enable: false` — updates Lambda env vars directly.
 
 ---
@@ -151,12 +163,14 @@ The AI calls `toggle_failure` with `enable: false` — updates Lambda env vars d
 ## 🔧 MCP Server Setup
 
 ### Install
+
 ```bash
 cd terraform/aws-demo/mcp-server
 npm install
 ```
 
 ### Add to VS Code / Cline MCP Config
+
 ```json
 {
   "mcpServers": {
@@ -174,23 +188,24 @@ npm install
 
 ### Available Tools
 
-| Tool | Input | Description |
-|------|-------|-------------|
+| Tool                 | Input              | Description                                                    |
+| -------------------- | ------------------ | -------------------------------------------------------------- |
 | `troubleshoot_trace` | `traceId` (string) | Takes a Trace ID, fetches X-Ray data + logs, returns diagnosis |
-| `get_recent_traces` | _(none)_ | Lists recent error traces (last 5 min) |
-| `toggle_failure` | `enable` (boolean) | Enables/disables failure mode by updating Lambda env vars |
+| `get_recent_traces`  | _(none)_           | Lists recent error traces (last 5 min)                         |
+| `toggle_failure`     | `enable` (boolean) | Enables/disables failure mode by updating Lambda env vars      |
 
 ---
 
 ## 💥 Failure Scenarios
 
-| # | Scenario | Trigger | What Happens |
-|---|----------|---------|--------------|
-| 1 | **Lambda Timeout** | `GET /api/products` (with failure ON) | 25s delay → Lambda times out at 30s |
-| 2 | **Negative Stock** | `POST /api/products/prod-010/sell` (with failure ON) | Stock=0, throws ConditionalCheckFailed |
-| 3 | **Data Corruption** | `GET /api/products` (with failure ON) | Random product gets null name/price |
+| #   | Scenario            | Trigger                                              | What Happens                           |
+| --- | ------------------- | ---------------------------------------------------- | -------------------------------------- |
+| 1   | **Lambda Timeout**  | `GET /api/products` (with failure ON)                | 25s delay → Lambda times out at 30s    |
+| 2   | **Negative Stock**  | `POST /api/products/prod-010/sell` (with failure ON) | Stock=0, throws ConditionalCheckFailed |
+| 3   | **Data Corruption** | `GET /api/products` (with failure ON)                | Random product gets null name/price    |
 
 ### How Failure Mode Works
+
 - Controlled via `ENABLE_FAILURE` environment variable on each Lambda
 - Only `get-products` and `sell-product` Lambdas have failure scenarios
 - The MCP `toggle_failure` tool updates the env var via `aws lambda update-function-configuration`
@@ -201,6 +216,7 @@ npm install
 ## 💰 Cost
 
 This demo costs essentially **$0** when idle:
+
 - S3: Pennies for static hosting
 - DynamoDB: PAY_PER_REQUEST (no reads = no cost)
 - Lambda: Free tier covers 1M requests/month

@@ -115,7 +115,7 @@ export class PosFacade {
       (item: { product: { id: string }; quantity: number }) => ({
         productId: item.product.id,
         quantity: item.quantity,
-      }),
+      })
     );
 
     // Generate receipt from current cart state BEFORE clearing

@@ -7,13 +7,9 @@ import {
 import 'fake-indexeddb/auto';
 
 beforeAll(() => {
-  TestBed.initTestEnvironment(
-    BrowserDynamicTestingModule,
-    platformBrowserDynamicTesting(),
-    {
-      teardown: { destroyAfterEach: true }
-    }
-  );
+  TestBed.initTestEnvironment(BrowserDynamicTestingModule, platformBrowserDynamicTesting(), {
+    teardown: { destroyAfterEach: true },
+  });
 });
 
 afterEach(() => {

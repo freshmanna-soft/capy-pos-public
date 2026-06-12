@@ -3,6 +3,7 @@
 ## 🚀 Getting Started
 
 ### Prerequisites
+
 - Node.js 20+
 - npm 11+
 - IBM Cloud account
@@ -78,6 +79,7 @@ capy-pos/
 ## 🏗️ Architecture Overview
 
 ### Microservices Agents
+
 1. **Inventory Agent** - Product & stock management
 2. **Sales Agent** - Transaction processing
 3. **Payment Agent** - Payment handling
@@ -86,12 +88,14 @@ capy-pos/
 6. **Integration Agent** - Data sync (SQLite ↔ API)
 
 ### Clean Architecture Layers
+
 - **Domain**: Business entities & rules
 - **Application**: Use cases & services
 - **Infrastructure**: Repositories & adapters
 - **Presentation**: UI components
 
 ### Repository Pattern
+
 ```typescript
 // Switch between SQLite and API
 const repo = RepositoryFactory.create('sqlite' | 'api');
@@ -142,21 +146,25 @@ terraform apply -auto-approve
 ## 🧪 Testing
 
 ### Unit Tests
+
 ```bash
 npm run test
 ```
 
 ### E2E Tests (Playwright)
+
 ```bash
 npm run test:e2e
 ```
 
 ### BDD Tests (Cucumber)
+
 ```bash
 npm run test:cucumber
 ```
 
 ### Component Tests (Storybook)
+
 ```bash
 npm run storybook
 ```

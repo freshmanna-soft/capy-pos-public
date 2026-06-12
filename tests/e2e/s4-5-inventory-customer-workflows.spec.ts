@@ -85,7 +85,9 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
     await page.waitForTimeout(500);
 
     // Find and click edit on the product we just created
-    const editBtn = page.locator('.product-row', { hasText: 'S4-5 Edit Target' }).locator('.btn-edit');
+    const editBtn = page
+      .locator('.product-row', { hasText: 'S4-5 Edit Target' })
+      .locator('.btn-edit');
     await editBtn.click({ force: true });
 
     // Form should open with pre-filled data
@@ -123,7 +125,9 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
     await page.waitForTimeout(500);
 
     // Click delete on the product
-    const deleteBtn = page.locator('.product-row', { hasText: 'S4-5 Delete Me' }).locator('.btn-delete');
+    const deleteBtn = page
+      .locator('.product-row', { hasText: 'S4-5 Delete Me' })
+      .locator('.btn-delete');
     await deleteBtn.click({ force: true });
 
     // Confirmation dialog should appear
@@ -222,7 +226,9 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
     await page.waitForTimeout(500);
 
     // Click edit on the customer
-    const editBtn = page.locator('.customer-row', { hasText: 'S4-5 Edit Customer' }).locator('.btn-edit');
+    const editBtn = page
+      .locator('.customer-row', { hasText: 'S4-5 Edit Customer' })
+      .locator('.btn-edit');
     await editBtn.click({ force: true });
 
     // Form should open with pre-filled data
@@ -258,7 +264,9 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
     await page.waitForTimeout(500);
 
     // Click delete
-    const deleteBtn = page.locator('.customer-row', { hasText: 'S4-5 Delete Customer' }).locator('.btn-delete');
+    const deleteBtn = page
+      .locator('.customer-row', { hasText: 'S4-5 Delete Customer' })
+      .locator('.btn-delete');
     await deleteBtn.click({ force: true });
 
     // Confirmation dialog should appear
@@ -336,7 +344,8 @@ test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
 
     // Wait for debounce (300ms) + search results to appear
     await page.waitForTimeout(500);
-    const resultVisible = await page.locator('[data-testid="product-result"]')
+    const resultVisible = await page
+      .locator('[data-testid="product-result"]')
       .first()
       .isVisible({ timeout: 5000 })
       .catch(() => false);

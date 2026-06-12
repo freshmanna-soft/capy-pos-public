@@ -190,7 +190,7 @@ export abstract class BaseDexieRepository<
    */
   protected async findOneByIndexedField(
     field: keyof TDB,
-    value: IndexableType,
+    value: IndexableType
   ): Promise<TEntity | null> {
     const record = await this.table
       .where(field as string)
@@ -205,7 +205,7 @@ export abstract class BaseDexieRepository<
    */
   protected async findByCompoundIndex(
     fields: [keyof TDB, keyof TDB],
-    values: [IndexableType, IndexableType],
+    values: [IndexableType, IndexableType]
   ): Promise<TEntity[]> {
     const indexName = `[${String(fields[0])}+${String(fields[1])}]`;
     const records = await this.table
@@ -233,7 +233,7 @@ export abstract class BaseDexieRepository<
   protected async findSorted(
     field: keyof TDB,
     direction: 'asc' | 'desc' = 'asc',
-    limit?: number,
+    limit?: number
   ): Promise<TEntity[]> {
     let collection = this.table
       .orderBy(field as string)

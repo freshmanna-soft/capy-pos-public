@@ -434,7 +434,7 @@ describe('RetryService', () => {
       };
 
       await expect(
-        service.execute('test-op', fn, { maxAttempts: 2, initialDelay: 10 }),
+        service.execute('test-op', fn, { maxAttempts: 2, initialDelay: 10 })
       ).rejects.toBeInstanceOf(RetryExhaustedError);
     });
 

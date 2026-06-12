@@ -161,7 +161,7 @@ export class ManageInventoryUseCase {
         request.lowStockThreshold ?? 10,
         request.reorderQuantity ?? 20,
         request.cost,
-        true,
+        true
       );
 
       const created = await this.productRepository.create(product);

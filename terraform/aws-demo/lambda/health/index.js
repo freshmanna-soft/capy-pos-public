@@ -1,6 +1,6 @@
 /**
  * Lambda: Health Check
- * 
+ *
  * Responsibility: Report service health and configuration status
  * Route: GET /api/health
  */
@@ -22,7 +22,7 @@ exports.handler = async (event) => {
       getProducts: 'GET /api/products',
       sellProduct: 'POST /api/products/{id}/sell',
       getTransactions: 'GET /api/transactions',
-      health: 'GET /api/health'
-    }
+      health: 'GET /api/health',
+    },
   });
 };

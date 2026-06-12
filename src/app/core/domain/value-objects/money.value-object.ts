@@ -226,7 +226,7 @@ export class Money
   private assertSameCurrency(other: Money): void {
     if (this._currency !== other._currency) {
       throw new Error(
-        `Cannot operate on different currencies: ${this._currency} and ${other._currency}`,
+        `Cannot operate on different currencies: ${this._currency} and ${other._currency}`
       );
     }
   }

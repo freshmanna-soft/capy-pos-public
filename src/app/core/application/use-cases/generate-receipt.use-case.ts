@@ -71,7 +71,7 @@ export class GenerateReceiptUseCase {
     subtotal: number,
     tax: number,
     taxRate: number,
-    total: number,
+    total: number
   ): ReceiptData {
     return { payment, items, subtotal, tax, taxRate, total };
   }

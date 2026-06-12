@@ -16,7 +16,7 @@ export const routes: Routes = [
     path: 'inventory',
     loadComponent: () =>
       import('./features/inventory-management/inventory-management.component').then(
-        (m) => m.InventoryManagementComponent,
+        (m) => m.InventoryManagementComponent
       ),
     title: 'Inventory Management',
   },
@@ -36,7 +36,7 @@ export const routes: Routes = [
     path: 'dashboard',
     loadComponent: () =>
       import('./features/dashboard/agent-monitor/agent-monitor.component').then(
-        (m) => m.AgentMonitorComponent,
+        (m) => m.AgentMonitorComponent
       ),
     title: 'Agent Dashboard',
   },
@@ -44,7 +44,7 @@ export const routes: Routes = [
     path: 'history',
     loadComponent: () =>
       import('./features/pos-terminal/components/transaction-history/transaction-history.component').then(
-        (m) => m.TransactionHistoryComponent,
+        (m) => m.TransactionHistoryComponent
       ),
     title: 'Transaction History',
   },

@@ -122,7 +122,9 @@ class TransactionHistoryPage {
    * Get all transaction cards visible on the page
    */
   async getTransactionCards() {
-    return this.page.locator('[data-testid^="transaction-"][data-testid$!="history"][data-testid$!="list"]');
+    return this.page.locator(
+      '[data-testid^="transaction-"][data-testid$!="history"][data-testid$!="list"]'
+    );
   }
 
   /**

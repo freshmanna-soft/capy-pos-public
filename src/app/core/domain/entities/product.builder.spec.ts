@@ -91,7 +91,7 @@ describe('ProductBuilder', () => {
           .withSku('SKU-1')
           .withCategory('General')
           .withStock(5)
-          .build(),
+          .build()
       ).toThrow('Product name is required');
     });
 
@@ -104,7 +104,7 @@ describe('ProductBuilder', () => {
           .withSku('SKU-1')
           .withCategory('General')
           .withStock(5)
-          .build(),
+          .build()
       ).toThrow('Price cannot be negative');
     });
 
@@ -117,7 +117,7 @@ describe('ProductBuilder', () => {
           .withSku('')
           .withCategory('General')
           .withStock(5)
-          .build(),
+          .build()
       ).toThrow('SKU is required');
     });
 
@@ -130,7 +130,7 @@ describe('ProductBuilder', () => {
           .withSku('SKU-1')
           .withCategory('General')
           .withStock(-1)
-          .build(),
+          .build()
       ).toThrow('Stock cannot be negative');
     });
   });

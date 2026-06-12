@@ -139,7 +139,7 @@ export class AuditLogService {
       this.addToCache(fullEntry);
 
       console.log(
-        `[AuditLog] Logged: ${entry.action} on ${entry.entityType}:${entry.entityId} by ${entry.agentName}`,
+        `[AuditLog] Logged: ${entry.action} on ${entry.entityType}:${entry.entityId} by ${entry.agentName}`
       );
     } catch (error) {
       console.error('[AuditLog] Failed to log entry:', error);
@@ -372,7 +372,7 @@ export class AuditLogService {
 
     // Combine headers and rows
     return [headers.join(','), ...rows.map((row) => row.map((cell) => `"${cell}"`).join(','))].join(
-      '\n',
+      '\n'
     );
   }
 }

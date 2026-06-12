@@ -65,7 +65,7 @@ export abstract class BaseDomainService {
    */
   protected validateRequired<T>(
     value: T | null | undefined,
-    paramName: string,
+    paramName: string
   ): asserts value is T {
     if (value === null || value === undefined || (typeof value === 'string' && value === '')) {
       throw new Error(`[${this.serviceName}] ${paramName} is required`);
@@ -103,7 +103,7 @@ export abstract class BaseDomainService {
   protected validateRange(value: number, min: number, max: number, paramName: string): void {
     this.validateInput(
       value >= min && value <= max,
-      `${paramName} must be between ${min} and ${max}, got ${value}`,
+      `${paramName} must be between ${min} and ${max}, got ${value}`
     );
   }
 
@@ -182,7 +182,7 @@ export abstract class BaseDomainService {
    */
   protected async executeAsyncWithErrorHandling<T>(
     fn: () => Promise<T>,
-    errorMessage: string,
+    errorMessage: string
   ): Promise<T> {
     try {
       return await fn();

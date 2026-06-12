@@ -2,7 +2,9 @@
 
 ## Overview
 
-This document provides comprehensive documentation for the enterprise-grade infrastructure services implemented in Capy-POS. These services provide fault tolerance, observability, resilience, and monitoring capabilities for the agent-based architecture.
+This document provides comprehensive documentation for the enterprise-grade infrastructure services
+implemented in Capy-POS. These services provide fault tolerance, observability, resilience, and
+monitoring capabilities for the agent-based architecture.
 
 ## Table of Contents
 
@@ -53,12 +55,16 @@ Infrastructure Services
 ## EventBusService
 
 ### Purpose
-Provides publish-subscribe messaging for inter-agent communication with topic-based routing and priority queuing.
+
+Provides publish-subscribe messaging for inter-agent communication with topic-based routing and
+priority queuing.
 
 ### Location
+
 `src/app/core/infrastructure/messaging/event-bus.service.ts`
 
 ### Key Features
+
 - Topic-based message routing
 - Priority levels (low, normal, high, critical)
 - Message history with configurable size
@@ -104,12 +110,12 @@ console.log('By type:', stats.byType);
 
 ```typescript
 interface EventBusMessage<T = any> {
-  id: string;              // Auto-generated
-  type: string;            // Message type
-  source: string;          // Sender agent
-  target?: string;         // Optional recipient
-  payload: T;              // Message data
-  timestamp: Date;         // Auto-generated
+  id: string; // Auto-generated
+  type: string; // Message type
+  source: string; // Sender agent
+  target?: string; // Optional recipient
+  payload: T; // Message data
+  timestamp: Date; // Auto-generated
   priority: 'low' | 'normal' | 'high' | 'critical';
   metadata?: Record<string, any>;
 }
@@ -120,12 +126,16 @@ interface EventBusMessage<T = any> {
 ## AuditLogService
 
 ### Purpose
-Comprehensive audit logging for compliance, debugging, and security tracking with persistent storage.
+
+Comprehensive audit logging for compliance, debugging, and security tracking with persistent
+storage.
 
 ### Location
+
 `src/app/core/infrastructure/audit/audit-log.service.ts`
 
 ### Key Features
+
 - Persistent storage using Dexie (IndexedDB)
 - Flexible querying and filtering
 - Change tracking for UPDATE operations
@@ -193,11 +203,19 @@ const purged = await this.auditLog.purgeOldLogs(90); // Older than 90 days
 
 ```typescript
 enum AuditAction {
-  CREATE, READ, UPDATE, DELETE,
-  EXECUTE, APPROVE, REJECT,
-  VOID, REFUND,
-  LOGIN, LOGOUT,
-  EXPORT, IMPORT
+  CREATE,
+  READ,
+  UPDATE,
+  DELETE,
+  EXECUTE,
+  APPROVE,
+  REJECT,
+  VOID,
+  REFUND,
+  LOGIN,
+  LOGOUT,
+  EXPORT,
+  IMPORT,
 }
 ```
 
@@ -206,12 +224,15 @@ enum AuditAction {
 ## CircuitBreakerService
 
 ### Purpose
+
 Implements the Circuit Breaker pattern to prevent cascading failures and provide fault tolerance.
 
 ### Location
+
 `src/app/core/infrastructure/resilience/circuit-breaker.service.ts`
 
 ### Key Features
+
 - Three states: CLOSED, OPEN, HALF_OPEN
 - Configurable failure thresholds
 - Automatic recovery attempts
@@ -273,12 +294,15 @@ OPEN
 ## RetryService
 
 ### Purpose
+
 Implements retry logic with multiple backoff strategies for transient failure recovery.
 
 ### Location
+
 `src/app/core/infrastructure/resilience/retry.service.ts`
 
 ### Key Features
+
 - Multiple strategies (FIXED, EXPONENTIAL, LINEAR)
 - Configurable retry conditions
 - Jitter support (prevents thundering herd)
@@ -371,12 +395,15 @@ class MyService {
 ## TelemetryService
 
 ### Purpose
+
 Collects and manages application metrics and telemetry data for performance monitoring.
 
 ### Location
+
 `src/app/core/infrastructure/telemetry/telemetry.service.ts`
 
 ### Key Features
+
 - Multiple metric types (COUNTER, GAUGE, HISTOGRAM, TIMER)
 - Real-time streaming via RxJS
 - Percentile calculations (p50, p95, p99)
@@ -447,12 +474,15 @@ class MyService {
 ## Agent Monitor Dashboard
 
 ### Purpose
+
 Real-time UI dashboard for monitoring all agents and infrastructure services.
 
 ### Location
+
 `src/app/features/dashboard/agent-monitor/agent-monitor.component.ts`
 
 ### Key Features
+
 - Live agent status display
 - Circuit breaker state visualization
 - Metrics dashboard
@@ -515,27 +545,24 @@ export class PaymentAgent extends BaseAgent {
 
   async processPayment(request: ProcessPaymentRequest): Promise<ProcessPaymentResponse> {
     const startTime = Date.now();
-    
+
     try {
       // Use circuit breaker for external gateway
-      const result = await this.circuitBreaker.execute(
-        'payment-gateway',
-        async () => {
-          // Use retry for transient failures
-          return await this.retry.executeWithExponentialBackoff(
-            'gateway-charge',
-            async () => {
-              return await this.paymentGateway.charge(request);
-            },
-            3,
-            1000
-          );
-        }
-      );
+      const result = await this.circuitBreaker.execute('payment-gateway', async () => {
+        // Use retry for transient failures
+        return await this.retry.executeWithExponentialBackoff(
+          'gateway-charge',
+          async () => {
+            return await this.paymentGateway.charge(request);
+          },
+          3,
+          1000
+        );
+      });
 
       // Record metrics
       this.telemetry.recordCounter('payments.processed', 1, {
-        method: request.method
+        method: request.method,
       });
       this.telemetry.recordHistogram(
         'payment.duration',
@@ -555,8 +582,8 @@ export class PaymentAgent extends BaseAgent {
         duration: Date.now() - startTime,
         metadata: {
           amount: request.amount,
-          method: request.method
-        }
+          method: request.method,
+        },
       });
 
       // Publish event
@@ -564,15 +591,14 @@ export class PaymentAgent extends BaseAgent {
         type: 'PAYMENT_PROCESSED',
         source: this.name,
         payload: result,
-        priority: 'high'
+        priority: 'high',
       });
 
       return result;
-
     } catch (error) {
       // Record error metrics
       this.telemetry.recordCounter('payments.failed', 1, {
-        method: request.method
+        method: request.method,
       });
 
       // Audit log failure
@@ -587,8 +613,8 @@ export class PaymentAgent extends BaseAgent {
         errorMessage: error instanceof Error ? error.message : 'Unknown error',
         metadata: {
           amount: request.amount,
-          method: request.method
-        }
+          method: request.method,
+        },
       });
 
       throw error;
@@ -630,6 +656,7 @@ export class PaymentAgent extends BaseAgent {
 ### 3. Audit Logging
 
 Always log:
+
 - CREATE, UPDATE, DELETE operations
 - Financial transactions
 - Authentication events
@@ -639,6 +666,7 @@ Always log:
 ### 4. Telemetry Metrics
 
 Track:
+
 - Request counts and rates
 - Response times (with percentiles)
 - Error rates
@@ -710,13 +738,13 @@ console.log('Failed retries:', stats.failedRetries);
 // Use pagination
 const logs = await auditLog.query({
   limit: 50,
-  offset: 0
+  offset: 0,
 });
 
 // Filter by date range
 const logs = await auditLog.query({
   startDate: new Date('2024-01-01'),
-  endDate: new Date('2024-01-31')
+  endDate: new Date('2024-01-31'),
 });
 
 // Purge old logs regularly

@@ -32,7 +32,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
   checkAvailability(
     productId: string,
     requestedQuantity: number,
-    currentStock: number,
+    currentStock: number
   ): StockAvailability {
     this.validateRequired(productId, 'Product ID');
     this.validatePositive(requestedQuantity, 'Requested quantity');
@@ -58,7 +58,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     quantity: number,
     currentStock: number,
     reservedStock: number,
-    durationMinutes = 15,
+    durationMinutes = 15
   ): StockReservation {
     this.validateRequired(productId, 'Product ID');
     this.validatePositive(quantity, 'Quantity');
@@ -71,7 +71,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     if (availableStock < quantity) {
       throw new Error(
         `[${this.serviceName}] Insufficient stock available. ` +
-          `Requested: ${quantity}, Available: ${availableStock}`,
+          `Requested: ${quantity}, Available: ${availableStock}`
       );
     }
 
@@ -107,7 +107,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     productId: string,
     currentStock: number,
     adjustmentAmount: number,
-    reason: string,
+    reason: string
   ): StockAdjustment {
     this.validateRequired(productId, 'Product ID');
     this.validateNonNegative(currentStock, CURRENT_STOCK_LABEL);
@@ -118,7 +118,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     if (newQuantity < 0) {
       throw new Error(
         `[${this.serviceName}] Stock adjustment would result in negative stock. ` +
-          `Current: ${currentStock}, Adjustment: ${adjustmentAmount}, Result: ${newQuantity}`,
+          `Current: ${currentStock}, Adjustment: ${adjustmentAmount}, Result: ${newQuantity}`
       );
     }
 
@@ -158,7 +158,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
     if (reservedStock > currentStock) {
       throw new Error(
         `[${this.serviceName}] Reserved stock cannot exceed current stock. ` +
-          `Current: ${currentStock}, Reserved: ${reservedStock}`,
+          `Current: ${currentStock}, Reserved: ${reservedStock}`
       );
     }
 

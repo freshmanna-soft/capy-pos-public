@@ -187,7 +187,7 @@ export class DexieTransactionRepository
         (record) =>
           record.status === TransactionStatus.COMPLETED &&
           record.type === TransactionType.SALE &&
-          !record.deletedAt,
+          !record.deletedAt
       )
       .toArray();
 
@@ -216,7 +216,7 @@ export class DexieTransactionRepository
         (record) =>
           record.status === TransactionStatus.COMPLETED &&
           record.type === TransactionType.SALE &&
-          !record.deletedAt,
+          !record.deletedAt
       )
       .toArray();
 
@@ -232,7 +232,7 @@ export class DexieTransactionRepository
   async getTopProducts(
     startDate: Date,
     endDate: Date,
-    limit: number,
+    limit: number
   ): Promise<
     {
       productId: string;
@@ -249,7 +249,7 @@ export class DexieTransactionRepository
         (record) =>
           record.status === TransactionStatus.COMPLETED &&
           record.type === TransactionType.SALE &&
-          !record.deletedAt,
+          !record.deletedAt
       )
       .toArray();
 
@@ -318,7 +318,7 @@ export class DexieTransactionRepository
         (record) =>
           record.status === TransactionStatus.COMPLETED &&
           record.type === TransactionType.SALE &&
-          !record.deletedAt,
+          !record.deletedAt
       )
       .toArray();
 
@@ -344,7 +344,7 @@ export class DexieTransactionRepository
    */
   async getRefundStats(
     startDate: Date,
-    endDate: Date,
+    endDate: Date
   ): Promise<{
     totalRefunds: number;
     refundCount: number;
@@ -357,13 +357,12 @@ export class DexieTransactionRepository
       .toArray();
 
     const completedSales = records.filter(
-      (r) => r.status === TransactionStatus.COMPLETED && r.type === TransactionType.SALE,
+      (r) => r.status === TransactionStatus.COMPLETED && r.type === TransactionType.SALE
     );
 
     const refundedTransactions = records.filter(
       (r) =>
-        r.status === TransactionStatus.REFUNDED ||
-        r.status === TransactionStatus.PARTIALLY_REFUNDED,
+        r.status === TransactionStatus.REFUNDED || r.status === TransactionStatus.PARTIALLY_REFUNDED
     );
 
     const totalRefunds = refundedTransactions.reduce((sum, r) => sum + r.refundedAmount, 0);
@@ -413,7 +412,7 @@ export class DexieTransactionRepository
   async updateStatus(
     transactionId: string,
     status: TransactionStatus,
-    updatedBy?: string,
+    updatedBy?: string
   ): Promise<Transaction> {
     const transaction = await this.findById(transactionId);
     if (!transaction) {
@@ -472,7 +471,7 @@ export class DexieTransactionRepository
   async addPayment(
     transactionId: string,
     paymentId: string,
-    updatedBy?: string,
+    updatedBy?: string
   ): Promise<Transaction> {
     const transaction = await this.findById(transactionId);
     if (!transaction) {

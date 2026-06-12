@@ -140,7 +140,7 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
    */
   async findPaginated(
     page: number,
-    pageSize: number,
+    pageSize: number
   ): Promise<{
     data: T[];
     total: number;
@@ -185,7 +185,7 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
    */
   protected abstract buildUpdateQuery(
     id: string,
-    data: Partial<T>,
+    data: Partial<T>
   ): { sql: string; params: unknown[] };
 
   /**
@@ -202,7 +202,7 @@ export abstract class BaseSQLiteRepository<T> implements IBaseRepository<T> {
    */
   protected buildSearchWhere(
     searchFields: string[],
-    query: string,
+    query: string
   ): { where: string; params: unknown[] } {
     const conditions = searchFields.map((field) => `${field} LIKE ?`);
     const searchPattern = `%${query}%`;

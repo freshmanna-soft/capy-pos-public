@@ -17,7 +17,7 @@ import {
 import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
 
 export const PRODUCT_REPOSITORY_TOKEN = new InjectionToken<IProductRepository>(
-  'IProductRepository',
+  'IProductRepository'
 );
 
 /**
@@ -335,7 +335,7 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
 
       const totalValue = allProducts.reduce(
         (sum, product) => sum + product.price * product.stock,
-        0,
+        0
       );
 
       const alerts: ILowStockAlert[] = lowStockProducts.map((product) => ({

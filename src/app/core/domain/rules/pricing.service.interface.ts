@@ -88,7 +88,7 @@ export interface IPricingService {
     quantity: number,
     discount?: Discount,
     taxConfig?: TaxConfig,
-    currency?: string,
+    currency?: string
   ): LineItemTotal;
 }
 

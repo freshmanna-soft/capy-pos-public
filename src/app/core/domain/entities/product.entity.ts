@@ -55,7 +55,7 @@ export class Product extends SoftDeletableEntity implements IProduct {
     createdBy?: string,
     updatedBy?: string,
     deletedAt?: Date,
-    deletedBy?: string,
+    deletedBy?: string
   ) {
     super(id, createdAt, updatedAt, createdBy, updatedBy, deletedAt, deletedBy);
     this.validate();
@@ -146,7 +146,7 @@ export class Product extends SoftDeletableEntity implements IProduct {
       this.createdBy,
       this.updatedBy,
       this.deletedAt,
-      this.deletedBy,
+      this.deletedBy
     );
   }
 
@@ -197,7 +197,7 @@ export class Product extends SoftDeletableEntity implements IProduct {
       record['createdBy'] as string | undefined,
       record['updatedBy'] as string | undefined,
       record['deletedAt'] ? new Date(record['deletedAt'] as string) : undefined,
-      record['deletedBy'] as string | undefined,
+      record['deletedBy'] as string | undefined
     );
   }
 }

@@ -92,7 +92,7 @@ export class AdjustStockOnSaleUseCase {
         // Apply negative adjustment (decrease stock by quantity sold)
         const updatedProduct = await this.productRepository.adjustStock(
           item.productId,
-          -item.quantity,
+          -item.quantity
         );
 
         adjustedProducts.push({
@@ -105,7 +105,7 @@ export class AdjustStockOnSaleUseCase {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error(
           `[AdjustStockOnSale] Failed to adjust stock for product ${item.productId}:`,
-          errorMessage,
+          errorMessage
         );
 
         failedAdjustments.push({
@@ -120,7 +120,7 @@ export class AdjustStockOnSaleUseCase {
 
     if (!success) {
       console.warn(
-        `[AdjustStockOnSale] ${failedAdjustments.length} of ${validItems.length} stock adjustments failed. Manual reconciliation required.`,
+        `[AdjustStockOnSale] ${failedAdjustments.length} of ${validItems.length} stock adjustments failed. Manual reconciliation required.`
       );
     }
 

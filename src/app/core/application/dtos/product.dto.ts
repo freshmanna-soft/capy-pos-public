@@ -41,7 +41,7 @@ export class CreateProductDto implements CreateDto, ProductData {
     public description?: string,
     public imageUrl?: string,
     public barcode?: string,
-    public emoji?: string,
+    public emoji?: string
   ) {}
 
   /**
@@ -58,7 +58,7 @@ export class CreateProductDto implements CreateDto, ProductData {
       d['description'] as string | undefined,
       d['imageUrl'] as string | undefined,
       d['barcode'] as string | undefined,
-      d['emoji'] as string | undefined,
+      d['emoji'] as string | undefined
     );
   }
 }
@@ -78,7 +78,7 @@ export class UpdateProductDto implements UpdateDto {
     public description?: string,
     public imageUrl?: string,
     public barcode?: string,
-    public emoji?: string,
+    public emoji?: string
   ) {}
 
   /**
@@ -95,7 +95,7 @@ export class UpdateProductDto implements UpdateDto {
       d['description'] as string | undefined,
       d['imageUrl'] as string | undefined,
       d['barcode'] as string | undefined,
-      d['emoji'] as string | undefined,
+      d['emoji'] as string | undefined
     );
   }
 
@@ -129,7 +129,7 @@ export class ProductResponseDto implements ResponseDto, ProductData {
     public createdBy?: string,
     public updatedBy?: string,
     public deletedAt?: string,
-    public deletedBy?: string,
+    public deletedBy?: string
   ) {}
 
   /**
@@ -153,7 +153,7 @@ export class ProductResponseDto implements ResponseDto, ProductData {
       d['createdBy'] as string | undefined,
       d['updatedBy'] as string | undefined,
       d['deletedAt'] as string | undefined,
-      d['deletedBy'] as string | undefined,
+      d['deletedBy'] as string | undefined
     );
   }
 
@@ -187,7 +187,7 @@ export class ProductFilterDto implements FilterDto {
     public minPrice?: number,
     public maxPrice?: number,
     public inStock?: boolean,
-    public sku?: string,
+    public sku?: string
   ) {}
 
   /**
@@ -205,7 +205,7 @@ export class ProductFilterDto implements FilterDto {
       d['minPrice'] as number | undefined,
       d['maxPrice'] as number | undefined,
       d['inStock'] as boolean | undefined,
-      d['sku'] as string | undefined,
+      d['sku'] as string | undefined
     );
   }
 
@@ -237,7 +237,7 @@ export class BulkProductDto implements BulkOperationDto<CreateProductDto> {
   static fromPlain(data: unknown): BulkProductDto {
     const d = data as Record<string, unknown>;
     const items = (d['items'] as unknown[]).map((item: unknown) =>
-      CreateProductDto.fromPlain(item),
+      CreateProductDto.fromPlain(item)
     );
     return new BulkProductDto(items);
   }
@@ -261,7 +261,7 @@ export class BulkProductUpdateDto implements BulkOperationDto<{
     public items: {
       id: string;
       data: UpdateProductDto;
-    }[],
+    }[]
   ) {}
 
   /**
@@ -273,7 +273,7 @@ export class BulkProductUpdateDto implements BulkOperationDto<{
       (item: Record<string, unknown>) => ({
         id: item['id'] as string,
         data: UpdateProductDto.fromPlain(item['data']),
-      }),
+      })
     );
     return new BulkProductUpdateDto(items);
   }

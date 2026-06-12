@@ -70,7 +70,7 @@ export interface DailySalesReportResult {
 })
 export class GetDailySalesReportUseCase {
   private readonly transactionRepository: ITransactionRepository = inject<ITransactionRepository>(
-    'ITransactionRepository' as never,
+    'ITransactionRepository' as never
   );
 
   /** Loading state signal */
@@ -111,7 +111,7 @@ export class GetDailySalesReportUseCase {
 
       // Filter to only completed transactions
       const completedTransactions = allTransactions.filter(
-        (t) => t.status === TransactionStatus.COMPLETED,
+        (t) => t.status === TransactionStatus.COMPLETED
       );
 
       // Aggregate metrics
@@ -156,7 +156,7 @@ export class GetDailySalesReportUseCase {
   private aggregateReport(
     transactions: Transaction[],
     startDate: Date,
-    endDate: Date,
+    endDate: Date
   ): DailySalesReportResult {
     const transactionCount = transactions.length;
     const totalRevenue = transactions.reduce((sum, t) => sum + t.total, 0);

@@ -5,10 +5,10 @@ module.exports = {
       'progress-bar',
       'html:cucumber-report.html',
       'json:cucumber-report.json',
-      '@cucumber/pretty-formatter'
+      '@cucumber/pretty-formatter',
     ],
     formatOptions: {
-      snippetInterface: 'async-await'
+      snippetInterface: 'async-await',
     },
     parallel: 2,
     retry: 0,
@@ -16,8 +16,8 @@ module.exports = {
     dryRun: false,
     failFast: false,
     paths: ['features/**/*.feature'],
-    publishQuiet: true
-  }
+    publishQuiet: true,
+  },
 };
 
 // Made with Bob

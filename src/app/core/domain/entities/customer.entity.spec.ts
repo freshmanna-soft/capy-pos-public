@@ -41,7 +41,7 @@ describe('Customer Entity', () => {
             phone: testPhone,
             status: CustomerStatus.ACTIVE,
             loyaltyPoints: -100,
-          }),
+          })
       ).toThrow('Loyalty points cannot be negative');
     });
   });
@@ -170,7 +170,7 @@ describe('Customer Entity', () => {
           state: 'NY',
           zipCode: '10001',
         },
-        'user-1',
+        'user-1'
       );
 
       expect(customer.name).toBe('Jane Doe');
@@ -191,7 +191,7 @@ describe('Customer Entity', () => {
 
     it('should validate after profile update', () => {
       expect(() =>
-        customer.updateProfile({ name: '', email: 'valid@email.com', phone: '+1-555-0000' }),
+        customer.updateProfile({ name: '', email: 'valid@email.com', phone: '+1-555-0000' })
       ).toThrow('Customer name is required');
     });
   });

@@ -223,7 +223,7 @@ describe('CustomerBuilder', () => {
 
     it('should throw when loyaltyPoints is negative', () => {
       expect(() => builder.withLoyaltyPoints(-100).build()).toThrow(
-        'Loyalty points cannot be negative',
+        'Loyalty points cannot be negative'
       );
     });
   });

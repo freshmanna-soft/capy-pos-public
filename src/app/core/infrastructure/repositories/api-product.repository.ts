@@ -43,7 +43,7 @@ export class ApiProductRepository implements IProductRepository {
   async findByCategory(category: string): Promise<Product[]> {
     try {
       const response = await firstValueFrom(
-        this.http.get<unknown[]>(`${this.apiUrl}/category/${category}`),
+        this.http.get<unknown[]>(`${this.apiUrl}/category/${category}`)
       );
       return response.map((data) => this.mapToEntity(data));
     } catch (error) {
@@ -57,7 +57,7 @@ export class ApiProductRepository implements IProductRepository {
       const response = await firstValueFrom(
         this.http.get<unknown[]>(`${this.apiUrl}/search`, {
           params: { q: query },
-        }),
+        })
       );
       return response.map((data) => this.mapToEntity(data));
     } catch (error) {
@@ -71,7 +71,7 @@ export class ApiProductRepository implements IProductRepository {
       const response = await firstValueFrom(
         this.http.get<unknown[]>(`${this.apiUrl}/low-stock`, {
           params: { threshold: threshold.toString() },
-        }),
+        })
       );
       return response.map((data) => this.mapToEntity(data));
     } catch (error) {
@@ -93,7 +93,7 @@ export class ApiProductRepository implements IProductRepository {
   async updateStock(productId: string, quantity: number): Promise<Product> {
     try {
       const response = await firstValueFrom(
-        this.http.patch<unknown>(`${this.apiUrl}/${productId}/stock`, { quantity }),
+        this.http.patch<unknown>(`${this.apiUrl}/${productId}/stock`, { quantity })
       );
       return this.mapToEntity(response);
     } catch (error) {
@@ -105,7 +105,7 @@ export class ApiProductRepository implements IProductRepository {
   async adjustStock(productId: string, adjustment: number): Promise<Product> {
     try {
       const response = await firstValueFrom(
-        this.http.patch<unknown>(`${this.apiUrl}/${productId}/adjust-stock`, { adjustment }),
+        this.http.patch<unknown>(`${this.apiUrl}/${productId}/adjust-stock`, { adjustment })
       );
       return this.mapToEntity(response);
     } catch (error) {
@@ -117,7 +117,7 @@ export class ApiProductRepository implements IProductRepository {
   async updatePrice(productId: string, price: number, cost?: number): Promise<Product> {
     try {
       const response = await firstValueFrom(
-        this.http.patch<unknown>(`${this.apiUrl}/${productId}/price`, { price, cost }),
+        this.http.patch<unknown>(`${this.apiUrl}/${productId}/price`, { price, cost })
       );
       return this.mapToEntity(response);
     } catch (error) {
@@ -148,7 +148,7 @@ export class ApiProductRepository implements IProductRepository {
   async update(id: string, productData: Partial<Product>): Promise<Product> {
     try {
       const response = await firstValueFrom(
-        this.http.patch<unknown>(`${this.apiUrl}/${id}`, productData),
+        this.http.patch<unknown>(`${this.apiUrl}/${id}`, productData)
       );
       return this.mapToEntity(response);
     } catch (error) {
@@ -182,7 +182,7 @@ export class ApiProductRepository implements IProductRepository {
   async count(): Promise<number> {
     try {
       const response = await firstValueFrom(
-        this.http.get<{ count: number }>(`${this.apiUrl}/count`),
+        this.http.get<{ count: number }>(`${this.apiUrl}/count`)
       );
       return response.count;
     } catch (error) {
@@ -196,8 +196,8 @@ export class ApiProductRepository implements IProductRepository {
       const response = await firstValueFrom(
         this.http.post<unknown[]>(
           `${this.apiUrl}/bulk`,
-          products.map((p) => p.toJSON()),
-        ),
+          products.map((p) => p.toJSON())
+        )
       );
       return response.map((data) => this.mapToEntity(data));
     } catch (error) {
@@ -209,7 +209,7 @@ export class ApiProductRepository implements IProductRepository {
   async bulkUpdate(updates: { id: string; data: Partial<Product> }[]): Promise<Product[]> {
     try {
       const response = await firstValueFrom(
-        this.http.patch<unknown[]>(`${this.apiUrl}/bulk`, updates),
+        this.http.patch<unknown[]>(`${this.apiUrl}/bulk`, updates)
       );
       return response.map((data) => this.mapToEntity(data));
     } catch (error) {

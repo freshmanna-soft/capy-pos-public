@@ -35,7 +35,7 @@ describe('GetTransactionHistoryUseCase', () => {
         subtotal: number;
       }[];
       receiptNumber: string;
-    }> = {},
+    }> = {}
   ): Transaction => {
     const builder = new TransactionBuilder()
       .withId(overrides.id ?? `TXN-${Math.random().toString(36).slice(2)}`)
@@ -43,7 +43,7 @@ describe('GetTransactionHistoryUseCase', () => {
         overrides.items ?? [
           { productId: 'P1', productName: 'Product 1', quantity: 2, unitPrice: 10, subtotal: 20 },
           { productId: 'P2', productName: 'Product 2', quantity: 1, unitPrice: 15, subtotal: 15 },
-        ],
+        ]
       )
       .withSubtotal(overrides.total ?? 35)
       .withTaxRate(0.08)
@@ -159,7 +159,7 @@ describe('GetTransactionHistoryUseCase', () => {
         createMockTransaction({
           id: `TXN-${i}`,
           createdAt: new Date(2026, 5, 9, 10, i),
-        }),
+        })
       );
       mockRepository['findCompleted'].mockResolvedValue(transactions);
 
@@ -177,7 +177,7 @@ describe('GetTransactionHistoryUseCase', () => {
         createMockTransaction({
           id: `TXN-${i}`,
           createdAt: new Date(2026, 5, 9, 10, i),
-        }),
+        })
       );
       mockRepository['findCompleted'].mockResolvedValue(transactions);
 
@@ -192,7 +192,7 @@ describe('GetTransactionHistoryUseCase', () => {
         createMockTransaction({
           id: `TXN-${i}`,
           createdAt: new Date(2026, 5, 9, 10, i),
-        }),
+        })
       );
       mockRepository['findCompleted'].mockResolvedValue(transactions);
 

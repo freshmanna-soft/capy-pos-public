@@ -2,12 +2,12 @@ import { test, expect, Page } from '@playwright/test';
 
 /**
  * POS Terminal E2E Tests - Search to Cart Flow
- * 
+ *
  * Story: [S1-6] E2E Test: Search to Cart Flow
- * 
+ *
  * Covers the complete user journey from searching products
  * to managing the shopping cart, including edge cases.
- * 
+ *
  * Acceptance Criteria:
  * - Search for product by name → results appear
  * - Click product → added to cart
@@ -181,7 +181,7 @@ class PosTerminalPage {
    */
   async getStockStatus(index: number): Promise<string> {
     const stockStatus = this.productResults.nth(index).getByTestId('stock-status');
-    return await stockStatus.textContent() ?? '';
+    return (await stockStatus.textContent()) ?? '';
   }
 }
 

@@ -103,7 +103,7 @@ describe('SettingsComponent', () => {
     fixture.detectChanges();
 
     const input = fixture.nativeElement.querySelector(
-      '[data-testid="input-threshold"]',
+      '[data-testid="input-threshold"]'
     ) as HTMLInputElement;
     expect(input).toBeTruthy();
   });

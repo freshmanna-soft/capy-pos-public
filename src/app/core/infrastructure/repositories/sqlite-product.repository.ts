@@ -131,7 +131,7 @@ export class SQLiteProductRepository
    */
   protected buildUpdateQuery(
     id: string,
-    data: Partial<Product>,
+    data: Partial<Product>
   ): { sql: string; params: unknown[] } {
     const updates: string[] = [];
     const params: unknown[] = [];

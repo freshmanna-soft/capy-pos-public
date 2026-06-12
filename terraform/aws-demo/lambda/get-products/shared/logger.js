@@ -9,7 +9,7 @@ function log(level, message, data = {}) {
     level,
     message,
     ...data,
-    traceId: process.env._X_AMZN_TRACE_ID || 'no-trace'
+    traceId: process.env._X_AMZN_TRACE_ID || 'no-trace',
   };
   console.log(JSON.stringify(entry));
 }
@@ -21,9 +21,9 @@ function response(statusCode, body) {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': 'Content-Type,X-Amzn-Trace-Id',
-      'X-Trace-Id': process.env._X_AMZN_TRACE_ID || 'unavailable'
+      'X-Trace-Id': process.env._X_AMZN_TRACE_ID || 'unavailable',
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   };
 }
 

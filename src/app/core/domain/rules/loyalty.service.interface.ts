@@ -1,9 +1,9 @@
 /**
  * Loyalty Service Interface
- * 
+ *
  * Defines the contract for customer loyalty program operations including
  * points calculation, rewards management, and tier progression.
- * 
+ *
  * @interface ILoyaltyService
  */
 
@@ -14,7 +14,7 @@ export enum LoyaltyTier {
   BRONZE = 'BRONZE',
   SILVER = 'SILVER',
   GOLD = 'GOLD',
-  PLATINUM = 'PLATINUM'
+  PLATINUM = 'PLATINUM',
 }
 
 /**
@@ -73,14 +73,14 @@ export interface PointsTransaction {
 
 /**
  * Loyalty Service Interface
- * 
+ *
  * Provides methods for managing customer loyalty programs including
  * points calculation, tier management, and reward redemption.
  */
 export interface ILoyaltyService {
   /**
    * Calculate loyalty points earned from a purchase
-   * 
+   *
    * @param purchaseAmount - The purchase amount in base currency
    * @param currentTier - The customer's current loyalty tier
    * @param isSpecialPromotion - Whether special promotion multiplier applies
@@ -95,7 +95,7 @@ export interface ILoyaltyService {
 
   /**
    * Determine loyalty tier based on total points
-   * 
+   *
    * @param totalPoints - The customer's total accumulated points
    * @returns The appropriate loyalty tier
    * @throws Error if total points is negative
@@ -104,7 +104,7 @@ export interface ILoyaltyService {
 
   /**
    * Get tier configuration details
-   * 
+   *
    * @param tier - The loyalty tier to get configuration for
    * @returns Tier configuration including thresholds and benefits
    */
@@ -112,7 +112,7 @@ export interface ILoyaltyService {
 
   /**
    * Calculate tier progression details
-   * 
+   *
    * @param currentPoints - The customer's current point balance
    * @returns Tier progression information
    * @throws Error if current points is negative
@@ -121,7 +121,7 @@ export interface ILoyaltyService {
 
   /**
    * Redeem points for a reward
-   * 
+   *
    * @param customerId - The customer identifier
    * @param rewardId - The reward identifier
    * @param pointsCost - The cost in points
@@ -140,7 +140,7 @@ export interface ILoyaltyService {
 
   /**
    * Record a points transaction
-   * 
+   *
    * @param customerId - The customer identifier
    * @param points - The points amount (positive for earned, negative for redeemed)
    * @param type - The transaction type
@@ -159,7 +159,7 @@ export interface ILoyaltyService {
 
   /**
    * Calculate discount amount based on tier
-   * 
+   *
    * @param amount - The purchase amount
    * @param tier - The customer's loyalty tier
    * @returns The discount amount
@@ -169,7 +169,7 @@ export interface ILoyaltyService {
 
   /**
    * Check if customer has sufficient points for redemption
-   * 
+   *
    * @param currentBalance - The customer's current point balance
    * @param requiredPoints - The points required for redemption
    * @returns True if sufficient points available

@@ -61,7 +61,7 @@ export class ProductMapper extends BaseMapper<
       entity.createdBy,
       entity.updatedBy,
       this.dateToIsoString(entity.deletedAt),
-      entity.deletedBy,
+      entity.deletedBy
     );
   }
 

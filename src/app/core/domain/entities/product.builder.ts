@@ -129,7 +129,7 @@ export class ProductBuilder
       this._createdBy,
       this._updatedBy,
       this._deletedAt,
-      this._deletedBy,
+      this._deletedBy
     );
   }
 }

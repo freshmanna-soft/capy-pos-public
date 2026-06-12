@@ -54,7 +54,7 @@ export interface IPaymentAgent extends IBaseAgent {
    * Generate payment report
    */
   generatePaymentReport(
-    request: GeneratePaymentReportRequest,
+    request: GeneratePaymentReportRequest
   ): Promise<GeneratePaymentReportResponse>;
 
   /**

@@ -121,7 +121,7 @@ describe('Transaction Entity', () => {
     it('should accept optional cancelledAt and cancellationReason', () => {
       const date = new Date('2025-01-02');
       const txn = new Transaction(
-        createValidParams({ cancelledAt: date, cancellationReason: 'Customer request' }),
+        createValidParams({ cancelledAt: date, cancellationReason: 'Customer request' })
       );
       expect(txn.cancelledAt).toEqual(date);
       expect(txn.cancellationReason).toBe('Customer request');
@@ -132,7 +132,7 @@ describe('Transaction Entity', () => {
         createValidParams({
           status: TransactionStatus.PARTIALLY_REFUNDED,
           refundedAmount: 5.0,
-        }),
+        })
       );
       expect(txn.refundedAmount).toBe(5.0);
     });
@@ -141,55 +141,55 @@ describe('Transaction Entity', () => {
   describe('Validation', () => {
     it('should throw if items array is empty', () => {
       expect(() => new Transaction(createValidParams({ items: [] }))).toThrow(
-        'Transaction must have at least one item',
+        'Transaction must have at least one item'
       );
     });
 
     it('should throw if subtotal is negative', () => {
       expect(() => new Transaction(createValidParams({ subtotal: -1 }))).toThrow(
-        'Subtotal cannot be negative',
+        'Subtotal cannot be negative'
       );
     });
 
     it('should throw if taxRate is negative', () => {
       expect(() => new Transaction(createValidParams({ taxRate: -0.1 }))).toThrow(
-        'Tax rate must be between 0 and 1',
+        'Tax rate must be between 0 and 1'
       );
     });
 
     it('should throw if taxRate exceeds 1', () => {
       expect(() => new Transaction(createValidParams({ taxRate: 1.5 }))).toThrow(
-        'Tax rate must be between 0 and 1',
+        'Tax rate must be between 0 and 1'
       );
     });
 
     it('should throw if taxAmount is negative', () => {
       expect(() => new Transaction(createValidParams({ taxAmount: -1 }))).toThrow(
-        'Tax amount cannot be negative',
+        'Tax amount cannot be negative'
       );
     });
 
     it('should throw if discountAmount is negative', () => {
       expect(() => new Transaction(createValidParams({ discountAmount: -1 }))).toThrow(
-        'Discount amount cannot be negative',
+        'Discount amount cannot be negative'
       );
     });
 
     it('should throw if total is negative', () => {
       expect(() => new Transaction(createValidParams({ total: -1 }))).toThrow(
-        'Total cannot be negative',
+        'Total cannot be negative'
       );
     });
 
     it('should throw if refundedAmount is negative', () => {
       expect(() => new Transaction(createValidParams({ refundedAmount: -1 }))).toThrow(
-        'Refunded amount cannot be negative',
+        'Refunded amount cannot be negative'
       );
     });
 
     it('should throw if refundedAmount exceeds total', () => {
       expect(() => new Transaction(createValidParams({ total: 10, refundedAmount: 15 }))).toThrow(
-        'Refunded amount cannot exceed total',
+        'Refunded amount cannot exceed total'
       );
     });
 
@@ -266,7 +266,7 @@ describe('Transaction Entity', () => {
     it('should throw if transaction is COMPLETED', () => {
       const txn = new Transaction(createValidParams({ status: TransactionStatus.COMPLETED }));
       expect(() => txn.cancel('Reason')).toThrow(
-        'Cannot cancel a completed transaction. Use refund instead.',
+        'Cannot cancel a completed transaction. Use refund instead.'
       );
     });
 
@@ -354,7 +354,7 @@ describe('Transaction Entity', () => {
         createValidParams({
           status: TransactionStatus.REFUNDED,
           refundedAmount: 14.3,
-        }),
+        })
       );
       expect(txn.isRefundable()).toBe(false);
     });
@@ -396,7 +396,7 @@ describe('Transaction Entity', () => {
         createValidParams({
           status: TransactionStatus.REFUNDED,
           refundedAmount: 14.3,
-        }),
+        })
       );
       expect(txn.isFullyRefunded()).toBe(true);
     });
@@ -406,7 +406,7 @@ describe('Transaction Entity', () => {
         createValidParams({
           status: TransactionStatus.PARTIALLY_REFUNDED,
           refundedAmount: 5.0,
-        }),
+        })
       );
       expect(txn.isPartiallyRefunded()).toBe(true);
     });
@@ -431,7 +431,7 @@ describe('Transaction Entity', () => {
           status: TransactionStatus.COMPLETED,
           createdAt,
           completedAt,
-        }),
+        })
       );
       expect(txn.getTransactionDuration()).toBe(300000); // 5 minutes in ms
     });
@@ -441,7 +441,7 @@ describe('Transaction Entity', () => {
         createValidParams({
           status: TransactionStatus.PARTIALLY_REFUNDED,
           refundedAmount: 4.3,
-        }),
+        })
       );
       expect(txn.getEffectiveTotal()).toBeCloseTo(10.0);
     });
@@ -584,7 +584,7 @@ describe('Transaction Entity', () => {
           paymentIds: ['pay-1'],
           receiptNumber: 'REC-001',
           notes: 'Test',
-        }),
+        })
       );
       const clone = txn.clone();
       expect(clone.id).toBe(txn.id);
@@ -613,7 +613,7 @@ describe('Transaction Entity', () => {
           paymentIds: ['pay-1'],
           receiptNumber: 'REC-001',
           notes: 'Test note',
-        }),
+        })
       );
       const json = txn.toJSON();
 
@@ -644,7 +644,7 @@ describe('Transaction Entity', () => {
         createValidParams({
           status: TransactionStatus.COMPLETED,
           completedAt,
-        }),
+        })
       );
       const json = txn.toJSON();
       expect(json['completedAt']).toBe(completedAt.toISOString());
@@ -657,7 +657,7 @@ describe('Transaction Entity', () => {
           status: TransactionStatus.CANCELLED,
           cancelledAt,
           cancellationReason: 'Test reason',
-        }),
+        })
       );
       const json = txn.toJSON();
       expect(json['cancelledAt']).toBe(cancelledAt.toISOString());
@@ -672,7 +672,7 @@ describe('Transaction Entity', () => {
           status: TransactionStatus.COMPLETED,
           createdAt,
           completedAt,
-        }),
+        })
       );
       const json = txn.toJSON();
       expect(json['transactionDuration']).toBe(600000);

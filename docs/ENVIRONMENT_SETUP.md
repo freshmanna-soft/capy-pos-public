@@ -2,7 +2,8 @@
 
 ## Overview
 
-Capy-POS uses environment-specific configuration files to manage settings across different deployment environments. This guide explains how to set up and use these configurations.
+Capy-POS uses environment-specific configuration files to manage settings across different
+deployment environments. This guide explains how to set up and use these configurations.
 
 ## Environment Files
 
@@ -57,16 +58,19 @@ This uses `src/environments/environment.ts` and `.env.development`.
 ### 3. Building for Different Environments
 
 #### Development Build
+
 ```bash
 ng build --configuration=development
 ```
 
 #### Staging Build
+
 ```bash
 ng build --configuration=staging
 ```
 
 #### Production Build
+
 ```bash
 ng build --configuration=production
 # or simply
@@ -74,6 +78,7 @@ ng build
 ```
 
 #### Test Build
+
 ```bash
 ng build --configuration=test
 ```
@@ -222,7 +227,7 @@ export class ApiService {
 
   getData() {
     return this.http.get(`${this.apiUrl}/data`, {
-      timeout: this.timeout
+      timeout: this.timeout,
     });
   }
 }
@@ -257,6 +262,7 @@ export class ApiService {
 ## Support
 
 For issues or questions:
+
 - Check `PROJECT_STATUS.md` for project status
 - Review `ARCHITECTURE.md` for system design
 - See `INFRASTRUCTURE_GUIDE.md` for infrastructure details

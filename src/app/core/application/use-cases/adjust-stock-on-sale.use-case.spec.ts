@@ -23,7 +23,7 @@ describe('AdjustStockOnSaleUseCase', () => {
       overrides.lowStockThreshold ?? 10,
       overrides.reorderQuantity ?? 20,
       overrides.cost ?? 8.0,
-      overrides.isActive ?? true,
+      overrides.isActive ?? true
     );
   };
 

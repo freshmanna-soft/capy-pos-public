@@ -1,9 +1,9 @@
 /**
  * Inventory Service Interface
- * 
+ *
  * Defines the contract for inventory management operations including
  * stock checking, reservation, and availability calculations.
- * 
+ *
  * @interface IInventoryService
  */
 
@@ -53,14 +53,14 @@ export interface StockAdjustment {
 
 /**
  * Inventory Service Interface
- * 
+ *
  * Provides methods for managing product inventory including stock checks,
  * reservations, adjustments, and availability calculations.
  */
 export interface IInventoryService {
   /**
    * Check if sufficient stock is available for a product
-   * 
+   *
    * @param productId - The product identifier
    * @param requestedQuantity - The quantity to check
    * @param currentStock - The current stock level
@@ -75,7 +75,7 @@ export interface IInventoryService {
 
   /**
    * Reserve stock for a product (e.g., during checkout)
-   * 
+   *
    * @param productId - The product identifier
    * @param quantity - The quantity to reserve
    * @param currentStock - The current stock level
@@ -94,7 +94,7 @@ export interface IInventoryService {
 
   /**
    * Release a stock reservation
-   * 
+   *
    * @param reservationId - The reservation identifier
    * @param quantity - The quantity to release
    * @returns The released quantity
@@ -104,7 +104,7 @@ export interface IInventoryService {
 
   /**
    * Adjust stock levels (add or remove inventory)
-   * 
+   *
    * @param productId - The product identifier
    * @param currentStock - The current stock level
    * @param adjustmentAmount - The amount to adjust (positive to add, negative to remove)
@@ -121,22 +121,18 @@ export interface IInventoryService {
 
   /**
    * Check if stock is below threshold (low stock alert)
-   * 
+   *
    * @param productId - The product identifier
    * @param currentStock - The current stock level
    * @param threshold - The low stock threshold
    * @returns Low stock threshold details
    * @throws Error if productId is empty or values are invalid
    */
-  checkLowStock(
-    productId: string,
-    currentStock: number,
-    threshold: number
-  ): LowStockThreshold;
+  checkLowStock(productId: string, currentStock: number, threshold: number): LowStockThreshold;
 
   /**
    * Calculate available stock after reservations
-   * 
+   *
    * @param currentStock - The current stock level
    * @param reservedStock - The currently reserved stock
    * @returns Available stock quantity
@@ -146,17 +142,13 @@ export interface IInventoryService {
 
   /**
    * Validate if a stock operation is allowed
-   * 
+   *
    * @param currentStock - The current stock level
    * @param requestedQuantity - The quantity requested
    * @param reservedStock - The currently reserved stock
    * @returns True if operation is allowed
    */
-  canFulfillOrder(
-    currentStock: number,
-    requestedQuantity: number,
-    reservedStock: number
-  ): boolean;
+  canFulfillOrder(currentStock: number, requestedQuantity: number, reservedStock: number): boolean;
 }
 
 // Made with Bob

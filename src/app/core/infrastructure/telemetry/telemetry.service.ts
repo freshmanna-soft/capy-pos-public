@@ -174,7 +174,7 @@ export class TelemetryService {
   async measureAsync<T>(
     name: string,
     fn: () => Promise<T>,
-    tags?: Record<string, string>,
+    tags?: Record<string, string>
   ): Promise<T> {
     const stopTimer = this.startTimer(name, tags);
     try {
@@ -194,7 +194,7 @@ export class TelemetryService {
   trackEvent(
     name: string,
     properties?: Record<string, unknown>,
-    measurements?: Record<string, number>,
+    measurements?: Record<string, number>
   ): void {
     const event: TelemetryEvent = {
       name,

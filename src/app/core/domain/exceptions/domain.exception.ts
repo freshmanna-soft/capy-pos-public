@@ -13,7 +13,7 @@
 export class DomainException extends Error {
   constructor(
     public readonly code: string,
-    message: string,
+    message: string
   ) {
     super(message);
     this.name = 'DomainException';
@@ -29,7 +29,7 @@ export class DomainException extends Error {
 export class EntityNotFoundException extends DomainException {
   constructor(
     public readonly entityType: string,
-    public readonly entityId: string,
+    public readonly entityId: string
   ) {
     super('ENTITY_NOT_FOUND', `${entityType} with id '${entityId}' not found`);
     this.name = 'EntityNotFoundException';
@@ -45,7 +45,7 @@ export class EntityNotFoundException extends DomainException {
 export class ValidationException extends DomainException {
   constructor(
     public readonly field: string,
-    message: string,
+    message: string
   ) {
     super('VALIDATION_ERROR', message);
     this.name = 'ValidationException';
@@ -63,7 +63,7 @@ export class DuplicateEntityException extends DomainException {
   constructor(
     public readonly entityType: string,
     public readonly field: string,
-    public readonly value: string,
+    public readonly value: string
   ) {
     super('DUPLICATE_ENTITY', `${entityType} with ${field} '${value}' already exists`);
     this.name = 'DuplicateEntityException';
@@ -81,11 +81,11 @@ export class InsufficientStockException extends DomainException {
     public readonly productId: string,
     public readonly productName: string,
     public readonly available: number,
-    public readonly requested: number,
+    public readonly requested: number
   ) {
     super(
       'INSUFFICIENT_STOCK',
-      `Insufficient stock for '${productName}': available ${available}, requested ${requested}`,
+      `Insufficient stock for '${productName}': available ${available}, requested ${requested}`
     );
     this.name = 'InsufficientStockException';
     Object.setPrototypeOf(this, InsufficientStockException.prototype);
@@ -101,11 +101,11 @@ export class InvalidStateException extends DomainException {
   constructor(
     public readonly entityType: string,
     public readonly currentState: string,
-    public readonly attemptedOperation: string,
+    public readonly attemptedOperation: string
   ) {
     super(
       'INVALID_STATE',
-      `Cannot ${attemptedOperation} on ${entityType}: current state is '${currentState}'`,
+      `Cannot ${attemptedOperation} on ${entityType}: current state is '${currentState}'`
     );
     this.name = 'InvalidStateException';
     Object.setPrototypeOf(this, InvalidStateException.prototype);

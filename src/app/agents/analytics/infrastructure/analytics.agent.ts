@@ -30,7 +30,7 @@ export class AnalyticsAgent extends BaseAgent implements IAnalyticsAgent {
     super(
       'analytics-agent',
       'AnalyticsAgent',
-      'Handles data analytics, reporting, and insights generation',
+      'Handles data analytics, reporting, and insights generation'
     );
   }
 
@@ -82,7 +82,7 @@ export class AnalyticsAgent extends BaseAgent implements IAnalyticsAgent {
   }
 
   async generateInventoryAnalytics(
-    _request: InventoryAnalyticsRequest,
+    _request: InventoryAnalyticsRequest
   ): Promise<InventoryAnalyticsResponse> {
     return {
       totalProducts: 100,
@@ -93,7 +93,7 @@ export class AnalyticsAgent extends BaseAgent implements IAnalyticsAgent {
   }
 
   async generateCustomerAnalytics(
-    _request: CustomerAnalyticsRequest,
+    _request: CustomerAnalyticsRequest
   ): Promise<CustomerAnalyticsResponse> {
     return {
       totalCustomers: 500,

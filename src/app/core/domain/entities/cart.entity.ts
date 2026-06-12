@@ -8,7 +8,7 @@ export class CartItem {
   constructor(
     public readonly product: Product,
     public quantity: number,
-    public readonly addedAt: Date = new Date(),
+    public readonly addedAt: Date = new Date()
   ) {
     this.validate();
   }
@@ -55,7 +55,7 @@ export class Cart {
     public readonly id: string,
     public readonly customerId?: string,
     public readonly createdAt: Date = new Date(),
-    public updatedAt: Date = new Date(),
+    public updatedAt: Date = new Date()
   ) {
     if (!this.id || this.id.trim() === '') {
       throw new Error('Cart ID is required');

@@ -7,7 +7,7 @@ import { Injectable } from '@angular/core';
 export class CircuitBreakerError extends Error {
   constructor(
     public readonly circuitName: string,
-    public readonly state: CircuitState,
+    public readonly state: CircuitState
   ) {
     super(`Circuit breaker is ${state} for ${circuitName}`);
     this.name = 'CircuitBreakerError';
@@ -75,7 +75,7 @@ export class CircuitBreaker {
 
   constructor(
     private readonly name: string,
-    private readonly config: CircuitBreakerConfig,
+    private readonly config: CircuitBreakerConfig
   ) {}
 
   /**
@@ -177,7 +177,7 @@ export class CircuitBreaker {
 
     // Remove old failures outside monitoring period
     this.failureTimestamps = this.failureTimestamps.filter(
-      (timestamp) => now - timestamp < this.config.monitoringPeriod,
+      (timestamp) => now - timestamp < this.config.monitoringPeriod
     );
 
     if (this.state === CircuitState.HALF_OPEN) {
@@ -192,7 +192,7 @@ export class CircuitBreaker {
       this.state = CircuitState.OPEN;
       this.nextAttemptTime = new Date(Date.now() + this.config.timeout);
       console.log(
-        `[CircuitBreaker:${this.name}] Opened after ${this.failureTimestamps.length} failures`,
+        `[CircuitBreaker:${this.name}] Opened after ${this.failureTimestamps.length} failures`
       );
     }
   }
@@ -239,7 +239,7 @@ export class CircuitBreakerService {
   async execute<T>(
     name: string,
     fn: () => Promise<T>,
-    config?: Partial<CircuitBreakerConfig>,
+    config?: Partial<CircuitBreakerConfig>
   ): Promise<T> {
     const breaker = this.getBreaker(name, config);
     return breaker.execute(fn);

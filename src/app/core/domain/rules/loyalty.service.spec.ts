@@ -27,12 +27,12 @@ describe('LoyaltyService', () => {
         expect(result.bonusPoints).toBe(expectedBonus);
         expect(result.totalPoints).toBe(expectedTotal);
         expect(result.multiplier).toBe(expectedMultiplier);
-      },
+      }
     );
 
     it('should throw error for negative purchase amount', () => {
       expect(() => service.calculatePoints(-100, LoyaltyTier.BRONZE)).toThrow(
-        '[LoyaltyService] Purchase amount must be non-negative',
+        '[LoyaltyService] Purchase amount must be non-negative'
       );
     });
   });
@@ -59,7 +59,7 @@ describe('LoyaltyService', () => {
 
     it('should throw error for negative points', () => {
       expect(() => service.determineTier(-100)).toThrow(
-        '[LoyaltyService] Total points must be non-negative',
+        '[LoyaltyService] Total points must be non-negative'
       );
     });
   });
@@ -145,7 +145,7 @@ describe('LoyaltyService', () => {
 
     it('should throw error for negative points', () => {
       expect(() => service.calculateTierProgression(-100)).toThrow(
-        '[LoyaltyService] Current points must be non-negative',
+        '[LoyaltyService] Current points must be non-negative'
       );
     });
   });
@@ -160,7 +160,7 @@ describe('LoyaltyService', () => {
       expect(result.redeemedAt).toBeInstanceOf(Date);
       expect(result.expiresAt).toBeInstanceOf(Date);
       expect(result.expiresAt!.getTime() - result.redeemedAt.getTime()).toBe(
-        30 * 24 * 60 * 60 * 1000,
+        30 * 24 * 60 * 60 * 1000
       );
     });
 
@@ -172,25 +172,25 @@ describe('LoyaltyService', () => {
 
     it('should throw error for insufficient points', () => {
       expect(() => service.redeemReward('C1', 'R1', 1000, 500)).toThrow(
-        '[LoyaltyService] Insufficient points. Required: 1000, Available: 500',
+        '[LoyaltyService] Insufficient points. Required: 1000, Available: 500'
       );
     });
 
     it('should throw error for empty customer ID', () => {
       expect(() => service.redeemReward('', 'R1', 500, 1000)).toThrow(
-        '[LoyaltyService] Customer ID is required',
+        '[LoyaltyService] Customer ID is required'
       );
     });
 
     it('should throw error for empty reward ID', () => {
       expect(() => service.redeemReward('C1', '', 500, 1000)).toThrow(
-        '[LoyaltyService] Reward ID is required',
+        '[LoyaltyService] Reward ID is required'
       );
     });
 
     it('should throw error for negative points cost', () => {
       expect(() => service.redeemReward('C1', 'R1', -500, 1000)).toThrow(
-        '[LoyaltyService] Points cost must be positive',
+        '[LoyaltyService] Points cost must be positive'
       );
     });
   });
@@ -234,31 +234,31 @@ describe('LoyaltyService', () => {
 
     it('should throw error for positive points in REDEEMED transaction', () => {
       expect(() => service.recordTransaction('C1', 100, 'REDEEMED', 'Test', 500)).toThrow(
-        '[LoyaltyService] Points for REDEEMED transactions must be negative',
+        '[LoyaltyService] Points for REDEEMED transactions must be negative'
       );
     });
 
     it('should throw error for positive points in EXPIRED transaction', () => {
       expect(() => service.recordTransaction('C1', 100, 'EXPIRED', 'Test', 500)).toThrow(
-        '[LoyaltyService] Points for EXPIRED transactions must be negative',
+        '[LoyaltyService] Points for EXPIRED transactions must be negative'
       );
     });
 
     it('should throw error when transaction results in negative balance', () => {
       expect(() => service.recordTransaction('C1', -600, 'REDEEMED', 'Test', 500)).toThrow(
-        '[LoyaltyService] Transaction would result in negative balance. Current: 500, Change: -600, Result: -100',
+        '[LoyaltyService] Transaction would result in negative balance. Current: 500, Change: -600, Result: -100'
       );
     });
 
     it('should throw error for empty customer ID', () => {
       expect(() => service.recordTransaction('', 100, 'EARNED', 'Test', 500)).toThrow(
-        '[LoyaltyService] Customer ID is required',
+        '[LoyaltyService] Customer ID is required'
       );
     });
 
     it('should throw error for empty reason', () => {
       expect(() => service.recordTransaction('C1', 100, 'EARNED', '', 500)).toThrow(
-        '[LoyaltyService] Reason is required',
+        '[LoyaltyService] Reason is required'
       );
     });
   });
@@ -279,7 +279,7 @@ describe('LoyaltyService', () => {
 
     it('should throw error for negative amount', () => {
       expect(() => service.calculateTierDiscount(-100, LoyaltyTier.BRONZE)).toThrow(
-        '[LoyaltyService] Amount must be non-negative',
+        '[LoyaltyService] Amount must be non-negative'
       );
     });
   });
@@ -298,18 +298,18 @@ describe('LoyaltyService', () => {
         const result = service.hasSufficientPoints(balance, required);
 
         expect(result).toBe(expected);
-      },
+      }
     );
 
     it('should throw error for negative balance', () => {
       expect(() => service.hasSufficientPoints(-100, 500)).toThrow(
-        '[LoyaltyService] Current balance must be non-negative',
+        '[LoyaltyService] Current balance must be non-negative'
       );
     });
 
     it('should throw error for negative required points', () => {
       expect(() => service.hasSufficientPoints(1000, -500)).toThrow(
-        '[LoyaltyService] Required points must be non-negative',
+        '[LoyaltyService] Required points must be non-negative'
       );
     });
   });

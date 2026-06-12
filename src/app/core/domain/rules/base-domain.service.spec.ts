@@ -64,7 +64,7 @@ class TestDomainService extends BaseDomainService {
 
   public testExecuteAsyncWithErrorHandling<T>(
     fn: () => Promise<T>,
-    errorMessage: string,
+    errorMessage: string
   ): Promise<T> {
     return this.executeAsyncWithErrorHandling(fn, errorMessage);
   }
@@ -115,7 +115,7 @@ describe('BaseDomainService', () => {
 
     it('should throw with service name prefix when condition is false', () => {
       expect(() => service.testValidateInput(false, 'Something went wrong')).toThrow(
-        '[TestService] Something went wrong',
+        '[TestService] Something went wrong'
       );
     });
   });
@@ -139,19 +139,19 @@ describe('BaseDomainService', () => {
 
     it('should throw for null', () => {
       expect(() => service.testValidateRequired(null, 'name')).toThrow(
-        '[TestService] name is required',
+        '[TestService] name is required'
       );
     });
 
     it('should throw for undefined', () => {
       expect(() => service.testValidateRequired(undefined, 'name')).toThrow(
-        '[TestService] name is required',
+        '[TestService] name is required'
       );
     });
 
     it('should throw for empty string', () => {
       expect(() => service.testValidateRequired('', 'name')).toThrow(
-        '[TestService] name is required',
+        '[TestService] name is required'
       );
     });
   });
@@ -167,13 +167,13 @@ describe('BaseDomainService', () => {
 
     it('should throw for zero', () => {
       expect(() => service.testValidatePositive(0, 'quantity')).toThrow(
-        '[TestService] quantity must be positive',
+        '[TestService] quantity must be positive'
       );
     });
 
     it('should throw for negative number', () => {
       expect(() => service.testValidatePositive(-1, 'quantity')).toThrow(
-        '[TestService] quantity must be positive',
+        '[TestService] quantity must be positive'
       );
     });
   });
@@ -189,7 +189,7 @@ describe('BaseDomainService', () => {
 
     it('should throw for negative number', () => {
       expect(() => service.testValidateNonNegative(-1, 'amount')).toThrow(
-        '[TestService] amount must be non-negative, got -1',
+        '[TestService] amount must be non-negative, got -1'
       );
     });
   });
@@ -209,13 +209,13 @@ describe('BaseDomainService', () => {
 
     it('should throw when value is below min', () => {
       expect(() => service.testValidateRange(0, 1, 10, 'value')).toThrow(
-        '[TestService] value must be between 1 and 10, got 0',
+        '[TestService] value must be between 1 and 10, got 0'
       );
     });
 
     it('should throw when value is above max', () => {
       expect(() => service.testValidateRange(11, 1, 10, 'value')).toThrow(
-        '[TestService] value must be between 1 and 10, got 11',
+        '[TestService] value must be between 1 and 10, got 11'
       );
     });
   });
@@ -227,13 +227,13 @@ describe('BaseDomainService', () => {
 
     it('should throw for empty string', () => {
       expect(() => service.testValidateNotEmpty('', 'name')).toThrow(
-        '[TestService] name is required',
+        '[TestService] name is required'
       );
     });
 
     it('should throw for whitespace-only string', () => {
       expect(() => service.testValidateNotEmpty('   ', 'name')).toThrow(
-        '[TestService] name cannot be empty',
+        '[TestService] name cannot be empty'
       );
     });
   });
@@ -249,7 +249,7 @@ describe('BaseDomainService', () => {
 
     it('should throw for empty array', () => {
       expect(() => service.testValidateArrayNotEmpty([], 'items')).toThrow(
-        '[TestService] items cannot be empty',
+        '[TestService] items cannot be empty'
       );
     });
   });
@@ -312,7 +312,7 @@ describe('BaseDomainService', () => {
     it('should return complex result on success', () => {
       const result = service.testExecuteWithErrorHandling(
         () => ({ name: 'test', value: 123 }),
-        'Operation failed',
+        'Operation failed'
       );
       expect(result).toEqual({ name: 'test', value: 123 });
     });
@@ -321,7 +321,7 @@ describe('BaseDomainService', () => {
       expect(() =>
         service.testExecuteWithErrorHandling(() => {
           throw new Error('Original error');
-        }, 'Operation failed'),
+        }, 'Operation failed')
       ).toThrow('[TestService] Operation failed: Original error');
     });
 
@@ -329,7 +329,7 @@ describe('BaseDomainService', () => {
       expect(() =>
         service.testExecuteWithErrorHandling(() => {
           throw 'string error';
-        }, 'Operation failed'),
+        }, 'Operation failed')
       ).toThrow('[TestService] Operation failed: string error');
     });
 
@@ -351,7 +351,7 @@ describe('BaseDomainService', () => {
     it('should return result on success', async () => {
       const result = await service.testExecuteAsyncWithErrorHandling(
         async () => 'async result',
-        'Async failed',
+        'Async failed'
       );
       expect(result).toBe('async result');
     });
@@ -359,7 +359,7 @@ describe('BaseDomainService', () => {
     it('should return complex async result', async () => {
       const result = await service.testExecuteAsyncWithErrorHandling(
         async () => ({ items: [1, 2, 3] }),
-        'Async failed',
+        'Async failed'
       );
       expect(result).toEqual({ items: [1, 2, 3] });
     });
@@ -368,7 +368,7 @@ describe('BaseDomainService', () => {
       await expect(
         service.testExecuteAsyncWithErrorHandling(async () => {
           throw new Error('Async original error');
-        }, 'Async operation failed'),
+        }, 'Async operation failed')
       ).rejects.toThrow('[TestService] Async operation failed: Async original error');
     });
 
@@ -376,7 +376,7 @@ describe('BaseDomainService', () => {
       await expect(
         service.testExecuteAsyncWithErrorHandling(async () => {
           throw 'async string error';
-        }, 'Async operation failed'),
+        }, 'Async operation failed')
       ).rejects.toThrow('[TestService] Async operation failed: async string error');
     });
 

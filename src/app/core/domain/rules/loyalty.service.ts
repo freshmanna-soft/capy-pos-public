@@ -84,7 +84,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
   calculatePoints(
     purchaseAmount: number,
     currentTier: LoyaltyTier,
-    isSpecialPromotion = false,
+    isSpecialPromotion = false
   ): PointsCalculation {
     this.validateNonNegative(purchaseAmount, 'Purchase amount');
 
@@ -174,7 +174,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     rewardId: string,
     pointsCost: number,
     currentBalance: number,
-    expirationDays: number | null = null,
+    expirationDays: number | null = null
   ): RewardRedemption {
     this.validateRequired(customerId, 'Customer ID');
     this.validateRequired(rewardId, 'Reward ID');
@@ -184,7 +184,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     if (!this.hasSufficientPoints(currentBalance, pointsCost)) {
       throw new Error(
         `[${this.serviceName}] Insufficient points. ` +
-          `Required: ${pointsCost}, Available: ${currentBalance}`,
+          `Required: ${pointsCost}, Available: ${currentBalance}`
       );
     }
 
@@ -214,7 +214,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     points: number,
     type: 'EARNED' | 'REDEEMED' | 'EXPIRED' | 'ADJUSTED',
     reason: string,
-    currentBalance: number,
+    currentBalance: number
   ): PointsTransaction {
     this.validateRequired(customerId, 'Customer ID');
     this.validateRequired(reason, 'Reason');
@@ -234,7 +234,7 @@ export class LoyaltyService extends BaseDomainService implements ILoyaltyService
     if (balanceAfter < 0) {
       throw new Error(
         `[${this.serviceName}] Transaction would result in negative balance. ` +
-          `Current: ${currentBalance}, Change: ${points}, Result: ${balanceAfter}`,
+          `Current: ${currentBalance}, Change: ${points}, Result: ${balanceAfter}`
       );
     }
 

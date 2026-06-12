@@ -43,7 +43,7 @@ describe('Payment Entity', () => {
             orderId: orderId as string,
             amount: amount as number,
             method: testMethod,
-          }),
+          })
       ).toThrow(expectedError);
     });
 
@@ -61,7 +61,7 @@ describe('Payment Entity', () => {
             status: PaymentStatus.PENDING,
             currency: 'USD',
             refundedAmount,
-          }),
+          })
       ).toThrow(expectedError);
     });
   });

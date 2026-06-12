@@ -47,7 +47,7 @@ export class IntegrationAgent extends BaseAgent implements IIntegrationAgent {
         return {
           success: true,
           data: await this.getIntegrationStatus(
-            (message.payload as { integrationId: string }).integrationId,
+            (message.payload as { integrationId: string }).integrationId
           ),
         };
       default:

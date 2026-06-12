@@ -86,7 +86,7 @@ export interface ITransactionRepository extends IBaseRepository<Transaction> {
   getTopProducts(
     startDate: Date,
     endDate: Date,
-    limit: number,
+    limit: number
   ): Promise<
     {
       productId: string;
@@ -118,7 +118,7 @@ export interface ITransactionRepository extends IBaseRepository<Transaction> {
    */
   getRefundStats(
     startDate: Date,
-    endDate: Date,
+    endDate: Date
   ): Promise<{
     totalRefunds: number;
     refundCount: number;
@@ -148,7 +148,7 @@ export interface ITransactionRepository extends IBaseRepository<Transaction> {
   updateStatus(
     transactionId: string,
     status: TransactionStatus,
-    updatedBy?: string,
+    updatedBy?: string
   ): Promise<Transaction>;
 
   /**

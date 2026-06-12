@@ -90,7 +90,7 @@ describe('LowStockSettingsService', () => {
           id: 'low-stock-threshold',
           key: 'low-stock-threshold',
           value: '20',
-        }),
+        })
       );
     });
 

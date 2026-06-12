@@ -14,7 +14,7 @@ describe('ManageCustomersUseCase', () => {
   let mockRepository: MockedObject<ICustomerRepository>;
 
   const createMockCustomer = (
-    overrides: Partial<{ id: string; name: string; email: string; phone: string }> = {},
+    overrides: Partial<{ id: string; name: string; email: string; phone: string }> = {}
   ): Customer => {
     return new Customer({
       id: overrides.id ?? 'customer-1',
@@ -207,7 +207,7 @@ describe('ManageCustomersUseCase', () => {
     it('should update an existing customer', async () => {
       mockRepository.findById.mockResolvedValue(existingCustomer);
       mockRepository.update.mockImplementation(
-        async (_id: string, data: Partial<Customer>) => data as Customer,
+        async (_id: string, data: Partial<Customer>) => data as Customer
       );
 
       const request: UpdateCustomerRequest = {
@@ -244,7 +244,7 @@ describe('ManageCustomersUseCase', () => {
     it('should not check email uniqueness if email unchanged', async () => {
       mockRepository.findById.mockResolvedValue(existingCustomer);
       mockRepository.update.mockImplementation(
-        async (_id: string, data: Partial<Customer>) => data as Customer,
+        async (_id: string, data: Partial<Customer>) => data as Customer
       );
 
       await useCase.updateCustomer({ id: 'cust-1', name: 'New Name' });
@@ -259,7 +259,7 @@ describe('ManageCustomersUseCase', () => {
 
       mockRepository.findById.mockResolvedValue(existingCustomer);
       mockRepository.update.mockImplementation(
-        async (_id: string, data: Partial<Customer>) => data as Customer,
+        async (_id: string, data: Partial<Customer>) => data as Customer
       );
 
       await useCase.updateCustomer({ id: 'cust-1', name: 'Updated' });

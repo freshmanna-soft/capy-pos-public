@@ -16,7 +16,7 @@ import { IBaseAgent } from '@app/agents/base/base-agent.interface';
  */
 export function createAgentProvider<T extends IBaseAgent>(
   tokenName: string,
-  agentClass: new () => T,
+  agentClass: new () => T
 ): {
   token: InjectionToken<T>;
   provider: Provider;
@@ -45,7 +45,7 @@ export function createAgentProvider<T extends IBaseAgent>(
  * ```
  */
 export function createAgentProviders<T extends IBaseAgent>(
-  configs: { name: string; class: new () => T }[],
+  configs: { name: string; class: new () => T }[]
 ): { token: InjectionToken<T>; provider: Provider }[] {
   return configs.map((config) => createAgentProvider(config.name, config.class));
 }

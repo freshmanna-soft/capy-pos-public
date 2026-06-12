@@ -197,19 +197,19 @@ describe('PaymentBuilder', () => {
 
     it('should throw when amount is negative', () => {
       expect(() => builder.withAmount(-10).build()).toThrow(
-        'Payment amount must be greater than 0',
+        'Payment amount must be greater than 0'
       );
     });
 
     it('should throw when refundedAmount is negative', () => {
       expect(() => builder.withRefundedAmount(-5).build()).toThrow(
-        'Refunded amount cannot be negative',
+        'Refunded amount cannot be negative'
       );
     });
 
     it('should throw when refundedAmount exceeds amount', () => {
       expect(() => builder.withAmount(50).withRefundedAmount(100).build()).toThrow(
-        'Refunded amount cannot exceed payment amount',
+        'Refunded amount cannot exceed payment amount'
       );
     });
   });

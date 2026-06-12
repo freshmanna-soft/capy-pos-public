@@ -67,7 +67,7 @@ export class DatabaseInitializerService {
   private isDatabaseInitialized(): boolean {
     try {
       const result = this.databaseService.queryOne(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='products'",
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='products'"
       );
       return result !== null;
     } catch {
@@ -93,7 +93,7 @@ export class DatabaseInitializerService {
       this.databaseService.run(
         `INSERT OR REPLACE INTO _metadata (key, value, updated_at) 
          VALUES (?, ?, datetime('now'))`,
-        ['initialized', 'true'],
+        ['initialized', 'true']
       );
     } catch (error) {
       console.error('[DatabaseInitializer] Failed to mark database as initialized:', error);
@@ -143,7 +143,7 @@ export class DatabaseInitializerService {
   private getTableCount(tableName: string): number {
     try {
       const result = this.databaseService.queryOne(
-        `SELECT COUNT(*) as count FROM ${tableName}`,
+        `SELECT COUNT(*) as count FROM ${tableName}`
       ) as { count: number } | null;
       return result ? result.count : 0;
     } catch {

@@ -84,7 +84,7 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
       props.createdBy,
       props.updatedBy,
       props.deletedAt,
-      props.deletedBy,
+      props.deletedBy
     );
     this.name = props.name;
     this.email = props.email;
@@ -298,7 +298,7 @@ export class Customer extends AbstractCustomer {
       state?: string;
       zipCode?: string;
     },
-    updatedBy?: string,
+    updatedBy?: string
   ): void {
     if (profileData.name !== undefined) this.name = profileData.name;
     if (profileData.email !== undefined) this.email = profileData.email;

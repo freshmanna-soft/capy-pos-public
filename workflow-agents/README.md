@@ -2,27 +2,30 @@
 
 ## Overview
 
-This directory contains Ollama Modelfiles for AI workflow agents that simulate a full development team. Each agent has a specific role, expertise, and communication style to help orchestrate the development of Capy-POS.
+This directory contains Ollama Modelfiles for AI workflow agents that simulate a full development
+team. Each agent has a specific role, expertise, and communication style to help orchestrate the
+development of Capy-POS.
 
 ## Team Roster
 
-| Agent | Role | Modelfile | Focus |
-|-------|------|-----------|-------|
-| 🎯 Product Owner | `product-owner` | `Modelfile.product-owner` | Vision, priorities, user stories |
-| 📋 Scrum Master | `scrum-master` | `Modelfile.scrum-master` | Process, ceremonies, blockers |
-| 📊 Business Analyst | `business-analyst` | `Modelfile.business-analyst` | Requirements, acceptance criteria |
-| 💻 Full Stack Developer | `fullstack-dev` | `Modelfile.fullstack-dev` | Implementation, Angular/TypeScript |
-| 🗄️ DBA | `dba` | `Modelfile.dba` | Data modeling, IndexedDB/Dexie |
-| 🧪 QA Tester | `qa-tester` | `Modelfile.qa-tester` | Test strategy, coverage, E2E |
-| 🔍 Code Reviewer | `code-reviewer` | `Modelfile.code-reviewer` | Quality, patterns, standards |
-| 🚀 DevOps | `devops` | `Modelfile.devops` | CI/CD, Docker, Terraform, IBM Cloud |
-| 🎨 UX Lead | `ux-lead` | `Modelfile.ux-lead` | Design, accessibility, usability |
-| 📢 Marketing & Branding | `marketing` | `Modelfile.marketing` | Branding, positioning, messaging |
-| 🎭 Orchestrator | `orchestrator` | `Modelfile.orchestrator` | Workflow coordination, delegation |
+| Agent                   | Role               | Modelfile                    | Focus                               |
+| ----------------------- | ------------------ | ---------------------------- | ----------------------------------- |
+| 🎯 Product Owner        | `product-owner`    | `Modelfile.product-owner`    | Vision, priorities, user stories    |
+| 📋 Scrum Master         | `scrum-master`     | `Modelfile.scrum-master`     | Process, ceremonies, blockers       |
+| 📊 Business Analyst     | `business-analyst` | `Modelfile.business-analyst` | Requirements, acceptance criteria   |
+| 💻 Full Stack Developer | `fullstack-dev`    | `Modelfile.fullstack-dev`    | Implementation, Angular/TypeScript  |
+| 🗄️ DBA                  | `dba`              | `Modelfile.dba`              | Data modeling, IndexedDB/Dexie      |
+| 🧪 QA Tester            | `qa-tester`        | `Modelfile.qa-tester`        | Test strategy, coverage, E2E        |
+| 🔍 Code Reviewer        | `code-reviewer`    | `Modelfile.code-reviewer`    | Quality, patterns, standards        |
+| 🚀 DevOps               | `devops`           | `Modelfile.devops`           | CI/CD, Docker, Terraform, IBM Cloud |
+| 🎨 UX Lead              | `ux-lead`          | `Modelfile.ux-lead`          | Design, accessibility, usability    |
+| 📢 Marketing & Branding | `marketing`        | `Modelfile.marketing`        | Branding, positioning, messaging    |
+| 🎭 Orchestrator         | `orchestrator`     | `Modelfile.orchestrator`     | Workflow coordination, delegation   |
 
 ## Quick Start
 
 ### 1. Build All Agents
+
 ```bash
 # Build each agent from its Modelfile
 cd workflow-agents
@@ -41,11 +44,13 @@ ollama create capy-orchestrator -f Modelfile.orchestrator
 ```
 
 ### 2. Run an Agent
+
 ```bash
 ollama run capy-orchestrator
 ```
 
 ### 3. Workflow Example
+
 ```bash
 # Start with the orchestrator to plan a sprint
 ollama run capy-orchestrator "Plan Sprint 1 for the POS Terminal UI"
@@ -66,6 +71,7 @@ ollama run capy-qa-tester "Write test plan for the checkout flow"
 ## Workflow Phases
 
 See `WORKFLOW.md` for the complete orchestration workflow including:
+
 - Sprint Planning
 - Daily Standups
 - Implementation Cycles

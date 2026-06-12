@@ -100,7 +100,7 @@ export abstract class AbstractTransaction extends BaseEntity implements IRefunda
       params.createdAt ?? new Date(),
       params.updatedAt ?? new Date(),
       params.createdBy,
-      params.updatedBy,
+      params.updatedBy
     );
     this.customerId = params.customerId;
     this.items = params.items;
@@ -524,7 +524,7 @@ export class Transaction extends AbstractTransaction {
     taxRate: number,
     discountAmount = 0,
     customerId?: string,
-    createdBy?: string,
+    createdBy?: string
   ): Transaction {
     const items: ITransactionItem[] = cartItems.map((item) => ({
       productId: item.product.id,

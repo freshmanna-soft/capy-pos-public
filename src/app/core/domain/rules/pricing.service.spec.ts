@@ -39,13 +39,13 @@ describe('PricingService', () => {
 
     it('should throw error for zero quantity', () => {
       expect(() => pricingService.calculatePrice(product, 0)).toThrow(
-        '[PricingService] quantity must be positive',
+        '[PricingService] quantity must be positive'
       );
     });
 
     it('should throw error for negative quantity', () => {
       expect(() => pricingService.calculatePrice(product, -1)).toThrow(
-        '[PricingService] quantity must be positive',
+        '[PricingService] quantity must be positive'
       );
     });
   });
@@ -69,7 +69,7 @@ describe('PricingService', () => {
       const subtotal = new Money(100, 'USD');
       const discount: Discount = { type: DiscountType.PERCENTAGE, value: 150 };
       expect(() => pricingService.applyDiscount(subtotal, 1, discount)).toThrow(
-        '[PricingService] percentage must be between 0 and 100',
+        '[PricingService] percentage must be between 0 and 100'
       );
     });
   });
@@ -170,7 +170,7 @@ describe('PricingService', () => {
       const subtotal = new Money(100, 'USD');
       const taxConfig: TaxConfig = { rate: -0.05, name: 'Invalid Tax' };
       expect(() => pricingService.calculateTax(subtotal, taxConfig)).toThrow(
-        '[PricingService] tax rate must be non-negative',
+        '[PricingService] tax rate must be non-negative'
       );
     });
   });

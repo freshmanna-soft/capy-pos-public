@@ -2,7 +2,11 @@
 
 ## Executive Summary
 
-The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 (S2-1 through S2-3)**, **Sprint 3 (S3-1 through S3-4)**, and **Sprint 4 (S4-1 through S4-5)**. All 4 sprints are **100% COMPLETE**. The infrastructure layer is **100% complete** with enterprise-grade services. **All 1250+ unit tests pass across 47 files. All 160 E2E tests pass.** Sprint 4 delivered 19/19 committed story points.
+The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 (S2-1 through
+S2-3)**, **Sprint 3 (S3-1 through S3-4)**, and **Sprint 4 (S4-1 through S4-5)**. All 4 sprints are
+**100% COMPLETE**. The infrastructure layer is **100% complete** with enterprise-grade services.
+**All 1250+ unit tests pass across 47 files. All 160 E2E tests pass.** Sprint 4 delivered 19/19
+committed story points.
 
 **Last Updated:** June 9, 2026
 
@@ -15,33 +19,35 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 **Team Capacity:** 13 story points | **Sprint Goal:** Transaction persistence, receipts, and history
 **Velocity:** 13 pts (100% — all committed + stretch goal delivered)
 
-| Ticket | Title | Size | Priority | Status |
-|--------|-------|------|----------|--------|
-| S3-1 (#21) | Persist Transactions to IndexedDB | M (4 pts) | P0 | ✅ Done (PR #26) |
-| S3-2 (#22) | Generate and Display Receipt after Payment | M (4 pts) | P0 | ✅ Done (PR #27) |
-| S3-3 (#23) | View Transaction History | S (3 pts) | P1 | ✅ Done (PR #32, #33) |
-| S3-4 (#24) | Daily Sales Reporting (Stretch) | S (2 pts) | P2 | ✅ Done (PR #34) |
+| Ticket     | Title                                      | Size      | Priority | Status                |
+| ---------- | ------------------------------------------ | --------- | -------- | --------------------- |
+| S3-1 (#21) | Persist Transactions to IndexedDB          | M (4 pts) | P0       | ✅ Done (PR #26)      |
+| S3-2 (#22) | Generate and Display Receipt after Payment | M (4 pts) | P0       | ✅ Done (PR #27)      |
+| S3-3 (#23) | View Transaction History                   | S (3 pts) | P1       | ✅ Done (PR #32, #33) |
+| S3-4 (#24) | Daily Sales Reporting (Stretch)            | S (2 pts) | P2       | ✅ Done (PR #34)      |
 
 **Total Delivered:** 13 pts (11 committed + 2 stretch)
 
 ### ✅ Done (13 items — Sprints 1, 2 & 3)
-| Ticket | Title | Status |
-|--------|-------|--------|
-| S1-1 | Product Search Component | ✅ Closed |
-| S1-2 | Search Results Display | ✅ Closed |
-| S1-3 | Shopping Cart Component | ✅ Closed |
-| S1-4 | Add to Cart Interaction | ✅ Closed |
-| S1-5 | Cart Total Calculation | ✅ Closed |
-| S1-6 | E2E Test: Search to Cart Flow | ✅ Closed |
-| S2-1 | Payment Method Selection | ✅ Closed (PR #15) |
-| S2-2 | Cash Payment Flow | ✅ Closed (PR #16) |
-| S2-3 | Card Payment Flow | ✅ Closed (PR #17) |
-| S3-1 | Persist Transactions to IndexedDB | ✅ Closed (PR #26) |
-| S3-2 | Generate and Display Receipt | ✅ Closed (PR #27) |
-| S3-3 | View Transaction History | ✅ Closed (PR #32, #33) |
-| S3-4 | Daily Sales Reporting | ✅ Closed (PR #34) |
+
+| Ticket | Title                             | Status                  |
+| ------ | --------------------------------- | ----------------------- |
+| S1-1   | Product Search Component          | ✅ Closed               |
+| S1-2   | Search Results Display            | ✅ Closed               |
+| S1-3   | Shopping Cart Component           | ✅ Closed               |
+| S1-4   | Add to Cart Interaction           | ✅ Closed               |
+| S1-5   | Cart Total Calculation            | ✅ Closed               |
+| S1-6   | E2E Test: Search to Cart Flow     | ✅ Closed               |
+| S2-1   | Payment Method Selection          | ✅ Closed (PR #15)      |
+| S2-2   | Cash Payment Flow                 | ✅ Closed (PR #16)      |
+| S2-3   | Card Payment Flow                 | ✅ Closed (PR #17)      |
+| S3-1   | Persist Transactions to IndexedDB | ✅ Closed (PR #26)      |
+| S3-2   | Generate and Display Receipt      | ✅ Closed (PR #27)      |
+| S3-3   | View Transaction History          | ✅ Closed (PR #32, #33) |
+| S3-4   | Daily Sales Reporting             | ✅ Closed (PR #34)      |
 
 ### 📊 Board Columns
+
 - **Todo:** 0
 - **In Progress:** 0
 - **Done:** 18
@@ -50,15 +56,16 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 
 ## 🔬 Sanity Check Results (June 9, 2026)
 
-| Check | Result | Details |
-|-------|--------|---------|
-| **Build** | ✅ PASS | Compiles successfully |
-| **Unit Tests** | ✅ PASS | 38 test files, **1065+ tests passed**, 2 pre-existing flaky tests |
-| **Test Duration** | ✅ FAST | ~4.5s total |
-| **Lint** | ⚠️ N/A | ESLint not configured (angular-eslint needed) |
-| **E2E Tests** | ✅ PASS | Transaction history E2E test passing |
+| Check             | Result  | Details                                                           |
+| ----------------- | ------- | ----------------------------------------------------------------- |
+| **Build**         | ✅ PASS | Compiles successfully                                             |
+| **Unit Tests**    | ✅ PASS | 38 test files, **1065+ tests passed**, 2 pre-existing flaky tests |
+| **Test Duration** | ✅ FAST | ~4.5s total                                                       |
+| **Lint**          | ⚠️ N/A  | ESLint not configured (angular-eslint needed)                     |
+| **E2E Tests**     | ✅ PASS | Transaction history E2E test passing                              |
 
 ### Known Pre-existing Test Issues (Non-blocking)
+
 - `agent.registry.spec.ts` — DI issue with IProductRepository token (18 tests)
 - `payment.builder.spec.ts` — Flaky timing test (1ms race condition, 1 test)
 
@@ -69,6 +76,7 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 ### 1. Core Domain Layer (100% Complete)
 
 **Entities:**
+
 - ✅ `BaseEntity` - Base class with ID, timestamps, validation
 - ✅ `Product` - Product entity with business rules
 - ✅ `Customer` - Customer entity with loyalty
@@ -77,12 +85,14 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 - ✅ `Cart` - Shopping cart with calculations
 
 **Value Objects:**
+
 - ✅ `Email` - Email validation
 - ✅ `Phone` - Phone number validation
 - ✅ `Address` - Address with validation
 - ✅ `Money` - Currency handling
 
 **Domain Services:**
+
 - ✅ `PricingService` - Pricing calculations
 - ✅ `InventoryService` - Stock management
 - ✅ `LoyaltyService` - Loyalty points
@@ -137,7 +147,8 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 
 ### 8. Inventory Management (S4-1)
 
-- ✅ `InventoryManagementComponent` - Full CRUD with create/edit form, delete confirmation, search, category filter, stock adjustment
+- ✅ `InventoryManagementComponent` - Full CRUD with create/edit form, delete confirmation, search,
+  category filter, stock adjustment
 
 ### 6. Shared UI (Atomic Design)
 
@@ -156,35 +167,37 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 
 ## ✅ Sprint 4 — COMPLETED (Jun 9, 2026)
 
-**Sprint Goal:** Inventory management and customer management with persistent storage
-**Team Capacity:** ~21 story points | **Committed:** 19 pts + 3 stretch = 22 total
-**Velocity:** 22 pts (100% — all committed + stretch delivered)
+**Sprint Goal:** Inventory management and customer management with persistent storage **Team
+Capacity:** ~21 story points | **Committed:** 19 pts + 3 stretch = 22 total **Velocity:** 22 pts
+(100% — all committed + stretch delivered)
 
-| Ticket | Title | Size | Priority | Status | Persona Stakeholder |
-|--------|-------|------|----------|--------|---------------------|
-| S4-1 (#35) | Inventory Management CRUD with Persistent Storage | L (8 pts) | P0 | ✅ Done (PR #40) | Carlos, Ana |
-| S4-2 (#36) | Customer Management CRUD with Persistent Storage | M (5 pts) | P0 | ✅ Done (PR #42) | Sofia |
-| S4-3 (#37) | Low Stock Alerts and Notifications | S (3 pts) | P1 | ✅ Done (PR #44) | Carlos, Ana |
-| S4-4 (#38) | Automatic Stock Adjustment on Sale Completion | S (3 pts) | P0 | ✅ Done (PR #43) | Maria, Ana |
-| S4-5 (#39) | E2E Tests: Inventory and Customer Management Workflows | S (3 pts) | P2 (Stretch) | ✅ Done (PR #46) | Carlos |
+| Ticket     | Title                                                  | Size      | Priority     | Status           | Persona Stakeholder |
+| ---------- | ------------------------------------------------------ | --------- | ------------ | ---------------- | ------------------- |
+| S4-1 (#35) | Inventory Management CRUD with Persistent Storage      | L (8 pts) | P0           | ✅ Done (PR #40) | Carlos, Ana         |
+| S4-2 (#36) | Customer Management CRUD with Persistent Storage       | M (5 pts) | P0           | ✅ Done (PR #42) | Sofia               |
+| S4-3 (#37) | Low Stock Alerts and Notifications                     | S (3 pts) | P1           | ✅ Done (PR #44) | Carlos, Ana         |
+| S4-4 (#38) | Automatic Stock Adjustment on Sale Completion          | S (3 pts) | P0           | ✅ Done (PR #43) | Maria, Ana          |
+| S4-5 (#39) | E2E Tests: Inventory and Customer Management Workflows | S (3 pts) | P2 (Stretch) | ✅ Done (PR #46) | Carlos              |
 
 **Total Delivered:** 22 pts (19 committed + 3 stretch)
 
 ### 👥 Persona Stakeholders (Sprint Review Demo)
 
-| Persona | Role | Demo Focus |
-|---------|------|------------|
-| 👩‍💼 Maria the Cashier | Primary POS user | Quick checkout, auto stock adjustment |
-| 👨‍💼 Carlos the Manager | Store manager | Inventory CRUD, low stock alerts, reports |
-| 👩‍🔧 Ana the Inventory Clerk | Stock management | Product CRUD, category filtering, stock levels |
-| 👩 Sofia the Customer | Loyalty member | Customer profile, purchase history, loyalty points |
+| Persona                    | Role             | Demo Focus                                         |
+| -------------------------- | ---------------- | -------------------------------------------------- |
+| 👩‍💼 Maria the Cashier       | Primary POS user | Quick checkout, auto stock adjustment              |
+| 👨‍💼 Carlos the Manager      | Store manager    | Inventory CRUD, low stock alerts, reports          |
+| 👩‍🔧 Ana the Inventory Clerk | Stock management | Product CRUD, category filtering, stock levels     |
+| 👩 Sofia the Customer      | Loyalty member   | Customer profile, purchase history, loyalty points |
 
 ### 📅 Ceremony Schedule
+
 - **Daily Standup:** 10:00-10:15 AM
 - **Mid-Sprint Check:** Day 10 (Jun 19), 3:00-4:00 PM
 - **Sprint Review/Demo:** Day 14 (Jun 22), 3:00-4:30 PM (persona-based demo)
 
 ### 🏗️ Architecture Guidance (Sprint 4)
+
 - Optimistic concurrency control for inventory CRUD
 - Atomic Dexie transactions for stock adjustments
 - Clean Architecture compliance: Domain → Application → Infrastructure → Presentation
@@ -204,6 +217,7 @@ The Capy-POS project has completed **Sprint 1 (S1-1 through S1-6)**, **Sprint 2 
 ## 🚀 Running the Project
 
 ### Development Server
+
 ```bash
 npm start
 # or
@@ -211,6 +225,7 @@ ng serve
 ```
 
 ### Run Unit Tests
+
 ```bash
 npm run test:unit
 # or
@@ -218,11 +233,13 @@ npx vitest run
 ```
 
 ### Run E2E Tests
+
 ```bash
 npm run test:e2e
 ```
 
 ### Build
+
 ```bash
 npm run build
 ```
@@ -243,6 +260,7 @@ src/app/
 ```
 
 **Key Patterns:**
+
 - Clean Architecture (Domain → Application → Infrastructure → Presentation)
 - Agent Pattern for autonomous business domains
 - Repository Pattern for data access
@@ -256,14 +274,14 @@ src/app/
 
 ## 📊 Test Metrics
 
-| Category | Test Files | Tests | Duration |
-|----------|-----------|-------|----------|
-| Domain | 8 | ~200 | <1s |
-| Infrastructure | 6 | ~150 | <1s |
-| Agents | 6 | ~180 | ~3s |
-| Components | 10 | ~350 | <1s |
-| Use Cases | 5 | ~185 | <1s |
-| **Total** | **38** | **1065+** | **~4.5s** |
+| Category       | Test Files | Tests     | Duration  |
+| -------------- | ---------- | --------- | --------- |
+| Domain         | 8          | ~200      | <1s       |
+| Infrastructure | 6          | ~150      | <1s       |
+| Agents         | 6          | ~180      | ~3s       |
+| Components     | 10         | ~350      | <1s       |
+| Use Cases      | 5          | ~185      | <1s       |
+| **Total**      | **38**     | **1065+** | **~4.5s** |
 
 ---
 
@@ -278,11 +296,11 @@ src/app/
 
 ## 📈 Sprint Velocity History
 
-| Sprint | Committed | Delivered | Velocity | Notes |
-|--------|-----------|-----------|----------|-------|
-| Sprint 1 | 21 pts | 21 pts | 100% | All 6 stories delivered |
-| Sprint 2 | 24 pts | 24 pts | 100% | All 6 stories delivered |
-| Sprint 3 | 11 pts (+2 stretch) | 13 pts | 100% | All 4 stories delivered (incl. stretch) |
-| Sprint 4 | 19 pts (+3 stretch) | 22 pts | 100% | All 5 stories delivered (incl. stretch) |
+| Sprint   | Committed           | Delivered | Velocity | Notes                                   |
+| -------- | ------------------- | --------- | -------- | --------------------------------------- |
+| Sprint 1 | 21 pts              | 21 pts    | 100%     | All 6 stories delivered                 |
+| Sprint 2 | 24 pts              | 24 pts    | 100%     | All 6 stories delivered                 |
+| Sprint 3 | 11 pts (+2 stretch) | 13 pts    | 100%     | All 4 stories delivered (incl. stretch) |
+| Sprint 4 | 19 pts (+3 stretch) | 22 pts    | 100%     | All 5 stories delivered (incl. stretch) |
 
 **Cumulative:** 80 story points delivered across 4 sprints with 100% velocity

@@ -89,7 +89,7 @@ export class EventBusService {
    * Subscribe to messages with minimum priority
    */
   subscribeByPriority(
-    minPriority: 'low' | 'normal' | 'high' | 'critical',
+    minPriority: 'low' | 'normal' | 'high' | 'critical'
   ): Observable<EventBusMessage> {
     const priorityLevels = { low: 0, normal: 1, high: 2, critical: 3 };
     const minLevel = priorityLevels[minPriority];

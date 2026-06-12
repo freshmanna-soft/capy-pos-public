@@ -27,7 +27,7 @@ describe('ManageInventoryUseCase', () => {
       overrides.lowStockThreshold ?? 10,
       overrides.reorderQuantity ?? 20,
       overrides.cost ?? 2.0,
-      overrides.isActive ?? true,
+      overrides.isActive ?? true
     );
   };
 

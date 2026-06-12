@@ -1,11 +1,14 @@
 # Capy-POS Architecture Plan
 
 ## 🎯 Project Overview
-Enterprise-grade Point of Sale (POS) system built with Angular 21+, microservices architecture, and deployed to IBM Cloud Code Engine using Terraform.
+
+Enterprise-grade Point of Sale (POS) system built with Angular 21+, microservices architecture, and
+deployed to IBM Cloud Code Engine using Terraform.
 
 ## 🏗️ Architecture Principles
 
 ### SOLID Principles
+
 - **S**ingle Responsibility: Each agent handles one business domain
 - **O**pen/Closed: Extensible through interfaces, closed for modification
 - **L**iskov Substitution: All implementations are interchangeable
@@ -13,6 +16,7 @@ Enterprise-grade Point of Sale (POS) system built with Angular 21+, microservice
 - **D**ependency Inversion: Depend on abstractions, not concretions
 
 ### Clean Architecture Layers
+
 ```
 ┌─────────────────────────────────────────┐
 │         Presentation Layer              │
@@ -32,9 +36,11 @@ Enterprise-grade Point of Sale (POS) system built with Angular 21+, microservice
 ## 🤖 Microservices Agent Architecture
 
 ### Agent 1: Inventory Agent
+
 **Responsibility:** Product catalog and stock management
+
 - **Domain Models:** Product, Category, Stock, Supplier
-- **Use Cases:** 
+- **Use Cases:**
   - Add/Update/Delete products
   - Track inventory levels
   - Low stock alerts
@@ -43,7 +49,9 @@ Enterprise-grade Point of Sale (POS) system built with Angular 21+, microservice
 - **Database:** SQLite (local) / PostgreSQL (cloud)
 
 ### Agent 2: Sales Agent
+
 **Responsibility:** Transaction processing and cart management
+
 - **Domain Models:** Cart, CartItem, Transaction, Discount
 - **Use Cases:**
   - Create/Update cart
@@ -54,7 +62,9 @@ Enterprise-grade Point of Sale (POS) system built with Angular 21+, microservice
 - **Database:** SQLite (local) / PostgreSQL (cloud)
 
 ### Agent 3: Payment Agent
+
 **Responsibility:** Payment processing and reconciliation
+
 - **Domain Models:** Payment, PaymentMethod, Receipt, Refund
 - **Use Cases:**
   - Process payments (cash, card, digital)
@@ -65,7 +75,9 @@ Enterprise-grade Point of Sale (POS) system built with Angular 21+, microservice
 - **Integration:** Payment gateways (Stripe, Square)
 
 ### Agent 4: Analytics Agent
+
 **Responsibility:** Business intelligence and reporting
+
 - **Domain Models:** Report, Metric, Dashboard, Insight
 - **Use Cases:**
   - Sales analytics
@@ -76,7 +88,9 @@ Enterprise-grade Point of Sale (POS) system built with Angular 21+, microservice
 - **Database:** Time-series data store
 
 ### Agent 5: Customer Agent
+
 **Responsibility:** Customer relationship management
+
 - **Domain Models:** Customer, LoyaltyProgram, Reward, Profile
 - **Use Cases:**
   - Customer registration
@@ -87,7 +101,9 @@ Enterprise-grade Point of Sale (POS) system built with Angular 21+, microservice
 - **Database:** SQLite (local) / PostgreSQL (cloud)
 
 ### Agent 6: Integration Agent
+
 **Responsibility:** Data abstraction and external integrations
+
 - **Domain Models:** DataSource, SyncJob, ApiConfig
 - **Use Cases:**
   - SQLite ↔ API synchronization
@@ -190,6 +206,7 @@ capy-pos/
 ## 🎨 Micro UI Component Library
 
 ### Atomic Design System
+
 ```
 Atoms (Basic building blocks)
 ├── Button
@@ -222,6 +239,7 @@ Templates (Page layouts)
 ## 🗄️ Data Layer Architecture
 
 ### Repository Pattern with Strategy
+
 ```typescript
 // Abstract repository interface
 interface IRepository<T> {
@@ -245,9 +263,7 @@ class ApiProductRepository implements IRepository<Product> {
 // Factory pattern for switching
 class RepositoryFactory {
   static createProductRepository(type: 'sqlite' | 'api'): IRepository<Product> {
-    return type === 'sqlite' 
-      ? new SQLiteProductRepository()
-      : new ApiProductRepository();
+    return type === 'sqlite' ? new SQLiteProductRepository() : new ApiProductRepository();
   }
 }
 ```
@@ -257,24 +273,28 @@ class RepositoryFactory {
 ### Infrastructure Components
 
 #### 1. Code Engine Applications
+
 - **Frontend App:** Angular SPA
 - **Backend Services:** 6 microservice agents
 - **Auto-scaling:** 0-10 instances per service
-- **Resource Allocation:** 
+- **Resource Allocation:**
   - CPU: 0.5-2 vCPU per instance
   - Memory: 512MB-4GB per instance
 
 #### 2. Databases
+
 - **IBM Cloud Databases for PostgreSQL:** Production data
 - **IBM Cloud Object Storage:** File storage, backups
 - **Redis:** Caching layer
 
 #### 3. Networking
+
 - **IBM Cloud Internet Services:** CDN, DDoS protection
 - **Private Endpoints:** Secure service communication
 - **API Gateway:** Rate limiting, authentication
 
 #### 4. Monitoring & Logging
+
 - **IBM Log Analysis:** Centralized logging
 - **IBM Monitoring:** Metrics and alerts
 - **Sysdig:** Application performance monitoring
@@ -303,12 +323,12 @@ resource "ibm_code_engine_app" "inventory_agent" {
   project_id      = ibm_code_engine_project.capy_pos.id
   name            = "inventory-agent"
   image_reference = var.inventory_image
-  
+
   scale_cpu_limit      = "2"
   scale_memory_limit   = "4G"
   scale_min_instances  = 0
   scale_max_instances  = 10
-  
+
   env {
     name  = "DATABASE_URL"
     value = ibm_database.postgres.connectionstrings[0].composed
@@ -322,9 +342,9 @@ resource "ibm_database" "postgres" {
   location          = var.region
   service           = "databases-for-postgresql"
   resource_group_id = var.resource_group_id
-  
+
   adminpassword = var.db_admin_password
-  
+
   group {
     group_id = "member"
     memory {
@@ -340,16 +360,19 @@ resource "ibm_database" "postgres" {
 ## 🧪 Testing Strategy
 
 ### 1. Unit Tests (Vitest)
+
 - Test individual functions and classes
 - Mock dependencies
 - Coverage target: 80%+
 
 ### 2. Integration Tests (Vitest)
+
 - Test agent interactions
 - Test repository implementations
 - Test API integrations
 
 ### 3. E2E Tests (Playwright + Cucumber)
+
 ```gherkin
 Feature: Process Sale
   As a cashier
@@ -369,6 +392,7 @@ Feature: Process Sale
 ```
 
 ### 4. Component Tests (Storybook)
+
 - Visual regression testing
 - Interaction testing
 - Accessibility testing
@@ -376,6 +400,7 @@ Feature: Process Sale
 ## 🚀 CI/CD Pipeline
 
 ### GitHub Actions Workflow
+
 ```yaml
 name: Deploy to IBM Cloud
 
@@ -390,14 +415,16 @@ jobs:
       - uses: actions/checkout@v3
       - name: Run tests
         run: npm test
-      
+
   build:
     needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Build Docker images
-        run: docker build -t ${{ secrets.ICR_NAMESPACE }}/inventory-agent:${{ github.sha }} -f docker/Dockerfile.inventory .
-      
+        run:
+          docker build -t ${{ secrets.ICR_NAMESPACE }}/inventory-agent:${{ github.sha }} -f
+          docker/Dockerfile.inventory .
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -412,12 +439,14 @@ jobs:
 ## 📊 Monitoring & Observability
 
 ### Key Metrics
+
 - **Performance:** Response time, throughput
 - **Availability:** Uptime, error rates
 - **Business:** Sales volume, revenue, inventory turnover
 - **User Experience:** Page load time, interaction latency
 
 ### Logging Strategy
+
 - **Structured Logging:** JSON format
 - **Log Levels:** ERROR, WARN, INFO, DEBUG
 - **Correlation IDs:** Track requests across services
@@ -427,7 +456,7 @@ jobs:
 
 1. **Authentication:** IBM App ID / OAuth 2.0
 2. **Authorization:** Role-based access control (RBAC)
-3. **Data Encryption:** 
+3. **Data Encryption:**
    - At rest: AES-256
    - In transit: TLS 1.3
 4. **API Security:** Rate limiting, API keys
@@ -436,16 +465,19 @@ jobs:
 ## 📈 Scalability Strategy
 
 ### Horizontal Scaling
+
 - Auto-scale based on CPU/memory usage
 - Load balancing across instances
 - Stateless service design
 
 ### Vertical Scaling
+
 - Increase resources per instance
 - Optimize database queries
 - Implement caching strategies
 
 ### Data Scaling
+
 - Database read replicas
 - Sharding for large datasets
 - Archive old transactions
@@ -453,12 +485,14 @@ jobs:
 ## 🎯 Success Metrics
 
 ### Technical KPIs
+
 - **Deployment Frequency:** Daily
 - **Lead Time:** < 1 hour
 - **MTTR:** < 30 minutes
 - **Change Failure Rate:** < 5%
 
 ### Business KPIs
+
 - **Transaction Processing Time:** < 3 seconds
 - **System Uptime:** 99.9%
 - **User Satisfaction:** > 4.5/5

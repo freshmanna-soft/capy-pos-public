@@ -196,7 +196,7 @@ export class PricingService extends BaseDomainService implements IPricingService
     quantity: number,
     discount?: Discount,
     taxConfig?: TaxConfig,
-    currency = 'USD',
+    currency = 'USD'
   ): LineItemTotal {
     const priceAsMoney = new Money(product.price, currency);
     const subtotal = priceAsMoney.multiply(quantity);

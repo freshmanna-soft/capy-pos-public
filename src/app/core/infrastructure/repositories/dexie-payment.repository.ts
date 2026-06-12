@@ -153,7 +153,7 @@ export class DexiePaymentRepository
    */
   async getStatsByDateRange(
     startDate: Date,
-    endDate: Date,
+    endDate: Date
   ): Promise<{
     totalAmount: number;
     totalCount: number;

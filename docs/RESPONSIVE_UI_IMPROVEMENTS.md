@@ -1,17 +1,20 @@
 # Responsive UI Improvements
 
 ## Overview
+
 Enhanced the Capy POS Terminal UI to be fully responsive with a mobile-first cart overlay approach.
 
 ## Changes Made
 
 ### 1. Cart Icon with Badge (Header)
+
 - Added a cart toggle button (🛒) in the header
 - Badge shows item count when cart has items
 - Hidden on desktop (>1200px), visible on mobile/tablet
 - Position: absolute badge with red background
 
 ### 2. Cart Overlay/Modal (Mobile)
+
 - Cart becomes a slide-in overlay on screens <1200px
 - Slides in from the right with smooth animation
 - Full-height overlay with backdrop
@@ -19,6 +22,7 @@ Enhanced the Capy POS Terminal UI to be fully responsive with a mobile-first car
 - Width: 400px on tablet, 100vw on mobile
 
 ### 3. Responsive Breakpoints
+
 - **Desktop (>1200px)**: Side-by-side layout, cart always visible
 - **Tablet (768px-1200px)**: Single column, cart as overlay
 - **Mobile (<768px)**: Optimized grid, full-width cart overlay
@@ -26,6 +30,7 @@ Enhanced the Capy POS Terminal UI to be fully responsive with a mobile-first car
 ### 4. Component Updates
 
 #### TypeScript (`src/app/app.ts`)
+
 ```typescript
 // Added cart visibility signal
 protected cartVisible = signal(false);
@@ -42,11 +47,13 @@ protected closeCart(): void {
 ```
 
 #### HTML (`src/app/app.html`)
+
 - Cart toggle button with conditional badge
 - Cart section with `[class.cart-visible]` binding
 - Close button in cart header
 
 #### SCSS (`src/app/app.scss`)
+
 - Cart badge styling (absolute positioned, red circle)
 - Cart toggle button (hidden on desktop)
 - Cart close button (hidden on desktop)
@@ -57,11 +64,13 @@ protected closeCart(): void {
 ## User Experience
 
 ### Desktop (>1200px)
+
 - Traditional side-by-side layout
 - Cart always visible on the right
 - No cart icon needed
 
 ### Tablet/Mobile (<1200px)
+
 - Products take full width
 - Cart icon in header shows item count
 - Tap cart icon to open overlay
@@ -71,6 +80,7 @@ protected closeCart(): void {
 ## Testing
 
 ### Playwright E2E Tests (`tests/e2e/pos-terminal.spec.ts`)
+
 Created comprehensive test suite with 16 test scenarios:
 
 1. **Basic Functionality**
@@ -105,6 +115,7 @@ Created comprehensive test suite with 16 test scenarios:
    - Cart accessible on mobile
 
 ### Test Execution
+
 ```bash
 npx playwright test tests/e2e/pos-terminal.spec.ts --headed
 ```
@@ -121,11 +132,12 @@ npx playwright test tests/e2e/pos-terminal.spec.ts --headed
 ## Technical Details
 
 ### CSS Transitions
+
 ```scss
 .cart-section {
   transition: right 0.3s ease-in-out;
   right: -100%; // Hidden by default
-  
+
   &.cart-visible {
     right: 0; // Slides in
   }
@@ -133,11 +145,13 @@ npx playwright test tests/e2e/pos-terminal.spec.ts --headed
 ```
 
 ### Angular Signals
+
 - `cartVisible` signal controls overlay state
 - Reactive updates trigger CSS class changes
 - No manual DOM manipulation needed
 
 ### Backdrop Implementation
+
 ```scss
 .cart-section.cart-visible::before {
   content: '';

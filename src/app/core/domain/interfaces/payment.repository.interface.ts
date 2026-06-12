@@ -46,7 +46,7 @@ export interface IPaymentRepository extends IBaseRepository<Payment> {
    */
   getStatsByDateRange(
     startDate: Date,
-    endDate: Date,
+    endDate: Date
   ): Promise<{
     totalAmount: number;
     totalCount: number;

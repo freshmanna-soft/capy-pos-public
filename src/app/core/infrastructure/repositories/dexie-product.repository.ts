@@ -95,7 +95,7 @@ export class DexieProductRepository
     const records = await this.table
       .filter(
         (record) =>
-          !record.deletedAt && (record.isActive === true || (record.isActive as unknown) === 1),
+          !record.deletedAt && (record.isActive === true || (record.isActive as unknown) === 1)
       )
       .toArray();
     return records.map((record) => this.mapToEntity(record));

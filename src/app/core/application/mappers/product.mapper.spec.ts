@@ -118,7 +118,7 @@ describe('ProductMapper', () => {
         'Test description',
         'https://example.com/image.jpg',
         '1234567890',
-        '📱',
+        '📱'
       );
 
       const product = productMapper.fromResponseDto(dto);
@@ -146,7 +146,7 @@ describe('ProductMapper', () => {
         'Electronics',
         10,
         now.toISOString(),
-        now.toISOString(),
+        now.toISOString()
       );
 
       const product = productMapper.fromResponseDto(dto);
@@ -259,7 +259,7 @@ describe('ProductMapper', () => {
           'Cat1',
           5,
           new Date().toISOString(),
-          new Date().toISOString(),
+          new Date().toISOString()
         ),
         new ProductResponseDto(
           'id-2',
@@ -269,7 +269,7 @@ describe('ProductMapper', () => {
           'Cat2',
           10,
           new Date().toISOString(),
-          new Date().toISOString(),
+          new Date().toISOString()
         ),
       ];
 

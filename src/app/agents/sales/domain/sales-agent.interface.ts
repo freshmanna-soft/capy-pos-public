@@ -194,7 +194,7 @@ export interface ISalesAgent extends IBaseAgent {
   getTopProducts(
     limit: number,
     startDate?: Date,
-    endDate?: Date,
+    endDate?: Date
   ): Promise<IAgentResponse<ITopProduct[]>>;
 
   /**

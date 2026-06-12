@@ -130,7 +130,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         return this.getTopProducts(
           payload['limit'] as number,
           payload['startDate'] as Date,
-          payload['endDate'] as Date,
+          payload['endDate'] as Date
         );
 
       case SalesMessageType.GET_SALES_BY_PERIOD:
@@ -214,7 +214,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       savedTransaction.markAsCompleted(request.createdBy);
       const completedTransaction = await this.transactionRepository.update(
         savedTransaction.id,
-        savedTransaction,
+        savedTransaction
       );
 
       // Update product stock
@@ -261,7 +261,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
 
       // Get original transaction
       const originalTransaction = await this.transactionRepository.findById(
-        request.originalTransactionId,
+        request.originalTransactionId
       );
       if (!originalTransaction) {
         throw new Error('Original transaction not found');
@@ -304,7 +304,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         .withStatus(TransactionStatus.PENDING)
         .withType(TransactionType.RETURN)
         .withNotes(
-          `Return for transaction ${request.originalTransactionId}. Reason: ${request.reason}`,
+          `Return for transaction ${request.originalTransactionId}. Reason: ${request.reason}`
         );
 
       if (originalTransaction.customerId) {
@@ -377,7 +377,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       transaction.cancel(request.reason, request.voidedBy);
       const voidedTransaction = await this.transactionRepository.update(
         transaction.id,
-        transaction,
+        transaction
       );
 
       // Restore product stock if transaction was completed
@@ -414,7 +414,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
 
       // Filter completed sales
       const completedSales = transactions.filter(
-        (t) => t.status === TransactionStatus.COMPLETED && t.type === TransactionType.SALE,
+        (t) => t.status === TransactionStatus.COMPLETED && t.type === TransactionType.SALE
       );
 
       // Calculate metrics
@@ -427,7 +427,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       const refundedTransactions = transactions.filter(
         (t) =>
           t.status === TransactionStatus.REFUNDED ||
-          t.status === TransactionStatus.PARTIALLY_REFUNDED,
+          t.status === TransactionStatus.PARTIALLY_REFUNDED
       );
       const totalRefunds = refundedTransactions.reduce((sum, t) => sum + t.refundedAmount, 0);
       const refundRate = totalSales > 0 ? refundedTransactions.length / totalSales : 0;
@@ -541,7 +541,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
 
     // Filter completed sales
     const completedSales = transactions.filter(
-      (t) => t.status === TransactionStatus.COMPLETED && t.type === TransactionType.SALE,
+      (t) => t.status === TransactionStatus.COMPLETED && t.type === TransactionType.SALE
     );
 
     // Calculate totals
@@ -549,8 +549,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
     const totalRevenue = completedSales.reduce((sum, t) => sum + t.total, 0);
     const refundCount = transactions.filter(
       (t) =>
-        t.status === TransactionStatus.REFUNDED ||
-        t.status === TransactionStatus.PARTIALLY_REFUNDED,
+        t.status === TransactionStatus.REFUNDED || t.status === TransactionStatus.PARTIALLY_REFUNDED
     ).length;
     const totalRefunds = transactions.reduce((sum, t) => sum + t.refundedAmount, 0);
     const netRevenue = totalRevenue - totalRefunds;
@@ -559,7 +558,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
     const topProductsData = await this.transactionRepository.getTopProducts(
       startOfDay,
       endOfDay,
-      5,
+      5
     );
     const topProducts = topProductsData.map((p) => ({
       productId: p.productId,
@@ -594,7 +593,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
   async getTopProducts(
     limit: number,
     startDate?: Date,
-    endDate?: Date,
+    endDate?: Date
   ): Promise<IAgentResponse<ITopProduct[]>> {
     try {
       const start = startDate || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Default: last 30 days
@@ -628,13 +627,13 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
    * Get sales by period
    */
   async getSalesByPeriod(
-    request: ISalesByPeriodRequest,
+    request: ISalesByPeriodRequest
   ): Promise<IAgentResponse<ISalesByPeriod[]>> {
     try {
       // Get transactions for period
       const transactions = await this.transactionRepository.findByDateRange(
         request.startDate,
-        request.endDate,
+        request.endDate
       );
 
       // Group by period
@@ -672,7 +671,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       }
 
       const salesByPeriod = Array.from(grouped.values()).sort((a, b) =>
-        a.period.localeCompare(b.period),
+        a.period.localeCompare(b.period)
       );
 
       return {

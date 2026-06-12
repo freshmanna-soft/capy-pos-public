@@ -33,7 +33,7 @@ export interface RepositoryConfig {
 export const PRODUCT_REPOSITORY = new InjectionToken<IProductRepository>('PRODUCT_REPOSITORY');
 export const CUSTOMER_REPOSITORY = new InjectionToken<ICustomerRepository>('CUSTOMER_REPOSITORY');
 export const TRANSACTION_REPOSITORY = new InjectionToken<ITransactionRepository>(
-  'TRANSACTION_REPOSITORY',
+  'TRANSACTION_REPOSITORY'
 );
 export const PAYMENT_REPOSITORY = new InjectionToken<IPaymentRepository>('PAYMENT_REPOSITORY');
 export const REPOSITORY_CONFIG = new InjectionToken<RepositoryConfig>('REPOSITORY_CONFIG');
@@ -152,7 +152,7 @@ export class RepositoryFactory {
  */
 export function productRepositoryFactory(
   factory: RepositoryFactory,
-  config: RepositoryConfig,
+  config: RepositoryConfig
 ): IProductRepository {
   return factory.createProductRepository(config);
 }
@@ -162,7 +162,7 @@ export function productRepositoryFactory(
  */
 export function customerRepositoryFactory(
   factory: RepositoryFactory,
-  config: RepositoryConfig,
+  config: RepositoryConfig
 ): ICustomerRepository {
   return factory.createCustomerRepository(config);
 }
@@ -172,7 +172,7 @@ export function customerRepositoryFactory(
  */
 export function transactionRepositoryFactory(
   factory: RepositoryFactory,
-  config: RepositoryConfig,
+  config: RepositoryConfig
 ): ITransactionRepository {
   return factory.createTransactionRepository(config);
 }
@@ -182,7 +182,7 @@ export function transactionRepositoryFactory(
  */
 export function paymentRepositoryFactory(
   factory: RepositoryFactory,
-  config: RepositoryConfig,
+  config: RepositoryConfig
 ): IPaymentRepository {
   return factory.createPaymentRepository(config);
 }
