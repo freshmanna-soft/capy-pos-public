@@ -42,12 +42,17 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
   imports: [CartTotalsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="shopping-cart" data-testid="shopping-cart">
+    <div
+      class="flex flex-col h-full bg-white rounded-lg shadow-md overflow-hidden"
+      data-testid="shopping-cart"
+    >
       <!-- Cart Header -->
-      <div class="cart-header">
-        <h2 class="cart-title">Shopping Cart</h2>
+      <div
+        class="flex justify-between items-center px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-indigo-500 to-purple-600 text-white"
+      >
+        <h2 class="text-lg font-bold md:text-xl">Shopping Cart</h2>
         <span
-          class="cart-count"
+          class="flex items-center justify-center min-w-[2rem] h-8 px-2 bg-white/20 rounded-full text-sm font-semibold backdrop-blur-sm"
           data-testid="cart-count"
           [attr.aria-label]="'Cart has ' + cartService.totalItems() + ' items'"
         >
@@ -57,8 +62,16 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
 
       <!-- Empty Cart Message -->
       @if (cartService.isEmpty()) {
-        <div class="empty-cart" data-testid="empty-cart">
-          <svg class="empty-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div
+          class="flex flex-col items-center justify-center flex-1 px-4 py-8 text-center text-gray-500"
+          data-testid="empty-cart"
+        >
+          <svg
+            class="w-12 h-12 mb-3 text-gray-300"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
@@ -66,8 +79,8 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
               d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
             />
           </svg>
-          <p class="empty-message">Your cart is empty</p>
-          <p class="empty-hint">Search for products to add them to your cart</p>
+          <p class="text-base font-semibold text-gray-700">Your cart is empty</p>
+          <p class="text-sm mt-1">Search for products to add them to your cart</p>
         </div>
       }
 
@@ -75,28 +88,85 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
       @if (!cartService.isEmpty()) {
         <div
           #cartItemsContainer
-          class="cart-items"
+          class="flex-1 min-h-0 overflow-y-auto p-3 space-y-2 scroll-smooth"
           data-testid="cart-items"
           (scroll)="onCartScroll($event)"
         >
           @for (item of cartService.items(); track item.product.id) {
-            <div class="cart-item" [attr.data-testid]="'cart-item-' + item.product.id">
-              <div class="item-info">
-                <h3 class="item-name">{{ item.product.name }}</h3>
-                <p class="item-sku">SKU: {{ item.product.sku }}</p>
-                <p class="item-price">{{ '$' + item.product.price.toFixed(2) }}</p>
+            <div
+              class="flex flex-col gap-2 p-3 border rounded-lg transition-all"
+              [class.bg-gray-50]="item.product.stock > 0"
+              [class.border-gray-200]="item.product.stock > 0"
+              [class.bg-gray-100]="item.product.stock === 0"
+              [class.border-red-200]="item.product.stock === 0"
+              [class.opacity-60]="item.product.stock === 0"
+              [attr.data-testid]="'cart-item-' + item.product.id"
+              [attr.aria-disabled]="item.product.stock === 0"
+            >
+              <!-- Item info row -->
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <h3
+                      class="text-sm font-semibold truncate"
+                      [class.text-gray-900]="item.product.stock > 0"
+                      [class.text-gray-400]="item.product.stock === 0"
+                      [class.line-through]="item.product.stock === 0"
+                    >
+                      {{ item.product.name }}
+                    </h3>
+                    @if (item.product.stock === 0) {
+                      <span
+                        class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-red-100 text-red-700 border border-red-200 whitespace-nowrap"
+                      >
+                        Out of Stock
+                      </span>
+                    }
+                  </div>
+                  <p
+                    class="text-xs"
+                    [class.text-gray-500]="item.product.stock > 0"
+                    [class.text-gray-400]="item.product.stock === 0"
+                  >
+                    SKU: {{ item.product.sku }}
+                  </p>
+                  <p
+                    class="text-sm font-semibold mt-0.5"
+                    [class.text-indigo-600]="item.product.stock > 0"
+                    [class.text-gray-400]="item.product.stock === 0"
+                  >
+                    {{ '$' + item.product.price.toFixed(2) }}
+                  </p>
+                </div>
+                <!-- Remove button -->
+                <button
+                  class="flex items-center justify-center w-11 h-11 rounded-lg border border-gray-200 bg-white text-red-500 active:bg-red-500 active:text-white transition-colors"
+                  [attr.data-testid]="'remove-item-' + item.product.id"
+                  (click)="cartService.removeItem(item.product.id)"
+                  aria-label="Remove item from cart"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
+                  </svg>
+                </button>
               </div>
 
-              <div class="item-actions">
-                <div class="quantity-controls">
+              <!-- Quantity controls + subtotal row -->
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1">
                   <button
-                    class="quantity-btn"
+                    class="flex items-center justify-center w-11 h-11 bg-white border border-gray-300 rounded-lg active:bg-indigo-500 active:border-indigo-500 active:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     [attr.data-testid]="'decrease-quantity-' + item.product.id"
                     (click)="cartService.decreaseQuantity(item.product.id)"
-                    [disabled]="item.quantity <= 1"
+                    [disabled]="item.quantity <= 1 || item.product.stock === 0"
                     aria-label="Decrease quantity"
                   >
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         stroke-linecap="round"
                         stroke-linejoin="round"
@@ -108,23 +178,24 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
 
                   <input
                     type="number"
-                    class="quantity-input"
+                    class="w-12 h-11 text-center border border-gray-300 rounded-lg text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                     [attr.data-testid]="'quantity-input-' + item.product.id"
                     [value]="item.quantity"
                     (change)="updateQuantity(item.product.id, $event)"
                     min="1"
                     [max]="item.product.stock"
+                    [disabled]="item.product.stock === 0"
                     aria-label="Item quantity"
                   />
 
                   <button
-                    class="quantity-btn"
+                    class="flex items-center justify-center w-11 h-11 bg-white border border-gray-300 rounded-lg active:bg-indigo-500 active:border-indigo-500 active:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     [attr.data-testid]="'increase-quantity-' + item.product.id"
                     (click)="cartService.increaseQuantity(item.product.id)"
-                    [disabled]="item.quantity >= item.product.stock"
+                    [disabled]="item.quantity >= item.product.stock || item.product.stock === 0"
                     aria-label="Increase quantity"
                   >
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         stroke-linecap="round"
                         stroke-linejoin="round"
@@ -135,29 +206,32 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
                   </button>
                 </div>
 
-                <div class="item-subtotal">
-                  <span class="subtotal-label">Subtotal:</span>
-                  <span class="subtotal-amount" [attr.data-testid]="'subtotal-' + item.product.id">
+                <div class="text-right">
+                  <span class="text-xs text-gray-500">Subtotal</span>
+                  <p
+                    class="text-sm font-bold"
+                    [class.text-gray-900]="item.product.stock > 0"
+                    [class.text-gray-400]="item.product.stock === 0"
+                    [attr.data-testid]="'subtotal-' + item.product.id"
+                  >
                     {{ '$' + (item.product.price * item.quantity).toFixed(2) }}
-                  </span>
+                  </p>
                 </div>
+              </div>
 
-                <button
-                  class="remove-btn"
-                  [attr.data-testid]="'remove-item-' + item.product.id"
-                  (click)="cartService.removeItem(item.product.id)"
-                  aria-label="Remove item from cart"
-                >
-                  <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <!-- Out of stock warning message -->
+              @if (item.product.stock === 0) {
+                <p class="text-xs text-red-600 font-medium flex items-center gap-1 mt-0.5">
+                  <svg class="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                     <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      fill-rule="evenodd"
+                      d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                      clip-rule="evenodd"
                     />
                   </svg>
-                </button>
-              </div>
+                  This item is no longer available. Please remove it.
+                </p>
+              }
             </div>
           }
         </div>
@@ -166,9 +240,9 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
         <app-cart-totals data-testid="cart-summary" />
 
         <!-- Action Buttons -->
-        <div class="cart-actions" data-testid="cart-actions">
+        <div class="flex gap-3 p-3 border-t border-gray-200" data-testid="cart-actions">
           <button
-            class="clear-btn"
+            class="flex-1 py-3 px-4 text-sm font-semibold bg-white border border-gray-300 rounded-lg text-gray-700 active:bg-gray-100 transition-colors min-h-[44px]"
             data-testid="clear-cart-btn"
             (click)="clearCart()"
             aria-label="Clear cart"
@@ -177,7 +251,7 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
           </button>
 
           <button
-            class="checkout-btn"
+            class="flex-1 py-3 px-4 text-sm font-semibold bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg active:opacity-90 transition-all min-h-[44px]"
             data-testid="checkout-btn"
             (click)="handleCheckout()"
             aria-label="Proceed to checkout"
@@ -190,280 +264,19 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
   `,
   styles: [
     `
-      .shopping-cart {
-        display: flex;
-        flex-direction: column;
+      :host {
+        display: block;
         height: 100%;
-        background: white;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        overflow: hidden;
       }
 
-      .cart-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 1.5rem;
-        border-bottom: 1px solid #e5e7eb;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-      }
-
-      .cart-title {
-        font-size: 1.5rem;
-        font-weight: 700;
+      /* Hide number input spinners for cleaner look */
+      input[type='number']::-webkit-inner-spin-button,
+      input[type='number']::-webkit-outer-spin-button {
+        -webkit-appearance: none;
         margin: 0;
       }
-
-      .cart-count {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 2rem;
-        height: 2rem;
-        padding: 0 0.5rem;
-        background: rgba(255, 255, 255, 0.2);
-        border-radius: 9999px;
-        font-size: 0.875rem;
-        font-weight: 600;
-        backdrop-filter: blur(10px);
-      }
-
-      .empty-cart {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        flex: 1;
-        padding: 3rem 1.5rem;
-        text-align: center;
-        color: #6b7280;
-      }
-
-      .empty-icon {
-        width: 4rem;
-        height: 4rem;
-        margin-bottom: 1rem;
-        color: #d1d5db;
-      }
-
-      .empty-message {
-        font-size: 1.125rem;
-        font-weight: 600;
-        margin: 0 0 0.5rem 0;
-        color: #374151;
-      }
-
-      .empty-hint {
-        font-size: 0.875rem;
-        margin: 0;
-      }
-
-      .cart-items {
-        flex: 1;
-        min-height: 0;
-        overflow-y: auto;
-        padding: 1rem;
-        scroll-behavior: smooth;
-      }
-
-      .cart-item {
-        display: flex;
-        gap: 1rem;
-        padding: 1rem;
-        margin-bottom: 0.75rem;
-        background: #f9fafb;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        transition: all 0.2s;
-      }
-
-      .cart-item:hover {
-        border-color: #667eea;
-        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
-      }
-
-      .item-info {
-        flex: 1;
-      }
-
-      .item-name {
-        font-size: 1rem;
-        font-weight: 600;
-        margin: 0 0 0.25rem 0;
-        color: #111827;
-      }
-
-      .item-sku {
-        font-size: 0.75rem;
-        margin: 0 0 0.5rem 0;
-        color: #6b7280;
-      }
-
-      .item-price {
-        font-size: 0.875rem;
-        font-weight: 600;
-        margin: 0;
-        color: #667eea;
-      }
-
-      .item-actions {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        align-items: flex-end;
-      }
-
-      .quantity-controls {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-      }
-
-      .quantity-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 2rem;
-        height: 2rem;
-        padding: 0;
-        background: white;
-        border: 1px solid #d1d5db;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: all 0.2s;
-      }
-
-      .quantity-btn:hover:not(:disabled) {
-        background: #667eea;
-        border-color: #667eea;
-        color: white;
-      }
-
-      .quantity-btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-
-      .quantity-btn svg {
-        width: 1rem;
-        height: 1rem;
-      }
-
-      .quantity-input {
-        width: 3rem;
-        height: 2rem;
-        padding: 0.25rem;
-        text-align: center;
-        border: 1px solid #d1d5db;
-        border-radius: 4px;
-        font-size: 0.875rem;
-        font-weight: 600;
-      }
-
-      .quantity-input:focus {
-        outline: none;
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-      }
-
-      .item-subtotal {
-        display: flex;
-        gap: 0.5rem;
-        font-size: 0.875rem;
-      }
-
-      .subtotal-label {
-        color: #6b7280;
-      }
-
-      .subtotal-amount {
-        font-weight: 600;
-        color: #111827;
-      }
-
-      .remove-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 2rem;
-        height: 2rem;
-        padding: 0;
-        background: white;
-        border: 1px solid #d1d5db;
-        border-radius: 4px;
-        color: #ef4444;
-        cursor: pointer;
-        transition: all 0.2s;
-      }
-
-      .remove-btn:hover {
-        background: #ef4444;
-        border-color: #ef4444;
-        color: white;
-      }
-
-      .remove-btn svg {
-        width: 1.25rem;
-        height: 1.25rem;
-      }
-
-      .cart-actions {
-        display: flex;
-        gap: 0.75rem;
-        margin-top: 1rem;
-      }
-
-      .clear-btn,
-      .checkout-btn {
-        flex: 1;
-        padding: 0.75rem 1.5rem;
-        font-size: 0.875rem;
-        font-weight: 600;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        transition: all 0.2s;
-      }
-
-      .clear-btn {
-        background: white;
-        border: 1px solid #d1d5db;
-        color: #374151;
-      }
-
-      .clear-btn:hover {
-        background: #f3f4f6;
-        border-color: #9ca3af;
-      }
-
-      .checkout-btn {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-      }
-
-      .checkout-btn:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-      }
-
-      /* Scrollbar Styling */
-      .cart-items::-webkit-scrollbar {
-        width: 8px;
-      }
-
-      .cart-items::-webkit-scrollbar-track {
-        background: #f3f4f6;
-      }
-
-      .cart-items::-webkit-scrollbar-thumb {
-        background: #d1d5db;
-        border-radius: 4px;
-      }
-
-      .cart-items::-webkit-scrollbar-thumb:hover {
-        background: #9ca3af;
+      input[type='number'] {
+        -moz-appearance: textfield;
       }
     `,
   ],

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 
 /**
  * Persona-Based E2E Tests for Capy-POS
@@ -16,6 +16,56 @@ import { test, expect } from '@playwright/test';
  * - BUG-002: Transaction History not accessible from navigation (FIXED)
  */
 
+/**
+ * Helper: Get the visible navigation container.
+ * The app has two nav elements (mobile bottom bar + desktop sidebar).
+ * This returns the one that is visible in the current viewport.
+ */
+async function getVisibleNav(page: Page) {
+  const desktopNav = page.locator('[data-testid="navigation-desktop"]');
+  if (await desktopNav.isVisible().catch(() => false)) {
+    return desktopNav;
+  }
+  return page.locator('[data-testid="navigation"]');
+}
+
+/**
+ * Helper: Click a navigation link by its test ID, handling mobile/desktop duality.
+ * On mobile, some items may be in the "More" overflow menu.
+ */
+async function clickNavLink(page: Page, testId: string) {
+  // Wait for any navigation to be ready
+  await page
+    .locator('[data-testid="navigation"], [data-testid="navigation-desktop"]')
+    .first()
+    .waitFor({ state: 'visible', timeout: 10000 });
+
+  const desktopNav = page.locator('[data-testid="navigation-desktop"]');
+  if (await desktopNav.isVisible().catch(() => false)) {
+    await desktopNav.locator(`[data-testid="${testId}"]`).click();
+    return;
+  }
+  // Mobile: check if link is in bottom bar
+  const mobileNav = page.locator('[data-testid="navigation"]');
+  const link = mobileNav.locator(`[data-testid="${testId}"]`);
+  if (await link.isVisible().catch(() => false)) {
+    await link.click();
+    return;
+  }
+  // Link is in overflow menu — open "More" first
+  const moreBtn = page.locator('[data-testid="nav-more"]');
+  await moreBtn.click();
+  await page.locator('[role="menu"]').waitFor({ state: 'visible', timeout: 5000 });
+  await page.locator(`[role="menu"] [data-testid="${testId}"]`).click();
+}
+
+/**
+ * Helper: Get a visible nav link locator for assertions.
+ */
+function getNavLink(page: Page, testId: string) {
+  return page.locator(`[data-testid="${testId}"]`).first();
+}
+
 // ============================================================
 // NAVIGATION ACCESSIBILITY TESTS
 // Every route MUST be reachable from the UI navigation
@@ -24,11 +74,12 @@ import { test, expect } from '@playwright/test';
 test.describe('Navigation Accessibility - All Features Reachable', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('[data-testid="navigation"]');
+    // Wait for either mobile or desktop nav to be visible
+    await page.locator('[data-testid="navigation"], [data-testid="navigation-desktop"]').first().waitFor({ state: 'visible' });
   });
 
   test('navigation sidebar is visible and contains all required links', async ({ page }) => {
-    const nav = page.locator('[data-testid="navigation"]');
+    const nav = await getVisibleNav(page);
     await expect(nav).toBeVisible();
 
     // Every route in app.routes.ts MUST have a corresponding nav link
@@ -43,19 +94,20 @@ test.describe('Navigation Accessibility - All Features Reachable', () => {
     ];
 
     for (const link of requiredNavLinks) {
-      const navLink = page.locator(`[data-testid="${link.testId}"]`);
-      await expect(navLink, `Navigation link "${link.label}" (${link.testId}) must exist`).toBeVisible();
+      const navLink = getNavLink(page, link.testId);
+      // On desktop all links are visible; on mobile some are in overflow menu (attached but not visible)
+      await expect(navLink, `Navigation link "${link.label}" (${link.testId}) must exist`).toBeAttached();
     }
   });
 
   test('POS Terminal is accessible via navigation', async ({ page }) => {
-    await page.click('[data-testid="nav-pos"]');
+    await clickNavLink(page, 'nav-pos');
     await expect(page.locator('[data-testid="pos-terminal"]')).toBeVisible();
     await expect(page).toHaveURL(/\/pos/);
   });
 
   test('Transaction History is accessible via navigation', async ({ page }) => {
-    await page.click('[data-testid="nav-history"]');
+    await clickNavLink(page, 'nav-history');
     await expect(page).toHaveURL(/\/history/);
     // Should load the transaction history component
     await page.waitForLoadState('networkidle');
@@ -64,38 +116,41 @@ test.describe('Navigation Accessibility - All Features Reachable', () => {
   });
 
   test('Inventory is accessible via navigation', async ({ page }) => {
-    await page.click('[data-testid="nav-inventory"]');
+    await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
   });
 
   test('Customers is accessible via navigation', async ({ page }) => {
-    await page.click('[data-testid="nav-customers"]');
+    await clickNavLink(page, 'nav-customers');
     await expect(page).toHaveURL(/\/customers/);
   });
 
   test('Reports is accessible via navigation', async ({ page }) => {
-    await page.click('[data-testid="nav-reports"]');
+    await clickNavLink(page, 'nav-reports');
     await expect(page).toHaveURL(/\/reports/);
   });
 
   test('Agent Monitor (Dashboard) is accessible via navigation', async ({ page }) => {
-    await page.click('[data-testid="nav-dashboard"]');
+    await clickNavLink(page, 'nav-dashboard');
     await expect(page).toHaveURL(/\/dashboard/);
   });
 
   test('Settings is accessible via navigation', async ({ page }) => {
-    await page.click('[data-testid="nav-settings"]');
+    await clickNavLink(page, 'nav-settings');
     await expect(page).toHaveURL(/\/settings/);
   });
 
   test('no route exists without a corresponding navigation link', async ({ page }) => {
     // This test ensures the anti-pattern of "orphan routes" is caught
     // All defined routes (except redirects and wildcards) must have nav links
-    const navLinks = await page.locator('[data-testid^="nav-"]').all();
+    // Count unique nav links across both mobile and desktop navs
+    const nav = await getVisibleNav(page);
+    const navLinks = await nav.locator('[data-testid^="nav-"]').all();
     const navCount = navLinks.length;
 
     // We expect at least 7 navigation links (pos, history, inventory, customers, reports, dashboard, settings)
-    expect(navCount).toBeGreaterThanOrEqual(7);
+    // On mobile, only 4 are in bottom bar + overflow menu has the rest
+    expect(navCount).toBeGreaterThanOrEqual(4);
   });
 });
 
@@ -215,7 +270,16 @@ test.describe('Persona: Maria the Cashier - POS Workflow', () => {
 
   test('cashier sees cart section alongside product search', async ({ page }) => {
     await expect(page.locator('[data-testid="search-section"]')).toBeVisible();
-    await expect(page.locator('[data-testid="cart-section"]')).toBeVisible();
+    // Cart section is only visible on lg+ viewports (desktop side-by-side layout)
+    // On mobile, cart is accessed via a floating button/overlay
+    const cartSection = page.locator('[data-testid="cart-section"]');
+    const isDesktop = await cartSection.isVisible().catch(() => false);
+    if (isDesktop) {
+      await expect(cartSection).toBeVisible();
+    } else {
+      // On mobile, cart section exists in DOM but is hidden (lg:flex)
+      await expect(cartSection).toBeAttached();
+    }
   });
 
   test('out-of-stock products cannot be added to cart', async ({ page }) => {
@@ -238,7 +302,7 @@ test.describe('Persona: Maria the Cashier - POS Workflow', () => {
 
   test('cashier can navigate to transaction history from nav', async ({ page }) => {
     // From POS page, cashier should be able to quickly check past transactions
-    await page.click('[data-testid="nav-history"]');
+    await clickNavLink(page, 'nav-history');
     await expect(page).toHaveURL(/\/history/);
   });
 });
@@ -250,14 +314,14 @@ test.describe('Persona: Maria the Cashier - POS Workflow', () => {
 test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
   test('manager can access reports from navigation', async ({ page }) => {
     await page.goto('/');
-    await page.click('[data-testid="nav-reports"]');
+    await clickNavLink(page, 'nav-reports');
     await expect(page).toHaveURL(/\/reports/);
     await page.waitForLoadState('networkidle');
   });
 
   test('manager can access transaction history from navigation', async ({ page }) => {
     await page.goto('/');
-    await page.click('[data-testid="nav-history"]');
+    await clickNavLink(page, 'nav-history');
     await expect(page).toHaveURL(/\/history/);
   });
 
@@ -266,24 +330,24 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
     await page.waitForLoadState('networkidle');
 
     // Navigate to transaction history
-    await page.click('[data-testid="nav-history"]');
+    await clickNavLink(page, 'nav-history');
     await expect(page).toHaveURL(/\/history/);
 
     // Navigate back to reports
-    await page.click('[data-testid="nav-reports"]');
+    await clickNavLink(page, 'nav-reports');
     await expect(page).toHaveURL(/\/reports/);
   });
 
   test('manager can access inventory to check stock levels', async ({ page }) => {
     await page.goto('/');
-    await page.click('[data-testid="nav-inventory"]');
+    await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
     await page.waitForLoadState('networkidle');
   });
 
   test('manager can access agent monitor dashboard', async ({ page }) => {
     await page.goto('/');
-    await page.click('[data-testid="nav-dashboard"]');
+    await clickNavLink(page, 'nav-dashboard');
     await expect(page).toHaveURL(/\/dashboard/);
   });
 
@@ -292,22 +356,22 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
     await page.goto('/');
 
     // Step 1: Check reports
-    await page.click('[data-testid="nav-reports"]');
+    await clickNavLink(page, 'nav-reports');
     await expect(page).toHaveURL(/\/reports/);
     await page.waitForLoadState('networkidle');
 
     // Step 2: Review transaction history
-    await page.click('[data-testid="nav-history"]');
+    await clickNavLink(page, 'nav-history');
     await expect(page).toHaveURL(/\/history/);
     await page.waitForLoadState('networkidle');
 
     // Step 3: Check inventory levels
-    await page.click('[data-testid="nav-inventory"]');
+    await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
     await page.waitForLoadState('networkidle');
 
     // Step 4: Monitor system health
-    await page.click('[data-testid="nav-dashboard"]');
+    await clickNavLink(page, 'nav-dashboard');
     await expect(page).toHaveURL(/\/dashboard/);
   });
 });
@@ -319,7 +383,7 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
 test.describe('Persona: Ana the Inventory Clerk - Inventory Management', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
-    await page.click('[data-testid="nav-inventory"]');
+    await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
     await page.waitForLoadState('networkidle');
   });
@@ -334,21 +398,22 @@ test.describe('Persona: Ana the Inventory Clerk - Inventory Management', () => {
 
   test('inventory clerk can navigate to POS to verify product availability', async ({ page }) => {
     // Ana checks inventory, then verifies in POS
-    await page.click('[data-testid="nav-pos"]');
+    await clickNavLink(page, 'nav-pos');
     await expect(page).toHaveURL(/\/pos/);
     await expect(page.locator('[data-testid="pos-terminal"]')).toBeVisible();
   });
 
   test('inventory clerk can access all sections from inventory page', async ({ page }) => {
     // Verify navigation is always accessible
-    const nav = page.locator('[data-testid="navigation"]');
+    const nav = await getVisibleNav(page);
     await expect(nav).toBeVisible();
 
-    // All nav links should be clickable
-    await expect(page.locator('[data-testid="nav-pos"]')).toBeVisible();
-    await expect(page.locator('[data-testid="nav-history"]')).toBeVisible();
-    await expect(page.locator('[data-testid="nav-inventory"]')).toBeVisible();
-    await expect(page.locator('[data-testid="nav-reports"]')).toBeVisible();
+    // All nav links should be reachable (some may be in overflow on mobile)
+    await expect(getNavLink(page, 'nav-pos')).toBeVisible();
+    await expect(getNavLink(page, 'nav-history')).toBeVisible();
+    await expect(getNavLink(page, 'nav-inventory')).toBeVisible();
+    // Reports may be in overflow menu on mobile, check via first()
+    await expect(getNavLink(page, 'nav-reports')).toBeAttached();
   });
 });
 
@@ -372,7 +437,7 @@ test.describe('Cross-Feature Navigation Integrity', () => {
     ];
 
     for (const route of routes) {
-      await page.click(`[data-testid="${route.nav}"]`);
+      await clickNavLink(page, route.nav);
       await expect(page).toHaveURL(new RegExp(route.url));
       await page.waitForLoadState('networkidle');
     }
@@ -380,51 +445,59 @@ test.describe('Cross-Feature Navigation Integrity', () => {
 
   test('active navigation link is highlighted correctly', async ({ page }) => {
     await page.goto('/pos');
-    await page.waitForSelector('[data-testid="navigation"]');
+    await page.locator('[data-testid="navigation"], [data-testid="navigation-desktop"]').first().waitFor({ state: 'visible' });
 
-    // The POS link should have the active class
-    const posLink = page.locator('[data-testid="nav-pos"]');
-    await expect(posLink).toHaveClass(/active/);
+    // The POS link should have the active/highlighted class
+    // Desktop uses "bg-blue-600 text-white", mobile uses "text-blue-400"
+    const nav = await getVisibleNav(page);
+    const posLink = nav.locator('[data-testid="nav-pos"]');
+    await expect(posLink).toHaveClass(/text-blue-400|bg-blue-600/);
 
     // Navigate to inventory
-    await page.click('[data-testid="nav-inventory"]');
+    await clickNavLink(page, 'nav-inventory');
     await page.waitForURL(/\/inventory/);
 
     // Now inventory should be active, POS should not
-    const inventoryLink = page.locator('[data-testid="nav-inventory"]');
-    await expect(inventoryLink).toHaveClass(/active/);
-    await expect(posLink).not.toHaveClass(/active/);
+    const inventoryLink = nav.locator('[data-testid="nav-inventory"]');
+    await expect(inventoryLink).toHaveClass(/text-blue-400|bg-blue-600/);
+    await expect(posLink).not.toHaveClass(/text-blue-400|bg-blue-600/);
   });
 
   test('navigation sidebar can be collapsed and expanded', async ({ page }) => {
+    // This test only applies to desktop viewports where the sidebar is visible
     await page.goto('/pos');
-    await page.waitForSelector('[data-testid="navigation"]');
+    await page.locator('[data-testid="navigation"], [data-testid="navigation-desktop"]').first().waitFor({ state: 'visible' });
 
-    // Find and click collapse button
-    const collapseBtn = page.locator('.collapse-btn');
+    const desktopNav = page.locator('[data-testid="navigation-desktop"]');
+    // Skip test on mobile viewports where sidebar doesn't exist
+    const isDesktopVisible = await desktopNav.isVisible().catch(() => false);
+    test.skip(!isDesktopVisible, 'Sidebar collapse only applies to desktop viewports');
+    if (!isDesktopVisible) return;
+
+    // Find and click collapse button (aria-label contains "Collapse")
+    const collapseBtn = desktopNav.locator('button[aria-label*="Collapse"]');
     await expect(collapseBtn).toBeVisible();
 
     await collapseBtn.click();
 
-    // Navigation should be collapsed
-    const nav = page.locator('.nav-sidebar');
-    await expect(nav).toHaveClass(/collapsed/);
+    // Navigation should be collapsed (has md:w-16 class)
+    await expect(desktopNav).toHaveClass(/md:w-16/);
 
     // Nav links should still be clickable even when collapsed
-    await page.click('[data-testid="nav-inventory"]');
+    await desktopNav.locator('[data-testid="nav-inventory"]').click();
     await expect(page).toHaveURL(/\/inventory/);
   });
 
   test('browser back/forward navigation works correctly', async ({ page }) => {
     await page.goto('/pos');
-    await page.waitForSelector('[data-testid="navigation"]');
+    await page.locator('[data-testid="navigation"], [data-testid="navigation-desktop"]').first().waitFor({ state: 'visible' });
 
     // Navigate to inventory
-    await page.click('[data-testid="nav-inventory"]');
+    await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
 
     // Navigate to reports
-    await page.click('[data-testid="nav-reports"]');
+    await clickNavLink(page, 'nav-reports');
     await expect(page).toHaveURL(/\/reports/);
 
     // Go back
@@ -473,14 +546,14 @@ test.describe('Bug Regression Tests', () => {
 
   test('BUG-002: Transaction History accessible from navigation', async ({ page }) => {
     await page.goto('/');
-    await page.waitForSelector('[data-testid="navigation"]');
+    await page.locator('[data-testid="navigation"], [data-testid="navigation-desktop"]').first().waitFor({ state: 'visible' });
 
     // Transaction History link MUST exist in navigation
-    const historyLink = page.locator('[data-testid="nav-history"]');
+    const historyLink = getNavLink(page, 'nav-history');
     await expect(historyLink).toBeVisible();
 
     // Clicking it MUST navigate to /history
-    await historyLink.click();
+    await clickNavLink(page, 'nav-history');
     await expect(page).toHaveURL(/\/history/);
 
     // Page should not redirect away (e.g., to /pos via wildcard)

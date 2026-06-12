@@ -1,13 +1,15 @@
 import { Component, ChangeDetectionStrategy, signal } from '@angular/core';
-
 import { RouterModule } from '@angular/router';
 
 /**
- * Navigation Component
+ * Navigation Component (Mobile-First)
  *
- * Sidebar navigation for the Capy-POS application.
- * Provides links to all major sections with icons.
- * Collapsible on smaller screens.
+ * Mobile: Bottom tab bar (thumb-friendly, always visible)
+ * Desktop: Side navigation bar (collapsible)
+ *
+ * Progressive enhancement approach:
+ * - Base styles = mobile bottom nav
+ * - md: breakpoint = side navigation
  *
  * @example
  * ```html
@@ -20,15 +22,98 @@ import { RouterModule } from '@angular/router';
   imports: [RouterModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <nav class="nav-sidebar" [class.collapsed]="collapsed()" data-testid="navigation">
+    <!-- Mobile Bottom Navigation (visible < md) -->
+    <nav
+      class="fixed bottom-0 inset-x-0 z-50 bg-gray-900 border-t border-gray-700
+             flex justify-around items-center px-1 pb-[env(safe-area-inset-bottom)]
+             md:hidden"
+      style="height: 64px;"
+      data-testid="navigation"
+      aria-label="Main navigation"
+    >
+      @for (item of mobileNavItems; track item.path) {
+        <a
+          [routerLink]="item.path"
+          routerLinkActive="text-blue-400"
+          [routerLinkActiveOptions]="{ exact: item.exact }"
+          class="flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px]
+                 text-gray-400 no-underline transition-colors duration-150
+                 active:text-blue-300"
+          [attr.aria-label]="item.label"
+          [attr.data-testid]="'nav-' + item.id"
+        >
+          <span class="text-xl leading-none">{{ item.icon }}</span>
+          <span class="text-[10px] font-medium leading-tight">{{ item.shortLabel }}</span>
+        </a>
+      }
+      <!-- More menu for overflow items -->
+      <button
+        (click)="toggleMobileMenu()"
+        class="flex flex-col items-center justify-center gap-0.5 min-w-[44px] min-h-[44px]
+               text-gray-400 bg-transparent border-none cursor-pointer transition-colors duration-150"
+        [class.text-blue-400]="mobileMenuOpen()"
+        aria-label="More options"
+        data-testid="nav-more"
+      >
+        <span class="text-xl leading-none">⋯</span>
+        <span class="text-[10px] font-medium leading-tight">More</span>
+      </button>
+    </nav>
+
+    <!-- Mobile overflow menu (slide-up panel) -->
+    @if (mobileMenuOpen()) {
+      <div class="fixed inset-0 z-40 md:hidden" (click)="closeMobileMenu()" aria-hidden="true">
+        <div class="absolute inset-0 bg-black/50"></div>
+      </div>
+      <div
+        class="fixed bottom-16 inset-x-0 z-50 bg-gray-900 border-t border-gray-700
+               rounded-t-2xl p-4 pb-[env(safe-area-inset-bottom)] md:hidden
+               animate-slide-up"
+        role="menu"
+      >
+        <div class="grid grid-cols-4 gap-3">
+          @for (item of overflowNavItems; track item.path) {
+            <a
+              [routerLink]="item.path"
+              routerLinkActive="text-blue-400"
+              [routerLinkActiveOptions]="{ exact: item.exact }"
+              class="flex flex-col items-center justify-center gap-1 min-h-[56px]
+                     text-gray-400 no-underline rounded-lg transition-colors duration-150
+                     active:bg-gray-800"
+              [attr.aria-label]="item.label"
+              [attr.data-testid]="'nav-' + item.id"
+              (click)="closeMobileMenu()"
+            >
+              <span class="text-2xl leading-none">{{ item.icon }}</span>
+              <span class="text-xs font-medium">{{ item.shortLabel }}</span>
+            </a>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Desktop Side Navigation (visible >= md) -->
+    <nav
+      class="hidden md:flex md:flex-col md:h-screen md:bg-gray-900 md:text-gray-100
+             md:transition-all md:duration-200 md:overflow-hidden md:border-r md:border-gray-700"
+      [class.md:w-60]="!collapsed()"
+      [class.md:w-16]="collapsed()"
+      data-testid="navigation-desktop"
+      aria-label="Main navigation"
+    >
       <!-- Logo/Brand -->
-      <div class="nav-brand">
-        <span class="brand-icon">🦫</span>
+      <div
+        class="flex items-center gap-3 px-4 py-5 border-b border-gray-700"
+        [class.justify-center]="collapsed()"
+      >
+        <span class="text-2xl flex-shrink-0">🦫</span>
         @if (!collapsed()) {
-          <span class="brand-text">Capy-POS</span>
+          <span class="text-lg font-bold whitespace-nowrap">Capy-POS</span>
         }
         <button
-          class="collapse-btn"
+          class="ml-auto bg-transparent border-none text-gray-400 cursor-pointer p-1 rounded
+                 hover:text-gray-100 hover:bg-gray-700 flex items-center"
+          [class.ml-0]="collapsed()"
           (click)="toggleCollapse()"
           [attr.aria-label]="collapsed() ? 'Expand navigation' : 'Collapse navigation'"
         >
@@ -36,8 +121,8 @@ import { RouterModule } from '@angular/router';
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
-            class="collapse-icon"
-            [class.rotated]="collapsed()"
+            class="w-4 h-4 transition-transform duration-200"
+            [class.rotate-180]="collapsed()"
           >
             <path
               stroke-linecap="round"
@@ -50,20 +135,23 @@ import { RouterModule } from '@angular/router';
       </div>
 
       <!-- Navigation Links -->
-      <ul class="nav-links">
+      <ul class="list-none p-2 m-0 flex-1 flex flex-col gap-1 overflow-y-auto">
         @for (item of navItems; track item.path) {
           <li>
             <a
               [routerLink]="item.path"
-              routerLinkActive="active"
+              routerLinkActive="bg-blue-600 text-white"
               [routerLinkActiveOptions]="{ exact: item.exact }"
-              class="nav-link"
+              class="flex items-center gap-3 px-3 py-3 rounded-lg text-gray-300 no-underline
+                     text-sm font-medium whitespace-nowrap transition-all duration-150
+                     hover:bg-gray-700 hover:text-gray-100 min-h-[44px]"
+              [class.justify-center]="collapsed()"
               [attr.aria-label]="item.label"
               [attr.data-testid]="'nav-' + item.id"
             >
-              <span class="nav-icon">{{ item.icon }}</span>
+              <span class="text-xl flex-shrink-0 w-6 text-center">{{ item.icon }}</span>
               @if (!collapsed()) {
-                <span class="nav-label">{{ item.label }}</span>
+                <span class="overflow-hidden text-ellipsis">{{ item.label }}</span>
               }
             </a>
           </li>
@@ -72,163 +160,103 @@ import { RouterModule } from '@angular/router';
 
       <!-- Footer -->
       @if (!collapsed()) {
-        <div class="nav-footer">
-          <span class="nav-version">v1.0.0</span>
+        <div class="p-4 border-t border-gray-700 text-center">
+          <span class="text-xs text-gray-500">v1.0.0</span>
         </div>
       }
     </nav>
   `,
   styles: [
     `
-      .nav-sidebar {
-        display: flex;
-        flex-direction: column;
-        width: 240px;
-        height: 100vh;
-        background: #1f2937;
-        color: #f9fafb;
-        transition: width 0.2s ease;
-        overflow: hidden;
+      @keyframes slide-up {
+        from {
+          transform: translateY(100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
       }
 
-      .nav-sidebar.collapsed {
-        width: 64px;
-      }
-
-      .nav-brand {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 1.25rem 1rem;
-        border-bottom: 1px solid #374151;
-      }
-
-      .brand-icon {
-        font-size: 1.5rem;
-        flex-shrink: 0;
-      }
-
-      .brand-text {
-        font-size: 1.125rem;
-        font-weight: 700;
-        white-space: nowrap;
-      }
-
-      .collapse-btn {
-        margin-left: auto;
-        background: none;
-        border: none;
-        color: #9ca3af;
-        cursor: pointer;
-        padding: 0.25rem;
-        border-radius: 4px;
-        display: flex;
-        align-items: center;
-      }
-
-      .collapse-btn:hover {
-        color: #f9fafb;
-        background: #374151;
-      }
-
-      .collapse-icon {
-        width: 1rem;
-        height: 1rem;
-        transition: transform 0.2s;
-      }
-
-      .collapse-icon.rotated {
-        transform: rotate(180deg);
-      }
-
-      .nav-links {
-        list-style: none;
-        padding: 0.75rem 0.5rem;
-        margin: 0;
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-      }
-
-      .nav-link {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 0.75rem 0.75rem;
-        border-radius: 8px;
-        color: #d1d5db;
-        text-decoration: none;
-        font-size: 0.875rem;
-        font-weight: 500;
-        transition: all 0.15s;
-        white-space: nowrap;
-      }
-
-      .nav-link:hover {
-        background: #374151;
-        color: #f9fafb;
-      }
-
-      .nav-link.active {
-        background: #2563eb;
-        color: #ffffff;
-      }
-
-      .nav-icon {
-        font-size: 1.25rem;
-        flex-shrink: 0;
-        width: 1.5rem;
-        text-align: center;
-      }
-
-      .nav-label {
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .nav-footer {
-        padding: 1rem;
-        border-top: 1px solid #374151;
-        text-align: center;
-      }
-
-      .nav-version {
-        font-size: 0.75rem;
-        color: #6b7280;
-      }
-
-      /* Collapsed state adjustments */
-      .collapsed .nav-brand {
-        justify-content: center;
-        padding: 1.25rem 0.5rem;
-      }
-
-      .collapsed .collapse-btn {
-        margin-left: 0;
-      }
-
-      .collapsed .nav-link {
-        justify-content: center;
-        padding: 0.75rem;
+      .animate-slide-up {
+        animation: slide-up 0.2s ease-out;
       }
     `,
   ],
 })
 export class NavigationComponent {
   readonly collapsed = signal(false);
+  readonly mobileMenuOpen = signal(false);
 
+  /** All navigation items */
   readonly navItems = [
-    { id: 'pos', path: '/pos', label: 'POS Terminal', icon: '🛒', exact: false },
-    { id: 'history', path: '/history', label: 'Transactions', icon: '🧾', exact: false },
-    { id: 'inventory', path: '/inventory', label: 'Inventory', icon: '📦', exact: false },
-    { id: 'customers', path: '/customers', label: 'Customers', icon: '👥', exact: false },
-    { id: 'reports', path: '/reports', label: 'Reports', icon: '📊', exact: false },
-    { id: 'dashboard', path: '/dashboard', label: 'Agent Monitor', icon: '🤖', exact: false },
-    { id: 'settings', path: '/settings', label: 'Settings', icon: '⚙️', exact: false },
+    { id: 'pos', path: '/pos', label: 'POS Terminal', shortLabel: 'POS', icon: '🛒', exact: false },
+    {
+      id: 'history',
+      path: '/history',
+      label: 'Transactions',
+      shortLabel: 'History',
+      icon: '🧾',
+      exact: false,
+    },
+    {
+      id: 'inventory',
+      path: '/inventory',
+      label: 'Inventory',
+      shortLabel: 'Inventory',
+      icon: '📦',
+      exact: false,
+    },
+    {
+      id: 'customers',
+      path: '/customers',
+      label: 'Customers',
+      shortLabel: 'Customers',
+      icon: '👥',
+      exact: false,
+    },
+    {
+      id: 'reports',
+      path: '/reports',
+      label: 'Reports',
+      shortLabel: 'Reports',
+      icon: '📊',
+      exact: false,
+    },
+    {
+      id: 'dashboard',
+      path: '/dashboard',
+      label: 'Agent Monitor',
+      shortLabel: 'Agents',
+      icon: '🤖',
+      exact: false,
+    },
+    {
+      id: 'settings',
+      path: '/settings',
+      label: 'Settings',
+      shortLabel: 'Settings',
+      icon: '⚙️',
+      exact: false,
+    },
   ];
+
+  /** Primary items shown in mobile bottom bar (max 4) */
+  readonly mobileNavItems = this.navItems.slice(0, 4);
+
+  /** Overflow items shown in "More" menu */
+  readonly overflowNavItems = this.navItems.slice(4);
 
   toggleCollapse(): void {
     this.collapsed.update((v) => !v);
+  }
+
+  toggleMobileMenu(): void {
+    this.mobileMenuOpen.update((v) => !v);
+  }
+
+  closeMobileMenu(): void {
+    this.mobileMenuOpen.set(false);
   }
 }

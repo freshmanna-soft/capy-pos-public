@@ -35,7 +35,7 @@ import { ReceiptData } from '@core/application/use-cases/generate-receipt.use-ca
   styleUrl: './pos-terminal.component.scss',
 })
 export class PosTerminalComponent implements OnInit {
-  private readonly posFacade = inject(PosFacade);
+  protected readonly posFacade = inject(PosFacade);
 
   @ViewChild(ShoppingCartComponent) shoppingCart!: ShoppingCartComponent;
   @ViewChild(ProductSearchComponent) productSearch!: ProductSearchComponent;
@@ -45,6 +45,9 @@ export class PosTerminalComponent implements OnInit {
 
   /** Controls visibility of the receipt overlay */
   readonly showReceipt = signal(false);
+
+  /** Controls visibility of the mobile cart bottom sheet */
+  readonly mobileCartOpen = signal(false);
 
   /** Last completed payment result */
   readonly lastPayment = signal<PaymentResult | null>(null);
@@ -157,5 +160,19 @@ export class PosTerminalComponent implements OnInit {
     this.showReceipt.set(false);
     this.receiptData.set(null);
     this.lastPayment.set(null);
+  }
+
+  /**
+   * Toggles the mobile cart bottom sheet
+   */
+  toggleMobileCart(): void {
+    this.mobileCartOpen.update((v) => !v);
+  }
+
+  /**
+   * Closes the mobile cart bottom sheet
+   */
+  closeMobileCart(): void {
+    this.mobileCartOpen.set(false);
   }
 }

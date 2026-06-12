@@ -28,208 +28,266 @@ interface AgentStatus {
   standalone: true,
   imports: [CommonModule, LowStockWidgetComponent],
   template: `
-    <div class="agent-monitor">
+    <div class="p-4 md:p-6 bg-gray-100 min-h-screen">
       <!-- Low Stock Alerts Widget -->
-      <div class="widget-row" data-testid="dashboard-widgets">
+      <div class="mb-4" data-testid="dashboard-widgets">
         <app-low-stock-widget></app-low-stock-widget>
       </div>
 
-      <header class="monitor-header">
-        <h1>Agent Monitoring Dashboard</h1>
-        <div class="header-stats">
-          <div class="stat">
-            <span class="stat-label">Total Agents</span>
-            <span class="stat-value">{{ agents().length }}</span>
+      <!-- Header -->
+      <header class="bg-white p-4 md:p-5 rounded-lg shadow-sm mb-4 md:mb-6">
+        <h1 class="text-xl md:text-2xl font-bold text-gray-900 mb-4">Agent Monitoring Dashboard</h1>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="flex flex-col p-3 bg-gray-50 rounded-lg">
+            <span class="text-xs text-gray-500 mb-1">Total Agents</span>
+            <span class="text-xl md:text-2xl font-bold text-gray-900">{{ agents().length }}</span>
           </div>
-          <div class="stat">
-            <span class="stat-label">Running</span>
-            <span class="stat-value success">{{ runningAgents() }}</span>
+          <div class="flex flex-col p-3 bg-gray-50 rounded-lg">
+            <span class="text-xs text-gray-500 mb-1">Running</span>
+            <span class="text-xl md:text-2xl font-bold text-green-600">{{ runningAgents() }}</span>
           </div>
-          <div class="stat">
-            <span class="stat-label">Messages</span>
-            <span class="stat-value">{{ eventBusStats().totalMessages }}</span>
+          <div class="flex flex-col p-3 bg-gray-50 rounded-lg">
+            <span class="text-xs text-gray-500 mb-1">Messages</span>
+            <span class="text-xl md:text-2xl font-bold text-gray-900">{{
+              eventBusStats().totalMessages
+            }}</span>
           </div>
-          <div class="stat">
-            <span class="stat-label">Audit Logs</span>
-            <span class="stat-value">{{ auditStats().totalLogs }}</span>
+          <div class="flex flex-col p-3 bg-gray-50 rounded-lg">
+            <span class="text-xs text-gray-500 mb-1">Audit Logs</span>
+            <span class="text-xl md:text-2xl font-bold text-gray-900">{{
+              auditStats().totalLogs
+            }}</span>
           </div>
         </div>
       </header>
 
-      <div class="monitor-grid">
+      <!-- Grid of sections -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         <!-- Agents Section -->
-        <section class="monitor-section agents-section">
-          <h2>Agents</h2>
-          <div class="agent-list">
+        <section class="bg-white p-4 rounded-lg shadow-sm">
+          <h2
+            class="text-base md:text-lg font-semibold text-gray-900 mb-3 pb-2 border-b-2 border-blue-500"
+          >
+            Agents
+          </h2>
+          <div class="space-y-2">
             @for (agent of agents(); track agent) {
               <div
-                class="agent-card"
-                [class.running]="agent.isRunning"
-                [class.stopped]="!agent.isRunning"
+                class="p-3 border rounded-lg"
+                [class]="
+                  agent.isRunning
+                    ? 'border-l-4 border-l-green-500 border-gray-200'
+                    : 'border-l-4 border-l-red-500 border-gray-200'
+                "
               >
-                <div class="agent-header">
-                  <h3>{{ agent.name }}</h3>
-                  <span class="agent-status" [class.active]="agent.isRunning">
+                <div class="flex justify-between items-center mb-1">
+                  <h3 class="text-sm font-semibold text-gray-900">{{ agent.name }}</h3>
+                  <span
+                    class="px-2 py-0.5 rounded text-xs font-bold"
+                    [class]="
+                      agent.isRunning ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    "
+                  >
                     {{ agent.state }}
                   </span>
                 </div>
-                <div class="agent-details">
-                  <p><strong>ID:</strong> {{ agent.id }}</p>
-                  @if (agent.lastActivity) {
-                    <p>
-                      <strong>Last Activity:</strong>
-                      {{ agent.lastActivity | date: 'short' }}
-                    </p>
-                  }
-                </div>
+                <p class="text-xs text-gray-500">ID: {{ agent.id }}</p>
+                @if (agent.lastActivity) {
+                  <p class="text-xs text-gray-500">
+                    Last: {{ agent.lastActivity | date: 'short' }}
+                  </p>
+                }
               </div>
             }
           </div>
         </section>
 
         <!-- Circuit Breakers Section -->
-        <section class="monitor-section circuit-breakers-section">
-          <h2>Circuit Breakers</h2>
-          <div class="circuit-breaker-list">
+        <section class="bg-white p-4 rounded-lg shadow-sm">
+          <h2
+            class="text-base md:text-lg font-semibold text-gray-900 mb-3 pb-2 border-b-2 border-blue-500"
+          >
+            Circuit Breakers
+          </h2>
+          <div class="space-y-2">
             @for (cb of circuitBreakers() | keyvalue; track cb) {
               <div
-                class="circuit-breaker-card"
-                [class.open]="cb.value.state === 'OPEN'"
-                [class.half-open]="cb.value.state === 'HALF_OPEN'"
-                [class.closed]="cb.value.state === 'CLOSED'"
+                class="p-3 border rounded-lg border-l-4"
+                [class]="
+                  cb.value.state === 'OPEN'
+                    ? 'border-l-red-500'
+                    : cb.value.state === 'HALF_OPEN'
+                      ? 'border-l-yellow-500'
+                      : 'border-l-green-500'
+                "
               >
-                <div class="cb-header">
-                  <h3>{{ cb.key }}</h3>
-                  <span class="cb-state">{{ cb.value.state }}</span>
+                <div class="flex justify-between items-center mb-2">
+                  <h3 class="text-sm font-semibold text-gray-900 truncate">{{ cb.key }}</h3>
+                  <span
+                    class="px-2 py-0.5 rounded text-xs font-bold shrink-0"
+                    [class]="
+                      cb.value.state === 'OPEN'
+                        ? 'bg-red-100 text-red-800'
+                        : cb.value.state === 'HALF_OPEN'
+                          ? 'bg-yellow-100 text-yellow-800'
+                          : 'bg-green-100 text-green-800'
+                    "
+                  >
+                    {{ cb.value.state }}
+                  </span>
                 </div>
-                <div class="cb-stats">
-                  <div class="cb-stat">
-                    <span>Calls:</span>
-                    <span>{{ cb.value.totalCalls }}</span>
+                <div class="grid grid-cols-3 gap-2">
+                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                    <span>Calls</span>
+                    <span class="font-semibold">{{ cb.value.totalCalls }}</span>
                   </div>
-                  <div class="cb-stat">
-                    <span>Failures:</span>
-                    <span class="error">{{ cb.value.totalFailures }}</span>
+                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                    <span>Fail</span>
+                    <span class="font-bold text-red-600">{{ cb.value.totalFailures }}</span>
                   </div>
-                  <div class="cb-stat">
-                    <span>Successes:</span>
-                    <span class="success">{{ cb.value.totalSuccesses }}</span>
+                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                    <span>OK</span>
+                    <span class="font-bold text-green-600">{{ cb.value.totalSuccesses }}</span>
                   </div>
                 </div>
               </div>
             }
             @if ((circuitBreakers() | keyvalue).length === 0) {
-              <div class="empty-state">No circuit breakers active</div>
+              <div class="text-center py-8 text-gray-400 italic">No circuit breakers active</div>
             }
           </div>
         </section>
 
         <!-- Metrics Section -->
-        <section class="monitor-section metrics-section">
-          <h2>Metrics</h2>
-          <div class="metrics-list">
+        <section class="bg-white p-4 rounded-lg shadow-sm">
+          <h2
+            class="text-base md:text-lg font-semibold text-gray-900 mb-3 pb-2 border-b-2 border-blue-500"
+          >
+            Metrics
+          </h2>
+          <div class="space-y-2">
             @for (metric of metrics() | keyvalue; track metric) {
-              <div class="metric-card">
-                <h3>{{ metric.key }}</h3>
-                <div class="metric-stats">
-                  <div class="metric-stat">
-                    <span>Count:</span>
-                    <span>{{ metric.value.count }}</span>
+              <div class="p-3 border border-gray-200 rounded-lg">
+                <h3 class="text-sm font-semibold text-gray-900 mb-2 truncate">{{ metric.key }}</h3>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                    <span>Count</span>
+                    <span class="font-semibold">{{ metric.value.count }}</span>
                   </div>
-                  <div class="metric-stat">
-                    <span>Avg:</span>
-                    <span>{{ metric.value.avg | number: '1.2-2' }}</span>
+                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                    <span>Avg</span>
+                    <span class="font-semibold">{{ metric.value.avg | number: '1.2-2' }}</span>
                   </div>
-                  <div class="metric-stat">
-                    <span>Min:</span>
-                    <span>{{ metric.value.min | number: '1.2-2' }}</span>
+                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                    <span>Min</span>
+                    <span class="font-semibold">{{ metric.value.min | number: '1.2-2' }}</span>
                   </div>
-                  <div class="metric-stat">
-                    <span>Max:</span>
-                    <span>{{ metric.value.max | number: '1.2-2' }}</span>
+                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                    <span>Max</span>
+                    <span class="font-semibold">{{ metric.value.max | number: '1.2-2' }}</span>
                   </div>
                   @if (metric.value.p95) {
-                    <div class="metric-stat">
-                      <span>P95:</span>
-                      <span>{{ metric.value.p95 | number: '1.2-2' }}</span>
+                    <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                      <span>P95</span>
+                      <span class="font-semibold">{{ metric.value.p95 | number: '1.2-2' }}</span>
                     </div>
                   }
                 </div>
               </div>
             }
             @if ((metrics() | keyvalue).length === 0) {
-              <div class="empty-state">No metrics collected</div>
+              <div class="text-center py-8 text-gray-400 italic">No metrics collected</div>
             }
           </div>
         </section>
 
         <!-- Recent Audit Logs Section -->
-        <section class="monitor-section audit-logs-section">
-          <h2>Recent Audit Logs</h2>
-          <div class="audit-log-list">
+        <section class="bg-white p-4 rounded-lg shadow-sm">
+          <h2
+            class="text-base md:text-lg font-semibold text-gray-900 mb-3 pb-2 border-b-2 border-blue-500"
+          >
+            Recent Audit Logs
+          </h2>
+          <div class="space-y-2 max-h-96 overflow-y-auto">
             @for (log of recentAuditLogs(); track log) {
               <div
-                class="audit-log-entry"
-                [class.success]="log.status === 'SUCCESS'"
-                [class.failure]="log.status === 'FAILURE'"
+                class="p-3 border rounded-lg border-l-4"
+                [class]="log.status === 'SUCCESS' ? 'border-l-green-500' : 'border-l-red-500'"
               >
-                <div class="log-header">
-                  <span class="log-action">{{ log.action }}</span>
-                  <span class="log-status">{{ log.status }}</span>
-                  <span class="log-time">{{ log.timestamp | date: 'short' }}</span>
+                <div class="flex flex-wrap justify-between items-center gap-1 mb-1">
+                  <span class="text-xs font-bold text-blue-600">{{ log.action }}</span>
+                  <span
+                    class="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                    [class]="
+                      log.status === 'SUCCESS'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-red-100 text-red-800'
+                    "
+                  >
+                    {{ log.status }}
+                  </span>
+                  <span class="text-[10px] text-gray-400">{{ log.timestamp | date: 'short' }}</span>
                 </div>
-                <div class="log-details">
-                  <p><strong>Agent:</strong> {{ log.agentName }}</p>
-                  <p><strong>Operation:</strong> {{ log.operation }}</p>
-                  <p><strong>Entity:</strong> {{ log.entityType }}:{{ log.entityId }}</p>
+                <div class="text-xs text-gray-600 space-y-0.5">
+                  <p><span class="font-medium">Agent:</span> {{ log.agentName }}</p>
+                  <p><span class="font-medium">Op:</span> {{ log.operation }}</p>
+                  <p>
+                    <span class="font-medium">Entity:</span> {{ log.entityType }}:{{ log.entityId }}
+                  </p>
                   @if (log.duration) {
-                    <p><strong>Duration:</strong> {{ log.duration }}ms</p>
+                    <p><span class="font-medium">Duration:</span> {{ log.duration }}ms</p>
                   }
                   @if (log.errorMessage) {
-                    <p class="error-message"><strong>Error:</strong> {{ log.errorMessage }}</p>
+                    <p class="text-red-600">
+                      <span class="font-medium">Error:</span> {{ log.errorMessage }}
+                    </p>
                   }
                 </div>
               </div>
             }
             @if (recentAuditLogs().length === 0) {
-              <div class="empty-state">No audit logs</div>
+              <div class="text-center py-8 text-gray-400 italic">No audit logs</div>
             }
           </div>
         </section>
 
         <!-- Event Bus Activity Section -->
-        <section class="monitor-section event-bus-section">
-          <h2>Event Bus Activity</h2>
-          <div class="event-stats">
-            <div class="stat-card">
-              <h3>By Type</h3>
-              <div class="stat-list">
+        <section class="bg-white p-4 rounded-lg shadow-sm lg:col-span-2">
+          <h2
+            class="text-base md:text-lg font-semibold text-gray-900 mb-3 pb-2 border-b-2 border-blue-500"
+          >
+            Event Bus Activity
+          </h2>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <h3 class="text-xs font-medium text-gray-500 mb-2">By Type</h3>
+              <div class="space-y-1">
                 @for (type of eventBusStats().byType | keyvalue; track type) {
-                  <div class="stat-item">
-                    <span>{{ type.key }}:</span>
-                    <span>{{ type.value }}</span>
+                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                    <span class="truncate">{{ type.key }}</span>
+                    <span class="font-semibold shrink-0 ml-2">{{ type.value }}</span>
                   </div>
                 }
               </div>
             </div>
-            <div class="stat-card">
-              <h3>By Source</h3>
-              <div class="stat-list">
+            <div>
+              <h3 class="text-xs font-medium text-gray-500 mb-2">By Source</h3>
+              <div class="space-y-1">
                 @for (source of eventBusStats().bySource | keyvalue; track source) {
-                  <div class="stat-item">
-                    <span>{{ source.key }}:</span>
-                    <span>{{ source.value }}</span>
+                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                    <span class="truncate">{{ source.key }}</span>
+                    <span class="font-semibold shrink-0 ml-2">{{ source.value }}</span>
                   </div>
                 }
               </div>
             </div>
-            <div class="stat-card">
-              <h3>By Priority</h3>
-              <div class="stat-list">
+            <div>
+              <h3 class="text-xs font-medium text-gray-500 mb-2">By Priority</h3>
+              <div class="space-y-1">
                 @for (priority of eventBusStats().byPriority | keyvalue; track priority) {
-                  <div class="stat-item">
-                    <span>{{ priority.key }}:</span>
-                    <span>{{ priority.value }}</span>
+                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                    <span class="truncate">{{ priority.key }}</span>
+                    <span class="font-semibold shrink-0 ml-2">{{ priority.value }}</span>
                   </div>
                 }
               </div>
@@ -241,277 +299,8 @@ interface AgentStatus {
   `,
   styles: [
     `
-      .agent-monitor {
-        padding: 20px;
-        background: #f5f5f5;
-        min-height: 100vh;
-      }
-
-      .monitor-header {
-        background: white;
-        padding: 20px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-
-      .monitor-header h1 {
-        margin: 0 0 20px 0;
-        color: #333;
-      }
-
-      .header-stats {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 15px;
-      }
-
-      .stat {
-        display: flex;
-        flex-direction: column;
-        padding: 15px;
-        background: #f8f9fa;
-        border-radius: 6px;
-      }
-
-      .stat-label {
-        font-size: 12px;
-        color: #666;
-        margin-bottom: 5px;
-      }
-
-      .stat-value {
-        font-size: 24px;
-        font-weight: bold;
-        color: #333;
-      }
-
-      .stat-value.success {
-        color: #28a745;
-      }
-
-      .monitor-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-        gap: 20px;
-      }
-
-      .monitor-section {
-        background: white;
-        padding: 20px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-
-      .monitor-section h2 {
-        margin: 0 0 15px 0;
-        color: #333;
-        font-size: 18px;
-        border-bottom: 2px solid #007bff;
-        padding-bottom: 10px;
-      }
-
-      .agent-card,
-      .circuit-breaker-card,
-      .metric-card {
-        padding: 15px;
-        border: 1px solid #e0e0e0;
-        border-radius: 6px;
-        margin-bottom: 10px;
-      }
-
-      .agent-card.running {
-        border-left: 4px solid #28a745;
-      }
-
-      .agent-card.stopped {
-        border-left: 4px solid #dc3545;
-      }
-
-      .agent-header,
-      .cb-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 10px;
-      }
-
-      .agent-header h3,
-      .cb-header h3,
-      .metric-card h3 {
-        margin: 0;
-        font-size: 16px;
-        color: #333;
-      }
-
-      .agent-status {
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: bold;
-      }
-
-      .agent-status.active {
-        background: #d4edda;
-        color: #155724;
-      }
-
-      .cb-state {
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: bold;
-      }
-
-      .circuit-breaker-card.closed {
-        border-left: 4px solid #28a745;
-      }
-
-      .circuit-breaker-card.closed .cb-state {
-        background: #d4edda;
-        color: #155724;
-      }
-
-      .circuit-breaker-card.open {
-        border-left: 4px solid #dc3545;
-      }
-
-      .circuit-breaker-card.open .cb-state {
-        background: #f8d7da;
-        color: #721c24;
-      }
-
-      .circuit-breaker-card.half-open {
-        border-left: 4px solid #ffc107;
-      }
-
-      .circuit-breaker-card.half-open .cb-state {
-        background: #fff3cd;
-        color: #856404;
-      }
-
-      .cb-stats,
-      .metric-stats {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-        gap: 10px;
-        margin-top: 10px;
-      }
-
-      .cb-stat,
-      .metric-stat {
-        display: flex;
-        justify-content: space-between;
-        padding: 8px;
-        background: #f8f9fa;
-        border-radius: 4px;
-        font-size: 14px;
-      }
-
-      .cb-stat .error {
-        color: #dc3545;
-        font-weight: bold;
-      }
-
-      .cb-stat .success {
-        color: #28a745;
-        font-weight: bold;
-      }
-
-      .audit-log-entry {
-        padding: 12px;
-        border: 1px solid #e0e0e0;
-        border-radius: 6px;
-        margin-bottom: 10px;
-      }
-
-      .audit-log-entry.success {
-        border-left: 4px solid #28a745;
-      }
-
-      .audit-log-entry.failure {
-        border-left: 4px solid #dc3545;
-      }
-
-      .log-header {
-        display: flex;
-        justify-content: space-between;
-        margin-bottom: 8px;
-        font-size: 14px;
-      }
-
-      .log-action {
-        font-weight: bold;
-        color: #007bff;
-      }
-
-      .log-status {
-        padding: 2px 6px;
-        border-radius: 3px;
-        font-size: 12px;
-        font-weight: bold;
-      }
-
-      .audit-log-entry.success .log-status {
-        background: #d4edda;
-        color: #155724;
-      }
-
-      .audit-log-entry.failure .log-status {
-        background: #f8d7da;
-        color: #721c24;
-      }
-
-      .log-time {
-        color: #666;
-        font-size: 12px;
-      }
-
-      .log-details {
-        font-size: 13px;
-        color: #666;
-      }
-
-      .log-details p {
-        margin: 4px 0;
-      }
-
-      .error-message {
-        color: #dc3545;
-      }
-
-      .event-stats {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 15px;
-      }
-
-      .stat-card h3 {
-        margin: 0 0 10px 0;
-        font-size: 14px;
-        color: #666;
-      }
-
-      .stat-list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-
-      .stat-item {
-        display: flex;
-        justify-content: space-between;
-        padding: 8px;
-        background: #f8f9fa;
-        border-radius: 4px;
-        font-size: 13px;
-      }
-
-      .empty-state {
-        text-align: center;
-        padding: 40px;
-        color: #999;
-        font-style: italic;
+      :host {
+        display: block;
       }
     `,
   ],

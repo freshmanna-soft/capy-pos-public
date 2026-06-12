@@ -84,7 +84,7 @@ export class CustomersComponent implements OnInit {
         (c) =>
           c.name.toLowerCase().includes(query) ||
           c.email.toLowerCase().includes(query) ||
-          c.phone.toLowerCase().includes(query),
+          c.phone.toLowerCase().includes(query)
       );
     }
 
@@ -96,15 +96,15 @@ export class CustomersComponent implements OnInit {
   });
 
   readonly activeCount = computed(
-    () => this.customerFacade.customers().filter((c) => c.status === CustomerStatus.ACTIVE).length,
+    () => this.customerFacade.customers().filter((c) => c.status === CustomerStatus.ACTIVE).length
   );
 
   readonly vipCount = computed(
-    () => this.customerFacade.customers().filter((c) => c.status === CustomerStatus.VIP).length,
+    () => this.customerFacade.customers().filter((c) => c.status === CustomerStatus.VIP).length
   );
 
   readonly totalLoyaltyPoints = computed(() =>
-    this.customerFacade.customers().reduce((sum, c) => sum + c.loyaltyPoints, 0),
+    this.customerFacade.customers().reduce((sum, c) => sum + c.loyaltyPoints, 0)
   );
 
   ngOnInit(): void {
@@ -119,6 +119,38 @@ export class CustomersComponent implements OnInit {
       .join('')
       .toUpperCase()
       .slice(0, 2);
+  }
+
+  getStatusClasses(status: string): string {
+    const base = 'inline-block px-2.5 py-1 rounded-full font-semibold uppercase tracking-wide';
+    switch (status.toLowerCase()) {
+      case 'active':
+        return `${base} bg-green-100 text-green-800`;
+      case 'inactive':
+        return `${base} bg-gray-100 text-gray-600`;
+      case 'vip':
+        return `${base} bg-amber-100 text-amber-800`;
+      case 'blocked':
+        return `${base} bg-red-100 text-red-800`;
+      default:
+        return `${base} bg-gray-100 text-gray-600`;
+    }
+  }
+
+  getTierClasses(tier: string): string {
+    const base = 'inline-block px-2 py-1 rounded-md text-xs font-semibold';
+    switch (tier.toLowerCase()) {
+      case 'bronze':
+        return `${base} bg-amber-100 text-amber-800`;
+      case 'silver':
+        return `${base} bg-gray-100 text-gray-700`;
+      case 'gold':
+        return `${base} bg-yellow-100 text-yellow-800`;
+      case 'platinum':
+        return `${base} bg-purple-100 text-purple-800`;
+      default:
+        return `${base} bg-gray-100 text-gray-600`;
+    }
   }
 
   dismissError(): void {

@@ -85,7 +85,7 @@ export class InventoryManagementComponent implements OnInit {
 
     if (query) {
       result = result.filter(
-        (p) => p.name.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query),
+        (p) => p.name.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query)
       );
     }
 
@@ -101,19 +101,19 @@ export class InventoryManagementComponent implements OnInit {
   });
 
   readonly lowStockCount = computed(
-    () => this.inventoryFacade.products().filter((p) => p.stock < 5).length,
+    () => this.inventoryFacade.products().filter((p) => p.stock < 5).length
   );
 
   readonly warningCount = computed(
-    () => this.inventoryFacade.products().filter((p) => p.stock >= 5 && p.stock <= 20).length,
+    () => this.inventoryFacade.products().filter((p) => p.stock >= 5 && p.stock <= 20).length
   );
 
   readonly healthyCount = computed(
-    () => this.inventoryFacade.products().filter((p) => p.stock > 20).length,
+    () => this.inventoryFacade.products().filter((p) => p.stock > 20).length
   );
 
   readonly totalStock = computed(() =>
-    this.inventoryFacade.products().reduce((sum, p) => sum + p.stock, 0),
+    this.inventoryFacade.products().reduce((sum, p) => sum + p.stock, 0)
   );
 
   ngOnInit(): void {
@@ -131,6 +131,21 @@ export class InventoryManagementComponent implements OnInit {
     if (stock < 5) return 'Critical';
     if (stock <= 20) return 'Warning';
     return 'Healthy';
+  }
+
+  getStockStatusClasses(stock: number): string {
+    const base = 'inline-block px-2.5 py-1 rounded-full font-semibold uppercase tracking-wide';
+    const status = this.getStockStatus(stock);
+    switch (status) {
+      case 'healthy':
+        return `${base} bg-green-100 text-green-800`;
+      case 'warning':
+        return `${base} bg-yellow-100 text-yellow-800`;
+      case 'critical':
+        return `${base} bg-red-100 text-red-800`;
+      default:
+        return `${base} bg-gray-100 text-gray-600`;
+    }
   }
 
   // Stock adjustment

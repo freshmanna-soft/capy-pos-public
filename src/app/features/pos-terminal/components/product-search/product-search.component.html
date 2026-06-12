@@ -1,9 +1,16 @@
-<div class="product-search-container">
-  <!-- Category Filter -->
-  <div class="category-filter" data-testid="category-filter">
+<div class="flex flex-col h-full gap-3">
+  <!-- Category Filter (horizontal scroll on mobile) -->
+  <div
+    class="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide"
+    data-testid="category-filter"
+  >
     <button
-      class="category-chip"
-      [class.active]="selectedCategory() === null"
+      class="flex-shrink-0 px-4 py-2.5 rounded-full text-sm font-medium border-none cursor-pointer transition-all duration-150 min-h-[44px] whitespace-nowrap"
+      [class]="
+        selectedCategory() === null
+          ? 'bg-indigo-600 text-white shadow-md'
+          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+      "
       (click)="onCategorySelect(null)"
       data-testid="category-all"
     >
@@ -11,8 +18,12 @@
     </button>
     @for (category of categories(); track category) {
       <button
-        class="category-chip"
-        [class.active]="selectedCategory() === category"
+        class="flex-shrink-0 px-4 py-2.5 rounded-full text-sm font-medium border-none cursor-pointer transition-all duration-150 min-h-[44px] whitespace-nowrap"
+        [class]="
+          selectedCategory() === category
+            ? 'bg-indigo-600 text-white shadow-md'
+            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+        "
         (click)="onCategorySelect(category)"
         [attr.data-testid]="'category-' + category"
       >
@@ -22,7 +33,7 @@
   </div>
 
   <!-- Search Input -->
-  <div class="search-input-wrapper">
+  <div class="relative">
     <input
       #searchInput
       data-testid="product-search"
@@ -31,88 +42,162 @@
       (input)="onSearchInput($event)"
       (keydown)="onKeyDown($event)"
       placeholder="Search products..."
-      class="search-input"
+      class="w-full min-h-[48px] px-4 py-3 pl-11 border-2 border-gray-200 rounded-xl text-base bg-white transition-colors duration-200 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 placeholder:text-gray-400"
+      inputmode="search"
       role="combobox"
+      aria-controls="product-results-listbox"
       [attr.aria-autocomplete]="'list'"
       [attr.aria-expanded]="searchResults().length > 0"
-      [attr.aria-controls]="'search-results'"
-      [attr.aria-activedescendant]="highlightedIndex() >= 0 ? 'result-' + highlightedIndex() : null"
+      [attr.aria-activedescendant]="
+        highlightedIndex() >= 0 ? 'product-' + highlightedIndex() : null
+      "
     />
-
-    <button
-      data-testid="search-button"
-      class="search-button"
-      (click)="triggerSearch()"
-      [disabled]="isLoading()"
+    <!-- Search icon -->
+    <svg
+      class="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
     >
-      @if (!isLoading()) {
-        <span>🔍</span>
-      }
-      @if (isLoading()) {
-        <span class="spinner">⏳</span>
-      }
-    </button>
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+      />
+    </svg>
   </div>
 
-  <!-- Loading Indicator -->
-  @if (isLoading() && searchResults().length === 0) {
-    <div data-testid="search-loading" class="loading-indicator">Searching...</div>
+  <!-- Loading State -->
+  @if (isLoading()) {
+    <div
+      class="flex items-center justify-center py-8 text-gray-500"
+      data-testid="loading-indicator"
+    >
+      <div
+        class="w-6 h-6 border-2 border-gray-300 border-t-indigo-600 rounded-full animate-spin mr-3"
+      ></div>
+      <span class="text-sm">Searching...</span>
+    </div>
   }
 
-  <!-- Error Message -->
+  <!-- Error State -->
   @if (error()) {
-    <div data-testid="search-error" class="error-message" role="alert">
-      {{ error() }}
+    <div
+      class="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"
+      data-testid="error-message"
+      role="alert"
+    >
+      <span>⚠️</span>
+      <span>{{ error() }}</span>
     </div>
   }
 
-  <!-- Product Results -->
-  @if (searchResults().length > 0 && !isLoading()) {
-    <div class="search-results-list" id="search-results" (scroll)="onScroll($event)">
-      @for (product of searchResults(); track product.id; let i = $index) {
-        <button
-          type="button"
-          [id]="'result-' + i"
-          data-testid="product-result"
-          class="product-result"
-          [class.highlighted]="highlightedIndex() === i"
-          [class.out-of-stock]="product.stock === 0"
-          [disabled]="product.stock === 0"
-          (click)="selectProduct(product)"
-          (mouseenter)="highlightedIndex.set(i)"
-        >
-          <div class="product-info">
-            <span class="product-name">{{ product.name }}</span>
-            <span class="product-price">${{ product.price.toFixed(2) }}</span>
-          </div>
-          <div class="product-meta">
-            <span class="product-sku">{{ product.sku }}</span>
+  <!-- Product Results Grid -->
+  @if (!isLoading() && searchResults().length > 0) {
+    <div
+      class="flex-1 overflow-y-auto -mx-1 px-1"
+      data-testid="product-results"
+      (scroll)="onScroll($event)"
+    >
+      <ul
+        id="product-results-listbox"
+        class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 list-none p-0 m-0"
+        [attr.aria-label]="'Product results, ' + searchResults().length + ' items'"
+      >
+        @for (product of searchResults(); track product.id; let i = $index) {
+          <button
+            type="button"
+            [id]="'product-' + i"
+            [attr.aria-current]="highlightedIndex() === i"
+            [attr.aria-disabled]="product.stock === 0"
+            [disabled]="product.stock === 0"
+            class="border-2 rounded-xl p-3 md:p-4 text-center transition-all duration-150 min-h-[120px] flex flex-col items-center justify-center gap-1.5 appearance-none font-inherit w-full relative overflow-hidden disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100"
+            [class]="
+              product.stock === 0
+                ? 'bg-gray-100 border-gray-300 cursor-not-allowed'
+                : highlightedIndex() === i
+                  ? 'border-indigo-500 shadow-md bg-indigo-50 cursor-pointer active:scale-[0.97]'
+                  : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm cursor-pointer active:scale-[0.97]'
+            "
+            (click)="selectProduct(product)"
+            (keydown.enter)="selectProduct(product)"
+            (keydown.space)="selectProduct(product)"
+            [attr.data-testid]="'product-item-' + product.id"
+          >
+            <!-- Out of Stock overlay badge -->
+            @if (product.stock === 0) {
+              <span
+                class="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-red-500 text-white text-[9px] font-bold uppercase rounded tracking-wide shadow-sm"
+              >
+                Out of Stock
+              </span>
+            }
             <span
-              data-testid="stock-status"
-              class="stock-status"
-              [class.in-stock]="product.stock > 0"
-              [class.out-of-stock]="product.stock === 0"
+              class="text-3xl md:text-4xl leading-none"
+              [class.grayscale]="product.stock === 0"
+              [class.opacity-50]="product.stock === 0"
+              >{{
+                product.category === 'Beverages'
+                  ? '🥤'
+                  : product.category === 'Snacks'
+                    ? '🍿'
+                    : product.category === 'Dairy'
+                      ? '🧀'
+                      : '📦'
+              }}</span
             >
-              {{ product.stock > 0 ? 'In Stock (' + product.stock + ')' : 'Out of Stock' }}
-            </span>
-          </div>
-        </button>
-      }
+            <h3
+              class="m-0 text-xs md:text-sm font-semibold line-clamp-2 leading-tight"
+              [class.text-gray-800]="product.stock > 0"
+              [class.text-gray-400]="product.stock === 0"
+            >
+              {{ product.name }}
+            </h3>
+            <p
+              class="m-0 text-sm md:text-base font-bold"
+              [class.text-indigo-600]="product.stock > 0"
+              [class.text-gray-400]="product.stock === 0"
+              [class.line-through]="product.stock === 0"
+            >
+              ${{ product.price.toFixed(2) }}
+            </p>
+            <p
+              class="m-0 text-[10px] md:text-xs"
+              [class.text-gray-500]="product.stock > 0"
+              [class.text-red-500]="product.stock === 0"
+              [class.font-semibold]="product.stock === 0"
+            >
+              {{ product.stock === 0 ? 'Unavailable' : 'Stock: ' + product.stock }}
+            </p>
+          </button>
+        }
+      </ul>
 
-      <!-- Infinite scroll loading indicator -->
-      @if (isLoadingMore()) {
-        <div class="loading-more">Loading more products...</div>
+      <!-- Load More indicator -->
+      @if (hasMoreProducts()) {
+        <div class="flex justify-center py-4">
+          @if (isLoadingMore()) {
+            <div
+              class="w-5 h-5 border-2 border-gray-300 border-t-indigo-600 rounded-full animate-spin"
+            ></div>
+          } @else {
+            <span class="text-sm text-gray-400">Scroll for more</span>
+          }
+        </div>
       }
-    </div>
-
-    <!-- Product count -->
-    <div class="product-count">
-      Showing {{ searchResults().length }} {{ hasMoreProducts() ? 'of more' : '' }} products
     </div>
   }
 
-  <!-- No Results -->
-  @if (searchQuery().length >= 2 && searchResults().length === 0 && !isLoading() && !error()) {
-    <output data-testid="no-results" class="no-results">No products found</output>
+  <!-- Empty State -->
+  @if (!isLoading() && searchResults().length === 0 && searchQuery()) {
+    <div
+      class="flex flex-col items-center justify-center py-12 text-gray-400"
+      data-testid="no-results"
+    >
+      <span class="text-4xl mb-3">🔍</span>
+      <p class="m-0 text-base font-medium">No products found</p>
+      <p class="m-0 text-sm mt-1">Try a different search term</p>
+    </div>
   }
 </div>

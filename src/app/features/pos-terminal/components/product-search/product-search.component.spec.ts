@@ -346,7 +346,7 @@ describe('ProductSearchComponent', () => {
   describe('loadProducts via ngOnInit', () => {
     it('should load products on init', async () => {
       mockProductRepository.findActive.mockResolvedValue(mockProducts);
-      await component.ngOnInit();
+      component.ngOnInit();
       // Products should be loaded (or at least attempted)
       expect(component.isLoading()).toBe(false);
     });
@@ -354,7 +354,7 @@ describe('ProductSearchComponent', () => {
     it('should handle error during category loading', async () => {
       mockProductRepository.getCategories.mockRejectedValue(new Error('Network error'));
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-      await component.ngOnInit();
+      component.ngOnInit();
       consoleSpy.mockRestore();
       // Should not crash
       expect(component).toBeTruthy();
