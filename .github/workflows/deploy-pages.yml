@@ -5,18 +5,30 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least-privilege permissions (security hardening)
 permissions:
   contents: read
   pages: write
   id-token: write
+  pull-requests: read
 
 concurrency:
   group: "pages"
   cancel-in-progress: false
 
+env:
+  NODE_VERSION: '22'
+  ANGULAR_BUILD_CONFIG: 'production'
+  BASE_HREF: '/capy-pos-public/'
+
 jobs:
-  build:
+  # ─────────────────────────────────────────────
+  # Job 1: Lint — Static analysis & formatting
+  # ─────────────────────────────────────────────
+  lint:
+    name: 🔍 Lint & Format Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,14 +36,185 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
       - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts
 
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Check formatting (Prettier)
+        run: npm run format:check
+
+  # ─────────────────────────────────────────────
+  # Job 2: Test — Unit tests with coverage
+  # ─────────────────────────────────────────────
+  test:
+    name: 🧪 Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+
+      - name: Run unit tests with coverage
+        run: npm run test:unit -- --coverage
+
+      - name: Verify coverage output
+        run: |
+          if [ -f "coverage/lcov.info" ]; then
+            echo "✅ LCOV coverage report generated"
+            echo "📊 Coverage summary:"
+            tail -5 coverage/lcov.info | head -5
+          else
+            echo "⚠️ No lcov.info found — SonarQube will not receive coverage data"
+          fi
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
+
+  # ─────────────────────────────────────────────
+  # Job 3: SonarCloud — Code quality & coverage
+  # ─────────────────────────────────────────────
+  sonar:
+    name: 📊 SonarCloud Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [test]
+    steps:
+      - name: Checkout (full history for blame)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+      - name: Verify coverage for Sonar
+        run: |
+          echo "📂 Coverage directory contents:"
+          ls -la coverage/
+          if [ -f "coverage/lcov.info" ]; then
+            LINES=$(wc -l < coverage/lcov.info)
+            echo "✅ lcov.info found ($LINES lines)"
+          else
+            echo "⚠️ lcov.info not found — Sonar will report 0% coverage"
+          fi
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=javierbritopacheco_capy-pos-public
+            -Dsonar.organization=javierbritopacheco
+            -Dsonar.sources=src
+            -Dsonar.tests=src
+            -Dsonar.test.inclusions=**/*.spec.ts,**/*.test.ts
+            -Dsonar.exclusions=**/*.spec.ts,**/*.test.ts,**/node_modules/**,**/dist/**,coverage/**,.angular/**
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.coverage.exclusions=**/*.spec.ts,**/*.test.ts,**/node_modules/**
+
+  # ─────────────────────────────────────────────
+  # Job 4: Build — Angular production build
+  # ─────────────────────────────────────────────
+  build:
+    name: 🏗️ Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [lint, test]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+
+      - name: Cache Angular build
+        uses: actions/cache@v4
+        with:
+          path: .angular/cache
+          key: ${{ runner.os }}-angular-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('src/**') }}
+          restore-keys: |
+            ${{ runner.os }}-angular-${{ hashFiles('**/package-lock.json') }}-
+            ${{ runner.os }}-angular-
+
       - name: Build Angular app
-        run: npx ng build --configuration=production --base-href /capy-pos-public/
+        run: npx ng build --configuration=${{ env.ANGULAR_BUILD_CONFIG }} --base-href ${{ env.BASE_HREF }}
+
+      - name: Verify build output
+        run: |
+          if [ ! -d "./dist/capy-pos/browser" ]; then
+            echo "❌ Build output directory not found!"
+            exit 1
+          fi
+          echo "✅ Build output verified"
+          ls -la ./dist/capy-pos/browser
+          echo "📦 Build size:"
+          du -sh ./dist/capy-pos/browser
+
+      - name: Copy 404.html for SPA routing
+        run: |
+          if [ -f "./src/404.html" ]; then
+            cp ./src/404.html ./dist/capy-pos/browser/404.html
+            echo "✅ 404.html copied for SPA routing"
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -41,13 +224,27 @@ jobs:
         with:
           path: './dist/capy-pos/browser'
 
+  # ─────────────────────────────────────────────
+  # Job 5: Deploy — GitHub Pages deployment
+  # ─────────────────────────────────────────────
   deploy:
+    name: 🚀 Deploy
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: build
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Deployment summary
+        run: |
+          echo "## 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

@@ -33,12 +33,27 @@ async function getVisibleNav(page: Page) {
  * Helper: Click a navigation link by its test ID, handling mobile/desktop duality.
  * On mobile, some items may be in the "More" overflow menu.
  */
+async function waitForNavigation(page: Page) {
+  // Wait for either mobile or desktop nav to become visible.
+  // We use Promise.race because .or().first() always resolves to the first DOM element
+  // (mobile nav) which is hidden on desktop viewports (md:hidden class).
+  const mobileNav = page.locator('[data-testid="navigation"]');
+  const desktopNav = page.locator('[data-testid="navigation-desktop"]');
+  await Promise.race([
+    mobileNav.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null),
+    desktopNav.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null),
+  ]);
+  // Verify at least one is actually visible
+  const mobileVisible = await mobileNav.isVisible().catch(() => false);
+  const desktopVisible = await desktopNav.isVisible().catch(() => false);
+  if (!mobileVisible && !desktopVisible) {
+    throw new Error('Neither mobile nor desktop navigation became visible within timeout');
+  }
+}
+
 async function clickNavLink(page: Page, testId: string) {
   // Wait for any navigation to be ready
-  await page
-    .locator('[data-testid="navigation"], [data-testid="navigation-desktop"]')
-    .first()
-    .waitFor({ state: 'visible', timeout: 10000 });
+  await waitForNavigation(page);
 
   const desktopNav = page.locator('[data-testid="navigation-desktop"]');
   if (await desktopNav.isVisible().catch(() => false)) {
@@ -60,10 +75,12 @@ async function clickNavLink(page: Page, testId: string) {
 }
 
 /**
- * Helper: Get a visible nav link locator for assertions.
+ * Helper: Get a nav link locator for assertions.
+ * Scopes to the visible navigation container to avoid picking hidden mobile/desktop duplicates.
  */
-function getNavLink(page: Page, testId: string) {
-  return page.locator(`[data-testid="${testId}"]`).first();
+async function getNavLink(page: Page, testId: string) {
+  const nav = await getVisibleNav(page);
+  return nav.locator(`[data-testid="${testId}"]`);
 }
 
 // ============================================================
@@ -75,7 +92,7 @@ test.describe('Navigation Accessibility - All Features Reachable', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     // Wait for either mobile or desktop nav to be visible
-    await page.locator('[data-testid="navigation"], [data-testid="navigation-desktop"]').first().waitFor({ state: 'visible' });
+    await waitForNavigation(page);
   });
 
   test('navigation sidebar is visible and contains all required links', async ({ page }) => {
@@ -93,9 +110,16 @@ test.describe('Navigation Accessibility - All Features Reachable', () => {
       { testId: 'nav-settings', label: 'Settings' },
     ];
 
+    // On mobile, overflow items are only rendered when "More" menu is opened (@if guard).
+    // Open the overflow menu if we're on mobile so all links become attached.
+    const moreBtn = page.locator('[data-testid="nav-more"]');
+    if (await moreBtn.isVisible().catch(() => false)) {
+      await moreBtn.click();
+      await page.locator('[role="menu"]').waitFor({ state: 'visible', timeout: 5000 });
+    }
+
     for (const link of requiredNavLinks) {
-      const navLink = getNavLink(page, link.testId);
-      // On desktop all links are visible; on mobile some are in overflow menu (attached but not visible)
+      const navLink = page.locator(`[data-testid="${link.testId}"]`).first();
       await expect(navLink, `Navigation link "${link.label}" (${link.testId}) must exist`).toBeAttached();
     }
   });
@@ -408,12 +432,18 @@ test.describe('Persona: Ana the Inventory Clerk - Inventory Management', () => {
     const nav = await getVisibleNav(page);
     await expect(nav).toBeVisible();
 
-    // All nav links should be reachable (some may be in overflow on mobile)
-    await expect(getNavLink(page, 'nav-pos')).toBeVisible();
-    await expect(getNavLink(page, 'nav-history')).toBeVisible();
-    await expect(getNavLink(page, 'nav-inventory')).toBeVisible();
-    // Reports may be in overflow menu on mobile, check via first()
-    await expect(getNavLink(page, 'nav-reports')).toBeAttached();
+    // Core nav links should be visible in the nav bar (both mobile and desktop show these)
+    await expect(await getNavLink(page, 'nav-pos')).toBeVisible();
+    await expect(await getNavLink(page, 'nav-history')).toBeVisible();
+    await expect(await getNavLink(page, 'nav-inventory')).toBeVisible();
+
+    // Reports may be in overflow menu on mobile — open it first if needed
+    const moreBtn = page.locator('[data-testid="nav-more"]');
+    if (await moreBtn.isVisible().catch(() => false)) {
+      await moreBtn.click();
+      await page.locator('[role="menu"]').waitFor({ state: 'visible', timeout: 5000 });
+    }
+    await expect(page.locator('[data-testid="nav-reports"]').first()).toBeAttached();
   });
 });
 
@@ -445,7 +475,7 @@ test.describe('Cross-Feature Navigation Integrity', () => {
 
   test('active navigation link is highlighted correctly', async ({ page }) => {
     await page.goto('/pos');
-    await page.locator('[data-testid="navigation"], [data-testid="navigation-desktop"]').first().waitFor({ state: 'visible' });
+    await waitForNavigation(page);
 
     // The POS link should have the active/highlighted class
     // Desktop uses "bg-blue-600 text-white", mobile uses "text-blue-400"
@@ -466,7 +496,7 @@ test.describe('Cross-Feature Navigation Integrity', () => {
   test('navigation sidebar can be collapsed and expanded', async ({ page }) => {
     // This test only applies to desktop viewports where the sidebar is visible
     await page.goto('/pos');
-    await page.locator('[data-testid="navigation"], [data-testid="navigation-desktop"]').first().waitFor({ state: 'visible' });
+    await waitForNavigation(page);
 
     const desktopNav = page.locator('[data-testid="navigation-desktop"]');
     // Skip test on mobile viewports where sidebar doesn't exist
@@ -490,7 +520,7 @@ test.describe('Cross-Feature Navigation Integrity', () => {
 
   test('browser back/forward navigation works correctly', async ({ page }) => {
     await page.goto('/pos');
-    await page.locator('[data-testid="navigation"], [data-testid="navigation-desktop"]').first().waitFor({ state: 'visible' });
+    await waitForNavigation(page);
 
     // Navigate to inventory
     await clickNavLink(page, 'nav-inventory');
@@ -546,10 +576,10 @@ test.describe('Bug Regression Tests', () => {
 
   test('BUG-002: Transaction History accessible from navigation', async ({ page }) => {
     await page.goto('/');
-    await page.locator('[data-testid="navigation"], [data-testid="navigation-desktop"]').first().waitFor({ state: 'visible' });
+    await waitForNavigation(page);
 
     // Transaction History link MUST exist in navigation
-    const historyLink = getNavLink(page, 'nav-history');
+    const historyLink = await getNavLink(page, 'nav-history');
     await expect(historyLink).toBeVisible();
 
     // Clicking it MUST navigate to /history
