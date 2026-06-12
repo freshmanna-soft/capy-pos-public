@@ -1,15 +1,36 @@
 #!/usr/bin/env sh
 
+# 🛡️ Protected branch guard — block direct pushes to main
+# main requires PRs; direct push (including force push) is rejected locally.
+PROTECTED_BRANCH="main"
+
+while read local_ref local_sha remote_ref remote_sha; do
+  remote_branch=$(echo "$remote_ref" | sed 's|refs/heads/||')
+  if [ "$remote_branch" = "$PROTECTED_BRANCH" ]; then
+    echo ""
+    echo "🚫 PUSH REJECTED: Direct push to '$PROTECTED_BRANCH' is not allowed."
+    echo "   The '$PROTECTED_BRANCH' branch is protected and requires a Pull Request."
+    echo ""
+    echo "   To push your feature branch instead:"
+    echo "     git push origin <your-branch-name>"
+    echo ""
+    echo "   Then create a PR:"
+    echo "     gh pr create --base main"
+    echo ""
+    exit 1
+  fi
+done
+
 echo "🧪 Running E2E Playwright tests before push..."
 echo "   This gate ensures no disconnected features or UX regressions are pushed."
 echo ""
 
-# Run unit tests first (fast gate)
-npm run test:unit
+# Run unit tests WITH coverage (enforces 90% threshold gate)
+npm run test:unit -- --coverage
 if [ $? -ne 0 ]; then
   echo ""
-  echo "❌ Unit tests failed. Push aborted."
-  echo "   Fix failing tests before pushing."
+  echo "❌ Unit tests or coverage threshold failed. Push aborted."
+  echo "   Fix failing tests or increase coverage before pushing."
   exit 1
 fi
 
