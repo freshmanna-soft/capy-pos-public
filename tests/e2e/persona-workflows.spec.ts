@@ -562,7 +562,12 @@ test.describe('Bug Regression Tests', () => {
 
     await page.waitForSelector('[data-testid="product-result"]', { timeout: 5000 });
 
-    // Count results before selection
+    // Wait for debounced search to fully resolve (300ms debounce + network)
+    // The component does an immediate client-side filter, then a debounced service call
+    // that may return different results. We must wait for the final stable state.
+    await page.waitForTimeout(800);
+
+    // Count results before selection (after debounce has fully settled)
     const countBefore = await page.locator('[data-testid="product-result"]').count();
     expect(countBefore).toBeGreaterThan(0);
 
