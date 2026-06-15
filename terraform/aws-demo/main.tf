@@ -349,6 +349,51 @@ resource "aws_cloudwatch_log_group" "get_transactions_logs" {
 }
 
 # =============================================================================
+# Lambda: Create Product
+# =============================================================================
+
+data "archive_file" "create_product_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/create-product"
+  output_path = "${path.module}/.build/create-product.zip"
+
+  depends_on = [local_file.create_product_shared]
+}
+
+resource "local_file" "create_product_shared" {
+  for_each = fileset("${path.module}/lambda/shared", "*.js")
+  filename = "${path.module}/lambda/create-product/shared/${each.value}"
+  source   = "${path.module}/lambda/shared/${each.value}"
+}
+
+resource "aws_lambda_function" "create_product" {
+  filename         = data.archive_file.create_product_zip.output_path
+  function_name    = "${var.project_name}-create-product"
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "index.handler"
+  source_code_hash = data.archive_file.create_product_zip.output_base64sha256
+  runtime          = "nodejs20.x"
+  timeout          = 30
+  memory_size      = 256
+  layers           = [aws_lambda_layer_version.shared_deps.arn]
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      PRODUCTS_TABLE = aws_dynamodb_table.products.name
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_group" "create_product_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.create_product.function_name}"
+  retention_in_days = 7
+}
+
+# =============================================================================
 # Lambda: Health
 # =============================================================================
 
@@ -455,6 +500,13 @@ resource "aws_apigatewayv2_integration" "get_transactions" {
   integration_method = "POST"
 }
 
+resource "aws_apigatewayv2_integration" "create_product" {
+  api_id             = aws_apigatewayv2_api.api.id
+  integration_type   = "AWS_PROXY"
+  integration_uri    = aws_lambda_function.create_product.invoke_arn
+  integration_method = "POST"
+}
+
 resource "aws_apigatewayv2_integration" "health" {
   api_id             = aws_apigatewayv2_api.api.id
   integration_type   = "AWS_PROXY"
@@ -488,6 +540,12 @@ resource "aws_apigatewayv2_route" "get_health" {
   target    = "integrations/${aws_apigatewayv2_integration.health.id}"
 }
 
+resource "aws_apigatewayv2_route" "create_product" {
+  api_id    = aws_apigatewayv2_api.api.id
+  route_key = "POST /api/products"
+  target    = "integrations/${aws_apigatewayv2_integration.create_product.id}"
+}
+
 
 # --- Lambda Permissions (allow API Gateway to invoke each function) ---
 
@@ -519,6 +577,14 @@ resource "aws_lambda_permission" "health" {
   statement_id  = "AllowAPIGateway"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.health.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "create_product" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.create_product.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
 }

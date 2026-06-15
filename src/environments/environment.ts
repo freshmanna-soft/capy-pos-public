@@ -7,7 +7,7 @@ export const environment = {
   name: 'development',
 
   // API Configuration
-  apiUrl: 'http://localhost:4200/api',
+  apiUrl: 'https://fqjj2r15m7.execute-api.us-east-1.amazonaws.com/api',
   apiTimeout: 30000,
 
   // Database

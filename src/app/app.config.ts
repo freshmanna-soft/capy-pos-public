@@ -17,6 +17,8 @@ import { INVENTORY_AGENT_PROVIDERS } from '@app/agents/inventory/infrastructure'
 import { SALES_AGENT_PROVIDERS } from '@app/agents/sales/infrastructure';
 import { PAYMENT_AGENT_PROVIDER } from '@app/agents/payment/infrastructure/payment-agent.provider';
 import { AgentRegistry } from '@app/agents/agent.registry';
+import { SyncService } from '@core/infrastructure/sync';
+import { environment } from '../environments/environment';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -68,5 +70,15 @@ export const appConfig: ApplicationConfig = {
     ...INVENTORY_AGENT_PROVIDERS,
     ...SALES_AGENT_PROVIDERS,
     PAYMENT_AGENT_PROVIDER,
+    // Background sync worker (syncs local Dexie ↔ AWS API)
+    provideAppInitializer(() => {
+      const syncService = inject(SyncService);
+      syncService.start({
+        apiBaseUrl: environment.apiUrl.replace('/api', ''),
+        syncIntervalMs: 30000,
+        circuitBreaker: environment.circuitBreaker,
+        retry: environment.retry,
+      });
+    }),
   ],
 };

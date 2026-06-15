@@ -191,7 +191,7 @@ export class NavigationComponent {
 
   /** All navigation items */
   readonly navItems = [
-    { id: 'pos', path: '/pos', label: 'POS Terminal', shortLabel: 'POS', icon: '🛒', exact: false },
+    { id: 'pos', path: '/pos', label: 'Norma POS', shortLabel: 'POS', icon: '🌸', exact: false },
     {
       id: 'history',
       path: '/history',
