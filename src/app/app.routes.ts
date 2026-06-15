@@ -10,7 +10,7 @@ export const routes: Routes = [
     path: 'pos',
     loadComponent: () =>
       import('./features/pos-terminal/pos-terminal.component').then((m) => m.PosTerminalComponent),
-    title: 'POS Terminal',
+    title: 'Norma POS',
   },
   {
     path: 'inventory',

@@ -7,7 +7,7 @@ export const environment = {
   name: 'production',
 
   // API Configuration
-  apiUrl: 'https://api.capy-pos.com/api',
+  apiUrl: 'https://fqjj2r15m7.execute-api.us-east-1.amazonaws.com/api',
   apiTimeout: 30000,
 
   // Database
