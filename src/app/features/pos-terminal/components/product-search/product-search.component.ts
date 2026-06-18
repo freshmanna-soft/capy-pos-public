@@ -1,4 +1,4 @@
-import { Component, output, signal, inject, OnInit } from '@angular/core';
+import { Component, output, signal, inject, OnInit, ViewChild, ElementRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, catchError, of, from } from 'rxjs';
 import { ProductService } from '@core/application/services/product.service';
@@ -45,6 +45,9 @@ export class ProductSearchComponent implements OnInit {
 
   // Output events
   readonly productSelected = output<Product>();
+
+  /** The search text field, used to programmatically focus the search. */
+  @ViewChild('searchInput') private readonly searchInputRef?: ElementRef<HTMLInputElement>;
 
   // Search subject for debouncing
   private readonly searchSubject = new Subject<string>();
@@ -173,6 +176,14 @@ export class ProductSearchComponent implements OnInit {
     } else {
       this.loadProducts(true);
     }
+  }
+
+  /**
+   * Public method to move keyboard focus to the search input.
+   * Called from the POS terminal's "Add Product" action.
+   */
+  focusSearch(): void {
+    this.searchInputRef?.nativeElement.focus();
   }
 
   /**

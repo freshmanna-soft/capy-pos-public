@@ -305,24 +305,52 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
   });
 
   describe('startNewTransaction', () => {
-    it('should clear the cart via PosFacade', () => {
+    it('should clear the cart when the user confirms', () => {
+      const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
       addProduct(mockProducts.coffee);
       addProduct(mockProducts.tea);
       expect(cartService.items().length).toBe(2);
 
       component.startNewTransaction();
 
+      expect(confirmSpy).toHaveBeenCalled();
       expect(cartService.isEmpty()).toBe(true);
+      confirmSpy.mockRestore();
+    });
+
+    it('should NOT clear the cart when the user cancels confirmation', () => {
+      const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
+      addProduct(mockProducts.coffee);
+      expect(cartService.items().length).toBe(1);
+
+      component.startNewTransaction();
+
+      expect(cartService.items().length).toBe(1);
+      confirmSpy.mockRestore();
+    });
+
+    it('should clear without confirmation when the cart is already empty', () => {
+      const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
+      expect(cartService.isEmpty()).toBe(true);
+
+      component.startNewTransaction();
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+      expect(cartService.isEmpty()).toBe(true);
+      confirmSpy.mockRestore();
     });
   });
 
   describe('handleAddProduct', () => {
-    it('should log "Add Product button clicked"', () => {
-      const logSpy = vi.spyOn(console, 'log');
+    it('should focus the product search input', () => {
+      const focusSpy = vi.fn();
+      (component as never as { productSearch: { focusSearch: () => void } }).productSearch = {
+        focusSearch: focusSpy,
+      };
 
       component.handleAddProduct();
 
-      expect(logSpy).toHaveBeenCalledWith('Add Product button clicked');
+      expect(focusSpy).toHaveBeenCalled();
     });
   });
 
@@ -368,17 +396,18 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     });
   });
 
-  describe('handleProductSelected edge cases', () => {
-    it('should log error if shoppingCart is not initialized', () => {
-      const errorSpy = vi.spyOn(console, 'error');
-      const originalCart = component.shoppingCart;
-      (component as never as { shoppingCart: undefined }).shoppingCart = undefined;
-
+  describe('handleProductSelected feedback', () => {
+    it('should add the product synchronously (no setTimeout deferral)', () => {
       component.handleProductSelected(mockProducts.coffee);
-      vi.advanceTimersByTime(0);
 
-      expect(errorSpy).toHaveBeenCalledWith('Shopping cart not initialized');
-      (component as never as { shoppingCart: typeof originalCart }).shoppingCart = originalCart;
+      // No timer advance needed — the add is immediate.
+      expect(cartService.items().length).toBe(1);
+    });
+
+    it('should not add an out-of-stock product', () => {
+      component.handleProductSelected(mockProducts.outOfStock);
+
+      expect(cartService.isEmpty()).toBe(true);
     });
   });
 

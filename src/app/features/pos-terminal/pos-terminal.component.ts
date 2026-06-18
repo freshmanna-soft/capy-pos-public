@@ -10,6 +10,7 @@ import { ReceiptComponent } from '@features/pos-terminal/components/receipt/rece
 import { Product } from '@core/domain/entities/product.entity';
 import { PosFacade } from '@core/application/facades';
 import { ReceiptData } from '@core/application/use-cases/generate-receipt.use-case';
+import { ToastService } from '@shared/ui/toast/toast.service';
 
 /**
  * POS Terminal Page Component
@@ -36,8 +37,8 @@ import { ReceiptData } from '@core/application/use-cases/generate-receipt.use-ca
 })
 export class PosTerminalComponent implements OnInit {
   protected readonly posFacade = inject(PosFacade);
+  private readonly toast = inject(ToastService);
 
-  @ViewChild(ShoppingCartComponent) shoppingCart!: ShoppingCartComponent;
   @ViewChild(ProductSearchComponent) productSearch!: ProductSearchComponent;
 
   /** Controls visibility of the checkout overlay */
@@ -69,39 +70,46 @@ export class PosTerminalComponent implements OnInit {
 
   /**
    * Handles product selection from search.
-   * Delegates stock validation to PosFacade.
+   * Delegates stock validation to PosFacade and surfaces the outcome to the
+   * cashier via a toast — previously a rejected scan failed silently to the
+   * console, making it easy to under-scan without noticing. The cart is
+   * signal-driven, so no ViewChild/setTimeout deferral is needed.
    */
   handleProductSelected(product: Product): void {
-    // Use setTimeout to ensure ViewChild is initialized
-    setTimeout(() => {
-      if (!this.shoppingCart) {
-        console.error('Shopping cart not initialized');
-        return;
-      }
+    const result = this.posFacade.tryAddToCart(product);
 
-      const added = this.posFacade.addToCart(product);
-      if (!added) {
-        console.warn('Cannot add product to cart:', product.name);
-        return;
-      }
+    if (!result.added) {
+      const message =
+        result.reason === 'out-of-stock'
+          ? `${product.name} is out of stock`
+          : `Only ${product.stock} of ${product.name} available`;
+      this.toast.warning(message);
+      return;
+    }
 
-      console.log('Product added to cart:', product.name);
-    }, 0);
+    this.toast.success(`${product.name} added to cart`);
   }
 
   /**
-   * Starts a new transaction
+   * Starts a new transaction. Guards against accidental data loss: when the
+   * cart already has items, the cashier must confirm before it is discarded
+   * (mirrors the in-cart "Clear Cart" confirmation).
    */
   startNewTransaction(): void {
-    this.posFacade.clearCart();
+    if (
+      this.posFacade.isCartEmpty() ||
+      confirm('Start a new transaction? This will clear the current cart.')
+    ) {
+      this.posFacade.clearCart();
+    }
   }
 
   /**
-   * Handles adding a product to the cart
+   * Handles the header "Add Product" action by focusing the product search so
+   * the cashier can immediately type/scan an item.
    */
   handleAddProduct(): void {
-    // This would typically trigger the product selection flow
-    console.log('Add Product button clicked');
+    this.productSearch?.focusSearch();
   }
 
   /**
@@ -142,6 +150,10 @@ export class PosTerminalComponent implements OnInit {
       })
       .catch((error: unknown) => {
         console.error('[POS] Checkout failed:', error);
+        // Recover the UI: close the stuck "Processing…" dialog and tell the
+        // cashier. The cart is preserved so they can retry.
+        this.showCheckout.set(false);
+        this.toast.error('Checkout failed. Your cart was kept — please try again.');
       });
   }
 
