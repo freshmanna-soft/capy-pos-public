@@ -761,6 +761,9 @@ export class CheckoutComponent {
   cardExpiry = '';
   cardCvv = '';
 
+  /** True while a confirmed payment is being processed; blocks re-submission. */
+  private isSubmitting = false;
+
   // Quick cash amounts (kept for backward compatibility)
   readonly quickAmounts = computed(() => {
     const total = this.cartService.total();
@@ -834,35 +837,42 @@ export class CheckoutComponent {
   }
 
   confirmPayment(): void {
-    if (this.selectedMethod() === 'cash') {
+    // Re-entry guard: ignore repeat taps while a payment is already in flight.
+    // Prevents double submission (and double charge) during the processing window.
+    if (this.isSubmitting) {
+      return;
+    }
+
+    const method = this.selectedMethod();
+    if (!method) {
+      return;
+    }
+
+    // Run the payment use-case exactly ONCE and reuse its result. Previously
+    // execute() was called a second time inside the timeout, which minted a new
+    // transactionId and ran the payment twice per confirmation.
+    let transactionId: string;
+    if (method === 'cash') {
       const cashResult = this.cashPayment.execute();
       if (!cashResult.success) {
         return;
       }
-    }
-
-    if (this.selectedMethod() === 'card') {
+      transactionId = cashResult.transactionId;
+    } else if (method === 'card') {
       const cardResult = this.cardPayment.execute();
       if (!cardResult.success) {
         return;
       }
+      transactionId = cardResult.transactionId;
+    } else {
+      transactionId = this.generateTransactionId();
     }
 
+    this.isSubmitting = true;
     this.step.set('processing');
 
     // Simulate payment processing
     setTimeout(() => {
-      const method = this.selectedMethod()!;
-      let transactionId: string;
-
-      if (method === 'cash') {
-        transactionId = this.cashPayment.execute().transactionId;
-      } else if (method === 'card') {
-        transactionId = this.cardPayment.execute().transactionId;
-      } else {
-        transactionId = this.generateTransactionId();
-      }
-
       const result: PaymentResult = {
         method,
         amount: this.cartService.total(),
@@ -885,6 +895,7 @@ export class CheckoutComponent {
 
       this.cashPayment.completeProcessing();
       this.cardPayment.completeProcessing();
+      this.isSubmitting = false;
       this.paymentComplete.emit(result);
     }, 1500);
   }

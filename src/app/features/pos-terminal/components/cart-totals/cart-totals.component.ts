@@ -62,8 +62,13 @@ import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculat
         <!-- Divider -->
         <div class="totals-divider"></div>
 
-        <!-- Total -->
-        <div class="totals-row total-row" data-testid="totals-total">
+        <!-- Total (announced to assistive tech when it changes) -->
+        <div
+          class="totals-row total-row"
+          data-testid="totals-total"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           <span class="totals-label">Total</span>
           <span class="totals-value total-value">
             {{ formatCurrency(totalsUseCase.totals().total) }}

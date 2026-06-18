@@ -12,6 +12,12 @@ import { DexieDatabase } from '@core/infrastructure/database/dexie-database.serv
 import { Product } from '@core/domain/entities/product.entity';
 import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
 
+/** Reason an add-to-cart request was rejected. */
+export type AddToCartRejection = 'out-of-stock' | 'max-stock-reached';
+
+/** Outcome of an attempt to add a product to the cart. */
+export type AddToCartResult = { added: true } | { added: false; reason: AddToCartRejection };
+
 /**
  * PosFacade - Single point of access for POS Terminal operations.
  *
@@ -57,21 +63,30 @@ export class PosFacade {
   // ─── Cart Operations ──────────────────────────────────────────────────
 
   /**
-   * Adds a product to the cart with stock validation.
-   * @returns true if product was added, false if rejected (out of stock or exceeds available)
+   * Adds a product to the cart with stock validation, returning a structured
+   * result so callers can surface *why* an add was rejected (out of stock vs.
+   * all available stock already in the cart).
    */
-  addToCart(product: Product): boolean {
+  tryAddToCart(product: Product): AddToCartResult {
     if (product.isOutOfStock()) {
-      return false;
+      return { added: false, reason: 'out-of-stock' };
     }
 
     const currentQuantity = this.cartService.getQuantity(product.id);
     if (currentQuantity >= product.stock) {
-      return false;
+      return { added: false, reason: 'max-stock-reached' };
     }
 
     this.cartService.addProduct(product);
-    return true;
+    return { added: true };
+  }
+
+  /**
+   * Adds a product to the cart with stock validation.
+   * @returns true if product was added, false if rejected (out of stock or exceeds available)
+   */
+  addToCart(product: Product): boolean {
+    return this.tryAddToCart(product).added;
   }
 
   /** Increase quantity of a product in cart */
