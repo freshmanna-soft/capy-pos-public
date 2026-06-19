@@ -19,7 +19,9 @@ Feature: Product Search
     When I type "Coffee" in the product search field
     And I click on the first search result
     Then the product should be added to the cart
-    And the search field should be cleared
+    # Search query intentionally persists after selection so cashiers can add
+    # multiple items quickly; only Escape clears it (see "Clear search" scenario).
+    And the search results should remain visible
 
   Scenario: Keyboard navigation with Enter key
     When I type "Coffee" in the product search field

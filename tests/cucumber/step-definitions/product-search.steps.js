@@ -74,6 +74,11 @@ Then('the search results should be hidden', async function () {
   expect(results).toBe(0);
 });
 
+Then('the search results should remain visible', async function () {
+  const results = await page.locator('[data-testid="product-result"]').count();
+  expect(results).toBeGreaterThan(0);
+});
+
 module.exports = { page, browser };
 
 // Made with Bob

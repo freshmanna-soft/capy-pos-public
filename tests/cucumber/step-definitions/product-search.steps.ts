@@ -84,6 +84,11 @@ Then('the search results should be hidden', async function () {
   expect(results).toBe(0);
 });
 
+Then('the search results should remain visible', async function () {
+  const results = await page.locator('[data-testid="product-result"]').count();
+  expect(results).toBeGreaterThan(0);
+});
+
 Then('I should see a loading indicator', async function () {
   const loader = await page.locator('[data-testid="search-loading"]');
   await expect(loader).toBeVisible();
