@@ -1,7 +1,9 @@
 /** @type {import('@cucumber/cucumber/api').IConfiguration} */
 module.exports = {
   default: {
-    require: ['tests/cucumber/step-definitions/**/*.js'],
+    // Step definitions are TypeScript, transpiled on the fly by tsx.
+    requireModule: ['tsx/cjs'],
+    require: ['tests/cucumber/step-definitions/**/*.ts'],
     paths: ['tests/cucumber/**/*.feature'],
     format: [
       'progress-bar',

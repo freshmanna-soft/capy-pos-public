@@ -70,8 +70,9 @@ Then('I should see {string} message', async function (message: string) {
 });
 
 Then('the product should be added to the cart', async function () {
-  const cartCount = await page.locator('[data-testid="cart-count"]').textContent();
-  expect(parseInt(cartCount || '0')).toBeGreaterThan(0);
+  // Web-first assertion: auto-retries until the cart count shows a non-zero
+  // value, so it doesn't race the async cart update after selection.
+  await expect(page.locator('[data-testid="cart-count"]')).toHaveText(/[1-9]/);
 });
 
 Then('the search field should be cleared', async function () {
@@ -82,11 +83,6 @@ Then('the search field should be cleared', async function () {
 Then('the search results should be hidden', async function () {
   const results = await page.locator('[data-testid="product-result"]').count();
   expect(results).toBe(0);
-});
-
-Then('the search results should remain visible', async function () {
-  const results = await page.locator('[data-testid="product-result"]').count();
-  expect(results).toBeGreaterThan(0);
 });
 
 Then('I should see a loading indicator', async function () {
