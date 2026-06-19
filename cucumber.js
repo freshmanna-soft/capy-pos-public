@@ -1,11 +1,14 @@
+/** @type {import('@cucumber/cucumber/api').IConfiguration} */
 module.exports = {
   default: {
-    require: ['features/step-definitions/**/*.js'],
+    // Step definitions are TypeScript, transpiled on the fly by tsx.
+    requireModule: ['tsx/cjs'],
+    require: ['tests/cucumber/step-definitions/**/*.ts'],
+    paths: ['tests/cucumber/**/*.feature'],
     format: [
       'progress-bar',
       'html:cucumber-report.html',
       'json:cucumber-report.json',
-      '@cucumber/pretty-formatter',
     ],
     formatOptions: {
       snippetInterface: 'async-await',
@@ -13,11 +16,5 @@ module.exports = {
     parallel: 2,
     retry: 0,
     strict: true,
-    dryRun: false,
-    failFast: false,
-    paths: ['features/**/*.feature'],
-    publishQuiet: true,
   },
 };
-
-// Made with Bob

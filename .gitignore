@@ -95,4 +95,11 @@ __screenshots__/
 # Playwright MCP temp files
 .playwright-mcp/
 
+# =============================================================================
+# Generated reports & analysis artifacts
+# =============================================================================
+documentation.json
+cucumber-report.*
+.scannerwork/
+
 *.patch

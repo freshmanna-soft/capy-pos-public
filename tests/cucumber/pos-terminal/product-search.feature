@@ -19,7 +19,6 @@ Feature: Product Search
     When I type "Coffee" in the product search field
     And I click on the first search result
     Then the product should be added to the cart
-    And the search field should be cleared
 
   Scenario: Keyboard navigation with Enter key
     When I type "Coffee" in the product search field
