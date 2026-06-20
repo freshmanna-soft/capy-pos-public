@@ -36,6 +36,23 @@
     </div>
   }
 
+  <!-- Sync Notice (remote soft-delete didn't confirm) -->
+  @if (syncNotice()) {
+    <div
+      class="flex items-center gap-3 p-3 bg-blue-50 border border-blue-400 rounded-lg mb-4"
+      data-testid="sync-notice"
+    >
+      <span>🔄</span>
+      <span class="flex-1 text-sm text-blue-800">{{ syncNotice() }}</span>
+      <button
+        class="px-3 py-1.5 bg-blue-500 text-white border-none rounded-md text-xs cursor-pointer"
+        (click)="dismissSyncNotice()"
+      >
+        Dismiss
+      </button>
+    </div>
+  }
+
   <!-- Low Stock Alert -->
   @if (lowStockCount() > 0) {
     <div

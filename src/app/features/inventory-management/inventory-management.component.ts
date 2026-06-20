@@ -14,6 +14,7 @@ import {
   UpdateProductRequest,
 } from '@core/application/use-cases/manage-inventory.use-case';
 import { InventoryFacade } from '@core/application/facades';
+import { SyncService } from '@core/infrastructure/sync';
 
 type StockStatus = 'healthy' | 'warning' | 'critical';
 type FormMode = 'closed' | 'create' | 'edit';
@@ -61,6 +62,7 @@ interface ProductFormData {
 })
 export class InventoryManagementComponent implements OnInit {
   protected readonly inventoryFacade = inject(InventoryFacade);
+  private readonly syncService = inject(SyncService);
 
   // Filter signals
   readonly searchQuery = signal('');
@@ -75,6 +77,9 @@ export class InventoryManagementComponent implements OnInit {
 
   // Delete confirmation
   readonly deleteConfirmId = signal<string | null>(null);
+
+  // Non-blocking notice when a remote sync didn't confirm (offline / circuit open)
+  readonly syncNotice = signal<string | null>(null);
 
   // Computed values
   readonly filteredProducts = computed(() => {
@@ -276,8 +281,36 @@ export class InventoryManagementComponent implements OnInit {
     const id = this.deleteConfirmId();
     if (!id) return;
 
-    await this.inventoryFacade.deleteProduct(id);
+    const product = this.inventoryFacade.products().find((p) => p.id === id);
+
+    // Soft-delete locally first (offline-first — always succeeds against IndexedDB).
+    const deleted = await this.inventoryFacade.deleteProduct(id);
     this.deleteConfirmId.set(null);
+    if (!deleted || !product) return;
+
+    // Mirror the removal to the remote API as a soft-delete (isActive: false)
+    // rather than a destructive DELETE, so transaction history that references
+    // this product stays intact. Await confirmation; if it doesn't land
+    // (offline / circuit open), the local delete still applied and the next
+    // background sync will reconcile.
+    try {
+      this.syncNotice.set(null);
+      await this.syncService.pushUpdateAsync({
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        category: product.category,
+        stock: product.stock,
+        isActive: false,
+      });
+    } catch (error) {
+      console.warn(`[Inventory] Remote soft-delete for ${id} did not confirm:`, error);
+      this.syncNotice.set('Removed locally — will sync to the server when back online.');
+    }
+  }
+
+  dismissSyncNotice(): void {
+    this.syncNotice.set(null);
   }
 
   // Form validation
