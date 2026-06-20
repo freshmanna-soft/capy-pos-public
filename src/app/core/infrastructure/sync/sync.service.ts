@@ -31,6 +31,12 @@ export class SyncService implements OnDestroy {
   private readonly db = inject(DexieDatabase);
   private worker: Worker | null = null;
 
+  // Promises awaiting a PUSH_COMPLETED result, keyed by product id.
+  private readonly pendingPushes = new Map<
+    string,
+    { resolve: (result: PushResult) => void; reject: (error: Error) => void }
+  >();
+
   // ─── Reactive State (Signals) ───────────────────────────────────────────
 
   private readonly _status = signal<SyncStatus>(SyncStatus.IDLE);
@@ -106,6 +112,13 @@ export class SyncService implements OnDestroy {
       this.worker.terminate();
       this.worker = null;
       this._status.set(SyncStatus.IDLE);
+
+      // Reject any in-flight awaited pushes so callers don't hang.
+      for (const pending of this.pendingPushes.values()) {
+        pending.reject(new Error('Sync worker stopped before push confirmed'));
+      }
+      this.pendingPushes.clear();
+
       console.log('[SyncService] Worker stopped.');
     }
   }
@@ -166,6 +179,92 @@ export class SyncService implements OnDestroy {
   }
 
   /**
+   * Update products on the remote API (partial PATCH per product).
+   * Results come back via the PUSH_COMPLETED event.
+   */
+  pushUpdates(products: PushProductPayload[]): void {
+    if (!products.length) {
+      console.warn('[SyncService] No products to update.');
+      return;
+    }
+
+    if (!this.worker) {
+      console.error('[SyncService] Worker not running. Call start() first.');
+      return;
+    }
+
+    console.log(`[SyncService] Queuing ${products.length} product update(s)...`);
+    this.postCommand({ type: 'PUSH_UPDATE_PRODUCTS', products });
+  }
+
+  /**
+   * Convenience: update a single product on the API
+   */
+  pushUpdate(product: PushProductPayload): void {
+    this.pushUpdates([product]);
+  }
+
+  /**
+   * Delete products on the remote API (DELETE per id).
+   * Results come back via the PUSH_COMPLETED event.
+   */
+  pushDeletes(productIds: string[]): void {
+    if (!productIds.length) {
+      console.warn('[SyncService] No products to delete.');
+      return;
+    }
+
+    if (!this.worker) {
+      console.error('[SyncService] Worker not running. Call start() first.');
+      return;
+    }
+
+    console.log(`[SyncService] Queuing ${productIds.length} product deletion(s)...`);
+    this.postCommand({ type: 'PUSH_DELETE_PRODUCTS', productIds });
+  }
+
+  /**
+   * Convenience: delete a single product on the API
+   */
+  pushDelete(productId: string): void {
+    this.pushDeletes([productId]);
+  }
+
+  /**
+   * Update a product on the API and resolve when the push confirms.
+   * Unlike pushUpdate (fire-and-forget), this awaits the matching
+   * PUSH_COMPLETED result so callers can react to success/failure.
+   *
+   * Resolves with the PushResult for this product; rejects if the worker
+   * isn't running or the push doesn't confirm within timeoutMs.
+   */
+  pushUpdateAsync(product: PushProductPayload, timeoutMs = 20000): Promise<PushResult> {
+    if (!this.worker) {
+      return Promise.reject(new Error('Sync worker not running. Call start() first.'));
+    }
+
+    return new Promise<PushResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingPushes.delete(product.id);
+        reject(new Error(`Push for product ${product.id} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      this.pendingPushes.set(product.id, {
+        resolve: (result) => {
+          clearTimeout(timer);
+          resolve(result);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+
+      this.postCommand({ type: 'PUSH_UPDATE_PRODUCTS', products: [product] });
+    });
+  }
+
+  /**
    * Check if worker is running
    */
   isRunning(): boolean {
@@ -181,6 +280,23 @@ export class SyncService implements OnDestroy {
   private postCommand(command: SyncWorkerCommand): void {
     if (this.worker) {
       this.worker.postMessage(command);
+    }
+  }
+
+  /**
+   * Resolve any pushUpdateAsync() promises whose product appears in a
+   * PUSH_COMPLETED result. Failed results reject; successful ones resolve.
+   */
+  private settlePendingPushes(results: PushResult[]): void {
+    for (const result of results) {
+      const pending = this.pendingPushes.get(result.productId);
+      if (!pending) continue;
+      this.pendingPushes.delete(result.productId);
+      if (result.success) {
+        pending.resolve(result);
+      } else {
+        pending.reject(new Error(result.error ?? `Push failed for product ${result.productId}`));
+      }
     }
   }
 
@@ -243,6 +359,7 @@ export class SyncService implements OnDestroy {
             .map((r: PushResult) => r.productId);
           console.warn('[SyncService] Failed to push products:', failedIds);
         }
+        this.settlePendingPushes(event.results);
         break;
 
       case 'ERROR':

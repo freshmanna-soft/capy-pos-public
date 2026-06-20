@@ -455,6 +455,113 @@ async function pushProducts(products: PushProductPayload[]): Promise<void> {
   console.log(`[Worker:Push] Done. Pushed: ${pushed}, Failed: ${failed}`);
 }
 
+async function pushUpdates(products: PushProductPayload[]): Promise<void> {
+  if (!products.length) return;
+
+  const base = `${config.apiBaseUrl}${config.endpoints.products}`;
+  const results: PushResult[] = [];
+  let pushed = 0;
+  let failed = 0;
+
+  console.log(`[Worker:Push] Updating ${products.length} product(s) on API...`);
+
+  for (const product of products) {
+    const { id, ...changes } = product;
+    try {
+      const response = await circuitBreaker.execute(() =>
+        retry.execute(`update-product-${id}`, async () => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+          try {
+            const res = await fetch(`${base}/${id}`, {
+              method: 'PATCH',
+              signal: controller.signal,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(changes),
+            });
+
+            if (res.status === 200) {
+              return res;
+            }
+            // 4xx (incl. 404 missing) are non-retryable; 5xx are retryable.
+            if (res.status >= 400 && res.status < 500) {
+              throw new Error(`HTTP ${res.status}: ${res.statusText} (non-retryable)`);
+            }
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        })
+      );
+
+      pushed++;
+      results.push({ productId: id, success: true, status: response.status });
+      console.log(`[Worker:Push] ✓ Product ${id} updated (${response.status})`);
+    } catch (error) {
+      failed++;
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      results.push({ productId: id, success: false, error: errorMsg });
+      console.warn(`[Worker:Push] ✗ Product ${id} update failed: ${errorMsg}`);
+    }
+  }
+
+  postEvent({ type: 'PUSH_COMPLETED', pushed, failed, results });
+  console.log(`[Worker:Push] Update done. Updated: ${pushed}, Failed: ${failed}`);
+}
+
+async function pushDeletes(productIds: string[]): Promise<void> {
+  if (!productIds.length) return;
+
+  const base = `${config.apiBaseUrl}${config.endpoints.products}`;
+  const results: PushResult[] = [];
+  let pushed = 0;
+  let failed = 0;
+
+  console.log(`[Worker:Push] Deleting ${productIds.length} product(s) on API...`);
+
+  for (const id of productIds) {
+    try {
+      const response = await circuitBreaker.execute(() =>
+        retry.execute(`delete-product-${id}`, async () => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+          try {
+            const res = await fetch(`${base}/${id}`, {
+              method: 'DELETE',
+              signal: controller.signal,
+            });
+
+            // 200 = deleted, 404 = already gone (both "success" for an idempotent delete)
+            if (res.status === 200 || res.status === 204 || res.status === 404) {
+              return res;
+            }
+            if (res.status >= 400 && res.status < 500) {
+              throw new Error(`HTTP ${res.status}: ${res.statusText} (non-retryable)`);
+            }
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        })
+      );
+
+      pushed++;
+      results.push({ productId: id, success: true, status: response.status });
+      console.log(`[Worker:Push] ✓ Product ${id} deleted (${response.status})`);
+    } catch (error) {
+      failed++;
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      results.push({ productId: id, success: false, error: errorMsg });
+      console.warn(`[Worker:Push] ✗ Product ${id} delete failed: ${errorMsg}`);
+    }
+  }
+
+  postEvent({ type: 'PUSH_COMPLETED', pushed, failed, results });
+  console.log(`[Worker:Push] Delete done. Deleted: ${pushed}, Failed: ${failed}`);
+}
+
 // ─── Worker Lifecycle ───────────────────────────────────────────────────────
 
 function startSync(cfg: SyncWorkerConfig): void {
@@ -550,6 +657,14 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
 
     case 'PUSH_PRODUCTS':
       pushProducts(command.products);
+      break;
+
+    case 'PUSH_UPDATE_PRODUCTS':
+      pushUpdates(command.products);
+      break;
+
+    case 'PUSH_DELETE_PRODUCTS':
+      pushDeletes(command.productIds);
       break;
   }
 });

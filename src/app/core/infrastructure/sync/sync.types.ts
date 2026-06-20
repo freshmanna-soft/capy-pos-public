@@ -42,7 +42,9 @@ export type SyncWorkerCommand =
   | { type: 'GET_STATUS' }
   | { type: 'RESET_CIRCUIT_BREAKER' }
   | { type: 'UPDATE_CONFIG'; config: Partial<SyncWorkerConfig> }
-  | { type: 'PUSH_PRODUCTS'; products: PushProductPayload[] };
+  | { type: 'PUSH_PRODUCTS'; products: PushProductPayload[] }
+  | { type: 'PUSH_UPDATE_PRODUCTS'; products: PushProductPayload[] }
+  | { type: 'PUSH_DELETE_PRODUCTS'; productIds: string[] };
 
 /**
  * Product payload for PUSH sync (local → API)
@@ -54,6 +56,7 @@ export interface PushProductPayload {
   category: string;
   stock?: number;
   description?: string;
+  isActive?: boolean;
 }
 
 /**

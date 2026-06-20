@@ -394,6 +394,96 @@ resource "aws_cloudwatch_log_group" "create_product_logs" {
 }
 
 # =============================================================================
+# Lambda: Update Product
+# =============================================================================
+
+data "archive_file" "update_product_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/update-product"
+  output_path = "${path.module}/.build/update-product.zip"
+
+  depends_on = [local_file.update_product_shared]
+}
+
+resource "local_file" "update_product_shared" {
+  for_each = fileset("${path.module}/lambda/shared", "*.js")
+  filename = "${path.module}/lambda/update-product/shared/${each.value}"
+  source   = "${path.module}/lambda/shared/${each.value}"
+}
+
+resource "aws_lambda_function" "update_product" {
+  filename         = data.archive_file.update_product_zip.output_path
+  function_name    = "${var.project_name}-update-product"
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "index.handler"
+  source_code_hash = data.archive_file.update_product_zip.output_base64sha256
+  runtime          = "nodejs20.x"
+  timeout          = 30
+  memory_size      = 256
+  layers           = [aws_lambda_layer_version.shared_deps.arn]
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      PRODUCTS_TABLE = aws_dynamodb_table.products.name
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_group" "update_product_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.update_product.function_name}"
+  retention_in_days = 7
+}
+
+# =============================================================================
+# Lambda: Delete Product
+# =============================================================================
+
+data "archive_file" "delete_product_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/delete-product"
+  output_path = "${path.module}/.build/delete-product.zip"
+
+  depends_on = [local_file.delete_product_shared]
+}
+
+resource "local_file" "delete_product_shared" {
+  for_each = fileset("${path.module}/lambda/shared", "*.js")
+  filename = "${path.module}/lambda/delete-product/shared/${each.value}"
+  source   = "${path.module}/lambda/shared/${each.value}"
+}
+
+resource "aws_lambda_function" "delete_product" {
+  filename         = data.archive_file.delete_product_zip.output_path
+  function_name    = "${var.project_name}-delete-product"
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "index.handler"
+  source_code_hash = data.archive_file.delete_product_zip.output_base64sha256
+  runtime          = "nodejs20.x"
+  timeout          = 30
+  memory_size      = 256
+  layers           = [aws_lambda_layer_version.shared_deps.arn]
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      PRODUCTS_TABLE = aws_dynamodb_table.products.name
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_group" "delete_product_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.delete_product.function_name}"
+  retention_in_days = 7
+}
+
+# =============================================================================
 # Lambda: Health
 # =============================================================================
 
@@ -507,6 +597,20 @@ resource "aws_apigatewayv2_integration" "create_product" {
   integration_method = "POST"
 }
 
+resource "aws_apigatewayv2_integration" "update_product" {
+  api_id             = aws_apigatewayv2_api.api.id
+  integration_type   = "AWS_PROXY"
+  integration_uri    = aws_lambda_function.update_product.invoke_arn
+  integration_method = "POST"
+}
+
+resource "aws_apigatewayv2_integration" "delete_product" {
+  api_id             = aws_apigatewayv2_api.api.id
+  integration_type   = "AWS_PROXY"
+  integration_uri    = aws_lambda_function.delete_product.invoke_arn
+  integration_method = "POST"
+}
+
 resource "aws_apigatewayv2_integration" "health" {
   api_id             = aws_apigatewayv2_api.api.id
   integration_type   = "AWS_PROXY"
@@ -544,6 +648,24 @@ resource "aws_apigatewayv2_route" "create_product" {
   api_id    = aws_apigatewayv2_api.api.id
   route_key = "POST /api/products"
   target    = "integrations/${aws_apigatewayv2_integration.create_product.id}"
+}
+
+resource "aws_apigatewayv2_route" "update_product_put" {
+  api_id    = aws_apigatewayv2_api.api.id
+  route_key = "PUT /api/products/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.update_product.id}"
+}
+
+resource "aws_apigatewayv2_route" "update_product_patch" {
+  api_id    = aws_apigatewayv2_api.api.id
+  route_key = "PATCH /api/products/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.update_product.id}"
+}
+
+resource "aws_apigatewayv2_route" "delete_product" {
+  api_id    = aws_apigatewayv2_api.api.id
+  route_key = "DELETE /api/products/{id}"
+  target    = "integrations/${aws_apigatewayv2_integration.delete_product.id}"
 }
 
 
@@ -589,6 +711,22 @@ resource "aws_lambda_permission" "create_product" {
   source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
 }
 
+resource "aws_lambda_permission" "update_product" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.update_product.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "delete_product" {
+  statement_id  = "AllowAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.delete_product.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/*/*"
+}
+
 # =============================================================================
 # Outputs
 # =============================================================================
@@ -609,6 +747,9 @@ output "lambda_functions" {
     get_products     = aws_lambda_function.get_products.function_name
     sell_product     = aws_lambda_function.sell_product.function_name
     get_transactions = aws_lambda_function.get_transactions.function_name
+    create_product   = aws_lambda_function.create_product.function_name
+    update_product   = aws_lambda_function.update_product.function_name
+    delete_product   = aws_lambda_function.delete_product.function_name
     health           = aws_lambda_function.health.function_name
   }
 }
@@ -629,6 +770,9 @@ output "log_groups" {
     get_products     = aws_cloudwatch_log_group.get_products_logs.name
     sell_product     = aws_cloudwatch_log_group.sell_product_logs.name
     get_transactions = aws_cloudwatch_log_group.get_transactions_logs.name
+    create_product   = aws_cloudwatch_log_group.create_product_logs.name
+    update_product   = aws_cloudwatch_log_group.update_product_logs.name
+    delete_product   = aws_cloudwatch_log_group.delete_product_logs.name
     health           = aws_cloudwatch_log_group.health_logs.name
     api_gateway      = aws_cloudwatch_log_group.api_logs.name
   }
