@@ -37,13 +37,29 @@
   }
 
   <!-- Sync Notice (remote soft-delete didn't confirm) -->
-  @if (syncNotice()) {
+  @if (syncNotice(); as notice) {
     <div
-      class="flex items-center gap-3 p-3 bg-blue-50 border border-blue-400 rounded-lg mb-4"
+      class="flex flex-wrap items-center gap-x-3 gap-y-2 p-3 bg-blue-50 border border-blue-400 rounded-lg mb-4"
       data-testid="sync-notice"
     >
       <span>🔄</span>
-      <span class="flex-1 text-sm text-blue-800">{{ syncNotice() }}</span>
+      <span class="flex-1 min-w-[12rem] text-sm text-blue-800">{{ notice.message }}</span>
+
+      <!-- Trace reference: only present when the server actually answered with one -->
+      @if (notice.traceId) {
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-100 hover:bg-blue-200 text-blue-900 border border-blue-300 rounded-md text-xs font-mono cursor-pointer"
+          (click)="copyTrace(notice.traceId)"
+          data-testid="sync-notice-trace"
+          [title]="'Trace ID: ' + notice.traceId + ' — click to copy'"
+        >
+          <span>🔖</span>
+          <span>Ref {{ notice.traceId.slice(0, 12) }}…</span>
+          <span class="font-sans text-blue-600">{{ traceCopied() ? '✓ copied' : 'copy' }}</span>
+        </button>
+      }
+
       <button
         class="px-3 py-1.5 bg-blue-500 text-white border-none rounded-md text-xs cursor-pointer"
         (click)="dismissSyncNotice()"

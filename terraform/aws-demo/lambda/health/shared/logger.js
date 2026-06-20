@@ -21,6 +21,9 @@ function response(statusCode, body) {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': 'Content-Type,X-Amzn-Trace-Id',
+      // Expose X-Trace-Id so browser JS (fetch) can actually read it off the
+      // response — Allow-Headers governs request headers, not response ones.
+      'Access-Control-Expose-Headers': 'X-Trace-Id',
       'X-Trace-Id': process.env._X_AMZN_TRACE_ID || 'unavailable',
     },
     body: JSON.stringify(body),

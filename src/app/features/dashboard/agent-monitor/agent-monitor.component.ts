@@ -242,6 +242,23 @@ interface AgentStatus {
                       <span class="font-medium">Error:</span> {{ log.errorMessage }}
                     </p>
                   }
+                  @if (traceIdOf(log); as traceId) {
+                    <p class="flex items-center gap-1.5">
+                      <span class="font-medium">Trace:</span>
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 font-mono text-[11px] text-blue-700 hover:text-blue-900 hover:underline cursor-pointer"
+                        (click)="copyTrace(traceId)"
+                        [title]="'Trace ID: ' + traceId + ' — click to copy'"
+                        data-testid="audit-trace"
+                      >
+                        {{ traceId }}
+                        <span class="text-gray-400">{{
+                          copiedTraceId() === traceId ? '✓' : '⧉'
+                        }}</span>
+                      </button>
+                    </p>
+                  }
                 </div>
               </div>
             }
@@ -333,6 +350,26 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   auditStats = signal<{ totalLogs: number }>({
     totalLogs: 0,
   });
+
+  // Trace ID most recently copied to the clipboard (for the ✓ affordance).
+  copiedTraceId = signal<string | null>(null);
+
+  /** Pull a string traceId out of an audit entry's free-form metadata, if present. */
+  traceIdOf(log: AuditLogEntry): string | undefined {
+    const traceId = log.metadata?.['traceId'];
+    return typeof traceId === 'string' && traceId.length > 0 ? traceId : undefined;
+  }
+
+  /** Copy a trace ID so it can be pasted into X-Ray, CloudWatch, or a ticket. */
+  async copyTrace(traceId: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(traceId);
+      this.copiedTraceId.set(traceId);
+      setTimeout(() => this.copiedTraceId.set(null), 2000);
+    } catch {
+      // Clipboard may be unavailable (no permission / insecure context); ignore.
+    }
+  }
 
   ngOnInit(): void {
     this.loadAgentStatus();

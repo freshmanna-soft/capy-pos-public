@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { InventoryManagementComponent } from './inventory-management.component';
 import { ProductSummaryDTO } from '@core/application/use-cases/manage-inventory.use-case';
 import { InventoryFacade } from '@core/application/facades';
+import { SyncService, PushFailedError } from '@core/infrastructure/sync';
+import { AuditLogService, AuditAction, AuditStatus } from '@core/infrastructure/audit';
 import { signal, computed } from '@angular/core';
 
 describe('InventoryManagementComponent', () => {
@@ -288,6 +290,58 @@ describe('InventoryManagementComponent', () => {
     it('should not call delete if no id set', async () => {
       await component.confirmDelete();
       expect(mockFacade.deleteProduct).not.toHaveBeenCalled();
+    });
+
+    it('surfaces the trace ref and audit-logs when remote soft-delete fails', async () => {
+      const sync = TestBed.inject(SyncService);
+      const audit = TestBed.inject(AuditLogService);
+      const logSpy = vi.spyOn(audit, 'log').mockResolvedValue(undefined);
+      vi.spyOn(sync, 'pushUpdateAsync').mockRejectedValue(
+        new PushFailedError('HTTP 500: Internal server error', 'p1', 'trace-xyz', 500)
+      );
+
+      component.requestDelete('p1');
+      await component.confirmDelete();
+
+      // Tier 1: notice carries the trace ref for the user.
+      expect(component.syncNotice()?.message).toContain('Removed locally');
+      expect(component.syncNotice()?.traceId).toBe('trace-xyz');
+
+      // Tier 2: a FAILURE entry is persisted with the trace in metadata.
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: AuditStatus.FAILURE,
+          action: AuditAction.DELETE,
+          entityType: 'Product',
+          entityId: 'p1',
+          metadata: expect.objectContaining({ traceId: 'trace-xyz' }),
+        })
+      );
+    });
+
+    it('shows a notice without a trace ref when the failure carries none', async () => {
+      const sync = TestBed.inject(SyncService);
+      vi.spyOn(TestBed.inject(AuditLogService), 'log').mockResolvedValue(undefined);
+      vi.spyOn(sync, 'pushUpdateAsync').mockRejectedValue(new Error('offline'));
+
+      component.requestDelete('p1');
+      await component.confirmDelete();
+
+      expect(component.syncNotice()?.message).toContain('Removed locally');
+      expect(component.syncNotice()?.traceId).toBeUndefined();
+    });
+
+    it('copyTrace copies the id and flips the copied flag', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText },
+        configurable: true,
+      });
+
+      await component.copyTrace('trace-xyz');
+
+      expect(writeText).toHaveBeenCalledWith('trace-xyz');
+      expect(component.traceCopied()).toBe(true);
     });
   });
 

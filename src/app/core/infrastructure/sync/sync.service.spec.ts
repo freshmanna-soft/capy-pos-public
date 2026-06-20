@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { SyncService } from './sync.service';
+import { SyncService, PushFailedError } from './sync.service';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
 import {
   SyncWorkerCommand,
@@ -351,6 +351,38 @@ describe('SyncService', () => {
         results: [{ productId: 'p1', success: true, status: 200 }],
       });
       await expect(promise).resolves.toMatchObject({ productId: 'p1' });
+    });
+
+    it('rejects with a PushFailedError carrying the trace ID and status', async () => {
+      const worker = start();
+      const promise = service.pushUpdateAsync(product);
+      worker.emit({
+        type: 'PUSH_COMPLETED',
+        pushed: 0,
+        failed: 1,
+        results: [
+          { productId: 'p1', success: false, error: 'HTTP 500', status: 500, traceId: 'trace-xyz' },
+        ],
+      });
+      await expect(promise).rejects.toMatchObject({
+        name: 'PushFailedError',
+        productId: 'p1',
+        traceId: 'trace-xyz',
+        status: 500,
+      });
+      await promise.catch((err) => expect(err).toBeInstanceOf(PushFailedError));
+    });
+
+    it('resolves with the trace ID on a successful push', async () => {
+      const worker = start();
+      const promise = service.pushUpdateAsync(product);
+      worker.emit({
+        type: 'PUSH_COMPLETED',
+        pushed: 1,
+        failed: 0,
+        results: [{ productId: 'p1', success: true, status: 200, traceId: 'trace-ok' }],
+      });
+      await expect(promise).resolves.toMatchObject({ traceId: 'trace-ok' });
     });
   });
 
