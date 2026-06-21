@@ -540,7 +540,10 @@ resource "aws_apigatewayv2_api" "api" {
     allow_origins = ["*"]
     allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     allow_headers = ["Content-Type", "X-Amzn-Trace-Id"]
-    max_age       = 300
+    # HTTP API manages CORS response headers and strips the Lambda's, so the
+    # trace header must be exposed here for browser fetch() to read it.
+    expose_headers = ["x-trace-id"]
+    max_age        = 300
   }
 }
 
