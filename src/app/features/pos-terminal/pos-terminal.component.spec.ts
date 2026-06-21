@@ -1,5 +1,7 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { PosTerminalComponent } from '@features/pos-terminal/pos-terminal.component';
+import { ProductGridComponent } from '@shared/ui/organisms/product-grid/product-grid.component';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
 import {
   CheckoutComponent,
@@ -150,6 +152,29 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     component.handleProductSelected(product);
     vi.advanceTimersByTime(0);
   }
+
+  describe('Browse grid (organism) integration', () => {
+    it('renders the product-grid organism fed by the catalog', () => {
+      component.catalog.set([mockProducts.coffee]);
+      fixture.detectChanges();
+
+      const grid = fixture.debugElement.query(By.directive(ProductGridComponent));
+      expect(grid).toBeTruthy();
+      expect(grid.componentInstance.products()).toEqual([mockProducts.coffee]);
+    });
+
+    it('adds to cart when the grid emits productSelected', () => {
+      component.catalog.set([mockProducts.coffee]);
+      fixture.detectChanges();
+
+      const grid = fixture.debugElement.query(By.directive(ProductGridComponent));
+      grid.componentInstance.productSelected.emit(mockProducts.coffee);
+      vi.advanceTimersByTime(0);
+
+      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()[0].product.id).toBe('1');
+    });
+  });
 
   describe('AC1: Adding a product to an empty cart', () => {
     it('should add a product to the cart when handleProductSelected is called', () => {

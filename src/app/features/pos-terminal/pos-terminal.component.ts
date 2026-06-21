@@ -7,8 +7,10 @@ import {
   PaymentResult,
 } from '@features/pos-terminal/components/checkout/checkout.component';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
+import { ProductGridComponent } from '@shared/ui/organisms/product-grid/product-grid.component';
 import { Product } from '@core/domain/entities/product.entity';
 import { PosFacade } from '@core/application/facades';
+import { ProductService } from '@core/application/services/product.service';
 import { ReceiptData } from '@core/application/use-cases/generate-receipt.use-case';
 import { ToastService } from '@shared/ui/toast/toast.service';
 
@@ -31,15 +33,25 @@ import { ToastService } from '@shared/ui/toast/toast.service';
 @Component({
   selector: 'app-pos-terminal',
   standalone: true,
-  imports: [ProductSearchComponent, ShoppingCartComponent, CheckoutComponent, ReceiptComponent],
+  imports: [
+    ProductSearchComponent,
+    ShoppingCartComponent,
+    CheckoutComponent,
+    ReceiptComponent,
+    ProductGridComponent,
+  ],
   templateUrl: './pos-terminal.component.html',
   styleUrl: './pos-terminal.component.scss',
 })
 export class PosTerminalComponent implements OnInit {
   protected readonly posFacade = inject(PosFacade);
   private readonly toast = inject(ToastService);
+  private readonly productService = inject(ProductService);
 
   @ViewChild(ProductSearchComponent) productSearch!: ProductSearchComponent;
+
+  /** Active product catalog feeding the browse grid (organism). */
+  readonly catalog = signal<Product[]>([]);
 
   /** Controls visibility of the checkout overlay */
   readonly showCheckout = signal(false);
@@ -62,10 +74,20 @@ export class PosTerminalComponent implements OnInit {
       .initializeDatabase()
       .then(() => {
         console.log('Database initialized with seed data');
+        return this.loadCatalog();
       })
       .catch((error: unknown) => {
         console.error('Failed to initialize database:', error);
       });
+  }
+
+  /** Load the active product catalog into the browse grid. */
+  private async loadCatalog(): Promise<void> {
+    try {
+      this.catalog.set(await this.productService.getActiveProducts());
+    } catch (error) {
+      console.error('[POS] Failed to load product catalog:', error);
+    }
   }
 
   /**
@@ -141,10 +163,11 @@ export class PosTerminalComponent implements OnInit {
         this.showCheckout.set(false);
         this.showReceipt.set(true);
 
-        // Refresh product search to show updated stock numbers
+        // Refresh product search + browse grid to show updated stock numbers
         if (this.productSearch) {
           this.productSearch.refreshProducts();
         }
+        void this.loadCatalog();
 
         console.log('Payment completed:', result);
       })
