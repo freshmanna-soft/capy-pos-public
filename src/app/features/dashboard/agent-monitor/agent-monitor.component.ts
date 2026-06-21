@@ -7,8 +7,11 @@ import { AuditLogService, AuditLogEntry } from '@core/infrastructure/audit/audit
 import {
   CircuitBreakerService,
   CircuitBreakerStats,
+  CircuitState,
 } from '@core/infrastructure/resilience/circuit-breaker.service';
 import { TelemetryService, MetricSummary } from '@core/infrastructure/telemetry/telemetry.service';
+import { SyncService } from '@core/infrastructure/sync/sync.service';
+import { WorkerCircuitState } from '@core/infrastructure/sync/sync.types';
 import { LowStockWidgetComponent } from '../low-stock-widget/low-stock-widget.component';
 
 interface AgentStatus {
@@ -18,6 +21,13 @@ interface AgentStatus {
   isRunning: boolean;
   lastActivity?: Date;
 }
+
+/** Worker and main-thread circuit-breaker enums share string values; map them explicitly. */
+const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
+  [WorkerCircuitState.CLOSED]: CircuitState.CLOSED,
+  [WorkerCircuitState.OPEN]: CircuitState.OPEN,
+  [WorkerCircuitState.HALF_OPEN]: CircuitState.HALF_OPEN,
+};
 
 /**
  * Agent Monitor Component
@@ -328,6 +338,7 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   private readonly auditLog = inject(AuditLogService);
   private readonly circuitBreakerService = inject(CircuitBreakerService);
   private readonly telemetry = inject(TelemetryService);
+  private readonly syncService = inject(SyncService);
 
   private readonly destroy$ = new Subject<void>();
 
@@ -416,7 +427,32 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   }
 
   private loadCircuitBreakers(): void {
-    this.circuitBreakers.set(this.circuitBreakerService.getAllStats());
+    // Start with any breakers registered on the main-thread service.
+    const stats: Record<string, CircuitBreakerStats> = {
+      ...this.circuitBreakerService.getAllStats(),
+    };
+
+    // The real API-sync circuit breaker lives in the sync web worker, so it
+    // never appears in the main-thread CircuitBreakerService. SyncService
+    // mirrors the worker's state (via CIRCUIT_STATE_CHANGED / status reports)
+    // onto the main thread, so surface it here as the "api-sync" breaker.
+    if (this.syncService.isRunning()) {
+      const successes = this.syncService.totalSyncs();
+      const failures = this.syncService.totalFailures();
+      stats['api-sync'] = {
+        state: WORKER_TO_CIRCUIT_STATE[this.syncService.circuitState()],
+        failures,
+        successes,
+        consecutiveFailures: 0,
+        consecutiveSuccesses: 0,
+        // Counts reflect completed sync cycles, not individual worker calls.
+        totalCalls: successes + failures,
+        totalFailures: failures,
+        totalSuccesses: successes,
+      };
+    }
+
+    this.circuitBreakers.set(stats);
   }
 
   private loadMetrics(): void {
