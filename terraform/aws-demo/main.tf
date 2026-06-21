@@ -538,7 +538,7 @@ resource "aws_apigatewayv2_api" "api" {
 
   cors_configuration {
     allow_origins = ["*"]
-    allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     allow_headers = ["Content-Type", "X-Amzn-Trace-Id"]
     # HTTP API manages CORS response headers and strips the Lambda's, so the
     # trace header must be exposed here for browser fetch() to read it.
