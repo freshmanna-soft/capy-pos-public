@@ -235,6 +235,17 @@ function postEvent(event: SyncWorkerEvent): void {
   self.postMessage(event);
 }
 
+/**
+ * Pull the X-Ray trace ID off a response so failures can be traced back to
+ * CloudWatch/X-Ray. Requires the API to send `Access-Control-Expose-Headers:
+ * X-Trace-Id` (otherwise the browser hides the header). Returns undefined when
+ * absent or set to the backend's "unavailable" sentinel.
+ */
+function readTraceId(res: Response): string | undefined {
+  const value = res.headers.get('X-Trace-Id');
+  return value && value !== 'unavailable' ? value : undefined;
+}
+
 // ─── API Fetch with timeout ─────────────────────────────────────────────────
 
 async function fetchWithTimeout(
@@ -467,6 +478,9 @@ async function pushUpdates(products: PushProductPayload[]): Promise<void> {
 
   for (const product of products) {
     const { id, ...changes } = product;
+    // Captured as soon as a response lands so the trace ID survives even when
+    // a non-2xx status makes us throw past the response below.
+    let traceId: string | undefined;
     try {
       const response = await circuitBreaker.execute(() =>
         retry.execute(`update-product-${id}`, async () => {
@@ -480,6 +494,7 @@ async function pushUpdates(products: PushProductPayload[]): Promise<void> {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(changes),
             });
+            traceId = readTraceId(res);
 
             if (res.status === 200) {
               return res;
@@ -496,13 +511,15 @@ async function pushUpdates(products: PushProductPayload[]): Promise<void> {
       );
 
       pushed++;
-      results.push({ productId: id, success: true, status: response.status });
+      results.push({ productId: id, success: true, status: response.status, traceId });
       console.log(`[Worker:Push] ✓ Product ${id} updated (${response.status})`);
     } catch (error) {
       failed++;
       const errorMsg = error instanceof Error ? error.message : String(error);
-      results.push({ productId: id, success: false, error: errorMsg });
-      console.warn(`[Worker:Push] ✗ Product ${id} update failed: ${errorMsg}`);
+      results.push({ productId: id, success: false, error: errorMsg, traceId });
+      console.warn(
+        `[Worker:Push] ✗ Product ${id} update failed: ${errorMsg} [trace: ${traceId ?? 'none'}]`
+      );
     }
   }
 
@@ -521,6 +538,9 @@ async function pushDeletes(productIds: string[]): Promise<void> {
   console.log(`[Worker:Push] Deleting ${productIds.length} product(s) on API...`);
 
   for (const id of productIds) {
+    // Captured as soon as a response lands so the trace ID survives even when
+    // a non-2xx status makes us throw past the response below.
+    let traceId: string | undefined;
     try {
       const response = await circuitBreaker.execute(() =>
         retry.execute(`delete-product-${id}`, async () => {
@@ -532,6 +552,7 @@ async function pushDeletes(productIds: string[]): Promise<void> {
               method: 'DELETE',
               signal: controller.signal,
             });
+            traceId = readTraceId(res);
 
             // 200 = deleted, 404 = already gone (both "success" for an idempotent delete)
             if (res.status === 200 || res.status === 204 || res.status === 404) {
@@ -548,13 +569,15 @@ async function pushDeletes(productIds: string[]): Promise<void> {
       );
 
       pushed++;
-      results.push({ productId: id, success: true, status: response.status });
+      results.push({ productId: id, success: true, status: response.status, traceId });
       console.log(`[Worker:Push] ✓ Product ${id} deleted (${response.status})`);
     } catch (error) {
       failed++;
       const errorMsg = error instanceof Error ? error.message : String(error);
-      results.push({ productId: id, success: false, error: errorMsg });
-      console.warn(`[Worker:Push] ✗ Product ${id} delete failed: ${errorMsg}`);
+      results.push({ productId: id, success: false, error: errorMsg, traceId });
+      console.warn(
+        `[Worker:Push] ✗ Product ${id} delete failed: ${errorMsg} [trace: ${traceId ?? 'none'}]`
+      );
     }
   }
 

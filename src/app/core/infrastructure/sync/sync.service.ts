@@ -14,6 +14,23 @@ import {
 } from './sync.types';
 
 /**
+ * Error raised when an awaited push (pushUpdateAsync) fails on the server.
+ * Carries the X-Ray traceId so callers can surface it to the user and to the
+ * audit log for later investigation in CloudWatch/X-Ray.
+ */
+export class PushFailedError extends Error {
+  constructor(
+    message: string,
+    readonly productId: string,
+    readonly traceId?: string,
+    readonly status?: number
+  ) {
+    super(message);
+    this.name = 'PushFailedError';
+  }
+}
+
+/**
  * Sync Service
  * Manages the background sync web worker from the Angular main thread.
  * Handles worker lifecycle, message passing, and writing synced data to Dexie.
@@ -295,7 +312,14 @@ export class SyncService implements OnDestroy {
       if (result.success) {
         pending.resolve(result);
       } else {
-        pending.reject(new Error(result.error ?? `Push failed for product ${result.productId}`));
+        pending.reject(
+          new PushFailedError(
+            result.error ?? `Push failed for product ${result.productId}`,
+            result.productId,
+            result.traceId,
+            result.status
+          )
+        );
       }
     }
   }

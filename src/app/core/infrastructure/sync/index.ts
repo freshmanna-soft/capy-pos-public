@@ -1,4 +1,4 @@
-export { SyncService } from './sync.service';
+export { SyncService, PushFailedError } from './sync.service';
 export type {
   SyncWorkerConfig,
   SyncWorkerCommand,

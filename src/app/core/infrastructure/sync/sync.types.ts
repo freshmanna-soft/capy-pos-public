@@ -82,6 +82,8 @@ export interface PushResult {
   success: boolean;
   status?: number;
   error?: string;
+  /** X-Ray trace ID from the API response, for tracing failures in CloudWatch. */
+  traceId?: string;
 }
 
 /**

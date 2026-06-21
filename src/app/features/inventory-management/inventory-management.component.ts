@@ -14,7 +14,8 @@ import {
   UpdateProductRequest,
 } from '@core/application/use-cases/manage-inventory.use-case';
 import { InventoryFacade } from '@core/application/facades';
-import { SyncService } from '@core/infrastructure/sync';
+import { SyncService, PushFailedError } from '@core/infrastructure/sync';
+import { AuditLogService, AuditAction, AuditStatus } from '@core/infrastructure/audit';
 
 type StockStatus = 'healthy' | 'warning' | 'critical';
 type FormMode = 'closed' | 'create' | 'edit';
@@ -63,6 +64,7 @@ interface ProductFormData {
 export class InventoryManagementComponent implements OnInit {
   protected readonly inventoryFacade = inject(InventoryFacade);
   private readonly syncService = inject(SyncService);
+  private readonly auditLog = inject(AuditLogService);
 
   // Filter signals
   readonly searchQuery = signal('');
@@ -78,8 +80,13 @@ export class InventoryManagementComponent implements OnInit {
   // Delete confirmation
   readonly deleteConfirmId = signal<string | null>(null);
 
-  // Non-blocking notice when a remote sync didn't confirm (offline / circuit open)
-  readonly syncNotice = signal<string | null>(null);
+  // Non-blocking notice when a remote sync didn't confirm (offline / circuit open).
+  // When the failure came back from the server it carries a traceId so the user
+  // can quote it for support and we can match it in CloudWatch/X-Ray.
+  readonly syncNotice = signal<{ message: string; traceId?: string } | null>(null);
+
+  // Transient confirmation shown after the trace ref is copied to the clipboard.
+  readonly traceCopied = signal(false);
 
   // Computed values
   readonly filteredProducts = computed(() => {
@@ -293,6 +300,7 @@ export class InventoryManagementComponent implements OnInit {
     // this product stays intact. Await confirmation; if it doesn't land
     // (offline / circuit open), the local delete still applied and the next
     // background sync will reconcile.
+    const startTime = Date.now();
     try {
       this.syncNotice.set(null);
       await this.syncService.pushUpdateAsync({
@@ -304,13 +312,46 @@ export class InventoryManagementComponent implements OnInit {
         isActive: false,
       });
     } catch (error) {
+      const traceId = error instanceof PushFailedError ? error.traceId : undefined;
+      const message = error instanceof Error ? error.message : String(error);
       console.warn(`[Inventory] Remote soft-delete for ${id} did not confirm:`, error);
-      this.syncNotice.set('Removed locally — will sync to the server when back online.');
+
+      // Tier 1 — tell the user now (local delete already applied; this is a sync hiccup).
+      this.syncNotice.set({
+        message: 'Removed locally — will sync to the server when back online.',
+        traceId,
+      });
+
+      // Tier 2 — persist the failure so it shows up in the agent monitor for
+      // later triage, with the trace ID to follow into CloudWatch/X-Ray.
+      void this.auditLog.log({
+        agentName: 'SyncService',
+        operation: 'pushUpdate (soft-delete)',
+        entityType: 'Product',
+        entityId: id,
+        action: AuditAction.DELETE,
+        status: AuditStatus.FAILURE,
+        errorMessage: message,
+        duration: Date.now() - startTime,
+        metadata: { traceId, productName: product.name },
+      });
+    }
+  }
+
+  /** Copy the failure's trace ID so the user can quote it in a support request. */
+  async copyTrace(traceId: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(traceId);
+      this.traceCopied.set(true);
+      setTimeout(() => this.traceCopied.set(false), 2000);
+    } catch {
+      // Clipboard can be unavailable (no permission / insecure context); ignore.
     }
   }
 
   dismissSyncNotice(): void {
     this.syncNotice.set(null);
+    this.traceCopied.set(false);
   }
 
   // Form validation
