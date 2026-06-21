@@ -1,5 +1,7 @@
 import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
+import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
+import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
 import {
   SyncWorkerCommand,
   SyncWorkerEvent,
@@ -46,6 +48,7 @@ export class PushFailedError extends Error {
 })
 export class SyncService implements OnDestroy {
   private readonly db = inject(DexieDatabase);
+  private readonly eventBus = inject(EventBusService);
   private worker: Worker | null = null;
 
   // Promises awaiting a PUSH_COMPLETED result, keyed by product id.
@@ -336,6 +339,9 @@ export class SyncService implements OnDestroy {
         this._totalSyncs.update((n) => n + 1);
         this._lastError.set(null);
         console.log('[SyncService] Sync completed:', event.data);
+        this.eventBus.publish(
+          busEvent(EventType.SYNC_COMPLETED, EventSource.SYNC_SERVICE, event.data, 'normal')
+        );
         break;
 
       case 'SYNC_FAILED':
@@ -364,6 +370,14 @@ export class SyncService implements OnDestroy {
           this._status.set(SyncStatus.CIRCUIT_OPEN);
         }
         console.log(`[SyncService] Circuit "${event.circuit}" → ${event.state}`);
+        this.eventBus.publish(
+          busEvent(
+            EventType.CIRCUIT_STATE_CHANGED,
+            EventSource.SYNC_SERVICE,
+            { circuit: event.circuit, state: event.state },
+            'high'
+          )
+        );
         break;
 
       case 'HEALTH_CHECK':
@@ -378,10 +392,27 @@ export class SyncService implements OnDestroy {
           `[SyncService] Push completed. Pushed: ${event.pushed}, Failed: ${event.failed}`
         );
         if (event.failed > 0) {
-          const failedIds = event.results
-            .filter((r: PushResult) => !r.success)
-            .map((r: PushResult) => r.productId);
+          const failed = event.results.filter((r: PushResult) => !r.success);
+          const failedIds = failed.map((r: PushResult) => r.productId);
           console.warn('[SyncService] Failed to push products:', failedIds);
+          this.eventBus.publish(
+            busEvent(
+              EventType.SYNC_PUSH_FAILED,
+              EventSource.SYNC_SERVICE,
+              { pushed: event.pushed, failed: event.failed, failedIds },
+              'high',
+              { traceIds: failed.map((r: PushResult) => r.traceId).filter(Boolean) }
+            )
+          );
+        } else {
+          this.eventBus.publish(
+            busEvent(
+              EventType.SYNC_PUSH_COMPLETED,
+              EventSource.SYNC_SERVICE,
+              { pushed: event.pushed },
+              'normal'
+            )
+          );
         }
         this.settlePendingPushes(event.results);
         break;
@@ -391,6 +422,14 @@ export class SyncService implements OnDestroy {
         this._lastError.set(event.error);
         this._totalFailures.update((n) => n + 1);
         console.error('[SyncService] Worker error:', event.error, event.details);
+        this.eventBus.publish(
+          busEvent(
+            EventType.SYNC_ERROR,
+            EventSource.SYNC_SERVICE,
+            { error: event.error, details: event.details },
+            'critical'
+          )
+        );
         break;
     }
   }

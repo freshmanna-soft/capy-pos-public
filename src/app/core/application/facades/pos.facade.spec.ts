@@ -5,6 +5,8 @@ import { CartService } from '@core/application/services/cart.service';
 import { GenerateReceiptUseCase } from '@core/application/use-cases/generate-receipt.use-case';
 import { AdjustStockOnSaleUseCase } from '@core/application/use-cases/adjust-stock-on-sale.use-case';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
+import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
+import { EventType } from '@core/infrastructure/messaging/event-bus.events';
 import { Product } from '@core/domain/entities/product.entity';
 
 describe('PosFacade', () => {
@@ -30,6 +32,7 @@ describe('PosFacade', () => {
   };
   let mockAdjustStock: { execute: ReturnType<typeof vi.fn> };
   let mockDb: { initializeWithSeedData: ReturnType<typeof vi.fn> };
+  let mockEventBus: { publish: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     mockCartService = {
@@ -63,6 +66,8 @@ describe('PosFacade', () => {
       initializeWithSeedData: vi.fn().mockResolvedValue(undefined),
     };
 
+    mockEventBus = { publish: vi.fn() };
+
     TestBed.configureTestingModule({
       providers: [
         PosFacade,
@@ -70,6 +75,7 @@ describe('PosFacade', () => {
         { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
         { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
         { provide: DexieDatabase, useValue: mockDb },
+        { provide: EventBusService, useValue: mockEventBus },
       ],
     });
 
@@ -166,6 +172,52 @@ describe('PosFacade', () => {
     });
   });
 
+  describe('event bus publishing', () => {
+    const mockProduct = {
+      id: 'prod-1',
+      name: 'Test Product',
+      price: 4.5,
+      stock: 10,
+      isOutOfStock: () => false,
+    } as unknown as Product;
+
+    it('publishes cart.item.added on a successful add', () => {
+      facade.addToCart(mockProduct);
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: EventType.CART_ITEM_ADDED,
+          source: 'PosFacade',
+          priority: 'normal',
+          payload: expect.objectContaining({ productId: 'prod-1' }),
+        })
+      );
+    });
+
+    it('does NOT publish when an add is rejected', () => {
+      mockCartService.getQuantity.mockReturnValue(10);
+      facade.addToCart(mockProduct);
+      expect(mockEventBus.publish).not.toHaveBeenCalled();
+    });
+
+    it('publishes cart.item.removed on remove', () => {
+      facade.removeFromCart('prod-1');
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ type: EventType.CART_ITEM_REMOVED, source: 'PosFacade' })
+      );
+    });
+
+    it('publishes transaction.completed (high) on checkout', async () => {
+      await facade.checkout({ method: 'cash', amount: 100 } as never);
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: EventType.TRANSACTION_COMPLETED,
+          priority: 'high',
+          payload: expect.objectContaining({ amount: 100, method: 'cash' }),
+        })
+      );
+    });
+  });
+
   describe('checkout operations', () => {
     it('should generate receipt and adjust stock on checkout', async () => {
       const mockItems = [{ product: { id: 'p1' }, quantity: 2 }];
@@ -180,6 +232,7 @@ describe('PosFacade', () => {
           { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
           { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
           { provide: DexieDatabase, useValue: mockDb },
+          { provide: EventBusService, useValue: mockEventBus },
         ],
       });
       facade = TestBed.inject(PosFacade);
