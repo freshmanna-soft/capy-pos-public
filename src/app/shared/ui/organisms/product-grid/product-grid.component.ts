@@ -1,4 +1,4 @@
-import { Component, output, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, output, signal, ChangeDetectionStrategy } from '@angular/core';
 
 import { Product } from '@core/domain/entities/product.entity';
 
@@ -374,27 +374,15 @@ import { Product } from '@core/domain/entities/product.entity';
   ],
 })
 export class ProductGridComponent {
-  // Signal-based state (new Angular way)
-  products = signal<Product[]>([]);
-  isLoading = signal<boolean>(false);
-  viewMode = signal<'grid' | 'list'>('grid');
+  // Signal inputs — bind from the host (e.g. POS terminal) via [products]/[isLoading].
+  readonly products = input<Product[]>([]);
+  readonly isLoading = input<boolean>(false);
+
+  // Internal view state (toggled by the grid's own controls).
+  readonly viewMode = signal<'grid' | 'list'>('grid');
 
   // Signal-based output
   readonly productSelected = output<Product>();
-
-  /**
-   * Set products to display
-   */
-  setProducts(products: Product[]): void {
-    this.products.set(products);
-  }
-
-  /**
-   * Set loading state
-   */
-  setLoading(loading: boolean): void {
-    this.isLoading.set(loading);
-  }
 
   /**
    * Set view mode (grid or list)

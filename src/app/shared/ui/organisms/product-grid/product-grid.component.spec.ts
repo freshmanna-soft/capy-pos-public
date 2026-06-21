@@ -67,7 +67,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should display products in grid view by default', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const cards = el.querySelectorAll('[data-testid="product-card"]');
@@ -75,7 +75,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should show product name on each card', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const names = el.querySelectorAll('[data-testid="product-name"]');
@@ -84,7 +84,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should show product price formatted as currency', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const prices = el.querySelectorAll('[data-testid="product-price"]');
@@ -92,7 +92,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should show stock level on each card', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const stocks = el.querySelectorAll('[data-testid="product-stock"]');
@@ -100,7 +100,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should show category badge on each card', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const badges = el.querySelectorAll('[data-testid="product-category"]');
@@ -109,7 +109,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should display product emoji when available', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const emojis = el.querySelectorAll('[data-testid="product-emoji"]');
@@ -119,7 +119,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
 
   describe('List View Display', () => {
     it('should toggle to list view when view mode is changed', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const listToggle = el.querySelector('[data-testid="view-list"]') as HTMLButtonElement;
@@ -131,7 +131,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should display products in list format', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const listToggle = el.querySelector('[data-testid="view-list"]') as HTMLButtonElement;
@@ -144,7 +144,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should toggle back to grid view', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       // Switch to list first
@@ -163,7 +163,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
 
   describe('Low Stock Indicator', () => {
     it('should show low stock indicator when stock is below threshold', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const cards = el.querySelectorAll('[data-testid="product-card"]');
@@ -172,7 +172,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should NOT show low stock indicator when stock is above threshold', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const cards = el.querySelectorAll('[data-testid="product-card"]');
@@ -181,7 +181,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should show out-of-stock indicator when stock is 0', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const cards = el.querySelectorAll('[data-testid="product-card"]');
@@ -190,7 +190,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should visually dim out-of-stock products', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const cards = el.querySelectorAll('[data-testid="product-card"]');
@@ -200,7 +200,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
 
   describe('Product Selection', () => {
     it('should emit productSelected event when a product card is clicked', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const spy = vi.spyOn(component.productSelected, 'emit');
@@ -211,7 +211,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should NOT emit productSelected for out-of-stock products', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const spy = vi.spyOn(component.productSelected, 'emit');
@@ -222,7 +222,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should show clickable class on available products', () => {
-      component.products.set(mockProducts);
+      fixture.componentRef.setInput('products', mockProducts);
       fixture.detectChanges();
 
       const cards = el.querySelectorAll('[data-testid="product-card"]');
@@ -233,7 +233,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
 
   describe('Empty State', () => {
     it('should show empty state when products array is empty', () => {
-      component.products.set([]);
+      fixture.componentRef.setInput('products', []);
       fixture.detectChanges();
 
       const emptyState = el.querySelector('[data-testid="empty-results"]');
@@ -242,7 +242,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should NOT show product container when products array is empty', () => {
-      component.products.set([]);
+      fixture.componentRef.setInput('products', []);
       fixture.detectChanges();
 
       const container = el.querySelector('[data-testid="product-container"]');
@@ -252,7 +252,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
 
   describe('Loading State', () => {
     it('should show loading state when isLoading is true', () => {
-      component.isLoading.set(true);
+      fixture.componentRef.setInput('isLoading', true);
       fixture.detectChanges();
 
       const loading = el.querySelector('[data-testid="loading-results"]');
@@ -260,8 +260,8 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
 
     it('should hide loading state when isLoading is false', () => {
-      component.products.set(mockProducts);
-      component.isLoading.set(false);
+      fixture.componentRef.setInput('products', mockProducts);
+      fixture.componentRef.setInput('isLoading', false);
       fixture.detectChanges();
 
       const loading = el.querySelector('[data-testid="loading-results"]');
@@ -269,17 +269,17 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
     });
   });
 
-  describe('Public API Methods', () => {
-    it('should set products via setProducts method', () => {
-      component.setProducts(mockProducts);
+  describe('Signal inputs', () => {
+    it('reflects the products input', () => {
+      fixture.componentRef.setInput('products', mockProducts);
       expect(component.products()).toEqual(mockProducts);
     });
 
-    it('should set loading via setLoading method', () => {
-      component.setLoading(true);
+    it('reflects the isLoading input', () => {
+      fixture.componentRef.setInput('isLoading', true);
       expect(component.isLoading()).toBe(true);
 
-      component.setLoading(false);
+      fixture.componentRef.setInput('isLoading', false);
       expect(component.isLoading()).toBe(false);
     });
   });
