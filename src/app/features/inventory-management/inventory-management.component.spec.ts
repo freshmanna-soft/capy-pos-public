@@ -5,12 +5,15 @@ import { ProductSummaryDTO } from '@core/application/use-cases/manage-inventory.
 import { InventoryFacade } from '@core/application/facades';
 import { SyncService, PushFailedError } from '@core/infrastructure/sync';
 import { AuditLogService, AuditAction, AuditStatus } from '@core/infrastructure/audit';
+import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
+import { EventType } from '@core/infrastructure/messaging/event-bus.events';
 import { signal, computed } from '@angular/core';
 
 describe('InventoryManagementComponent', () => {
   let component: InventoryManagementComponent;
   let fixture: ComponentFixture<InventoryManagementComponent>;
   let mockFacade: Partial<InventoryFacade>;
+  let mockEventBus: { publish: ReturnType<typeof vi.fn> };
 
   const mockProducts: ProductSummaryDTO[] = [
     {
@@ -75,9 +78,14 @@ describe('InventoryManagementComponent', () => {
       adjustStock: vi.fn().mockResolvedValue(mockProducts[0]),
     };
 
+    mockEventBus = { publish: vi.fn() };
+
     await TestBed.configureTestingModule({
       imports: [InventoryManagementComponent],
-      providers: [{ provide: InventoryFacade, useValue: mockFacade }],
+      providers: [
+        { provide: InventoryFacade, useValue: mockFacade },
+        { provide: EventBusService, useValue: mockEventBus },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(InventoryManagementComponent);
@@ -255,6 +263,9 @@ describe('InventoryManagementComponent', () => {
 
       expect(mockFacade.createProduct).toHaveBeenCalledTimes(1);
       expect(component.formMode()).toBe('closed');
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ type: EventType.PRODUCT_CREATED, source: 'InventoryManagement' })
+      );
     });
 
     it('should call updateProduct on valid edit form', async () => {
@@ -287,6 +298,20 @@ describe('InventoryManagementComponent', () => {
       expect(component.deleteConfirmId()).toBeNull();
     });
 
+    it('publishes product.deleted after a local delete', async () => {
+      // pushUpdateAsync rejects (no worker) → still a local success, event fires.
+      vi.spyOn(TestBed.inject(AuditLogService), 'log').mockResolvedValue(undefined);
+      component.requestDelete('p1');
+      await component.confirmDelete();
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: EventType.PRODUCT_DELETED,
+          source: 'InventoryManagement',
+          payload: expect.objectContaining({ id: 'p1' }),
+        })
+      );
+    });
+
     it('should not call delete if no id set', async () => {
       await component.confirmDelete();
       expect(mockFacade.deleteProduct).not.toHaveBeenCalled();
@@ -314,6 +339,15 @@ describe('InventoryManagementComponent', () => {
           action: AuditAction.DELETE,
           entityType: 'Product',
           entityId: 'p1',
+          metadata: expect.objectContaining({ traceId: 'trace-xyz' }),
+        })
+      );
+
+      // ...and a critical event hits the bus with the same trace.
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: EventType.SYNC_PUSH_FAILED,
+          priority: 'critical',
           metadata: expect.objectContaining({ traceId: 'trace-xyz' }),
         })
       );

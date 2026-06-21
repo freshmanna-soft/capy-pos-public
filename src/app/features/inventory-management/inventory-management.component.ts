@@ -16,6 +16,8 @@ import {
 import { InventoryFacade } from '@core/application/facades';
 import { SyncService, PushFailedError } from '@core/infrastructure/sync';
 import { AuditLogService, AuditAction, AuditStatus } from '@core/infrastructure/audit';
+import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
+import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
 
 type StockStatus = 'healthy' | 'warning' | 'critical';
 type FormMode = 'closed' | 'create' | 'edit';
@@ -65,6 +67,7 @@ export class InventoryManagementComponent implements OnInit {
   protected readonly inventoryFacade = inject(InventoryFacade);
   private readonly syncService = inject(SyncService);
   private readonly auditLog = inject(AuditLogService);
+  private readonly eventBus = inject(EventBusService);
 
   // Filter signals
   readonly searchQuery = signal('');
@@ -247,6 +250,14 @@ export class InventoryManagementComponent implements OnInit {
 
       const result = await this.inventoryFacade.createProduct(request);
       if (result) {
+        this.eventBus.publish(
+          busEvent(
+            EventType.PRODUCT_CREATED,
+            EventSource.INVENTORY,
+            { id: result.id, name: result.name },
+            'normal'
+          )
+        );
         this.closeForm();
       }
     } else {
@@ -270,6 +281,14 @@ export class InventoryManagementComponent implements OnInit {
 
       const result = await this.inventoryFacade.updateProduct(request);
       if (result) {
+        this.eventBus.publish(
+          busEvent(
+            EventType.PRODUCT_UPDATED,
+            EventSource.INVENTORY,
+            { id: productId, name: request.name },
+            'normal'
+          )
+        );
         this.closeForm();
       }
     }
@@ -294,6 +313,15 @@ export class InventoryManagementComponent implements OnInit {
     const deleted = await this.inventoryFacade.deleteProduct(id);
     this.deleteConfirmId.set(null);
     if (!deleted || !product) return;
+
+    this.eventBus.publish(
+      busEvent(
+        EventType.PRODUCT_DELETED,
+        EventSource.INVENTORY,
+        { id, name: product.name },
+        'normal'
+      )
+    );
 
     // Mirror the removal to the remote API as a soft-delete (isActive: false)
     // rather than a destructive DELETE, so transaction history that references
@@ -335,6 +363,17 @@ export class InventoryManagementComponent implements OnInit {
         duration: Date.now() - startTime,
         metadata: { traceId, productName: product.name },
       });
+
+      // Also surface the failure on the event bus (agent-monitor "Event Bus Activity").
+      this.eventBus.publish(
+        busEvent(
+          EventType.SYNC_PUSH_FAILED,
+          EventSource.INVENTORY,
+          { productId: id, operation: 'soft-delete' },
+          'critical',
+          { traceId }
+        )
+      );
     }
   }
 

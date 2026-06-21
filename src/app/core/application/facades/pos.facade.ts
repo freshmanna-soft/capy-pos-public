@@ -9,6 +9,8 @@ import {
   StockAdjustmentResult,
 } from '@core/application/use-cases/adjust-stock-on-sale.use-case';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
+import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
+import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
 import { Product } from '@core/domain/entities/product.entity';
 import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
 
@@ -39,6 +41,7 @@ export class PosFacade {
   private readonly generateReceipt = inject(GenerateReceiptUseCase);
   private readonly adjustStock = inject(AdjustStockOnSaleUseCase);
   private readonly db = inject(DexieDatabase);
+  private readonly eventBus = inject(EventBusService);
 
   // ─── Cart State (read-only signals) ───────────────────────────────────
 
@@ -78,6 +81,14 @@ export class PosFacade {
     }
 
     this.cartService.addProduct(product);
+    this.eventBus.publish(
+      busEvent(
+        EventType.CART_ITEM_ADDED,
+        EventSource.POS_FACADE,
+        { productId: product.id, name: product.name, price: product.price },
+        'normal'
+      )
+    );
     return { added: true };
   }
 
@@ -102,6 +113,9 @@ export class PosFacade {
   /** Remove a product from cart entirely */
   removeFromCart(productId: string): void {
     this.cartService.removeItem(productId);
+    this.eventBus.publish(
+      busEvent(EventType.CART_ITEM_REMOVED, EventSource.POS_FACADE, { productId }, 'normal')
+    );
   }
 
   /** Clear all items from cart */
@@ -148,6 +162,19 @@ export class PosFacade {
 
     // Clear cart after checkout
     this.cartService.clearCart();
+
+    this.eventBus.publish(
+      busEvent(
+        EventType.TRANSACTION_COMPLETED,
+        EventSource.POS_FACADE,
+        {
+          itemCount: stockAdjustmentItems.length,
+          amount: paymentResult.amount,
+          method: paymentResult.method,
+        },
+        'high'
+      )
+    );
 
     return receipt;
   }

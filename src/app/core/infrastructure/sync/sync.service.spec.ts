@@ -2,6 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SyncService, PushFailedError } from './sync.service';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
+import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
+import { EventType } from '@core/infrastructure/messaging/event-bus.events';
 import {
   SyncWorkerCommand,
   SyncWorkerEvent,
@@ -57,6 +59,7 @@ class FakeWorker {
 describe('SyncService', () => {
   let service: SyncService;
   let mockDb: { products: { get: ReturnType<typeof vi.fn>; bulkPut: ReturnType<typeof vi.fn> } };
+  let mockEventBus: { publish: ReturnType<typeof vi.fn> };
   let originalWorker: typeof globalThis.Worker;
 
   const product: PushProductPayload = {
@@ -91,8 +94,14 @@ describe('SyncService', () => {
       },
     };
 
+    mockEventBus = { publish: vi.fn() };
+
     TestBed.configureTestingModule({
-      providers: [SyncService, { provide: DexieDatabase, useValue: mockDb }],
+      providers: [
+        SyncService,
+        { provide: DexieDatabase, useValue: mockDb },
+        { provide: EventBusService, useValue: mockEventBus },
+      ],
     });
     service = TestBed.inject(SyncService);
   });
@@ -518,6 +527,72 @@ describe('SyncService', () => {
       expect(service.status()).toBe(SyncStatus.FAILED);
       expect(service.lastError()).toBe('kaboom');
       expect(service.totalFailures()).toBe(1);
+    });
+
+    it('publishes sync.completed on SYNC_COMPLETED', () => {
+      worker.emit({
+        type: 'SYNC_COMPLETED',
+        data: {
+          productssynced: 0,
+          transactionsSynced: 0,
+          duration: 1,
+          timestamp: '2026-06-20T00:00:00.000Z',
+          direction: SyncDirection.PULL,
+        },
+      });
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ type: EventType.SYNC_COMPLETED, source: 'SyncService' })
+      );
+    });
+
+    it('publishes a critical sync.error on ERROR', () => {
+      worker.emit({ type: 'ERROR', error: 'kaboom', details: 'stack' });
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ type: EventType.SYNC_ERROR, priority: 'critical' })
+      );
+    });
+
+    it('publishes a high sync.push.failed with traceIds when a push fails', () => {
+      worker.emit({
+        type: 'PUSH_COMPLETED',
+        pushed: 0,
+        failed: 1,
+        results: [{ productId: 'p1', success: false, error: 'HTTP 500', traceId: 'trace-xyz' }],
+      });
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: EventType.SYNC_PUSH_FAILED,
+          priority: 'high',
+          payload: expect.objectContaining({ failedIds: ['p1'] }),
+          metadata: expect.objectContaining({ traceIds: ['trace-xyz'] }),
+        })
+      );
+    });
+
+    it('publishes sync.push.completed when all pushes succeed', () => {
+      worker.emit({
+        type: 'PUSH_COMPLETED',
+        pushed: 2,
+        failed: 0,
+        results: [
+          { productId: 'p1', success: true },
+          { productId: 'p2', success: true },
+        ],
+      });
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ type: EventType.SYNC_PUSH_COMPLETED, priority: 'normal' })
+      );
+    });
+
+    it('publishes a high circuit-state event on CIRCUIT_STATE_CHANGED', () => {
+      worker.emit({
+        type: 'CIRCUIT_STATE_CHANGED',
+        state: WorkerCircuitState.OPEN,
+        circuit: 'products',
+      });
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ type: EventType.CIRCUIT_STATE_CHANGED, priority: 'high' })
+      );
     });
   });
 
