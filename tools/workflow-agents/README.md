@@ -1,5 +1,17 @@
 # Capy-POS Workflow Agents
 
+> **⚠️ Superseded by Claude Code subagents.** These Ollama Modelfiles (`FROM gemma`) run on a local
+> model and are unreliable for real work. The same roles now exist as cloud-backed **Claude Code
+> subagents** in [`.claude/agents/`](../../.claude/agents/), built to the standard of the existing
+> `code-reviewer` / `cloudwatch-tracer` agents and running on Opus/Sonnet/Haiku.
+>
+> **Use those instead** — invoke a role via the Task/Agent tool (e.g. `workflow-orchestrator`,
+> `architect`, `tech-lead`, `fullstack-dev`, `qa-tester`, `dba`, `devops`, `ux-lead`,
+> `product-owner`, `business-analyst`, `scrum-master`, `marketing`, `manager`). The `code-reviewer`
+> role maps to the pre-existing `code-reviewer` subagent. These Modelfiles are kept only for the
+> offline/local-only fallback (`ollama run capy-<role>`). Stack facts here are also stale
+> (Angular 19 → 21; "IBM Cloud" → the app deploys to **AWS** Lambda/API Gateway via Terraform).
+
 ## Overview
 
 This directory contains Ollama Modelfiles for AI workflow agents that simulate a full development
