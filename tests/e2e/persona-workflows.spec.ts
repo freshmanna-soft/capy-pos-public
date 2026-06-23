@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * Persona-Based E2E Tests for Capy-POS
@@ -90,6 +91,7 @@ async function getNavLink(page: Page, testId: string) {
 
 test.describe('Navigation Accessibility - All Features Reachable', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto('/');
     // Wait for either mobile or desktop nav to be visible
     await waitForNavigation(page);
@@ -188,6 +190,7 @@ test.describe('Navigation Accessibility - All Features Reachable', () => {
 
 test.describe('Persona: Maria the Cashier - POS Workflow', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto('/pos');
     await page.waitForSelector('[data-testid="pos-terminal"]');
   });
@@ -339,6 +342,10 @@ test.describe('Persona: Maria the Cashier - POS Workflow', () => {
 // ============================================================
 
 test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
   test('manager can access reports from navigation', async ({ page }) => {
     await page.goto('/');
     await clickNavLink(page, 'nav-reports');
@@ -409,6 +416,7 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
 
 test.describe('Persona: Ana the Inventory Clerk - Inventory Management', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto('/');
     await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
@@ -456,6 +464,10 @@ test.describe('Persona: Ana the Inventory Clerk - Inventory Management', () => {
 // ============================================================
 
 test.describe('Cross-Feature Navigation Integrity', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
   test('can navigate through all features sequentially', async ({ page }) => {
     await page.goto('/');
 
@@ -553,6 +565,10 @@ test.describe('Cross-Feature Navigation Integrity', () => {
 // ============================================================
 
 test.describe('Bug Regression Tests', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
   test('BUG-001: Search results persist after product selection', async ({ page }) => {
     await page.goto('/pos');
     await page.waitForSelector('[data-testid="pos-terminal"]');

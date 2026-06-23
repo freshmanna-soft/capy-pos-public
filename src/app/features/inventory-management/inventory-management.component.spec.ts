@@ -8,6 +8,7 @@ import { AuditLogService, AuditAction, AuditStatus } from '@core/infrastructure/
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventType } from '@core/infrastructure/messaging/event-bus.events';
 import { signal, computed } from '@angular/core';
+import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 
 describe('InventoryManagementComponent', () => {
   let component: InventoryManagementComponent;
@@ -85,6 +86,18 @@ describe('InventoryManagementComponent', () => {
       providers: [
         { provide: InventoryFacade, useValue: mockFacade },
         { provide: EventBusService, useValue: mockEventBus },
+        // Satisfies the *hasPermission directive's CurrentUserService -> AUTH_GATEWAY
+        // dependency chain. Unauthenticated stub: gated controls simply stay hidden.
+        {
+          provide: AUTH_GATEWAY,
+          useValue: {
+            authenticate: vi.fn(),
+            getActiveSession: vi.fn().mockResolvedValue(null),
+            refresh: vi.fn(),
+            signOut: vi.fn(),
+            getAccessToken: vi.fn().mockReturnValue(null),
+          },
+        },
       ],
     }).compileComponents();
 

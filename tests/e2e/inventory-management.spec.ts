@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * E2E Tests: Inventory Management CRUD
@@ -17,6 +18,7 @@ import { test, expect } from '@playwright/test';
  */
 test.describe('Inventory Management - Ana the Inventory Clerk', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto('/inventory');
     await page.waitForSelector('[data-testid="inventory-page"]');
   });

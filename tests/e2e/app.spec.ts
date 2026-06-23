@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * Basic E2E Tests for Capy-POS
@@ -6,6 +7,10 @@ import { test, expect } from '@playwright/test';
  */
 
 test.describe('Capy-POS Application', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
   test('should load the application', async ({ page }) => {
     await page.goto('/');
 
@@ -42,6 +47,10 @@ test.describe('Capy-POS Application', () => {
 });
 
 test.describe('Button Component', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
   test('should render buttons correctly', async ({ page }) => {
     await page.goto('/');
 

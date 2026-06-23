@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * E2E Tests: Inventory and Customer Management Workflows (S4-5)
@@ -24,6 +25,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto('/inventory');
     await page.waitForSelector('[data-testid="inventory-page"]');
   });
@@ -171,6 +173,7 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
 
 test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto('/');
     await page.waitForLoadState('networkidle');
   });
@@ -291,6 +294,10 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
 // ============================================================
 
 test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
   test('stock level is reduced after Maria completes a sale', async ({ page }) => {
     // Step 1: Navigate to POS first to initialize seed data
     await page.goto('/');
@@ -420,6 +427,10 @@ test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
 // ============================================================
 
 test.describe('S4-5 Scenario 4: Low Stock Alert Visibility - Carlos the Manager', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
   test('low stock widget is visible on Dashboard', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
