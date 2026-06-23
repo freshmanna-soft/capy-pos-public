@@ -18,6 +18,8 @@ import { SALES_AGENT_PROVIDERS } from '@app/agents/sales/infrastructure';
 import { PAYMENT_AGENT_PROVIDER } from '@app/agents/payment/infrastructure/payment-agent.provider';
 import { AgentRegistry } from '@app/agents/agent.registry';
 import { SyncService } from '@core/infrastructure/sync';
+import { AUTH_PROVIDERS } from '@core/infrastructure/auth/auth.providers';
+import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { environment } from '../environments/environment';
 
 export const appConfig: ApplicationConfig = {
@@ -39,6 +41,18 @@ export const appConfig: ApplicationConfig = {
       } catch (error) {
         console.error('Failed to initialize Dexie database:', error);
         throw error;
+      }
+    }),
+    // Rehydrate existing session AFTER the DB is open so the JWT gateway
+    // can resolve the operator record if needed. Runs before routing resolves.
+    provideAppInitializer(async () => {
+      const currentUser = inject(CurrentUserService);
+      try {
+        await currentUser.hydrate();
+        console.log('Session hydrated:', currentUser.isAuthenticated());
+      } catch (error) {
+        // Non-fatal — user will be redirected to /login by authGuard
+        console.warn('Session hydration failed (will require login):', error);
       }
     }),
     provideAppInitializer(async () => {
@@ -70,6 +84,8 @@ export const appConfig: ApplicationConfig = {
     ...INVENTORY_AGENT_PROVIDERS,
     ...SALES_AGENT_PROVIDERS,
     PAYMENT_AGENT_PROVIDER,
+    // Auth providers (local credential adapter — swap for Cognito in Story #42)
+    ...AUTH_PROVIDERS,
     // Background sync worker (syncs local Dexie ↔ AWS API)
     provideAppInitializer(() => {
       const syncService = inject(SyncService);

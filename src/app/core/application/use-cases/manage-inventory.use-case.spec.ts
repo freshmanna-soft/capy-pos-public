@@ -7,6 +7,7 @@ import {
 } from './manage-inventory.use-case';
 import { Product } from '@core/domain/entities/product.entity';
 import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import { AngularAuthorizationService } from '@core/application/auth/angular-authorization.service';
 
 describe('ManageInventoryUseCase', () => {
   let useCase: ManageInventoryUseCase;
@@ -56,6 +57,13 @@ describe('ManageInventoryUseCase', () => {
       providers: [
         ManageInventoryUseCase,
         { provide: PRODUCT_REPOSITORY, useValue: mockRepository },
+        // Permissive authz stub: these tests cover inventory behaviour, not RBAC.
+        // RBAC enforcement (Operator-denied / Manager-allowed) is covered by the
+        // authorization.service + use-case denial specs.
+        {
+          provide: AngularAuthorizationService,
+          useValue: { assert: vi.fn(), can: () => true, atLeast: () => true },
+        },
       ],
     });
 

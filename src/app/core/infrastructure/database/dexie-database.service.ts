@@ -185,6 +185,28 @@ export interface ISettingsDB {
   updatedAt: Date;
 }
 
+export interface IOperatorDB {
+  id: string;
+  email: string;
+  displayName: string;
+  roleId: string;
+  tenantId: string;
+  passwordHash: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
+export interface IRoleDB {
+  id: string;
+  name: string;
+  permissions: string; // JSON array of Permission strings
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 /**
  * Dexie Database Service
  * Provides ORM-like interface for IndexedDB
@@ -207,6 +229,8 @@ export class DexieDatabase extends Dexie {
   rewardRedemptions!: Table<IRewardRedemptionDB, string>;
   syncQueue!: Table<ISyncQueueDB, string>;
   settings!: Table<ISettingsDB, string>;
+  operators!: Table<IOperatorDB, string>;
+  roles!: Table<IRoleDB, string>;
 
   constructor() {
     super('CapyPOSDB');
@@ -251,6 +275,91 @@ export class DexieDatabase extends Dexie {
     this.version(2).stores({
       settings: 'id, key',
     });
+
+    // Version 3: Add RBAC tables (operators + roles) — do NOT edit v1/v2 above
+    this.version(3)
+      .stores({
+        operators: 'id, email, roleId, tenantId, isActive',
+        roles: 'id, name',
+      })
+      .upgrade(async (tx) => {
+        // Idempotent seed: only insert if tables are empty
+        const roleCount = await tx.table('roles').count();
+        if (roleCount === 0) {
+          await tx.table('roles').bulkAdd([
+            {
+              id: 'role-operator',
+              name: 'operator',
+              permissions: JSON.stringify([
+                'sale:process',
+                'sale:view_transactions',
+                'inventory:view',
+                'customer:view',
+              ]),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+            {
+              id: 'role-manager',
+              name: 'manager',
+              permissions: JSON.stringify([
+                'sale:process',
+                'sale:view_transactions',
+                'sale:discount',
+                'sale:refund',
+                'inventory:view',
+                'inventory:manage',
+                'customer:view',
+                'customer:manage',
+                'report:view',
+                'report:export',
+              ]),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+            {
+              id: 'role-admin',
+              name: 'admin',
+              permissions: JSON.stringify([
+                'sale:process',
+                'sale:view_transactions',
+                'sale:discount',
+                'sale:refund',
+                'inventory:view',
+                'inventory:manage',
+                'inventory:delete',
+                'customer:view',
+                'customer:manage',
+                'report:view',
+                'report:export',
+                'admin:manage_operators',
+                'admin:manage_roles',
+                'admin:settings',
+              ]),
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          ]);
+        }
+
+        const operatorCount = await tx.table('operators').count();
+        if (operatorCount === 0) {
+          // Default admin password: "admin1234"
+          // Hash produced with bcrypt cost 10 — replace in production via operator management UI.
+          await tx.table('operators').add({
+            id: 'operator-admin-default',
+            email: 'admin@capy-pos.local',
+            displayName: 'Admin',
+            roleId: 'role-admin',
+            tenantId: 'default-tenant',
+            // bcrypt hash of "admin1234" (cost 10) — NEVER store plaintext
+            passwordHash: '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW',
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
+      });
 
     // Map tables to classes (optional, for better type safety)
     this.products.mapToClass(ProductDBRecord);

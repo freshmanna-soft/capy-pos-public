@@ -4,6 +4,8 @@ import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.fa
 import { Product } from '@core/domain/entities/product.entity';
 import { generateUUID } from '@core/domain/utils/uuid';
 import { EntityNotFoundException } from '@core/domain/exceptions';
+import { AngularAuthorizationService } from '@core/application/auth/angular-authorization.service';
+import { Permission } from '@core/domain/auth/permission.constants';
 
 /**
  * DTO for creating a new product
@@ -94,6 +96,7 @@ export interface ProductSummaryDTO {
 export class ManageInventoryUseCase {
   private readonly productRepository: IProductRepository =
     inject<IProductRepository>(PRODUCT_REPOSITORY);
+  private readonly authz = inject(AngularAuthorizationService);
 
   /** Loading state signal */
   private readonly _loading = signal<boolean>(false);
@@ -246,9 +249,17 @@ export class ManageInventoryUseCase {
   }
 
   /**
-   * Adjusts stock for a product (increment/decrement)
+   * Adjusts stock for a product (increment/decrement).
+   *
+   * Authorization: requires ADJUST_STOCK permission (Manager/Admin only).
+   * Throws AuthorizationError when an Operator attempts this operation.
+   * The caller (InventoryFacade / component) is responsible for surfacing
+   * the error to the user via ToastService.
    */
   async adjustStock(productId: string, adjustment: number): Promise<ProductSummaryDTO | null> {
+    // Enforce at the use-case layer — will throw AuthorizationError for Operators
+    this.authz.assert(Permission.ADJUST_STOCK);
+
     this._error.set(null);
 
     try {

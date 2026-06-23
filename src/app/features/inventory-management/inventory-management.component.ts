@@ -18,6 +18,9 @@ import { SyncService, PushFailedError } from '@core/infrastructure/sync';
 import { AuditLogService, AuditAction, AuditStatus } from '@core/infrastructure/audit';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
+import { HasPermissionDirective } from '@shared/ui/directives/has-permission.directive';
+import { ToastService } from '@shared/ui/toast/toast.service';
+import { AuthorizationError } from '@core/application/auth/angular-authorization.service';
 
 type StockStatus = 'healthy' | 'warning' | 'critical';
 type FormMode = 'closed' | 'create' | 'edit';
@@ -58,7 +61,7 @@ interface ProductFormData {
 @Component({
   selector: 'app-inventory-management',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, HasPermissionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './inventory-management.component.html',
   styleUrl: './inventory-management.component.scss',
@@ -68,6 +71,7 @@ export class InventoryManagementComponent implements OnInit {
   private readonly syncService = inject(SyncService);
   private readonly auditLog = inject(AuditLogService);
   private readonly eventBus = inject(EventBusService);
+  private readonly toast = inject(ToastService);
 
   // Filter signals
   readonly searchQuery = signal('');
@@ -163,9 +167,17 @@ export class InventoryManagementComponent implements OnInit {
     }
   }
 
-  // Stock adjustment
-  adjustStock(productId: string, delta: number): void {
-    this.inventoryFacade.adjustStock(productId, delta);
+  // Stock adjustment — the use-case enforces ADJUST_STOCK permission
+  async adjustStock(productId: string, delta: number): Promise<void> {
+    try {
+      await this.inventoryFacade.adjustStock(productId, delta);
+    } catch (err) {
+      if (err instanceof AuthorizationError) {
+        this.toast.error('You do not have permission to adjust stock.');
+      } else {
+        this.toast.error('Failed to adjust stock. Please try again.');
+      }
+    }
   }
 
   // Filter actions
