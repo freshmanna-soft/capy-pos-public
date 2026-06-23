@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * Transaction History E2E Tests
@@ -223,6 +224,7 @@ test.describe('Transaction History - S3-3', () => {
   test.beforeEach(async ({ page }) => {
     historyPage = new TransactionHistoryPage(page);
     posHelper = new PosTerminalHelper(page);
+    await loginAsAdmin(page);
   });
 
   // --------------------------------------------------------------------------

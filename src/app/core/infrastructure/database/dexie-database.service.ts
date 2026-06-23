@@ -1,5 +1,13 @@
 import Dexie, { Table } from 'dexie';
 import { Injectable } from '@angular/core';
+import { Role } from '@core/domain/auth/role.value-object';
+
+/**
+ * bcrypt hash (cost 10) of the default admin password "admin1234".
+ * Dev/single-tenant bootstrap credential only — rotate via the operator
+ * management UI before any real deployment. NEVER store plaintext.
+ */
+const DEFAULT_ADMIN_PASSWORD_HASH = '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW';
 
 /**
  * Database table interfaces matching our domain entities
@@ -283,80 +291,38 @@ export class DexieDatabase extends Dexie {
         roles: 'id, name',
       })
       .upgrade(async (tx) => {
-        // Idempotent seed: only insert if tables are empty
+        // Migrating an existing v2 database to v3: seed RBAC defaults here.
+        // Fresh databases are handled by seedRbacDefaults() on boot (the
+        // .upgrade() hook does not run on first-ever creation). Both paths are
+        // idempotent and derive role permissions from the domain Role, so the
+        // persisted JSON can never drift from permission.constants.ts.
+        const now = new Date();
+
         const roleCount = await tx.table('roles').count();
         if (roleCount === 0) {
-          await tx.table('roles').bulkAdd([
-            {
-              id: 'role-operator',
-              name: 'operator',
-              permissions: JSON.stringify([
-                'sale:process',
-                'sale:view_transactions',
-                'inventory:view',
-                'customer:view',
-              ]),
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-            {
-              id: 'role-manager',
-              name: 'manager',
-              permissions: JSON.stringify([
-                'sale:process',
-                'sale:view_transactions',
-                'sale:discount',
-                'sale:refund',
-                'inventory:view',
-                'inventory:manage',
-                'customer:view',
-                'customer:manage',
-                'report:view',
-                'report:export',
-              ]),
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-            {
-              id: 'role-admin',
-              name: 'admin',
-              permissions: JSON.stringify([
-                'sale:process',
-                'sale:view_transactions',
-                'sale:discount',
-                'sale:refund',
-                'inventory:view',
-                'inventory:manage',
-                'inventory:delete',
-                'customer:view',
-                'customer:manage',
-                'report:view',
-                'report:export',
-                'admin:manage_operators',
-                'admin:manage_roles',
-                'admin:settings',
-              ]),
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-          ]);
+          await tx.table('roles').bulkAdd(
+            Role.all().map((role) => ({
+              id: `role-${role.name}`,
+              name: role.name,
+              permissions: JSON.stringify([...role.permissions]),
+              createdAt: now,
+              updatedAt: now,
+            }))
+          );
         }
 
         const operatorCount = await tx.table('operators').count();
         if (operatorCount === 0) {
-          // Default admin password: "admin1234"
-          // Hash produced with bcrypt cost 10 — replace in production via operator management UI.
           await tx.table('operators').add({
             id: 'operator-admin-default',
             email: 'admin@capy-pos.local',
             displayName: 'Admin',
             roleId: 'role-admin',
             tenantId: 'default-tenant',
-            // bcrypt hash of "admin1234" (cost 10) — NEVER store plaintext
-            passwordHash: '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW',
+            passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
             isActive: true,
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            createdAt: now,
+            updatedAt: now,
           });
         }
       });
@@ -517,6 +483,50 @@ export class DexieDatabase extends Dexie {
       ]);
 
       console.log('Database initialized with seed data');
+    }
+
+    // RBAC defaults are seeded independently of products: the version(3)
+    // .upgrade() hook does not run on a freshly-created database, so this
+    // boot-time path guarantees the default admin + roles exist on first launch.
+    await this.seedRbacDefaults();
+  }
+
+  /**
+   * Seed default RBAC roles + admin operator. Idempotent (no-op once seeded).
+   *
+   * Role permission lists are derived from the domain Role value object
+   * (permission.constants.ts), so the persisted role JSON can never drift from
+   * the authorization rules. Default credentials: admin@capy-pos.local / admin1234.
+   */
+  async seedRbacDefaults(): Promise<void> {
+    const roleCount = await this.roles.count();
+    if (roleCount === 0) {
+      const now = new Date();
+      await this.roles.bulkAdd(
+        Role.all().map((role) => ({
+          id: `role-${role.name}`,
+          name: role.name,
+          permissions: JSON.stringify([...role.permissions]),
+          createdAt: now,
+          updatedAt: now,
+        }))
+      );
+    }
+
+    const operatorCount = await this.operators.count();
+    if (operatorCount === 0) {
+      const now = new Date();
+      await this.operators.add({
+        id: 'operator-admin-default',
+        email: 'admin@capy-pos.local',
+        displayName: 'Admin',
+        roleId: 'role-admin',
+        tenantId: 'default-tenant',
+        passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      });
     }
   }
 

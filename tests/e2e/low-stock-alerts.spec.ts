@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * E2E Tests for Low Stock Alerts (S4-3)
@@ -13,6 +14,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Low Stock Alerts - Settings Configuration', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto('/settings');
     await page.waitForLoadState('networkidle');
   });
@@ -74,6 +76,7 @@ test.describe('Low Stock Alerts - Settings Configuration', () => {
 
 test.describe('Low Stock Alerts - Dashboard Widget', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
   });
@@ -111,6 +114,10 @@ test.describe('Low Stock Alerts - Dashboard Widget', () => {
 });
 
 test.describe('Low Stock Alerts - Persona: Ana the Inventory Clerk', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
   test('Ana can configure threshold then check dashboard for alerts', async ({ page }) => {
     // Step 1: Navigate to settings
     await page.goto('/');

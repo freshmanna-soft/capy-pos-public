@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * E2E Integration Tests for Agent Workflow
@@ -13,6 +14,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Agent Integration Workflow', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
     // Navigate to the application
     await page.goto('http://localhost:4200');
 
@@ -413,6 +415,10 @@ test.describe('Agent Integration Workflow', () => {
 });
 
 test.describe('Agent Error Handling', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
   test('should gracefully handle agent failures', async ({ page }) => {
     /**
      * Tests error handling when an agent fails
@@ -466,6 +472,10 @@ test.describe('Agent Error Handling', () => {
 });
 
 test.describe('Performance Tests', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+  });
+
   test('should handle concurrent transactions', async ({ page }) => {
     /**
      * Tests system performance under load

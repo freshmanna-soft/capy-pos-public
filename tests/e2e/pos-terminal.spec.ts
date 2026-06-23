@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * POS Terminal E2E Tests - Search to Cart Flow
@@ -190,6 +191,7 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
 
   test.beforeEach(async ({ page }) => {
     pos = new PosTerminalPage(page);
+    await loginAsAdmin(page);
     await page.goto('/');
     // Wait for the app to fully load and seed data to initialize
     await page.waitForLoadState('networkidle');

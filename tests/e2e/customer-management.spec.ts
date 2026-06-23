@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * E2E Tests: Customer Management CRUD
@@ -16,6 +17,7 @@ import { test, expect } from '@playwright/test';
  */
 test.describe('Customer Management - Carlos the Manager', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
     await page.goto('/customers');
     await page.waitForSelector('[data-testid="customers-page"]');
   });

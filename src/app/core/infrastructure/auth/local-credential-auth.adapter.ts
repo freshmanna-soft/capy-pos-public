@@ -4,6 +4,7 @@ import { DexieDatabase } from '@core/infrastructure/database/dexie-database.serv
 import { AuthGateway } from '@core/application/auth/ports/auth-gateway.port';
 import { CredentialsDto } from '@core/application/auth/dtos/credentials.dto';
 import { AuthSessionDto } from '@core/application/auth/dtos/auth-session.dto';
+import { Role } from '@core/domain/auth/role.value-object';
 
 /**
  * Token storage abstraction
@@ -180,6 +181,29 @@ export async function hashPassword(plaintext: string): Promise<string> {
   return `pbkdf2:${iterations}:${uint8ArrayToHex(salt)}:${uint8ArrayToHex(dk)}`;
 }
 
+/**
+ * Resolve the permission claim for a role.
+ *
+ * Prefers the canonical domain permission set (permission.constants.ts via the
+ * Role value object) so the JWT claim never drifts from the authorization rules.
+ * For a role name the domain doesn't recognise (a future custom role), falls back
+ * to the permissions persisted on the role record, if any.
+ */
+function resolvePermissions(roleName: string, storedJson?: string): string[] {
+  try {
+    return [...Role.fromName(roleName).permissions];
+  } catch {
+    if (storedJson) {
+      try {
+        return JSON.parse(storedJson) as string[];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Adapter
 // ---------------------------------------------------------------------------
@@ -203,11 +227,14 @@ export class LocalCredentialAuthAdapter implements AuthGateway {
     }
 
     const roleRecord = await this.db.roles.get(operator.roleId);
-    const permissions: string[] = roleRecord
-      ? (JSON.parse(roleRecord.permissions) as string[])
-      : [];
-
     const roleName = roleRecord?.name ?? operator.roleId;
+
+    // Permissions are derived from the domain Role (the single source of truth in
+    // permission.constants.ts) rather than the stored role JSON. This keeps the
+    // JWT `permissions` claim — consumed by the *appHasPermission directive — in
+    // lockstep with the role-name authorization path used by AuthorizationService.
+    // Falls back to the persisted JSON only for custom roles unknown to the domain.
+    const permissions: string[] = resolvePermissions(roleName, roleRecord?.permissions);
     const now = Math.floor(Date.now() / 1000);
     const exp = now + SESSION_TTL_SECONDS;
 
