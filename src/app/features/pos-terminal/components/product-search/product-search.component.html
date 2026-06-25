@@ -93,8 +93,59 @@
     </div>
   }
 
-  <!-- Product Results Grid -->
+  <!-- Product Results -->
   @if (!isLoading() && searchResults().length > 0) {
+    <!-- View Toggle: switch between touch-friendly cards and compact rows -->
+    <div class="flex items-center gap-2 px-1" data-testid="view-toggle">
+      <button
+        type="button"
+        data-testid="view-grid"
+        (click)="setViewMode('grid')"
+        [attr.aria-pressed]="viewMode() === 'grid'"
+        aria-label="Card view"
+        class="flex items-center justify-center w-11 h-11 min-h-[44px] min-w-[44px] rounded-lg border-2 cursor-pointer transition-colors duration-150"
+        [class]="
+          viewMode() === 'grid'
+            ? 'bg-indigo-600 text-white border-indigo-600'
+            : 'bg-white text-gray-500 border-gray-200 hover:border-indigo-300'
+        "
+      >
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
+          />
+        </svg>
+      </button>
+      <button
+        type="button"
+        data-testid="view-list"
+        (click)="setViewMode('list')"
+        [attr.aria-pressed]="viewMode() === 'list'"
+        aria-label="List view"
+        class="flex items-center justify-center w-11 h-11 min-h-[44px] min-w-[44px] rounded-lg border-2 cursor-pointer transition-colors duration-150"
+        [class]="
+          viewMode() === 'list'
+            ? 'bg-indigo-600 text-white border-indigo-600'
+            : 'bg-white text-gray-500 border-gray-200 hover:border-indigo-300'
+        "
+      >
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M4 6h16M4 12h16M4 18h16"
+          />
+        </svg>
+      </button>
+      <span class="ml-auto text-xs text-gray-400" data-testid="results-count">
+        {{ searchResults().length }} {{ searchResults().length === 1 ? 'item' : 'items' }}
+      </span>
+    </div>
+
     <div
       class="flex-1 overflow-y-auto -mx-1 px-1"
       data-testid="product-results"
@@ -102,7 +153,12 @@
     >
       <ul
         id="product-results-listbox"
-        class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 list-none p-0 m-0"
+        class="list-none p-0 m-0"
+        [class]="
+          viewMode() === 'list'
+            ? 'flex flex-col gap-2'
+            : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3'
+        "
         [attr.aria-label]="'Product results, ' + searchResults().length + ' items'"
       >
         @for (product of searchResults(); track product.id; let i = $index) {
@@ -112,13 +168,17 @@
             [attr.aria-current]="highlightedIndex() === i"
             [attr.aria-disabled]="product.stock === 0"
             [disabled]="product.stock === 0"
-            class="border-2 rounded-xl p-3 md:p-4 text-center transition-all duration-150 min-h-[120px] flex flex-col items-center justify-center gap-1.5 appearance-none font-inherit w-full relative overflow-hidden disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100"
+            class="border-2 rounded-xl p-3 md:p-4 transition-all duration-150 flex appearance-none font-inherit w-full relative overflow-hidden disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100"
             [class]="
-              product.stock === 0
+              (viewMode() === 'list'
+                ? 'flex-row items-center text-left gap-3 min-h-[64px]'
+                : 'flex-col items-center justify-center text-center gap-1.5 min-h-[120px]') +
+              ' ' +
+              (product.stock === 0
                 ? 'bg-gray-100 border-gray-300 cursor-not-allowed'
                 : highlightedIndex() === i
                   ? 'border-indigo-500 shadow-md bg-indigo-50 cursor-pointer active:scale-[0.97]'
-                  : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm cursor-pointer active:scale-[0.97]'
+                  : 'bg-white border-gray-200 hover:border-indigo-300 hover:shadow-sm cursor-pointer active:scale-[0.97]')
             "
             (click)="selectProduct(product)"
             (keydown.enter)="selectProduct(product)"
@@ -135,7 +195,8 @@
               </span>
             }
             <span
-              class="text-3xl md:text-4xl leading-none"
+              class="leading-none flex-shrink-0"
+              [class]="viewMode() === 'list' ? 'text-2xl' : 'text-3xl md:text-4xl'"
               [class.grayscale]="product.stock === 0"
               [class.opacity-50]="product.stock === 0"
               >{{
@@ -149,7 +210,11 @@
               }}</span
             >
             <h3
-              class="m-0 text-xs md:text-sm font-semibold line-clamp-2 leading-tight"
+              class="m-0 text-xs md:text-sm font-semibold leading-tight"
+              [class.line-clamp-2]="viewMode() === 'grid'"
+              [class.truncate]="viewMode() === 'list'"
+              [class.flex-1]="viewMode() === 'list'"
+              [class.min-w-0]="viewMode() === 'list'"
               [class.text-gray-800]="product.stock > 0"
               [class.text-gray-400]="product.stock === 0"
             >
@@ -157,6 +222,7 @@
             </h3>
             <p
               class="m-0 text-sm md:text-base font-bold"
+              [class.flex-shrink-0]="viewMode() === 'list'"
               [class.text-indigo-600]="product.stock > 0"
               [class.text-gray-400]="product.stock === 0"
               [class.line-through]="product.stock === 0"
@@ -165,6 +231,7 @@
             </p>
             <p
               class="m-0 text-[10px] md:text-xs"
+              [class.flex-shrink-0]="viewMode() === 'list'"
               [class.text-gray-500]="product.stock > 0"
               [class.text-red-500]="product.stock === 0"
               [class.font-semibold]="product.stock === 0"

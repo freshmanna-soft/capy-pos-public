@@ -80,15 +80,6 @@
     <!-- Product Search Section -->
     <section class="flex-1 min-h-0 overflow-auto" data-testid="search-section">
       <app-product-search (productSelected)="handleProductSelected($event)"> </app-product-search>
-
-      <!-- Browse grid (organism): tap a product to add it to the cart -->
-      <div class="mt-4" data-testid="browse-section">
-        <h2 class="text-sm font-semibold text-gray-500 mb-2">Browse products</h2>
-        <app-product-grid
-          [products]="catalog()"
-          (productSelected)="handleProductSelected($event)"
-        ></app-product-grid>
-      </div>
     </section>
 
     <!-- Shopping Cart Section -->
