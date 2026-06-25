@@ -144,15 +144,10 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
+          # All static config lives in sonar-project.properties (single source of truth).
+          # Only the per-run version is injected here.
           args: >
-            -Dsonar.projectKey=javierbritopacheco_capy-pos-public
-            -Dsonar.organization=javierbritopacheco
-            -Dsonar.sources=src
-            -Dsonar.tests=src
-            -Dsonar.test.inclusions=**/*.spec.ts,**/*.test.ts
-            -Dsonar.exclusions=**/*.spec.ts,**/*.test.ts,**/node_modules/**,**/dist/**,coverage/**,.angular/**
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
-            -Dsonar.coverage.exclusions=**/*.spec.ts,**/*.test.ts,**/node_modules/**
+            -Dsonar.projectVersion=${{ github.run_number }}
 
   # ─────────────────────────────────────────────
   # Job 4: Build — Angular production build
