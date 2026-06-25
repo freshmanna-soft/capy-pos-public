@@ -34,8 +34,10 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Run E2E Playwright tests (navigation integrity + persona workflows)
-npm run test:e2e:gate
+# Run affected E2E Playwright tests (deterministic git-diff selection, chromium only).
+# Always includes the persona-workflows navigation floor; escalates to the full
+# suite on core/shared/config changes. See scripts/affected-e2e.mjs.
+npm run test:e2e:affected
 if [ $? -ne 0 ]; then
   echo ""
   echo "❌ E2E Playwright tests failed. Push aborted."
@@ -44,7 +46,8 @@ if [ $? -ne 0 ]; then
   echo "   - UX regression (search results clearing on selection)"
   echo "   - Broken persona workflow"
   echo ""
-  echo "   Run 'npm run test:e2e' locally to debug."
+  echo "   Run 'npm run test:e2e' locally to debug, or"
+  echo "   'npm run test:e2e:affected -- --list' to see what was selected."
   exit 1
 fi
 
