@@ -20,6 +20,7 @@ import { AgentRegistry } from '@app/agents/agent.registry';
 import { SyncService } from '@core/infrastructure/sync';
 import { AUTH_PROVIDERS } from '@core/infrastructure/auth/auth.providers';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
+import { ThemeService } from '@core/application/services/theme.service';
 import { environment } from '../environments/environment';
 
 export const appConfig: ApplicationConfig = {
@@ -41,6 +42,17 @@ export const appConfig: ApplicationConfig = {
       } catch (error) {
         console.error('Failed to initialize Dexie database:', error);
         throw error;
+      }
+    }),
+    // Apply the persisted UI theme AFTER the DB is open so the correct
+    // light/dark mode is active before the first render (avoids a flash).
+    provideAppInitializer(async () => {
+      const theme = inject(ThemeService);
+      try {
+        await theme.loadTheme();
+      } catch (error) {
+        // Non-fatal — falls back to the default light theme.
+        console.warn('Theme load failed (using default):', error);
       }
     }),
     // Rehydrate existing session AFTER the DB is open so the JWT gateway

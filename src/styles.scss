@@ -44,4 +44,15 @@ body {
   font-family:
     Roboto, 'Helvetica Neue', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
     'Noto Color Emoji';
+  background-color: #f3f4f6;
+  color: #111827;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+/* Dark mode — driven by ThemeService toggling `.dark` on <html> */
+html.dark body {
+  background-color: #111827;
+  color: #f3f4f6;
 }

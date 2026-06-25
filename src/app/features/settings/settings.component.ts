@@ -1,12 +1,21 @@
-import { Component, ChangeDetectionStrategy, inject, signal, OnInit } from '@angular/core';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  inject,
+  signal,
+  computed,
+  OnInit,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { LowStockSettingsService } from '@core/application/services/low-stock-settings.service';
+import { ThemeService } from '@core/application/services/theme.service';
 
 /**
  * Settings Component
  *
  * Provides configuration UI for system preferences including:
+ * - Appearance / dark mode (persisted to IndexedDB)
  * - Low stock threshold (persisted to IndexedDB)
  *
  * Uses OnPush change detection with signals for reactivity.
@@ -21,6 +30,37 @@ import { LowStockSettingsService } from '@core/application/services/low-stock-se
       <div class="page-header">
         <h1>⚙️ Settings</h1>
         <p class="page-subtitle">Configure system preferences and thresholds</p>
+      </div>
+
+      <!-- Appearance Section -->
+      <div class="settings-section" data-testid="appearance-settings">
+        <div class="section-header">
+          <h2>🎨 Appearance</h2>
+          <p class="section-description">Customize how Capy-POS looks</p>
+        </div>
+
+        <div class="setting-card">
+          <div class="setting-row">
+            <div class="setting-info">
+              <h3>Dark Mode</h3>
+              <p>Use a darker colour palette that's easier on the eyes in low light.</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              class="theme-switch"
+              [class.theme-switch--on]="isDark()"
+              [attr.aria-checked]="isDark()"
+              aria-label="Toggle dark mode"
+              (click)="toggleDarkMode()"
+              data-testid="btn-toggle-dark-mode"
+            >
+              <span class="theme-switch__track">
+                <span class="theme-switch__thumb">{{ isDark() ? '🌙' : '☀️' }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Low Stock Threshold Section -->
@@ -302,6 +342,58 @@ import { LowStockSettingsService } from '@core/application/services/low-stock-se
         margin: 0;
       }
 
+      .setting-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+
+      /* Toggle switch */
+      .theme-switch {
+        flex-shrink: 0;
+        background: transparent;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+      }
+
+      .theme-switch__track {
+        display: flex;
+        align-items: center;
+        width: 56px;
+        height: 30px;
+        padding: 3px;
+        border-radius: 9999px;
+        background: #d1d5db;
+        transition: background 0.2s ease;
+      }
+
+      .theme-switch--on .theme-switch__track {
+        background: #2563eb;
+      }
+
+      .theme-switch__thumb {
+        width: 24px;
+        height: 24px;
+        border-radius: 9999px;
+        background: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.875rem;
+        transition: transform 0.2s ease;
+      }
+
+      .theme-switch--on .theme-switch__thumb {
+        transform: translateX(26px);
+      }
+
+      .theme-switch:focus-visible .theme-switch__track {
+        outline: 2px solid #2563eb;
+        outline-offset: 2px;
+      }
+
       @media (max-width: 640px) {
         .page-container {
           padding: 1rem;
@@ -311,15 +403,67 @@ import { LowStockSettingsService } from '@core/application/services/low-stock-se
           align-items: flex-start;
         }
       }
+
+      /* Dark mode — driven by ThemeService toggling the .dark class on html */
+      :host-context(html.dark) .page-header h1,
+      :host-context(html.dark) .section-header h2 {
+        color: #f9fafb;
+      }
+
+      :host-context(html.dark) .page-subtitle,
+      :host-context(html.dark) .section-description,
+      :host-context(html.dark) .setting-info p,
+      :host-context(html.dark) .threshold-unit,
+      :host-context(html.dark) .coming-soon-card p {
+        color: #9ca3af;
+      }
+
+      :host-context(html.dark) .setting-info h3 {
+        color: #e5e7eb;
+      }
+
+      :host-context(html.dark) .setting-card {
+        background: #1f2937;
+        border-color: #374151;
+      }
+
+      :host-context(html.dark) .coming-soon-card {
+        background: #1f2937;
+        border-color: #4b5563;
+      }
+
+      :host-context(html.dark) .threshold-input,
+      :host-context(html.dark) .btn-adjust {
+        background: #374151;
+        border-color: #4b5563;
+        color: #f9fafb;
+      }
+
+      :host-context(html.dark) .theme-switch__track {
+        background: #4b5563;
+      }
+
+      :host-context(html.dark) .theme-switch--on .theme-switch__track {
+        background: #2563eb;
+      }
     `,
   ],
 })
 export class SettingsComponent implements OnInit {
   readonly lowStockSettings = inject(LowStockSettingsService);
+  private readonly themeService = inject(ThemeService);
 
   readonly thresholdInput = signal(10);
   readonly saveSuccess = signal(false);
   readonly saveError = signal<string | null>(null);
+
+  /** Whether dark mode is currently active */
+  readonly isDark = computed(() => this.themeService.theme() === 'dark');
+
+  /** Toggle between light and dark mode (persisted to IndexedDB) */
+  async toggleDarkMode(): Promise<void> {
+    await this.themeService.toggleTheme();
+  }
 
   async ngOnInit(): Promise<void> {
     const threshold = await this.lowStockSettings.loadThreshold();
