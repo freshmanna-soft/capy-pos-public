@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SettingsComponent } from './settings.component';
 import { LowStockSettingsService } from '@core/application/services/low-stock-settings.service';
+import { ThemeService, Theme } from '@core/application/services/theme.service';
 import { signal } from '@angular/core';
 
 describe('SettingsComponent', () => {
@@ -13,6 +14,10 @@ describe('SettingsComponent', () => {
     loading: ReturnType<typeof signal<boolean>>;
     getThreshold: ReturnType<typeof vi.fn>;
   };
+  let mockThemeService: {
+    theme: ReturnType<typeof signal<Theme>>;
+    toggleTheme: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     mockSettingsService = {
@@ -23,9 +28,19 @@ describe('SettingsComponent', () => {
       getThreshold: vi.fn().mockReturnValue(10),
     };
 
+    mockThemeService = {
+      theme: signal<Theme>('light'),
+      toggleTheme: vi.fn().mockImplementation(async () => {
+        mockThemeService.theme.set(mockThemeService.theme() === 'dark' ? 'light' : 'dark');
+      }),
+    };
+
     await TestBed.configureTestingModule({
       imports: [SettingsComponent],
-      providers: [{ provide: LowStockSettingsService, useValue: mockSettingsService }],
+      providers: [
+        { provide: LowStockSettingsService, useValue: mockSettingsService },
+        { provide: ThemeService, useValue: mockThemeService },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(SettingsComponent);
@@ -106,5 +121,40 @@ describe('SettingsComponent', () => {
       '[data-testid="input-threshold"]'
     ) as HTMLInputElement;
     expect(input).toBeTruthy();
+  });
+
+  describe('dark mode', () => {
+    it('should display the appearance section with a toggle', () => {
+      fixture.detectChanges();
+      const compiled = fixture.nativeElement as HTMLElement;
+      expect(compiled.querySelector('[data-testid="appearance-settings"]')).toBeTruthy();
+      expect(compiled.querySelector('[data-testid="btn-toggle-dark-mode"]')).toBeTruthy();
+    });
+
+    it('should report dark mode off when theme is light', () => {
+      mockThemeService.theme.set('light');
+      expect(component.isDark()).toBe(false);
+    });
+
+    it('should report dark mode on when theme is dark', () => {
+      mockThemeService.theme.set('dark');
+      expect(component.isDark()).toBe(true);
+    });
+
+    it('should delegate toggling to the ThemeService', async () => {
+      await component.toggleDarkMode();
+      expect(mockThemeService.toggleTheme).toHaveBeenCalled();
+      expect(component.isDark()).toBe(true);
+    });
+
+    it('should reflect the active state on the switch via aria-checked', () => {
+      mockThemeService.theme.set('dark');
+      fixture.detectChanges();
+
+      const toggle = fixture.nativeElement.querySelector(
+        '[data-testid="btn-toggle-dark-mode"]'
+      ) as HTMLButtonElement;
+      expect(toggle.getAttribute('aria-checked')).toBe('true');
+    });
   });
 });
