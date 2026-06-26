@@ -171,3 +171,30 @@ export async function upsertIssueGraph(pool, { nodes, edges }) {
   await graphExec(pool, stmts);
   return { nodes: nodes.length, edges: edges.length };
 }
+
+/**
+ * Replace the :Memory subgraph in capy_kg (scope-clear + MERGE → idempotent).
+ * LINKS_TO edges carry a `dangling` flag. Leaves code/issue subgraphs intact.
+ * @param {pg.Pool} pool
+ * @param {{nodes: object[], edges: object[]}} graph
+ */
+export async function upsertMemoryGraph(pool, { nodes, edges }) {
+  const stmts = [cypherStmt('MATCH (n:Memory) DETACH DELETE n')];
+
+  for (const n of nodes) {
+    stmts.push(
+      cypherStmt(
+        `MERGE (n:Memory {id: '${escCypher(n.id)}'}) ` +
+          `SET n.type = '${escCypher(n.type)}', n.missing = ${n.missing ? 'true' : 'false'}`,
+      ),
+    );
+  }
+  for (const e of edges) {
+    const a = matchRef('a', 'Memory', e.from.id);
+    const b = matchRef('b', 'Memory', e.to.id);
+    stmts.push(cypherStmt(`MATCH ${a}, ${b} MERGE (a)-[r:${e.type}]->(b) SET r.dangling = ${e.dangling ? 'true' : 'false'}`));
+  }
+
+  await graphExec(pool, stmts);
+  return { nodes: nodes.length, edges: edges.length };
+}
