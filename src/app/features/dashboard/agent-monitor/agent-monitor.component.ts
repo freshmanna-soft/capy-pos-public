@@ -58,9 +58,11 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
           </div>
           <div class="flex flex-col p-3 bg-gray-50 rounded-lg">
             <span class="text-xs text-gray-500 mb-1">Messages</span>
-            <span class="text-xl md:text-2xl font-bold text-gray-900">{{
-              eventBusStats().totalMessages
-            }}</span>
+            <span
+              class="text-xl md:text-2xl font-bold text-gray-900"
+              data-testid="total-messages"
+              >{{ eventBusStats().totalMessages }}</span
+            >
           </div>
           <div class="flex flex-col p-3 bg-gray-50 rounded-lg">
             <span class="text-xs text-gray-500 mb-1">Audit Logs</span>
@@ -279,7 +281,10 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
         </section>
 
         <!-- Event Bus Activity Section -->
-        <section class="bg-white p-4 rounded-lg shadow-sm lg:col-span-2">
+        <section
+          class="bg-white p-4 rounded-lg shadow-sm lg:col-span-2"
+          data-testid="event-bus-stats"
+        >
           <h2
             class="text-base md:text-lg font-semibold text-gray-900 mb-3 pb-2 border-b-2 border-blue-500"
           >
@@ -290,7 +295,10 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
               <h3 class="text-xs font-medium text-gray-500 mb-2">By Type</h3>
               <div class="space-y-1">
                 @for (type of eventBusStats().byType | keyvalue; track type) {
-                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                  <div
+                    class="flex justify-between p-2 bg-gray-50 rounded text-xs"
+                    data-testid="messages-by-type"
+                  >
                     <span class="truncate">{{ type.key }}</span>
                     <span class="font-semibold shrink-0 ml-2">{{ type.value }}</span>
                   </div>
@@ -301,7 +309,10 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
               <h3 class="text-xs font-medium text-gray-500 mb-2">By Source</h3>
               <div class="space-y-1">
                 @for (source of eventBusStats().bySource | keyvalue; track source) {
-                  <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
+                  <div
+                    class="flex justify-between p-2 bg-gray-50 rounded text-xs"
+                    data-testid="messages-by-source"
+                  >
                     <span class="truncate">{{ source.key }}</span>
                     <span class="font-semibold shrink-0 ml-2">{{ source.value }}</span>
                   </div>
