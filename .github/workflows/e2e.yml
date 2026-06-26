@@ -1,0 +1,61 @@
+name: E2E (affected)
+
+# Runs the SAME affected-spec selection as the husky pre-push hook
+# (scripts/affected-e2e.mjs): only the Playwright specs impacted by the PR's
+# changed files run, escalating to the full suite on core/config changes.
+on:
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same PR.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  e2e:
+    name: 🎭 Affected Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the affected runner can diff against the base branch.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Ensure base ref is available
+        run: git fetch --no-tags origin ${{ github.base_ref }}
+
+      - name: Run affected e2e
+        # Mirrors the pre-push hook; diffs against the PR base branch.
+        env:
+          AFFECTED_BASE: origin/${{ github.base_ref }}
+          PLAYWRIGHT_PROJECT: chromium
+        run: node scripts/affected-e2e.mjs
+
+      - name: Upload Playwright report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
