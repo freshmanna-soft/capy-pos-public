@@ -13,10 +13,20 @@
  * Usage: RAG_DB_URL=… GRAPHRAG_PORT=37777 node scripts/graphrag/server.mjs
  */
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { makePool } from './db.mjs';
 import { graphRagSearch, fileNeighborhood, epicStories } from './graph-query.mjs';
 
 const PORT = Number(process.env.GRAPHRAG_PORT || 37777);
+
+/**
+ * Authorize a /reindex webhook call (#99). Returns 'ok' | 'disabled' | 'unauthorized'.
+ * Disabled unless GRAPHRAG_WEBHOOK_SECRET is set — the trigger is opt-in.
+ */
+export function authorizeReindex(headers, secret = process.env.GRAPHRAG_WEBHOOK_SECRET) {
+  if (!secret) return 'disabled';
+  return headers['x-webhook-secret'] === secret ? 'ok' : 'unauthorized';
+}
 
 /** Validate/normalize a /search body. Throws on bad input. */
 export function validateSearch(body) {
@@ -72,6 +82,18 @@ export function createServer(pool) {
         const number = url.searchParams.get('number');
         if (!number) return send(res, 400, { error: '`number` query param is required' });
         return send(res, 200, { epic: Number(number), stories: await epicStories(pool, number) });
+      }
+      if (req.method === 'POST' && url.pathname === '/reindex') {
+        const auth = authorizeReindex(req.headers);
+        if (auth === 'disabled') return send(res, 503, { error: 'reindex webhook disabled (set GRAPHRAG_WEBHOOK_SECRET)' });
+        if (auth === 'unauthorized') return send(res, 401, { error: 'invalid x-webhook-secret' });
+        // Fire-and-forget incremental reindex; respond immediately.
+        spawn('node', ['scripts/graphrag/reindex-all.mjs', '--incremental'], {
+          detached: true,
+          stdio: 'ignore',
+          env: process.env,
+        }).unref();
+        return send(res, 202, { triggered: true, mode: 'incremental' });
       }
       return send(res, 404, { error: 'not found' });
     } catch (err) {

@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { validateSearch } from './server.mjs';
+import { validateSearch, authorizeReindex } from './server.mjs';
+
+describe('authorizeReindex', () => {
+  it('is disabled when no secret is configured', () => {
+    expect(authorizeReindex({ 'x-webhook-secret': 'anything' }, undefined)).toBe('disabled');
+  });
+  it('authorizes a matching secret', () => {
+    expect(authorizeReindex({ 'x-webhook-secret': 's3cret' }, 's3cret')).toBe('ok');
+  });
+  it('rejects a wrong/missing secret', () => {
+    expect(authorizeReindex({ 'x-webhook-secret': 'nope' }, 's3cret')).toBe('unauthorized');
+    expect(authorizeReindex({}, 's3cret')).toBe('unauthorized');
+  });
+});
 
 describe('validateSearch', () => {
   it('accepts a query and defaults k to 5', () => {

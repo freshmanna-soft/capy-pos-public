@@ -64,6 +64,9 @@ npm run graphrag:serve                           # GRAPHRAG_PORT (default 37777)
 #   POST /search  {query, k?}   → top-k hits + graph neighborhood
 #   GET  /file?path=<relpath>   → file neighborhood
 #   GET  /epic?number=<n>       → stories of an epic
+#   POST /reindex               → trigger incremental reindex (#99); requires
+#                                 GRAPHRAG_WEBHOOK_SECRET + matching x-webhook-secret
+#                                 header (disabled/503 if the secret is unset)
 
 npm run test:graphrag                            # unit tests
 
