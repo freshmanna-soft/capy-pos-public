@@ -24,13 +24,13 @@ test.describe('Customer Management - Carlos the Manager', () => {
 
   test.describe('Page Load & Navigation', () => {
     test('should display customers page with title', async ({ page }) => {
-      const title = page.locator('.page-title');
-      await expect(title).toContainText('Customer Management');
+      const title = page.getByRole('heading', { name: /Customer Management/ });
+      await expect(title).toBeVisible();
     });
 
     test('should be accessible from navigation', async ({ page }) => {
       await page.goto('/pos');
-      await page.click('[data-testid="nav-customers"]');
+      await page.click('[data-testid="nav-customers"]:visible');
       await expect(page).toHaveURL(/\/customers/);
       await expect(page.locator('[data-testid="customers-page"]')).toBeVisible();
     });
@@ -90,8 +90,8 @@ test.describe('Customer Management - Carlos the Manager', () => {
       await page.click('[data-testid="btn-add-customer"]');
       await page.click('[data-testid="btn-save"]');
 
-      const errors = page.locator('.field-error');
-      await expect(errors.first()).toBeVisible();
+      // Per-field validation messages render as red helper text under each input.
+      await expect(page.getByText(/is required/i).first()).toBeVisible();
     });
 
     test('should show email validation error for invalid email', async ({ page }) => {
@@ -103,8 +103,7 @@ test.describe('Customer Management - Carlos the Manager', () => {
 
       await page.click('[data-testid="btn-save"]');
 
-      const emailError = page.locator('.field-error');
-      await expect(emailError).toContainText('valid email');
+      await expect(page.getByText(/valid email/i)).toBeVisible();
     });
 
     test('should create a customer with valid data', async ({ page }) => {
@@ -257,8 +256,10 @@ test.describe('Customer Management - Carlos the Manager', () => {
 
       await page.waitForTimeout(300);
 
-      const emptyState = page.locator('.empty-content');
-      await expect(emptyState).toBeVisible();
+      // Rendered in both the mobile and desktop list (one hidden per viewport).
+      await expect(
+        page.getByText('No customers found matching your criteria').filter({ visible: true })
+      ).toBeVisible();
     });
   });
 });
