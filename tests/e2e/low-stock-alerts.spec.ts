@@ -32,26 +32,24 @@ test.describe('Low Stock Alerts - Settings Configuration', () => {
     const input = page.locator('[data-testid="input-threshold"]');
     const increaseBtn = page.locator('[data-testid="btn-increase-threshold"]');
 
-    const valueBefore = await input.inputValue();
+    const before = parseInt(await input.inputValue());
     await increaseBtn.click();
-    const valueAfter = await input.inputValue();
-
-    expect(parseInt(valueAfter)).toBe(parseInt(valueBefore) + 1);
+    // toHaveValue retries, avoiding a stale read before the signal updates.
+    await expect(input).toHaveValue(String(before + 1));
   });
 
   test('can decrease threshold with - button', async ({ page }) => {
     const input = page.locator('[data-testid="input-threshold"]');
     const decreaseBtn = page.locator('[data-testid="btn-decrease-threshold"]');
 
-    // First increase to ensure we're above 1
+    // First increase so we're safely above the minimum.
     const increaseBtn = page.locator('[data-testid="btn-increase-threshold"]');
+    const start = parseInt(await input.inputValue());
     await increaseBtn.click();
+    await expect(input).toHaveValue(String(start + 1));
 
-    const valueBefore = await input.inputValue();
     await decreaseBtn.click();
-    const valueAfter = await input.inputValue();
-
-    expect(parseInt(valueAfter)).toBe(parseInt(valueBefore) - 1);
+    await expect(input).toHaveValue(String(start));
   });
 
   test('save button exists and is clickable', async ({ page }) => {

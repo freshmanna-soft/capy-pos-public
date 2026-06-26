@@ -25,8 +25,8 @@ test.describe('Inventory Management - Ana the Inventory Clerk', () => {
 
   test.describe('Page Load & Navigation', () => {
     test('should display inventory page with title', async ({ page }) => {
-      const title = page.locator('.page-title');
-      await expect(title).toContainText('Inventory Management');
+      const title = page.getByRole('heading', { name: /Inventory Management/ });
+      await expect(title).toBeVisible();
     });
 
     test('should be accessible from navigation', async ({ page }) => {
@@ -90,9 +90,8 @@ test.describe('Inventory Management - Ana the Inventory Clerk', () => {
       await page.click('[data-testid="btn-add-product"]');
       await page.click('[data-testid="btn-save"]');
 
-      // Should show validation errors
-      const errors = page.locator('.field-error');
-      await expect(errors.first()).toBeVisible();
+      // Per-field validation messages render as red helper text under each input.
+      await expect(page.getByText(/is required/i).first()).toBeVisible();
     });
 
     test('should create a product with valid data', async ({ page }) => {

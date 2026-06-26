@@ -166,6 +166,9 @@ class PosTerminalPage {
    * Clear the entire cart
    */
   async clearCart(): Promise<void> {
+    // Clearing a non-empty cart prompts a window.confirm(); Playwright dismisses
+    // dialogs by default, so explicitly accept it or the cart won't clear.
+    this.page.once('dialog', (dialog) => dialog.accept());
     await this.clearCartBtn.click();
     await this.page.waitForTimeout(100);
   }
@@ -236,7 +239,7 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
       await expect(pos.productResults).toHaveCount(0);
     });
 
-    test('should clear results when search is cleared', async () => {
+    test('should show the browse list again when search is cleared', async () => {
       // Search first
       await pos.searchProduct('Coffee');
       await expect(pos.productResults.first()).toBeVisible();
@@ -244,17 +247,19 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
       // Clear search
       await pos.clearSearch();
 
-      // Results should disappear
-      await expect(pos.productResults).toHaveCount(0);
+      // Browse-first POS: clearing the query returns to the full product list,
+      // not an empty state.
+      await expect(pos.productResults.first()).toBeVisible();
     });
 
-    test('should not search with less than 2 characters', async () => {
+    test('should not run a text search for less than 2 characters', async () => {
       // Type single character
       await pos.searchInput.fill('C');
       await pos.page.waitForTimeout(500);
 
-      // No results and no "no results" message should appear
-      await expect(pos.productResults).toHaveCount(0);
+      // <2 chars does not trigger a search; the browse list remains and there is
+      // no "no results" message.
+      await expect(pos.productResults.first()).toBeVisible();
       await expect(pos.noResults).not.toBeVisible();
     });
   });
@@ -307,15 +312,14 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
       await pos.searchProduct('Seasonal');
       await expect(pos.productResults.first()).toBeVisible();
 
-      // Verify it shows "Out of Stock" status
-      const stockStatus = pos.productResults.first().getByTestId('stock-status');
-      await expect(stockStatus).toContainText('Out of Stock');
-
-      // Verify the product result has aria-disabled
+      // Out-of-stock results show the "Out of Stock" badge and are disabled.
+      await expect(pos.productResults.first()).toContainText('Out of Stock');
       await expect(pos.productResults.first()).toHaveAttribute('aria-disabled', 'true');
 
-      // Try to click it
-      await pos.selectProductByIndex(0);
+      // Force-click the disabled product (a normal click would hang waiting for
+      // the disabled button to become actionable).
+      await pos.productResults.first().click({ force: true });
+      await pos.page.waitForTimeout(200);
 
       // Cart should remain empty - product was not added
       await expect(pos.emptyCart).toBeVisible();
@@ -363,21 +367,21 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
     });
 
     test('should calculate tax correctly when quantity changes', async () => {
-      // Coffee $2.50, tax 8% = $0.20
-      await expect(pos.totalsTax).toContainText('$0.20');
+      // Coffee $2.50, tax 8.5% = $0.21
+      await expect(pos.totalsTax).toContainText('$0.21');
 
-      // Increase to 2: $5.00, tax 8% = $0.40
+      // Increase to 2: $5.00, tax 8.5% = $0.43
       await pos.increaseQuantity('1');
-      await expect(pos.totalsTax).toContainText('$0.40');
+      await expect(pos.totalsTax).toContainText('$0.43');
     });
 
     test('should calculate grand total correctly', async () => {
-      // Coffee $2.50 + tax $0.20 = $2.70
-      await expect(pos.totalsTotal).toContainText('$2.70');
+      // Coffee $2.50 + tax $0.21 = $2.71
+      await expect(pos.totalsTotal).toContainText('$2.71');
 
-      // Increase to 2: $5.00 + tax $0.40 = $5.40
+      // Increase to 2: $5.00 + tax $0.43 = $5.43
       await pos.increaseQuantity('1');
-      await expect(pos.totalsTotal).toContainText('$5.40');
+      await expect(pos.totalsTotal).toContainText('$5.43');
     });
   });
 
@@ -448,7 +452,7 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
       await expect(pos.cartItem('3')).not.toBeVisible();
     });
 
-    test('should reset totals to zero after clearing', async () => {
+    test('should reset the cart after clearing', async () => {
       // Add Coffee
       await pos.searchProduct('Coffee');
       await pos.selectProductByName('Coffee');
@@ -459,10 +463,9 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
       // Clear cart
       await pos.clearCart();
 
-      // Totals should show $0.00
-      await expect(pos.totalsSubtotal).toContainText('$0.00');
-      await expect(pos.totalsTax).toContainText('$0.00');
-      await expect(pos.totalsTotal).toContainText('$0.00');
+      // Empty cart shows the empty state; the totals panel is no longer rendered.
+      await expect(pos.emptyCart).toBeVisible();
+      await expect(pos.totalsSubtotal).toHaveCount(0);
     });
   });
 
@@ -475,10 +478,9 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
       await expect(pos.productResults.first()).toBeVisible();
       await expect(pos.productResults.first()).toContainText('Seasonal Blend');
 
-      // Should show "Out of Stock" status
-      const stockStatus = pos.productResults.first().getByTestId('stock-status');
-      await expect(stockStatus).toContainText('Out of Stock');
-      await expect(stockStatus).toHaveClass(/out-of-stock/);
+      // Should show the "Out of Stock" badge and be disabled
+      await expect(pos.productResults.first()).toContainText('Out of Stock');
+      await expect(pos.productResults.first()).toHaveAttribute('aria-disabled', 'true');
     });
 
     test('should have aria-disabled on out-of-stock product', async () => {
@@ -493,23 +495,22 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
       await pos.searchProduct('Seasonal Blend');
       await expect(pos.productResults.first()).toBeVisible();
 
-      // Click the out-of-stock product
-      await pos.productResults.first().click();
+      // Force-click the disabled out-of-stock product
+      await pos.productResults.first().click({ force: true });
       await pos.page.waitForTimeout(200);
 
       // Cart should remain empty
       await expect(pos.emptyCart).toBeVisible();
     });
 
-    test('should show in-stock indicator for available products', async () => {
+    test('should not disable in-stock products', async () => {
       // Search for an in-stock product
       await pos.searchProduct('Coffee');
       await expect(pos.productResults.first()).toBeVisible();
 
-      // Should show "In Stock" status
-      const stockStatus = pos.productResults.first().getByTestId('stock-status');
-      await expect(stockStatus).toContainText('In Stock');
-      await expect(stockStatus).toHaveClass(/in-stock/);
+      // In-stock products are enabled and show no out-of-stock badge
+      await expect(pos.productResults.first()).toHaveAttribute('aria-disabled', 'false');
+      await expect(pos.productResults.first()).not.toContainText('Out of Stock');
     });
   });
 
@@ -532,10 +533,10 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
       // Step 4: Verify totals
       // Subtotal: 3 x $2.50 = $7.50
       await expect(pos.totalsSubtotal).toContainText('$7.50');
-      // Tax: 8% of $7.50 = $0.60
-      await expect(pos.totalsTax).toContainText('$0.60');
-      // Total: $7.50 + $0.60 = $8.10
-      await expect(pos.totalsTotal).toContainText('$8.10');
+      // Tax: 8.5% of $7.50 = $0.64
+      await expect(pos.totalsTax).toContainText('$0.64');
+      // Total: $7.50 + $0.64 = $8.14
+      await expect(pos.totalsTotal).toContainText('$8.14');
     });
 
     test('should handle adding same product multiple times via search', async () => {

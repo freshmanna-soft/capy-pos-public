@@ -12,7 +12,7 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () =>
       import('./features/pos-terminal/pos-terminal.component').then((m) => m.PosTerminalComponent),
-    title: 'Norma POS',
+    title: 'POS Terminal · Capy-POS',
   },
   {
     path: 'inventory',
