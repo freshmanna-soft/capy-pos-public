@@ -186,27 +186,27 @@ test.describe('Agent Integration Workflow', () => {
     expect(await download.path()).toBeTruthy();
   });
 
-  test.fixme('should handle inventory updates across agents', async ({ page }) => {
-    // Depends on payment-success + stock-quantity cross-feature flow.
-    await page.goto('http://localhost:4200/inventory');
-    await page.fill('[data-testid="product-search"]', 'Coffee');
-    await page.click('[data-testid="search-button"]');
-    const initialStock = await page.textContent('[data-testid="stock-quantity"]');
-    const initialQuantity = parseInt(initialStock || '0');
-    await page.goto('http://localhost:4200/pos-terminal');
-    await page.fill('[data-testid="product-search"]', 'Coffee');
-    await page.click('[data-testid="search-button"]');
-    await page.click('[data-testid="add-to-cart"]');
-    await page.click('[data-testid="checkout-button"]');
-    await page.click('[data-testid="payment-method-cash"]');
-    await page.fill('[data-testid="cash-amount"]', '10.00');
-    await page.click('[data-testid="submit-payment"]');
-    await page.waitForSelector('[data-testid="payment-success"]');
-    await page.goto('http://localhost:4200/inventory');
-    await page.fill('[data-testid="product-search"]', 'Coffee');
-    await page.click('[data-testid="search-button"]');
-    const updatedStock = await page.textContent('[data-testid="stock-quantity"]');
-    expect(parseInt(updatedStock || '0')).toBe(initialQuantity - 1);
+  test('should reduce inventory stock after a sale', async ({ page }) => {
+    // Cross-feature: a sale reduces the product's stock (AdjustStockOnSaleUseCase,
+    // persisted to IndexedDB). Read stock on /inventory before + after one sale.
+    const readCoffeeStock = async (): Promise<number> => {
+      await page.goto('/inventory');
+      await expect(page.getByTestId('inventory-page')).toBeVisible();
+      const row = page
+        .locator('[data-testid^="product-row-"]')
+        .filter({ hasText: 'Coffee' })
+        .filter({ visible: true });
+      await expect(row).toBeVisible({ timeout: 5000 });
+      const text = (await row.textContent()) ?? '';
+      return parseInt(text.match(/(\d+)\s*units/)?.[1] ?? '0');
+    };
+
+    const before = await readCoffeeStock();
+    await completeCashSale(page, 'Coffee');
+    await expect(page.getByTestId('receipt-overlay')).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('btn-new-transaction').click();
+    const after = await readCoffeeStock();
+    expect(after).toBe(before - 1);
   });
 });
 
