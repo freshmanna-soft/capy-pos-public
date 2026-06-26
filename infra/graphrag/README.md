@@ -73,6 +73,33 @@ node scripts/graphrag/reindex-all.mjs --incremental   # only re-embed changed fi
 npm run graphrag:refresh-graphs                       # issue + memory subgraphs only (~1s, no Ollama) (#80)
 ```
 
+## Consumers (#82)
+
+All three agent surfaces hit the same `/search` endpoint (start it with `npm run graphrag:serve`).
+
+**Universal client** (`scripts/graphrag/client.mjs`) — used by scripts/agents, or directly:
+
+```bash
+GRAPHRAG_ENDPOINT=http://localhost:37777 node scripts/graphrag/client.mjs "where is checkout total computed" --k 5
+node scripts/graphrag/client.mjs --file src/app/core/application/facades/pos.facade.ts
+node scripts/graphrag/client.mjs --epic 55
+```
+
+**Cloud `.claude` subagents** — call the endpoint with `curl` (or wrap as a project skill):
+
+```bash
+curl -s localhost:37777/search -H 'content-type: application/json' -d '{"query":"...","k":5}'
+```
+
+**Local Ollama `capy-*` agents** — same HTTP `POST /search` (they already speak HTTP per `ollama-agents`).
+
+**n8n** — an **HTTP Request** node: method `POST`, URL `http://host.docker.internal:37777/search`
+(from the n8n container), JSON body `{ "query": "{{ $json.query }}", "k": 5 }`. Feed `hits[]`
+(chunk + `graph` neighborhood) into the agent's context.
+
+> Registering an MCP server, adding a `.claude` skill, or editing the live n8n workflow are
+> per-environment opt-ins; the client + endpoint above are the shared contract they use.
+
 Issues and memory change more often than code, so `graphrag:refresh-graphs` is the
 cheap path to keep those subgraphs current. To run it on a schedule (opt-in), add a
 cron entry, e.g. every 15 min:
