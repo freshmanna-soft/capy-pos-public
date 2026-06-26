@@ -108,7 +108,9 @@ class TransactionHistoryPage {
 
   async navigate(): Promise<void> {
     await this.page.goto('/history');
-    await this.page.waitForLoadState('networkidle');
+    // Wait for the page's own container, not networkidle: the app runs a
+    // background sync setInterval (sync.worker.ts) so the network never idles.
+    await expect(this.container).toBeVisible();
   }
 
   async clickTransaction(id: string): Promise<void> {
@@ -123,18 +125,17 @@ class TransactionHistoryPage {
    * Get all transaction cards visible on the page
    */
   async getTransactionCards() {
-    return this.page.locator(
-      '[data-testid^="transaction-"][data-testid$!="history"][data-testid$!="list"]'
-    );
+    // Scope to cards INSIDE the list so we don't match the page container
+    // (`transaction-history`) or the list element (`transaction-list`) itself,
+    // both of which also start with "transaction-".
+    return this.transactionList.locator('[data-testid^="transaction-"]');
   }
 
   /**
    * Get the first transaction card's testid to extract the ID
    */
   async getFirstTransactionId(): Promise<string | null> {
-    const cards = this.page.locator('[data-testid^="transaction-"]').filter({
-      has: this.page.locator('[data-testid^="method-"]'),
-    });
+    const cards = this.transactionList.locator('[data-testid^="transaction-"]');
     const count = await cards.count();
     if (count === 0) return null;
     const testId = await cards.first().getAttribute('data-testid');
@@ -156,7 +157,6 @@ class PosTerminalHelper {
   async createCashTransaction(productName: string = 'Coffee'): Promise<void> {
     // Navigate to POS
     await this.page.goto('/pos');
-    await this.page.waitForLoadState('networkidle');
     await expect(this.page.getByTestId('pos-terminal')).toBeVisible();
 
     // Search for product
@@ -262,15 +262,10 @@ test.describe('Transaction History - S3-3', () => {
   // --------------------------------------------------------------------------
   test.describe('Empty State', () => {
     test('should show empty state when no transactions exist', async ({ page }) => {
-      // Clear IndexedDB to ensure no transactions
       await page.goto('/pos');
-      await page.waitForLoadState('networkidle');
-      await page.evaluate(() => {
-        const dbs = indexedDB.databases ? indexedDB.databases() : Promise.resolve([]);
-        return dbs;
-      });
+      await expect(page.getByTestId('pos-terminal')).toBeVisible();
 
-      // Navigate to history on a fresh state
+      // Navigate to history
       await historyPage.navigate();
 
       // Either empty state or transaction list should be visible
@@ -498,9 +493,7 @@ test.describe('Transaction History - S3-3', () => {
 
       // The first card in the list should be the most recent transaction
       // (newest first ordering)
-      const cards = historyPage.page.locator('[data-testid^="transaction-"]').filter({
-        has: historyPage.page.locator('[data-testid^="method-"]'),
-      });
+      const cards = historyPage.transactionList.locator('[data-testid^="transaction-"]');
       const count = await cards.count();
       expect(count).toBeGreaterThanOrEqual(2);
 

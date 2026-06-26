@@ -42,7 +42,7 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
   });
 
   test('Carlos can add a new product with valid data', async ({ page }) => {
-    await page.click('[data-testid="nav-inventory"]');
+    await page.click('[data-testid="nav-inventory"]:visible');
     await expect(page.locator('[data-testid="inventory-page"]')).toBeVisible();
     await page.waitForTimeout(500);
 
@@ -71,7 +71,7 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
   });
 
   test('Carlos can edit an existing product', async ({ page }) => {
-    await page.click('[data-testid="nav-inventory"]');
+    await page.click('[data-testid="nav-inventory"]:visible');
     await expect(page.locator('[data-testid="inventory-page"]')).toBeVisible();
     await page.waitForTimeout(500);
 
@@ -111,7 +111,7 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
   });
 
   test('Carlos can delete a product with confirmation', async ({ page }) => {
-    await page.click('[data-testid="nav-inventory"]');
+    await page.click('[data-testid="nav-inventory"]:visible');
     await expect(page.locator('[data-testid="inventory-page"]')).toBeVisible();
     await page.waitForTimeout(500);
 
@@ -149,12 +149,12 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
 
   test('inventory table reloads after navigation', async ({ page }) => {
     // Navigate away to another page
-    await page.click('[data-testid="nav-customers"]');
+    await page.click('[data-testid="nav-customers"]:visible');
     await expect(page.locator('[data-testid="customers-page"]')).toBeVisible();
     await page.waitForTimeout(500);
 
     // Navigate back to inventory
-    await page.click('[data-testid="nav-inventory"]');
+    await page.click('[data-testid="nav-inventory"]:visible');
     await expect(page.locator('[data-testid="inventory-page"]')).toBeVisible();
 
     // Inventory table should reload and be visible
@@ -175,11 +175,10 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
   });
 
   test('Carlos can navigate to Customers and view all customers', async ({ page }) => {
-    await page.click('[data-testid="nav-customers"]');
+    await page.click('[data-testid="nav-customers"]:visible');
     await expect(page).toHaveURL(/\/customers/);
     await expect(page.locator('[data-testid="customers-page"]')).toBeVisible();
 
@@ -188,7 +187,7 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
   });
 
   test('Carlos can add a new customer with valid data', async ({ page }) => {
-    await page.click('[data-testid="nav-customers"]');
+    await page.click('[data-testid="nav-customers"]:visible');
     await expect(page.locator('[data-testid="customers-page"]')).toBeVisible();
     await page.waitForTimeout(500);
 
@@ -215,7 +214,7 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
   });
 
   test('Carlos can edit an existing customer', async ({ page }) => {
-    await page.click('[data-testid="nav-customers"]');
+    await page.click('[data-testid="nav-customers"]:visible');
     await expect(page.locator('[data-testid="customers-page"]')).toBeVisible();
     await page.waitForTimeout(500);
 
@@ -253,7 +252,7 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
   });
 
   test('Carlos can delete a customer with confirmation', async ({ page }) => {
-    await page.click('[data-testid="nav-customers"]');
+    await page.click('[data-testid="nav-customers"]:visible');
     await expect(page.locator('[data-testid="customers-page"]')).toBeVisible();
     await page.waitForTimeout(500);
 
@@ -301,13 +300,12 @@ test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
   test('stock level is reduced after Maria completes a sale', async ({ page }) => {
     // Step 1: Navigate to POS first to initialize seed data
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
-    await page.click('[data-testid="nav-pos"]');
+    await page.click('[data-testid="nav-pos"]:visible');
     await expect(page.locator('[data-testid="pos-terminal"]')).toBeVisible();
     await page.waitForTimeout(1500); // Wait for seed data initialization
 
     // Step 2: Navigate to Inventory to check initial stock of a seed product
-    await page.click('[data-testid="nav-inventory"]');
+    await page.click('[data-testid="nav-inventory"]:visible');
     await expect(page.locator('[data-testid="inventory-page"]')).toBeVisible();
     await page.waitForTimeout(1000);
 
@@ -338,7 +336,7 @@ test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
     const productName = productExists ? 'Coffee' : 'S4-5 Sale Coffee';
 
     // Step 3: Maria navigates to POS and makes a sale
-    await page.click('[data-testid="nav-pos"]');
+    await page.click('[data-testid="nav-pos"]:visible');
     await expect(page.locator('[data-testid="pos-terminal"]')).toBeVisible();
     await page.waitForTimeout(500);
 
@@ -406,7 +404,7 @@ test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
     }
 
     // Step 4: Carlos navigates to Inventory to verify stock was reduced
-    await page.click('[data-testid="nav-inventory"]');
+    await page.click('[data-testid="nav-inventory"]:visible');
     await expect(page.locator('[data-testid="inventory-page"]')).toBeVisible();
     await page.waitForTimeout(1500);
 
@@ -433,10 +431,9 @@ test.describe('S4-5 Scenario 4: Low Stock Alert Visibility - Carlos the Manager'
 
   test('low stock widget is visible on Dashboard', async ({ page }) => {
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
 
     // Navigate to Dashboard
-    await page.click('[data-testid="nav-dashboard"]');
+    await page.click('[data-testid="nav-dashboard"]:visible');
     await expect(page).toHaveURL(/\/dashboard/);
     await page.waitForTimeout(1000);
 
@@ -446,7 +443,6 @@ test.describe('S4-5 Scenario 4: Low Stock Alert Visibility - Carlos the Manager'
 
   test('low stock widget shows alerts or healthy state', async ({ page }) => {
     await page.goto('/dashboard');
-    await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500);
 
     // Widget should show either healthy state or alert summary
@@ -463,7 +459,6 @@ test.describe('S4-5 Scenario 4: Low Stock Alert Visibility - Carlos the Manager'
   test('clicking View Inventory navigates to filtered inventory view', async ({ page }) => {
     // First, create a product with very low stock to ensure alerts exist
     await page.goto('/inventory');
-    await page.waitForLoadState('networkidle');
     await page.waitForTimeout(500);
 
     await page.click('[data-testid="btn-add-product"]');
@@ -477,7 +472,7 @@ test.describe('S4-5 Scenario 4: Low Stock Alert Visibility - Carlos the Manager'
     await page.waitForTimeout(500);
 
     // Navigate to Dashboard
-    await page.click('[data-testid="nav-dashboard"]');
+    await page.click('[data-testid="nav-dashboard"]:visible');
     await expect(page).toHaveURL(/\/dashboard/);
     await page.waitForTimeout(1500);
 
@@ -501,7 +496,6 @@ test.describe('S4-5 Scenario 4: Low Stock Alert Visibility - Carlos the Manager'
   test('product with stock below threshold appears in low stock alerts', async ({ page }) => {
     // Create a product with 0 stock (critical)
     await page.goto('/inventory');
-    await page.waitForLoadState('networkidle');
     await page.waitForTimeout(500);
 
     await page.click('[data-testid="btn-add-product"]');
@@ -515,7 +509,7 @@ test.describe('S4-5 Scenario 4: Low Stock Alert Visibility - Carlos the Manager'
     await page.waitForTimeout(500);
 
     // Navigate to Dashboard
-    await page.click('[data-testid="nav-dashboard"]');
+    await page.click('[data-testid="nav-dashboard"]:visible');
     await expect(page).toHaveURL(/\/dashboard/);
     await page.waitForTimeout(1500);
 

@@ -139,7 +139,6 @@ test.describe('Navigation Accessibility - All Features Reachable', () => {
     await clickNavLink(page, 'nav-history');
     await expect(page).toHaveURL(/\/history/);
     // Should load the transaction history component
-    await page.waitForLoadState('networkidle');
     // Verify we're not redirected back to POS (which would mean the route is broken)
     expect(page.url()).toContain('/history');
   });
@@ -350,7 +349,6 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
     await page.goto('/');
     await clickNavLink(page, 'nav-reports');
     await expect(page).toHaveURL(/\/reports/);
-    await page.waitForLoadState('networkidle');
   });
 
   test('manager can access transaction history from navigation', async ({ page }) => {
@@ -361,7 +359,6 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
 
   test('manager can navigate between reports and transaction history', async ({ page }) => {
     await page.goto('/reports');
-    await page.waitForLoadState('networkidle');
 
     // Navigate to transaction history
     await clickNavLink(page, 'nav-history');
@@ -376,7 +373,6 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
     await page.goto('/');
     await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
-    await page.waitForLoadState('networkidle');
   });
 
   test('manager can access agent monitor dashboard', async ({ page }) => {
@@ -392,17 +388,14 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
     // Step 1: Check reports
     await clickNavLink(page, 'nav-reports');
     await expect(page).toHaveURL(/\/reports/);
-    await page.waitForLoadState('networkidle');
 
     // Step 2: Review transaction history
     await clickNavLink(page, 'nav-history');
     await expect(page).toHaveURL(/\/history/);
-    await page.waitForLoadState('networkidle');
 
     // Step 3: Check inventory levels
     await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
-    await page.waitForLoadState('networkidle');
 
     // Step 4: Monitor system health
     await clickNavLink(page, 'nav-dashboard');
@@ -420,12 +413,10 @@ test.describe('Persona: Ana the Inventory Clerk - Inventory Management', () => {
     await page.goto('/');
     await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
-    await page.waitForLoadState('networkidle');
   });
 
   test('inventory page loads with product list', async ({ page }) => {
     // The inventory page should show products
-    await page.waitForLoadState('networkidle');
     // Verify the page has content (not blank)
     const bodyText = await page.locator('main').textContent();
     expect(bodyText?.length).toBeGreaterThan(0);
@@ -484,7 +475,6 @@ test.describe('Cross-Feature Navigation Integrity', () => {
     for (const route of routes) {
       await clickNavLink(page, route.nav);
       await expect(page).toHaveURL(new RegExp(route.url));
-      await page.waitForLoadState('networkidle');
     }
   });
 

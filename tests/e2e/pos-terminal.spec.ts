@@ -194,7 +194,6 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
     await loginAsAdmin(page);
     await page.goto('/');
     // Wait for the app to fully load and seed data to initialize
-    await page.waitForLoadState('networkidle');
     await expect(page.getByTestId('pos-terminal')).toBeVisible();
   });
 

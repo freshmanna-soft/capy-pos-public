@@ -31,7 +31,7 @@ test.describe('Inventory Management - Ana the Inventory Clerk', () => {
 
     test('should be accessible from navigation', async ({ page }) => {
       await page.goto('/pos');
-      await page.click('[data-testid="nav-inventory"]');
+      await page.click('[data-testid="nav-inventory"]:visible');
       await expect(page).toHaveURL(/\/inventory/);
       await expect(page.locator('[data-testid="inventory-page"]')).toBeVisible();
     });

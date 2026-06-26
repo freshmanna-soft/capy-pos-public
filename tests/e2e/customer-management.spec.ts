@@ -30,7 +30,7 @@ test.describe('Customer Management - Carlos the Manager', () => {
 
     test('should be accessible from navigation', async ({ page }) => {
       await page.goto('/pos');
-      await page.click('[data-testid="nav-customers"]');
+      await page.click('[data-testid="nav-customers"]:visible');
       await expect(page).toHaveURL(/\/customers/);
       await expect(page.locator('[data-testid="customers-page"]')).toBeVisible();
     });

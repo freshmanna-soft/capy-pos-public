@@ -16,7 +16,6 @@ test.describe('Low Stock Alerts - Settings Configuration', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto('/settings');
-    await page.waitForLoadState('networkidle');
   });
 
   test('settings page displays low stock threshold section', async ({ page }) => {
@@ -78,7 +77,6 @@ test.describe('Low Stock Alerts - Dashboard Widget', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto('/dashboard');
-    await page.waitForLoadState('networkidle');
   });
 
   test('dashboard displays low stock widget', async ({ page }) => {
@@ -121,7 +119,7 @@ test.describe('Low Stock Alerts - Persona: Ana the Inventory Clerk', () => {
   test('Ana can configure threshold then check dashboard for alerts', async ({ page }) => {
     // Step 1: Navigate to settings
     await page.goto('/');
-    await page.click('[data-testid="nav-settings"]');
+    await page.click('[data-testid="nav-settings"]:visible');
     await expect(page).toHaveURL(/\/settings/);
 
     // Step 2: Verify threshold configuration is available
@@ -129,7 +127,7 @@ test.describe('Low Stock Alerts - Persona: Ana the Inventory Clerk', () => {
     await expect(page.locator('[data-testid="input-threshold"]')).toBeVisible();
 
     // Step 3: Navigate to dashboard to check alerts
-    await page.click('[data-testid="nav-dashboard"]');
+    await page.click('[data-testid="nav-dashboard"]:visible');
     await expect(page).toHaveURL(/\/dashboard/);
 
     // Step 4: Verify widget is present
@@ -138,7 +136,6 @@ test.describe('Low Stock Alerts - Persona: Ana the Inventory Clerk', () => {
 
   test('Ana can navigate from widget to inventory for low stock items', async ({ page }) => {
     await page.goto('/dashboard');
-    await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1000);
 
     // If alerts exist, click view inventory button

@@ -15,7 +15,6 @@ test.describe('Capy-POS Application', () => {
     await page.goto('/');
 
     // Wait for the app to load
-    await page.waitForLoadState('networkidle');
 
     // Check if the page title is correct
     await expect(page).toHaveTitle(/Capy-POS/i);
