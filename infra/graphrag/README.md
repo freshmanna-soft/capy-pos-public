@@ -43,9 +43,22 @@ Connect: `postgres://capy:<pw>@localhost:5433/capy_rag`
 
 ```bash
 export RAG_DB_URL="postgres://capy:<pw>@localhost:5433/capy_rag"
-node scripts/graphrag/index-codebase.mjs      # build the codebase corpus
-node scripts/graphrag/query.mjs "..." --k 5   # top-k semantic search
-npm run test:graphrag                          # unit tests
+
+# Vector pillar
+node scripts/graphrag/index-codebase.mjs        # embed the codebase corpus
+node scripts/graphrag/query.mjs "..." --k 5     # top-k semantic search
+
+# Graph pillar (capy_kg)
+node scripts/graphrag/index-code-graph.mjs      # code structure (files/symbols/deps)
+node scripts/graphrag/index-issue-graph.mjs     # GitHub issue graph (epic/story/blocks)
+node scripts/graphrag/index-memory-graph.mjs    # claude-mem [[link]] graph
+
+# GraphRAG: semantic hit -> graph neighborhood, and graph traversal
+node scripts/graphrag/graph-query.mjs "where is checkout total calculated" --k 5
+node scripts/graphrag/graph-query.mjs --file src/app/.../x.ts   # file neighborhood
+node scripts/graphrag/graph-query.mjs --epic 55                 # stories of an epic
+
+npm run test:graphrag                            # unit tests
 ```
 
 ## Note on the local n8n stack
