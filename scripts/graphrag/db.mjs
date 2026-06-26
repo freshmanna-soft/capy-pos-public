@@ -64,6 +64,43 @@ export async function upsertFileChunks(pool, { path, lang, rows }) {
   }
 }
 
+/** Delete all stored code chunks for a file (used for removed files). */
+export async function deleteFileChunks(pool, path) {
+  const res = await pool.query(
+    `DELETE FROM rag_embeddings WHERE source_type = 'code' AND metadata->>'path' = $1`,
+    [path],
+  );
+  return res.rowCount ?? 0;
+}
+
+// --- incremental index state ---------------------------------------------------
+
+/** Small key/value table tracking the last-indexed git sha (issue #79). */
+export async function ensureIndexState(pool) {
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS rag_index_state (
+       key text PRIMARY KEY,
+       value text NOT NULL,
+       updated_at timestamptz NOT NULL DEFAULT now()
+     )`,
+  );
+}
+
+export async function getIndexState(pool, key) {
+  await ensureIndexState(pool);
+  const { rows } = await pool.query('SELECT value FROM rag_index_state WHERE key = $1', [key]);
+  return rows[0]?.value ?? null;
+}
+
+export async function setIndexState(pool, key, value) {
+  await ensureIndexState(pool);
+  await pool.query(
+    `INSERT INTO rag_index_state (key, value, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [key, value],
+  );
+}
+
 // --- Apache AGE graph (capy_kg) ------------------------------------------------
 
 const GRAPH = 'capy_kg';
