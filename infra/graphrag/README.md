@@ -11,10 +11,22 @@ version-controlled source of truth for the Postgres image + schema that the
 | `Dockerfile` | Postgres 16 with **pgvector** + **Apache AGE** compiled in (one image, both pillars). |
 | `docker-compose.yml` | Standalone `capy-rag-db` service (host port **5433**, named volume). |
 | `migrations/0001_init_vector_store.sql` | Idempotent: `vector` extension + `rag_embeddings` table (embedding `vector(768)`, HNSW cosine index, unique `(source_type, source_id)`). |
+| `migrations/0002_init_age_graph.sql` | Idempotent: enables **Apache AGE** + bootstraps the `capy_kg` knowledge graph (graph pillar, #62). |
 | `.env.example` | Template — copy to `.env` and set `CAPY_RAG_DB_PASSWORD`. `.env` is gitignored. |
 
-The graph pillar (Apache AGE) ships in the image but is not yet `CREATE EXTENSION`-ed;
-that lands in a later migration (Phase 2, issues #62–#66).
+The graph pillar (Apache AGE) is enabled by migration `0002` (#62), which creates the
+`capy_kg` graph. Nodes/edges are populated by later Phase 2 stories (#63–#66).
+
+**Using the graph (AGE):** AGE's `cypher(...)` helper lives in `ag_catalog` and must be
+loaded per connection. Any session that queries the graph must first run:
+
+```sql
+LOAD 'age';
+SET search_path = ag_catalog, "$user", public;
+SELECT * FROM cypher('capy_kg', $$ MATCH (n) RETURN n $$) AS (n agtype);
+```
+
+Plain pgvector queries against `rag_embeddings` do **not** need this.
 
 ## Bring it up
 
