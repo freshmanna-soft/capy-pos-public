@@ -58,6 +58,13 @@ node scripts/graphrag/graph-query.mjs "where is checkout total calculated" --k 5
 node scripts/graphrag/graph-query.mjs --file src/app/.../x.ts   # file neighborhood
 node scripts/graphrag/graph-query.mjs --epic 55                 # stories of an epic
 
+# Shared HTTP retrieval endpoint (#81) — one surface for all consumers
+npm run graphrag:serve                           # GRAPHRAG_PORT (default 37777)
+#   GET  /health
+#   POST /search  {query, k?}   → top-k hits + graph neighborhood
+#   GET  /file?path=<relpath>   → file neighborhood
+#   GET  /epic?number=<n>       → stories of an epic
+
 npm run test:graphrag                            # unit tests
 
 # Refresh the whole store in one command (vector + all graphs; idempotent)

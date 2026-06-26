@@ -27,7 +27,8 @@
     "prepare": "husky",
     "test:graphrag": "vitest run --config scripts/graphrag/vitest.config.mjs",
     "graphrag:reindex": "node scripts/graphrag/reindex-all.mjs",
-    "graphrag:refresh-graphs": "node scripts/graphrag/reindex-all.mjs --issues-memory"
+    "graphrag:refresh-graphs": "node scripts/graphrag/reindex-all.mjs --issues-memory",
+    "graphrag:serve": "node scripts/graphrag/server.mjs"
   },
   "private": true,
   "packageManager": "npm@11.12.1",
