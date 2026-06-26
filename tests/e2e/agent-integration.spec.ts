@@ -174,25 +174,21 @@ test.describe('Agent Integration Workflow', () => {
     expect(parseInt(metricValue || '0')).toBeGreaterThanOrEqual(3);
   });
 
-  test.fixme('should handle event bus messaging between agents', async ({ page }) => {
-    // Needs event-bus-stats / messages-by-source / messages-by-type UI.
-    await page.goto('http://localhost:4200/pos-terminal');
-    await page.fill('[data-testid="product-search"]', 'Coffee');
-    await page.click('[data-testid="search-button"]');
-    await page.click('[data-testid="add-to-cart"]');
-    await page.click('[data-testid="checkout-button"]');
-    await page.click('[data-testid="payment-method-card"]');
-    await page.fill('[data-testid="card-number"]', '4111111111111111');
-    await page.fill('[data-testid="card-expiry"]', '12/25');
-    await page.fill('[data-testid="card-cvv"]', '123');
-    await page.click('[data-testid="submit-payment"]');
-    await page.waitForSelector('[data-testid="payment-success"]');
-    await page.goto('http://localhost:4200/monitor');
-    await page.waitForSelector('[data-testid="event-bus-stats"]');
-    const messagesByType = await page.$$('[data-testid="messages-by-type"]');
-    expect(messagesByType.length).toBeGreaterThan(0);
-    const messageTypes = await Promise.all(messagesByType.map((msg) => msg.textContent()));
-    expect(messageTypes.some((text) => text?.includes('PAYMENT_PROCESSED'))).toBe(true);
+  test('should surface event-bus activity on the dashboard after a sale', async ({ page }) => {
+    // A real cash sale publishes events; navigate IN-APP (not goto, which would
+    // reload and reset the in-memory bus) to the dashboard and assert the
+    // Event Bus Activity panel reflects them. (#97)
+    await completeCashSale(page, 'Coffee');
+    await expect(page.getByTestId('receipt-overlay')).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('btn-new-transaction').click();
+
+    await page.locator('[data-testid="nav-dashboard"]:visible').click();
+    await expect(page).toHaveURL(/.*dashboard/);
+
+    await expect(page.getByTestId('event-bus-stats')).toBeVisible();
+    // The cart/checkout published events, so the message counter is non-zero.
+    await expect(page.getByTestId('total-messages')).not.toHaveText('0');
+    await expect(page.getByTestId('messages-by-type').first()).toBeVisible();
   });
 
   test.fixme('should export audit logs', async ({ page }) => {
