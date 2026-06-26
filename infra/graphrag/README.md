@@ -59,7 +59,29 @@ node scripts/graphrag/graph-query.mjs --file src/app/.../x.ts   # file neighborh
 node scripts/graphrag/graph-query.mjs --epic 55                 # stories of an epic
 
 npm run test:graphrag                            # unit tests
+
+# Refresh the whole store in one command (vector + all graphs; idempotent)
+npm run graphrag:reindex                         # or: node scripts/graphrag/reindex-all.mjs [--strict]
 ```
+
+## Auto-refresh on change (opt-in)
+
+`reindex-all` is safe to run on every repo update, but auto-running it from a git
+hook executes code (and needs Ollama + capy-rag-db up), so it is **not installed
+by default**. To enable it for your machine, add a `.husky/post-merge` hook that
+only fires when you've opted in via `RAG_DB_URL` and never blocks the merge:
+
+```sh
+#!/usr/bin/env sh
+# Opt-in, non-blocking GraphRAG refresh.
+if [ -n "$RAG_DB_URL" ]; then
+  nohup npm run graphrag:reindex >/tmp/graphrag-reindex.log 2>&1 &
+fi
+exit 0
+```
+
+(Incremental, changed-files-only refresh is issue #79; auto-refresh of just the
+issue/memory subgraphs is #80.)
 
 ## Note on the local n8n stack
 
