@@ -1,0 +1,32 @@
+# Standalone compose for the Capy-POS shared GraphRAG store (epic #55).
+# pgvector + Apache AGE in one Postgres 16 (custom image, see ./Dockerfile).
+#
+# In Javier's local setup this same service is also defined inline in
+# ~/n8n-local/docker-compose.yml (so it shares the n8n docker stack). This file
+# is the version-controlled source of truth and lets the store be brought up
+# independently:
+#
+#   cd infra/graphrag
+#   cp .env.example .env   # then set a real CAPY_RAG_DB_PASSWORD
+#   docker compose up -d --build
+#   docker exec -i capy-rag-db psql -U capy -d capy_rag -f /migrations/0001_init_vector_store.sql
+#
+# Connect: postgres://capy:<pw>@localhost:5433/capy_rag
+services:
+  capy-rag-db:
+    build: .
+    image: capy-rag-db:pg16-vector-age
+    container_name: capy-rag-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=capy
+      - POSTGRES_PASSWORD=${CAPY_RAG_DB_PASSWORD:?set CAPY_RAG_DB_PASSWORD in .env}
+      - POSTGRES_DB=capy_rag
+    ports:
+      - '5433:5432'
+    volumes:
+      - capy_rag_pg_data:/var/lib/postgresql/data
+      - ./migrations:/migrations:ro
+
+volumes:
+  capy_rag_pg_data:

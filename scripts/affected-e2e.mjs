@@ -81,6 +81,8 @@ const SKIP_PATTERNS = [
   /^docs\//,
   /^\.github\//,
   /^\.claude\//,
+  /^infra\//, // infra-as-code (Docker/compose/SQL/env) — no Angular runtime impact
+  /^scripts\//, // build/dev tooling (this runner, graphrag) — not bundled into the app
   /^LICENSE$/,
   /^src\/stories\//,
   /\.stories\.ts$/,
