@@ -143,3 +143,31 @@ export async function upsertCodeGraph(pool, { files, symbols, layers, edges }) {
   await graphExec(pool, stmts);
   return { nodes: layers.length + files.length + symbols.length, edges: edges.length };
 }
+
+/**
+ * Replace the :Issue subgraph in capy_kg (scope-clear + MERGE → idempotent).
+ * Leaves the code (File/Symbol/Layer) and future :Memory subgraphs intact.
+ * @param {pg.Pool} pool
+ * @param {{nodes: object[], edges: object[]}} graph
+ */
+export async function upsertIssueGraph(pool, { nodes, edges }) {
+  const stmts = [cypherStmt('MATCH (n:Issue) DETACH DELETE n')];
+
+  for (const n of nodes) {
+    stmts.push(
+      cypherStmt(
+        `MERGE (n:Issue {id: '${escCypher(n.id)}'}) ` +
+          `SET n.number = ${Number(n.number)}, n.title = '${escCypher(n.title)}', ` +
+          `n.state = '${escCypher(n.state)}', n.is_epic = ${n.isEpic ? 'true' : 'false'}`,
+      ),
+    );
+  }
+  for (const e of edges) {
+    const a = matchRef('a', 'Issue', e.from.id);
+    const b = matchRef('b', 'Issue', e.to.id);
+    stmts.push(cypherStmt(`MATCH ${a}, ${b} MERGE (a)-[:${e.type}]->(b)`));
+  }
+
+  await graphExec(pool, stmts);
+  return { nodes: nodes.length, edges: edges.length };
+}
