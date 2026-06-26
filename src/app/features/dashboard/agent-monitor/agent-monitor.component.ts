@@ -50,7 +50,9 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div class="flex flex-col p-3 bg-gray-50 rounded-lg">
             <span class="text-xs text-gray-500 mb-1">Total Agents</span>
-            <span class="text-xl md:text-2xl font-bold text-gray-900">{{ agents().length }}</span>
+            <span class="text-xl md:text-2xl font-bold text-gray-900" data-testid="total-agents">{{
+              agents().length
+            }}</span>
           </div>
           <div class="flex flex-col p-3 bg-gray-50 rounded-lg">
             <span class="text-xs text-gray-500 mb-1">Running</span>
@@ -86,6 +88,7 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
             @for (agent of agents(); track agent) {
               <div
                 class="p-3 border rounded-lg"
+                data-testid="agent-card"
                 [class]="
                   agent.isRunning
                     ? 'border-l-4 border-l-green-500 border-gray-200'
@@ -96,6 +99,7 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
                   <h3 class="text-sm font-semibold text-gray-900">{{ agent.name }}</h3>
                   <span
                     class="px-2 py-0.5 rounded text-xs font-bold"
+                    data-testid="agent-status"
                     [class]="
                       agent.isRunning ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     "
@@ -179,12 +183,14 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
           </h2>
           <div class="space-y-2">
             @for (metric of metrics() | keyvalue; track metric) {
-              <div class="p-3 border border-gray-200 rounded-lg">
+              <div class="p-3 border border-gray-200 rounded-lg" data-testid="metric-card">
                 <h3 class="text-sm font-semibold text-gray-900 mb-2 truncate">{{ metric.key }}</h3>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                   <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
                     <span>Count</span>
-                    <span class="font-semibold">{{ metric.value.count }}</span>
+                    <span class="font-semibold" data-testid="metric-value">{{
+                      metric.value.count
+                    }}</span>
                   </div>
                   <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
                     <span>Avg</span>
@@ -224,6 +230,7 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
             @for (log of recentAuditLogs(); track log) {
               <div
                 class="p-3 border rounded-lg border-l-4"
+                data-testid="audit-log-entry"
                 [class]="log.status === 'SUCCESS' ? 'border-l-green-500' : 'border-l-red-500'"
               >
                 <div class="flex flex-wrap justify-between items-center gap-1 mb-1">
