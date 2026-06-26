@@ -1,25 +1,33 @@
 #!/usr/bin/env node
 /**
- * Codebase indexer (issue #58) — the first GraphRAG corpus.
+ * Codebase indexer (issue #58; incremental mode #79) — the vector corpus.
  *
  * Walks the repo's source dirs, chunks each file on line boundaries (chunker.mjs),
  * embeds every chunk via the local Ollama service (#57), and upserts the chunks
  * into the vector store (#56) under a canonical id of `path:startLine-endLine`.
  *
- * Re-running is idempotent: each file's rows are replaced atomically, so chunk
- * counts stay stable and no duplicate/orphan rows accumulate.
+ * Re-running is idempotent: each file's rows are replaced atomically.
  *
  * Usage:
- *   RAG_DB_URL=postgres://capy:<pw>@localhost:5433/capy_rag \
- *     node scripts/graphrag/index-codebase.mjs [--root <dir> ...] [--dry]
+ *   RAG_DB_URL=… node scripts/graphrag/index-codebase.mjs [--root <dir> ...] [--dry] [--incremental]
  *
- *   --dry   chunk + report only; no embedding, no DB writes.
+ *   --dry           chunk + report only; no embedding, no DB writes.
+ *   --incremental   re-embed only files changed since the last indexed git sha
+ *                   (and drop removed files); falls back to a full index when no
+ *                   prior sha is recorded. The HEAD sha is stored after success.
  */
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join, relative, extname } from 'node:path';
 import { chunkFile } from './chunker.mjs';
 import { embed } from './embedding-service.mjs';
-import { makePool, upsertFileChunks } from './db.mjs';
+import {
+  makePool,
+  upsertFileChunks,
+  deleteFileChunks,
+  getIndexState,
+  setIndexState,
+} from './db.mjs';
+import { changedFilesSince, headSha } from './git-diff.mjs';
 
 const REPO_ROOT = process.cwd();
 const DEFAULT_ROOTS = ['src', 'scripts', 'tools'];
@@ -28,13 +36,14 @@ const IGNORE_DIRS = new Set([
   'node_modules', 'dist', 'coverage', '.angular', '.git',
   'test-results', 'playwright-report',
 ]);
+const STATE_KEY = 'codebase_sha';
 
 async function* walk(dir) {
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {
-    return; // missing root dir — skip
+    return;
   }
   for (const e of entries) {
     if (e.isDirectory()) {
@@ -46,63 +55,110 @@ async function* walk(dir) {
   }
 }
 
+/** Is a repo-relative path one we index (right ext, under a root, not ignored)? */
+function isIndexable(relPath, roots) {
+  if (!(extname(relPath) in EXT_LANG)) return false;
+  if (!roots.some((r) => relPath === r || relPath.startsWith(`${r}/`))) return false;
+  if (relPath.split('/').some((seg) => IGNORE_DIRS.has(seg))) return false;
+  return true;
+}
+
+/** Chunk + embed + upsert one file. Returns the number of chunks written. */
+async function indexFile(pool, relPath) {
+  const content = await readFile(join(REPO_ROOT, relPath), 'utf8');
+  const fileChunks = chunkFile(content);
+  if (fileChunks.length === 0) return 0;
+  const lang = EXT_LANG[extname(relPath)];
+  const rows = [];
+  for (const c of fileChunks) {
+    const embedding = await embed(c.text); // serialized inside the service
+    rows.push({
+      sourceId: `${relPath}:${c.startLine}-${c.endLine}`,
+      startLine: c.startLine,
+      endLine: c.endLine,
+      text: c.text,
+      embedding,
+    });
+  }
+  await upsertFileChunks(pool, { path: relPath, lang, rows });
+  return fileChunks.length;
+}
+
 function parseArgs(argv) {
   const roots = [];
   let dry = false;
+  let incremental = false;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--dry') dry = true;
+    else if (argv[i] === '--incremental') incremental = true;
     else if (argv[i] === '--root') roots.push(argv[(i += 1)]);
   }
-  return { roots: roots.length ? roots : DEFAULT_ROOTS, dry };
+  return { roots: roots.length ? roots : DEFAULT_ROOTS, dry, incremental };
 }
 
 async function main() {
-  const { roots, dry } = parseArgs(process.argv.slice(2));
+  const { roots, dry, incremental } = parseArgs(process.argv.slice(2));
   const pool = dry ? null : makePool();
-
+  const t0 = Date.now();
   let files = 0;
   let chunks = 0;
   let written = 0;
-  const t0 = Date.now();
+  let removed = 0;
+  let mode = 'full';
 
   try {
-    for (const root of roots) {
-      for await (const abs of walk(join(REPO_ROOT, root))) {
-        const relPath = relative(REPO_ROOT, abs);
-        const lang = EXT_LANG[extname(abs)];
-        const content = await readFile(abs, 'utf8');
-        const fileChunks = chunkFile(content);
-        if (fileChunks.length === 0) continue;
-        files += 1;
-        chunks += fileChunks.length;
+    const lastSha = !dry && incremental ? await getIndexState(pool, STATE_KEY) : null;
 
-        if (dry) {
-          process.stdout.write(`DRY ${relPath} → ${fileChunks.length} chunk(s)\n`);
-          continue;
+    if (lastSha) {
+      // Incremental: only files changed since the last indexed sha.
+      mode = `incremental (since ${lastSha.slice(0, 8)})`;
+      const { modified, deleted } = changedFilesSince(lastSha, REPO_ROOT);
+      for (const p of deleted.filter((x) => isIndexable(x, roots))) {
+        removed += await deleteFileChunks(pool, p);
+        process.stdout.write(`removed ${p}\n`);
+      }
+      for (const p of modified.filter((x) => isIndexable(x, roots))) {
+        const n = await indexFile(pool, p);
+        if (n > 0) {
+          files += 1;
+          chunks += n;
+          written += n;
+          process.stdout.write(`indexed ${p} (${n})\n`);
         }
-
-        const rows = [];
-        for (const c of fileChunks) {
-          const embedding = await embed(c.text); // serialized inside the service
-          rows.push({
-            sourceId: `${relPath}:${c.startLine}-${c.endLine}`,
-            startLine: c.startLine,
-            endLine: c.endLine,
-            text: c.text,
-            embedding,
-          });
+      }
+    } else {
+      // Full walk.
+      for (const root of roots) {
+        for await (const abs of walk(join(REPO_ROOT, root))) {
+          const relPath = relative(REPO_ROOT, abs);
+          if (dry) {
+            const fileChunks = chunkFile(await readFile(abs, 'utf8'));
+            if (fileChunks.length === 0) continue;
+            files += 1;
+            chunks += fileChunks.length;
+            process.stdout.write(`DRY ${relPath} → ${fileChunks.length} chunk(s)\n`);
+            continue;
+          }
+          const n = await indexFile(pool, relPath);
+          if (n > 0) {
+            files += 1;
+            chunks += n;
+            written += n;
+            process.stdout.write(`indexed ${relPath} (${n})\n`);
+          }
         }
-        written += await upsertFileChunks(pool, { path: relPath, lang, rows });
-        process.stdout.write(`indexed ${relPath} (${rows.length})\n`);
       }
     }
+
+    if (!dry) await setIndexState(pool, STATE_KEY, headSha(REPO_ROOT));
   } finally {
     if (pool) await pool.end();
   }
 
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   process.stdout.write(
-    `\n${dry ? 'DRY ' : ''}done: ${files} files, ${chunks} chunks${dry ? '' : `, ${written} rows upserted`} in ${secs}s\n`,
+    `\n${dry ? 'DRY ' : ''}done [${mode}]: ${files} files, ${chunks} chunks` +
+      `${dry ? '' : `, ${written} rows upserted, ${removed} removed`} in ${secs}s\n`,
   );
 }
 

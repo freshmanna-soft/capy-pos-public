@@ -15,21 +15,24 @@
 import { execFileSync } from 'node:child_process';
 
 const STRICT = process.argv.includes('--strict');
+// --incremental re-embeds only changed files for the vector corpus (the ~40s
+// cost); graphs rebuild wholesale (cheap) so cross-file edges stay correct.
+const INCREMENTAL = process.argv.includes('--incremental');
 
 const STEPS = [
-  ['Vector — codebase corpus', 'index-codebase.mjs'],
-  ['Graph — code structure', 'index-code-graph.mjs'],
-  ['Graph — GitHub issues', 'index-issue-graph.mjs'],
-  ['Graph — memory links', 'index-memory-graph.mjs'],
+  ['Vector — codebase corpus', 'index-codebase.mjs', INCREMENTAL ? ['--incremental'] : []],
+  ['Graph — code structure', 'index-code-graph.mjs', []],
+  ['Graph — GitHub issues', 'index-issue-graph.mjs', []],
+  ['Graph — memory links', 'index-memory-graph.mjs', []],
 ];
 
 const t0 = Date.now();
 let failures = 0;
 
-for (const [label, script] of STEPS) {
-  process.stdout.write(`\n=== ${label} (${script}) ===\n`);
+for (const [label, script, extraArgs] of STEPS) {
+  process.stdout.write(`\n=== ${label} (${script}${extraArgs.length ? ` ${extraArgs.join(' ')}` : ''}) ===\n`);
   try {
-    execFileSync('node', [`scripts/graphrag/${script}`], { stdio: 'inherit', env: process.env });
+    execFileSync('node', [`scripts/graphrag/${script}`, ...extraArgs], { stdio: 'inherit', env: process.env });
   } catch (err) {
     failures += 1;
     process.stderr.write(`  ✗ ${script} failed: ${err?.message ?? err}\n`);
