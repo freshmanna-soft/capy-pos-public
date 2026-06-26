@@ -63,3 +63,83 @@ export async function upsertFileChunks(pool, { path, lang, rows }) {
     client.release();
   }
 }
+
+// --- Apache AGE graph (capy_kg) ------------------------------------------------
+
+const GRAPH = 'capy_kg';
+
+/** Escape a value for use inside a single-quoted Cypher string literal. */
+function escCypher(v) {
+  return String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+/** A Cypher node-match pattern: Layer matches by `name`, everything else by `id`. */
+function matchRef(varName, label, idVal) {
+  const key = label === 'Layer' ? 'name' : 'id';
+  return `(${varName}:${label} {${key}: '${escCypher(idVal)}'})`;
+}
+
+/** Wrap a Cypher statement as an AGE SQL call. */
+function cypherStmt(cypher) {
+  return `SELECT * FROM cypher('${GRAPH}', $$ ${cypher} $$) AS (v agtype);`;
+}
+
+/**
+ * Run Cypher statements against capy_kg. AGE must be loaded and on the search_path
+ * per connection, so every batch is prefixed with LOAD + SET. Statements run in
+ * order; batched to keep query strings reasonable.
+ * @param {pg.Pool} pool
+ * @param {string[]} statements  full SQL statements (e.g. from cypherStmt)
+ */
+export async function graphExec(pool, statements, batchSize = 150) {
+  const preamble = `LOAD 'age'; SET search_path = ag_catalog, "$user", public;`;
+  for (let i = 0; i < statements.length; i += batchSize) {
+    const batch = statements.slice(i, i + batchSize).join('\n');
+    await pool.query(`${preamble}\n${batch}`);
+  }
+}
+
+/**
+ * Replace the code subgraph (File/Symbol/Layer + their edges) in capy_kg.
+ * Scope-clears only those labels so future :Issue / :Memory subgraphs survive,
+ * then MERGEs nodes and edges (idempotent — re-running yields identical counts).
+ * @param {pg.Pool} pool
+ * @param {{files: object[], symbols: object[], layers: string[], edges: object[]}} graph
+ */
+export async function upsertCodeGraph(pool, { files, symbols, layers, edges }) {
+  const stmts = [];
+
+  // 1. Scope-clear the code labels.
+  for (const label of ['File', 'Symbol', 'Layer']) {
+    stmts.push(cypherStmt(`MATCH (n:${label}) DETACH DELETE n`));
+  }
+
+  // 2. Nodes (layers, files, symbols) — must exist before edges.
+  for (const name of layers) {
+    stmts.push(cypherStmt(`MERGE (n:Layer {name: '${escCypher(name)}'})`));
+  }
+  for (const f of files) {
+    stmts.push(
+      cypherStmt(
+        `MERGE (n:File {id: '${escCypher(f.id)}'}) SET n.layer = '${escCypher(f.layer)}', n.lang = '${escCypher(f.lang)}'`,
+      ),
+    );
+  }
+  for (const s of symbols) {
+    stmts.push(
+      cypherStmt(
+        `MERGE (n:Symbol {id: '${escCypher(s.id)}'}) SET n.name = '${escCypher(s.name)}', n.kind = '${escCypher(s.kind)}', n.path = '${escCypher(s.path)}', n.layer = '${escCypher(s.layer)}'`,
+      ),
+    );
+  }
+
+  // 3. Edges.
+  for (const e of edges) {
+    const a = matchRef('a', e.from.label, e.from.id);
+    const b = matchRef('b', e.to.label, e.to.id);
+    stmts.push(cypherStmt(`MATCH ${a}, ${b} MERGE (a)-[:${e.type}]->(b)`));
+  }
+
+  await graphExec(pool, stmts);
+  return { nodes: layers.length + files.length + symbols.length, edges: edges.length };
+}
