@@ -11,6 +11,12 @@ import {
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
+import {
+  AuditLogService,
+  AuditAction,
+  AuditStatus,
+} from '@core/infrastructure/audit/audit-log.service';
+import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 import { Product } from '@core/domain/entities/product.entity';
 import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
 
@@ -42,6 +48,8 @@ export class PosFacade {
   private readonly adjustStock = inject(AdjustStockOnSaleUseCase);
   private readonly db = inject(DexieDatabase);
   private readonly eventBus = inject(EventBusService);
+  private readonly auditLog = inject(AuditLogService);
+  private readonly telemetry = inject(TelemetryService);
 
   // ─── Cart State (read-only signals) ───────────────────────────────────
 
@@ -175,6 +183,29 @@ export class PosFacade {
         'high'
       )
     );
+
+    // Observability (fire-and-forget): feed the audit log + telemetry so the
+    // agent-monitor dashboard reflects real POS activity. Deliberately NOT
+    // awaited — checkout must never block or fail on logging.
+    this.auditLog
+      .log({
+        agentName: 'PaymentAgent',
+        operation: 'processPayment',
+        entityType: 'Transaction',
+        entityId: paymentResult.transactionId,
+        action: AuditAction.EXECUTE,
+        status: AuditStatus.SUCCESS,
+        metadata: { method: paymentResult.method, amount: paymentResult.amount },
+      })
+      .catch((error) => console.error('[PosFacade] Audit log failed:', error));
+    try {
+      this.telemetry.recordCounter('payments.processed', 1, { method: paymentResult.method });
+      this.telemetry.recordGauge('payment.amount', paymentResult.amount, {
+        method: paymentResult.method,
+      });
+    } catch (error) {
+      console.error('[PosFacade] Telemetry failed:', error);
+    }
 
     return receipt;
   }

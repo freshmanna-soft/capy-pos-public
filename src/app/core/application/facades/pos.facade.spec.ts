@@ -7,6 +7,8 @@ import { AdjustStockOnSaleUseCase } from '@core/application/use-cases/adjust-sto
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventType } from '@core/infrastructure/messaging/event-bus.events';
+import { AuditLogService } from '@core/infrastructure/audit/audit-log.service';
+import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 import { Product } from '@core/domain/entities/product.entity';
 
 describe('PosFacade', () => {
@@ -263,6 +265,78 @@ describe('PosFacade', () => {
 
       expect(receipt).toBeTruthy();
       expect(mockCartService.clearCart).toHaveBeenCalled();
+    });
+  });
+
+  describe('checkout observability (#92)', () => {
+    function setup(overrides: { auditReject?: boolean; telemetryThrow?: boolean } = {}) {
+      const mockAudit = {
+        log: vi
+          .fn()
+          .mockReturnValue(
+            overrides.auditReject ? Promise.reject(new Error('db down')) : Promise.resolve()
+          ),
+      };
+      const mockTelemetry = {
+        recordCounter: vi.fn(() => {
+          if (overrides.telemetryThrow) throw new Error('telemetry down');
+        }),
+        recordGauge: vi.fn(),
+      };
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          PosFacade,
+          {
+            provide: CartService,
+            useValue: {
+              ...mockCartService,
+              items: signal([{ product: { id: 'p1' }, quantity: 1 }]),
+            },
+          },
+          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
+          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
+          { provide: DexieDatabase, useValue: mockDb },
+          { provide: EventBusService, useValue: mockEventBus },
+          { provide: AuditLogService, useValue: mockAudit },
+          { provide: TelemetryService, useValue: mockTelemetry },
+        ],
+      });
+      return { facade: TestBed.inject(PosFacade), mockAudit, mockTelemetry };
+    }
+
+    it('records an audit entry and telemetry on checkout', async () => {
+      const { facade, mockAudit, mockTelemetry } = setup();
+      await facade.checkout({ method: 'cash', amount: 100, transactionId: 'TXN-1' } as never);
+      expect(mockAudit.log).toHaveBeenCalledWith(
+        expect.objectContaining({ operation: 'processPayment', entityId: 'TXN-1' })
+      );
+      expect(mockTelemetry.recordCounter).toHaveBeenCalledWith('payments.processed', 1, {
+        method: 'cash',
+      });
+      expect(mockTelemetry.recordGauge).toHaveBeenCalled();
+    });
+
+    it('still returns a receipt when audit logging rejects', async () => {
+      const { facade } = setup({ auditReject: true });
+      const receipt = await facade.checkout({
+        method: 'cash',
+        amount: 100,
+        transactionId: 'TXN-2',
+      } as never);
+      // Flush the fire-and-forget rejection so its .catch runs.
+      await new Promise((r) => setTimeout(r, 0));
+      expect(receipt).toBeTruthy();
+    });
+
+    it('still returns a receipt when telemetry throws', async () => {
+      const { facade } = setup({ telemetryThrow: true });
+      const receipt = await facade.checkout({
+        method: 'card',
+        amount: 50,
+        transactionId: 'TXN-3',
+      } as never);
+      expect(receipt).toBeTruthy();
     });
   });
 

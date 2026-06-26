@@ -128,50 +128,34 @@ test.describe('Agent Integration Workflow', () => {
     expect(circuitState).toBe('OPEN');
   });
 
-  test.fixme('should track audit logs for all operations', async ({ page }) => {
-    // Needs per-operation audit-log-entry UI (dashboard only renders audit-trace).
-    await page.goto('http://localhost:4200/pos-terminal');
-    await page.fill('[data-testid="product-search"]', 'Coffee');
-    await page.click('[data-testid="search-button"]');
-    await page.click('[data-testid="add-to-cart"]');
-    await page.click('[data-testid="checkout-button"]');
-    await page.click('[data-testid="payment-method-cash"]');
-    await page.fill('[data-testid="cash-amount"]', '10.00');
-    await page.click('[data-testid="submit-payment"]');
-    await page.waitForSelector('[data-testid="payment-success"]');
-    await page.goto('http://localhost:4200/monitor');
-    await page.waitForSelector('[data-testid="audit-log-entry"]');
-    const auditLogs = await page.$$('[data-testid="audit-log-entry"]');
-    expect(auditLogs.length).toBeGreaterThanOrEqual(4);
-    const logTexts = await Promise.all(auditLogs.map((log) => log.textContent()));
-    const hasPaymentLog = logTexts.some(
-      (text) => text?.includes('PaymentAgent') && text?.includes('processPayment')
-    );
-    expect(hasPaymentLog).toBe(true);
+  test('should record an audit-log entry for a sale', async ({ page }) => {
+    // The checkout flow writes an audit entry (PosFacade → AuditLogService).
+    // Navigate IN-APP to /dashboard (keeps the in-memory log) and assert the
+    // Recent Audit Logs panel shows the PaymentAgent/processPayment entry. (#96)
+    await completeCashSale(page, 'Coffee');
+    await expect(page.getByTestId('receipt-overlay')).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('btn-new-transaction').click();
+
+    await page.locator('[data-testid="nav-dashboard"]:visible').click();
+    await expect(page).toHaveURL(/.*dashboard/);
+
+    const entry = page.getByTestId('audit-log-entry').filter({ hasText: 'processPayment' });
+    await expect(entry.first()).toBeVisible({ timeout: 10000 });
   });
 
-  test.fixme('should collect telemetry metrics', async ({ page }) => {
-    // Needs metric-card / metric-value telemetry dashboard.
-    for (let i = 0; i < 3; i++) {
-      await page.goto('http://localhost:4200/pos-terminal');
-      await page.fill('[data-testid="product-search"]', 'Coffee');
-      await page.click('[data-testid="search-button"]');
-      await page.click('[data-testid="add-to-cart"]');
-      await page.click('[data-testid="checkout-button"]');
-      await page.click('[data-testid="payment-method-cash"]');
-      await page.fill('[data-testid="cash-amount"]', '10.00');
-      await page.click('[data-testid="submit-payment"]');
-      await page.waitForSelector('[data-testid="payment-success"]');
-    }
-    await page.goto('http://localhost:4200/monitor');
-    await page.waitForSelector('[data-testid="metric-card"]');
-    const metricCards = await page.$$('[data-testid="metric-card"]');
-    expect(metricCards.length).toBeGreaterThan(0);
-    const paymentMetric = await page
-      .locator('[data-testid="metric-card"]')
-      .filter({ hasText: 'payments.processed' });
-    const metricValue = await paymentMetric.locator('[data-testid="metric-value"]').textContent();
-    expect(parseInt(metricValue || '0')).toBeGreaterThanOrEqual(3);
+  test('should record telemetry metrics for a sale', async ({ page }) => {
+    // The checkout flow records a payments.processed counter (PosFacade →
+    // TelemetryService); the dashboard's Metrics panel reflects it. (#98)
+    await completeCashSale(page, 'Coffee');
+    await expect(page.getByTestId('receipt-overlay')).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('btn-new-transaction').click();
+
+    await page.locator('[data-testid="nav-dashboard"]:visible').click();
+    await expect(page).toHaveURL(/.*dashboard/);
+
+    const paymentMetric = page.getByTestId('metric-card').filter({ hasText: 'payments.processed' });
+    await expect(paymentMetric).toBeVisible({ timeout: 10000 });
+    await expect(paymentMetric.getByTestId('metric-value')).not.toHaveText('0');
   });
 
   test('should surface event-bus activity on the dashboard after a sale', async ({ page }) => {
