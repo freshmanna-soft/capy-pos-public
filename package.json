@@ -28,7 +28,8 @@
     "test:graphrag": "vitest run --config scripts/graphrag/vitest.config.mjs",
     "graphrag:reindex": "node scripts/graphrag/reindex-all.mjs",
     "graphrag:refresh-graphs": "node scripts/graphrag/reindex-all.mjs --issues-memory",
-    "graphrag:serve": "node scripts/graphrag/server.mjs"
+    "graphrag:serve": "node scripts/graphrag/server.mjs",
+    "graphrag:celebrate": "node scripts/graphrag/celebrate.mjs"
   },
   "private": true,
   "packageManager": "npm@11.12.1",
