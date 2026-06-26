@@ -97,8 +97,28 @@ curl -s localhost:37777/search -H 'content-type: application/json' -d '{"query":
 (from the n8n container), JSON body `{ "query": "{{ $json.query }}", "k": 5 }`. Feed `hits[]`
 (chunk + `graph` neighborhood) into the agent's context.
 
-> Registering an MCP server, adding a `.claude` skill, or editing the live n8n workflow are
-> per-environment opt-ins; the client + endpoint above are the shared contract they use.
+**MCP server** (`scripts/graphrag/mcp-server.mjs`, #90) — exposes GraphRAG to cloud
+`.claude` subagents as native tools (`graphrag_search` / `graphrag_file` / `graphrag_epic`).
+Register it (per-environment opt-in) by adding to `.mcp.json` (or Claude settings):
+
+```json
+{
+  "mcpServers": {
+    "capy-graphrag": {
+      "command": "node",
+      "args": ["scripts/graphrag/mcp-server.mjs"],
+      "env": { "GRAPHRAG_ENDPOINT": "http://localhost:37777" }
+    }
+  }
+}
+```
+
+(The server proxies the HTTP endpoint, so `npm run graphrag:serve` must be running.)
+
+> **Activation is per-environment and intentionally left to you:** registering the MCP
+> server above, editing the live n8n workflow, or wiring a GitHub push webhook to
+> `graphrag:reindex --incremental`. The client, endpoint, and MCP server are the shared
+> contract; flipping them on touches your machine/services.
 
 Issues and memory change more often than code, so `graphrag:refresh-graphs` is the
 cheap path to keep those subgraphs current. To run it on a schedule (opt-in), add a
