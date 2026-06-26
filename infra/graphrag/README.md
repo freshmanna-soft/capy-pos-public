@@ -61,7 +61,17 @@ node scripts/graphrag/graph-query.mjs --epic 55                 # stories of an 
 npm run test:graphrag                            # unit tests
 
 # Refresh the whole store in one command (vector + all graphs; idempotent)
-npm run graphrag:reindex                         # or: node scripts/graphrag/reindex-all.mjs [--strict]
+npm run graphrag:reindex                              # full
+node scripts/graphrag/reindex-all.mjs --incremental   # only re-embed changed files (#79)
+npm run graphrag:refresh-graphs                       # issue + memory subgraphs only (~1s, no Ollama) (#80)
+```
+
+Issues and memory change more often than code, so `graphrag:refresh-graphs` is the
+cheap path to keep those subgraphs current. To run it on a schedule (opt-in), add a
+cron entry, e.g. every 15 min:
+
+```cron
+*/15 * * * * cd /path/to/capy-pos && RAG_DB_URL=postgres://capy:<pw>@localhost:5433/capy_rag npm run graphrag:refresh-graphs >>/tmp/graphrag-graphs.log 2>&1
 ```
 
 ## Auto-refresh on change (opt-in)

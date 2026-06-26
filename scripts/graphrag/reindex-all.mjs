@@ -18,13 +18,19 @@ const STRICT = process.argv.includes('--strict');
 // --incremental re-embeds only changed files for the vector corpus (the ~40s
 // cost); graphs rebuild wholesale (cheap) so cross-file edges stay correct.
 const INCREMENTAL = process.argv.includes('--incremental');
+// --issues-memory refreshes ONLY the issue + memory subgraphs (#80): fast
+// (~seconds, no Ollama), for content that changes more often than the code.
+const ISSUES_MEMORY = process.argv.includes('--issues-memory');
 
-const STEPS = [
+const ALL_STEPS = [
   ['Vector — codebase corpus', 'index-codebase.mjs', INCREMENTAL ? ['--incremental'] : []],
   ['Graph — code structure', 'index-code-graph.mjs', []],
   ['Graph — GitHub issues', 'index-issue-graph.mjs', []],
   ['Graph — memory links', 'index-memory-graph.mjs', []],
 ];
+const STEPS = ISSUES_MEMORY
+  ? ALL_STEPS.filter(([, s]) => s === 'index-issue-graph.mjs' || s === 'index-memory-graph.mjs')
+  : ALL_STEPS;
 
 const t0 = Date.now();
 let failures = 0;
