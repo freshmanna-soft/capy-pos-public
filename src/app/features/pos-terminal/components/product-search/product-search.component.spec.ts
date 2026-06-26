@@ -522,4 +522,23 @@ describe('ProductSearchComponent', () => {
       expect(component.isLoading()).toBe(false);
     });
   });
+
+  describe('Results view mode toggle', () => {
+    it('should default to the grid (card) view', () => {
+      expect(component.viewMode()).toBe('grid');
+    });
+
+    it('should switch to the list view', () => {
+      component.setViewMode('list');
+
+      expect(component.viewMode()).toBe('list');
+    });
+
+    it('should switch back to the grid view', () => {
+      component.setViewMode('list');
+      component.setViewMode('grid');
+
+      expect(component.viewMode()).toBe('grid');
+    });
+  });
 });

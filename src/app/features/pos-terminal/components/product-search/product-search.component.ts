@@ -38,6 +38,12 @@ export class ProductSearchComponent implements OnInit {
   categories = signal<string[]>([]);
   hasMoreProducts = signal<boolean>(false);
 
+  /**
+   * Result layout: 'grid' shows touch-friendly product cards, 'list' shows
+   * compact rows. Cashiers can switch on the fly via the view toggle.
+   */
+  viewMode = signal<'grid' | 'list'>('grid');
+
   // Pagination state
   private readonly pageSize = 20;
   private currentPage = 0;
@@ -222,6 +228,13 @@ export class ProductSearchComponent implements OnInit {
     }
 
     this.searchSubject.next(query);
+  }
+
+  /**
+   * Switch the results layout between the card grid and compact rows.
+   */
+  setViewMode(mode: 'grid' | 'list'): void {
+    this.viewMode.set(mode);
   }
 
   /**
