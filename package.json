@@ -26,7 +26,8 @@
     "build-storybook": "ng run capy-pos:build-storybook",
     "prepare": "husky",
     "test:graphrag": "vitest run --config scripts/graphrag/vitest.config.mjs",
-    "graphrag:reindex": "node scripts/graphrag/reindex-all.mjs"
+    "graphrag:reindex": "node scripts/graphrag/reindex-all.mjs",
+    "graphrag:refresh-graphs": "node scripts/graphrag/reindex-all.mjs --issues-memory"
   },
   "private": true,
   "packageManager": "npm@11.12.1",
