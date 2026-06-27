@@ -221,11 +221,17 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
 
         <!-- Recent Audit Logs Section -->
         <section class="bg-white p-4 rounded-lg shadow-sm">
-          <h2
-            class="text-base md:text-lg font-semibold text-gray-900 mb-3 pb-2 border-b-2 border-blue-500"
-          >
-            Recent Audit Logs
-          </h2>
+          <div class="flex items-center justify-between mb-3 pb-2 border-b-2 border-blue-500">
+            <h2 class="text-base md:text-lg font-semibold text-gray-900">Recent Audit Logs</h2>
+            <button
+              type="button"
+              class="text-xs px-2.5 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
+              (click)="exportAuditLogs()"
+              data-testid="export-audit-logs"
+            >
+              Export
+            </button>
+          </div>
           <div class="space-y-2 max-h-96 overflow-y-auto">
             @for (log of recentAuditLogs(); track log) {
               <div
@@ -398,6 +404,18 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
     } catch {
       // Clipboard may be unavailable (no permission / insecure context); ignore.
     }
+  }
+
+  /** Export the audit log as a downloaded JSON file (#92). */
+  async exportAuditLogs(): Promise<void> {
+    const json = await this.auditLog.export({}, 'json');
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `audit-logs-${Date.now()}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   ngOnInit(): void {
