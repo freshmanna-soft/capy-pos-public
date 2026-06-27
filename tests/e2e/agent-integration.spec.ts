@@ -15,10 +15,11 @@ import { loginAsAdmin } from './helpers/auth';
  */
 
 /**
- * Drive a complete cash sale from the POS terminal, mirroring the proven flow in
- * s4-5-inventory-customer-workflows.spec.ts. Leaves the receipt overlay visible.
+ * Navigate to the POS terminal and add a product to the cart via the reactive
+ * search (with a Beverages-category fallback). Leaves the cart populated and the
+ * terminal ready for checkout.
  */
-async function completeCashSale(page: Page, productName = 'Coffee'): Promise<void> {
+async function addProductToCart(page: Page, productName = 'Coffee'): Promise<void> {
   await page.goto('/pos');
   await expect(page.getByTestId('pos-terminal')).toBeVisible();
 
@@ -43,6 +44,14 @@ async function completeCashSale(page: Page, productName = 'Coffee'): Promise<voi
   await expect(firstResult).toBeVisible({ timeout: 5000 });
   await firstResult.click({ force: true });
   await expect(page.getByTestId('cart-items')).toBeVisible();
+}
+
+/**
+ * Drive a complete cash sale from the POS terminal, mirroring the proven flow in
+ * s4-5-inventory-customer-workflows.spec.ts. Leaves the receipt overlay visible.
+ */
+async function completeCashSale(page: Page, productName = 'Coffee'): Promise<void> {
+  await addProductToCart(page, productName);
 
   // Checkout → cash → confirm.
   await page.getByTestId('checkout-btn').click();
@@ -52,6 +61,25 @@ async function completeCashSale(page: Page, productName = 'Coffee'): Promise<voi
   await expect(page.getByTestId('cash-payment')).toBeVisible();
   await page.getByTestId('cash-tendered').fill('10.00');
   await page.getByTestId('btn-confirm-cash').click();
+}
+
+/** The simulated payment gateway always declines this PAN (see CheckoutComponent). */
+const DECLINED_CARD = '4000000000000002';
+
+/**
+ * From a POS terminal with a populated cart (and no intervening page reload —
+ * the circuit-breaker state is held in an in-memory singleton), open checkout
+ * and fill the card form with the always-declined test card.
+ */
+async function openDeclinedCardForm(page: Page): Promise<void> {
+  await page.getByTestId('checkout-btn').click();
+  await expect(page.getByTestId('checkout-overlay')).toBeVisible();
+  await page.getByTestId('method-card').click();
+  await page.getByTestId('btn-proceed').click();
+  await expect(page.getByTestId('card-payment')).toBeVisible();
+  await page.getByTestId('card-number').fill(DECLINED_CARD);
+  await page.getByTestId('card-expiry').fill('12/30');
+  await page.getByTestId('card-cvv').fill('123');
 }
 
 test.describe('Agent Integration Workflow', () => {
@@ -85,47 +113,47 @@ test.describe('Agent Integration Workflow', () => {
 
   // ── Quarantined: assert agent-observability / payment-result UI not yet built (#67) ──
 
-  test.fixme('should handle payment failure with retry', async ({ page }) => {
-    // Needs payment-error / payment-retrying UI (no failure path exists today).
-    await page.goto('http://localhost:4200/pos-terminal');
-    await page.fill('[data-testid="product-search"]', 'Coffee');
-    await page.click('[data-testid="search-button"]');
-    await page.click('[data-testid="add-to-cart"]');
-    await page.click('[data-testid="checkout-button"]');
-    await page.click('[data-testid="payment-method-card"]');
-    await page.fill('[data-testid="card-number"]', '4000000000000002');
-    await page.fill('[data-testid="card-expiry"]', '12/25');
-    await page.fill('[data-testid="card-cvv"]', '123');
-    await page.click('[data-testid="submit-payment"]');
-    await page.waitForSelector('[data-testid="payment-retrying"]');
-    await page.waitForSelector('[data-testid="payment-error"]', { timeout: 15000 });
-    const errorMessage = await page.textContent('[data-testid="payment-error"]');
-    expect(errorMessage).toContain('Payment failed');
+  test('should handle payment failure with retry', async ({ page }) => {
+    // The simulated gateway declines the well-known test card; the checkout
+    // retries (payment-retrying) before surfacing the failure (payment-error).
+    await addProductToCart(page, 'Coffee');
+    await openDeclinedCardForm(page);
+    await page.getByTestId('btn-confirm-card').click();
+
+    // Retry banner appears between gateway attempts, then the terminal error.
+    await expect(page.getByTestId('payment-retrying')).toBeVisible({ timeout: 10000 });
+    const error = page.getByTestId('payment-error');
+    await expect(error).toBeVisible({ timeout: 15000 });
+    await expect(error).toContainText('Payment failed');
   });
 
-  test.fixme('should handle circuit breaker opening on repeated failures', async ({ page }) => {
-    // Needs circuit-breaker-card / circuit-state UI.
+  test('should handle circuit breaker opening on repeated failures', async ({ page }) => {
+    // Five consecutive declines trip the 'payment-gateway' breaker. Stay in the
+    // same SPA session (no reload) so the in-memory breaker accumulates failures:
+    // add the product once, then re-confirm from the error state each time.
+    await addProductToCart(page, 'Coffee');
+    await openDeclinedCardForm(page);
+
     for (let i = 0; i < 5; i++) {
-      await page.goto('http://localhost:4200/pos-terminal');
-      await page.fill('[data-testid="product-search"]', 'Coffee');
-      await page.click('[data-testid="search-button"]');
-      await page.click('[data-testid="add-to-cart"]');
-      await page.click('[data-testid="checkout-button"]');
-      await page.click('[data-testid="payment-method-card"]');
-      await page.fill('[data-testid="card-number"]', '4000000000000002');
-      await page.fill('[data-testid="card-expiry"]', '12/25');
-      await page.fill('[data-testid="card-cvv"]', '123');
-      await page.click('[data-testid="submit-payment"]');
-      await page.waitForSelector('[data-testid="payment-error"]');
-      await page.click('[data-testid="clear-cart"]');
+      await page.getByTestId('btn-confirm-card').click();
+      await expect(page.getByTestId('payment-error')).toBeVisible({ timeout: 15000 });
+      if (i < 4) {
+        // Back to the card form (fields retained) for the next attempt.
+        await page.getByTestId('btn-retry-payment').click();
+        await expect(page.getByTestId('card-payment')).toBeVisible();
+      }
     }
-    await page.goto('http://localhost:4200/monitor');
-    await page.waitForSelector('[data-testid="circuit-breaker-card"]');
-    const paymentCircuit = await page
+
+    // In-app nav (NOT goto, which would reload and reset the breaker singleton).
+    await page.getByTestId('btn-cancel-payment').click();
+    await page.locator('[data-testid="nav-dashboard"]:visible').click();
+    await expect(page).toHaveURL(/.*dashboard/);
+
+    const paymentCircuit = page
       .locator('[data-testid="circuit-breaker-card"]')
       .filter({ hasText: 'payment-gateway' });
-    const circuitState = await paymentCircuit.locator('[data-testid="circuit-state"]').textContent();
-    expect(circuitState).toBe('OPEN');
+    await expect(paymentCircuit).toBeVisible({ timeout: 10000 });
+    await expect(paymentCircuit.getByTestId('circuit-state')).toHaveText('OPEN');
   });
 
   test('should record an audit-log entry for a sale', async ({ page }) => {
@@ -239,19 +267,59 @@ test.describe('Agent Error Handling', () => {
     await expect(page.getByTestId('product-result').first()).toBeVisible({ timeout: 5000 });
   });
 
-  test.fixme('should recover from circuit breaker open state', async ({ page }) => {
-    // Needs circuit-breaker-card / circuit-state UI (currently a no-op pass).
-    await page.goto('http://localhost:4200/monitor');
-    const openCircuit = await page
-      .locator('[data-testid="circuit-breaker-card"]')
-      .filter({ has: page.locator('[data-testid="circuit-state"]:has-text("OPEN")') })
-      .first();
-    if ((await openCircuit.count()) > 0) {
-      await page.waitForTimeout(5000);
-      await page.reload();
-      const circuitState = await openCircuit.locator('[data-testid="circuit-state"]').textContent();
-      expect(['HALF_OPEN', 'CLOSED']).toContain(circuitState || '');
+  test('should recover from circuit breaker open state', async ({ page }) => {
+    // Self-contained recovery, all in ONE SPA session (the breaker is an
+    // in-memory singleton; a reload would reset it). Trip it with 5 declines,
+    // wait past its 5s open window, then a successful card sale moves it out of
+    // OPEN (HALF_OPEN on the first recovery probe).
+    test.setTimeout(60000);
+
+    await addProductToCart(page, 'Coffee');
+    await openDeclinedCardForm(page);
+    for (let i = 0; i < 5; i++) {
+      await page.getByTestId('btn-confirm-card').click();
+      await expect(page.getByTestId('payment-error')).toBeVisible({ timeout: 15000 });
+      if (i < 4) {
+        await page.getByTestId('btn-retry-payment').click();
+        await expect(page.getByTestId('card-payment')).toBeVisible();
+      }
     }
+    await page.getByTestId('btn-cancel-payment').click();
+
+    // Confirm the breaker is OPEN.
+    await page.locator('[data-testid="nav-dashboard"]:visible').click();
+    await expect(page).toHaveURL(/.*dashboard/);
+    const paymentCircuit = page
+      .locator('[data-testid="circuit-breaker-card"]')
+      .filter({ hasText: 'payment-gateway' });
+    await expect(paymentCircuit.getByTestId('circuit-state')).toHaveText('OPEN', { timeout: 10000 });
+
+    // Wait past the breaker's open window (5s timeout) so it can probe.
+    await page.waitForTimeout(6000);
+
+    // A successful card sale (good test card) probes the gateway → HALF_OPEN.
+    // In-app nav back to POS keeps the breaker singleton alive; the cart still
+    // holds the item from the declined attempts.
+    await page.locator('[data-testid="nav-pos"]:visible').click();
+    await expect(page.getByTestId('pos-terminal')).toBeVisible();
+    await page.getByTestId('checkout-btn').click();
+    await expect(page.getByTestId('checkout-overlay')).toBeVisible();
+    await page.getByTestId('method-card').click();
+    await page.getByTestId('btn-proceed').click();
+    await page.getByTestId('card-number').fill('4242424242424242');
+    await page.getByTestId('card-expiry').fill('12/30');
+    await page.getByTestId('card-cvv').fill('123');
+    await page.getByTestId('btn-confirm-card').click();
+    await expect(page.getByTestId('receipt-overlay')).toBeVisible({ timeout: 15000 });
+    await page.getByTestId('btn-new-transaction').click();
+
+    // The breaker has left the OPEN state.
+    await page.locator('[data-testid="nav-dashboard"]:visible').click();
+    await expect(page).toHaveURL(/.*dashboard/);
+    await expect(async () => {
+      const state = await paymentCircuit.getByTestId('circuit-state').textContent();
+      expect(['HALF_OPEN', 'CLOSED']).toContain((state ?? '').trim());
+    }).toPass({ timeout: 10000 });
   });
 });
 

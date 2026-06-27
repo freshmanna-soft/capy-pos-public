@@ -12,6 +12,8 @@ import { CartService } from '@core/application/services/cart.service';
 import { ProcessCashPaymentUseCase } from '@core/application/use-cases/process-cash-payment.use-case';
 import { ProcessCardPaymentUseCase } from '@core/application/use-cases/process-card-payment.use-case';
 import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
+import { CircuitBreakerService } from '@core/infrastructure/resilience/circuit-breaker.service';
+import { RetryService } from '@core/infrastructure/resilience/retry.service';
 
 export type PaymentMethod = 'cash' | 'card' | 'mobile';
 
@@ -22,6 +24,19 @@ export interface PaymentResult {
   transactionId: string;
   timestamp: Date;
 }
+
+/**
+ * Name of the circuit breaker that fronts the (simulated) card payment gateway.
+ * Shared with the agent-monitor dashboard, which surfaces its state.
+ */
+const PAYMENT_GATEWAY = 'payment-gateway';
+
+/**
+ * Test card number that the simulated gateway always declines. Mirrors the
+ * well-known Stripe "card declined" test PAN so the failure/retry path is
+ * deterministically reproducible in demos and e2e tests.
+ */
+const DECLINED_TEST_CARD = '4000000000000002';
 
 /**
  * Checkout Component
@@ -322,6 +337,30 @@ export interface PaymentResult {
           <div class="processing" data-testid="processing">
             <div class="spinner"></div>
             <p class="processing-text">Processing payment...</p>
+          </div>
+        }
+
+        <!-- Retrying State (transient gateway failure) -->
+        @if (step() === 'retrying') {
+          <div class="processing" data-testid="payment-retrying">
+            <div class="spinner"></div>
+            <p class="processing-text">Payment failed — retrying…</p>
+          </div>
+        }
+
+        <!-- Error State (gateway declined / circuit open) -->
+        @if (step() === 'error') {
+          <div class="payment-error" data-testid="payment-error">
+            <div class="error-icon">⚠️</div>
+            <p class="error-text">{{ errorMessage() }}</p>
+            <div class="action-buttons">
+              <button class="btn-back" (click)="cancel()" data-testid="btn-cancel-payment">
+                Cancel
+              </button>
+              <button class="btn-confirm" (click)="retryPayment()" data-testid="btn-retry-payment">
+                Try Again
+              </button>
+            </div>
           </div>
         }
       </div>
@@ -672,6 +711,31 @@ export interface PaymentResult {
         margin: 0;
       }
 
+      .payment-error {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        padding: 2.5rem 1.5rem 1.5rem;
+        text-align: center;
+      }
+
+      .payment-error .error-icon {
+        font-size: 2.5rem;
+        line-height: 1;
+      }
+
+      .payment-error .error-text {
+        font-size: 1rem;
+        color: #b91c1c;
+        font-weight: 600;
+        margin: 0;
+      }
+
+      .payment-error .action-buttons {
+        width: 100%;
+      }
+
       .input-error {
         border-color: #ef4444;
       }
@@ -745,15 +809,22 @@ export class CheckoutComponent {
   readonly cashPayment = inject(ProcessCashPaymentUseCase);
   readonly cardPayment = inject(ProcessCardPaymentUseCase);
   private readonly persistTransaction = inject(PersistTransactionUseCase);
+  private readonly circuitBreaker = inject(CircuitBreakerService);
+  private readonly retry = inject(RetryService);
 
   // Outputs
   readonly paymentComplete = output<PaymentResult>();
   readonly checkoutCancelled = output<void>();
 
   // State
-  readonly step = signal<'select' | 'cash' | 'card' | 'mobile' | 'processing'>('select');
+  readonly step = signal<
+    'select' | 'cash' | 'card' | 'mobile' | 'processing' | 'retrying' | 'error'
+  >('select');
   readonly selectedMethod = signal<PaymentMethod | null>(null);
   readonly changeAmount = signal<number>(0);
+
+  /** User-facing message shown in the 'error' step after a failed payment. */
+  readonly errorMessage = signal<string>('');
 
   // Form fields
   cashTendered = 0;
@@ -871,33 +942,120 @@ export class CheckoutComponent {
     this.isSubmitting = true;
     this.step.set('processing');
 
-    // Simulate payment processing
-    setTimeout(() => {
-      const result: PaymentResult = {
-        method,
-        amount: this.cartService.total(),
-        change: method === 'cash' ? this.cashPayment.changeAmount() : undefined,
-        transactionId,
-        timestamp: new Date(),
-      };
+    // Card payments are routed through the payment-gateway circuit breaker +
+    // retry so transient gateway errors are retried and repeated hard declines
+    // trip the breaker (surfaced on the agent-monitor dashboard). Cash and
+    // mobile are local/offline and keep their original direct-confirm path.
+    if (method === 'card') {
+      void this.processCardPayment(transactionId);
+      return;
+    }
 
-      // Persist transaction to IndexedDB (fire-and-forget for offline-first)
-      this.persistTransaction
-        .execute({
-          paymentMethod: method,
-          transactionId,
-          amountTendered: method === 'cash' ? this.cashTendered : undefined,
-          changeGiven: method === 'cash' ? this.cashPayment.changeAmount() : undefined,
-        })
-        .catch(() => {
-          // Persistence failure is non-blocking; transaction completes regardless
-        });
+    // Simulate payment processing (cash / mobile)
+    setTimeout(() => this.finalizePayment(method, transactionId), 1500);
+  }
 
-      this.cashPayment.completeProcessing();
+  /**
+   * Drive a card payment through the resilience layer: the call is retried on
+   * transient failure and, after enough failures, the shared 'payment-gateway'
+   * circuit breaker opens and rejects fast. On approval the flow completes
+   * exactly like a cash/mobile sale; on exhaustion it lands in the 'error' step.
+   */
+  private async processCardPayment(transactionId: string): Promise<void> {
+    const declined = this.isDeclinedCard();
+    let attempt = 0;
+
+    try {
+      await this.circuitBreaker.execute(
+        PAYMENT_GATEWAY,
+        () =>
+          this.retry.execute(
+            'card-payment',
+            () => {
+              attempt += 1;
+              // Surface the retry to the cashier from the second attempt on.
+              if (attempt > 1) {
+                this.step.set('retrying');
+              }
+              return this.simulateGatewayCall(declined);
+            },
+            { maxAttempts: 3, initialDelay: 300, backoffMultiplier: 1.5 }
+          ),
+        // Short timeout keeps the demo responsive: an open breaker probes for
+        // recovery a few seconds later rather than the production default.
+        { failureThreshold: 5, timeout: 5000 }
+      );
+      this.finalizePayment('card', transactionId);
+    } catch {
+      // Release the use-case processing latch so a retry can execute cleanly.
       this.cardPayment.completeProcessing();
+      this.step.set('error');
+      this.errorMessage.set('Payment failed. Please try a different card or try again.');
       this.isSubmitting = false;
-      this.paymentComplete.emit(result);
-    }, 1500);
+    }
+  }
+
+  /**
+   * Simulated payment-gateway round-trip. Resolves for a normal card and
+   * rejects for the well-known declined test PAN, after a small network-like
+   * delay so the processing/retrying states are visible.
+   */
+  private simulateGatewayCall(declined: boolean): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      setTimeout(
+        () => {
+          if (declined) {
+            reject(new Error('Card declined by issuer'));
+          } else {
+            resolve();
+          }
+        },
+        declined ? 150 : 600
+      );
+    });
+  }
+
+  /** True when the entered card number is the deterministic declined test PAN. */
+  private isDeclinedCard(): boolean {
+    return this.cardNumber.replace(/\s+/g, '') === DECLINED_TEST_CARD;
+  }
+
+  /** From the 'error' step, return to the card form so the cashier can retry. */
+  retryPayment(): void {
+    this.errorMessage.set('');
+    this.step.set('card');
+  }
+
+  /**
+   * Completes a payment: persists the transaction, releases the use-cases, and
+   * emits the result. Shared by the cash/mobile timeout path and the card
+   * gateway path so completion behaviour stays identical across methods.
+   */
+  private finalizePayment(method: PaymentMethod, transactionId: string): void {
+    const result: PaymentResult = {
+      method,
+      amount: this.cartService.total(),
+      change: method === 'cash' ? this.cashPayment.changeAmount() : undefined,
+      transactionId,
+      timestamp: new Date(),
+    };
+
+    // Persist transaction to IndexedDB (fire-and-forget for offline-first)
+    this.persistTransaction
+      .execute({
+        paymentMethod: method,
+        transactionId,
+        amountTendered: method === 'cash' ? this.cashTendered : undefined,
+        changeGiven: method === 'cash' ? this.cashPayment.changeAmount() : undefined,
+      })
+      .catch(() => {
+        // Persistence failure is non-blocking; transaction completes regardless
+      });
+
+    this.cashPayment.completeProcessing();
+    this.cardPayment.completeProcessing();
+    this.isSubmitting = false;
+    this.paymentComplete.emit(result);
   }
 
   private generateTransactionId(): string {
