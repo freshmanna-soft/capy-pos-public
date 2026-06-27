@@ -29,13 +29,48 @@ export abstract class BaseDexieRepository<
   protected abstract mapToDatabase(entity: TEntity): TDB;
 
   /**
+   * Defensively map a batch of database records to domain entities.
+   *
+   * A single corrupt or invalid record (e.g. a missing required field from a
+   * bad sync or chaos/failure-injection) must NOT take down the entire list —
+   * that would break every view that loads this collection. Invalid records are
+   * skipped with a warning so the rest of the data still renders.
+   *
+   * Single-record getters (findById, findOneBy…) intentionally keep throwing:
+   * a direct lookup of a known-bad record should surface the error to the caller.
+   */
+  protected mapRecords(records: TDB[]): TEntity[] {
+    const entities: TEntity[] = [];
+    let skipped = 0;
+    for (const record of records) {
+      try {
+        entities.push(this.mapToEntity(record));
+      } catch (error) {
+        skipped++;
+        const id = (record as Record<string, unknown>)?.['id'];
+        const idSuffix = id ? ` (id=${String(id)})` : '';
+        console.warn(
+          `[${this.constructor.name}] Skipping invalid record${idSuffix}:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+    }
+    if (skipped > 0) {
+      console.warn(
+        `[${this.constructor.name}] Skipped ${skipped} invalid record(s) of ${records.length} while mapping.`
+      );
+    }
+    return entities;
+  }
+
+  /**
    * Find all entities (excluding soft-deleted)
    */
   async findAll(): Promise<TEntity[]> {
     const records = await this.table
       .filter((record) => !(record as Record<string, unknown>)['deletedAt'])
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -153,7 +188,7 @@ export abstract class BaseDexieRepository<
       .offset(offset)
       .limit(pageSize)
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -170,7 +205,7 @@ export abstract class BaseDexieRepository<
       })
       .limit(limit)
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -182,7 +217,7 @@ export abstract class BaseDexieRepository<
       .equals(value)
       .filter((record) => !(record as Record<string, unknown>)['deletedAt'])
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -213,7 +248,7 @@ export abstract class BaseDexieRepository<
       .equals(values as unknown as IndexableType)
       .filter((record) => !(record as Record<string, unknown>)['deletedAt'])
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -248,7 +283,7 @@ export abstract class BaseDexieRepository<
     }
 
     const records = await collection.toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**

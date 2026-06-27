@@ -98,7 +98,7 @@ export class DexieProductRepository
           !record.deletedAt && (record.isActive === true || (record.isActive as unknown) === 1)
       )
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -132,7 +132,7 @@ export class DexieProductRepository
       .limit(limit)
       .toArray();
 
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -146,7 +146,7 @@ export class DexieProductRepository
       })
       .toArray();
 
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
