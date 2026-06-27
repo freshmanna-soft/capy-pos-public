@@ -129,6 +129,7 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
             @for (cb of circuitBreakers() | keyvalue; track cb) {
               <div
                 class="p-3 border rounded-lg border-l-4"
+                data-testid="circuit-breaker-card"
                 [class]="
                   cb.value.state === 'OPEN'
                     ? 'border-l-red-500'
@@ -141,6 +142,7 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
                   <h3 class="text-sm font-semibold text-gray-900 truncate">{{ cb.key }}</h3>
                   <span
                     class="px-2 py-0.5 rounded text-xs font-bold shrink-0"
+                    data-testid="circuit-state"
                     [class]="
                       cb.value.state === 'OPEN'
                         ? 'bg-red-100 text-red-800'

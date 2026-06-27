@@ -8,6 +8,8 @@ import { ProcessCashPaymentUseCase } from '@core/application/use-cases/process-c
 import { ProcessCardPaymentUseCase } from '@core/application/use-cases/process-card-payment.use-case';
 import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
 import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
+import { CircuitBreakerService } from '@core/infrastructure/resilience/circuit-breaker.service';
+import { RetryService } from '@core/infrastructure/resilience/retry.service';
 import { signal } from '@angular/core';
 
 /**
@@ -35,6 +37,11 @@ describe('CheckoutComponent', () => {
   let mockCardPaymentUseCase: Partial<ProcessCardPaymentUseCase>;
   let mockCartTotals: Partial<CalculateCartTotalsUseCase>;
   let mockPersistTransaction: Partial<PersistTransactionUseCase>;
+  // Resilience layer is stubbed to run the wrapped fn directly so card-payment
+  // unit tests exercise the component's own retry/error branching without the
+  // real services' timers. Integration is covered by the e2e suite.
+  let mockCircuitBreaker: { execute: ReturnType<typeof vi.fn> };
+  let mockRetry: { execute: ReturnType<typeof vi.fn> };
 
   const mockValidation = signal({ isValid: false, error: null as string | null });
   const mockAmountDue = signal(108.5);
@@ -240,6 +247,15 @@ describe('CheckoutComponent', () => {
       }),
     };
 
+    // Stubs that simply invoke the wrapped function once (pass-through). Tests
+    // that need retry/open-breaker behaviour override these per-test.
+    mockCircuitBreaker = {
+      execute: vi.fn((_name: string, fn: () => Promise<unknown>) => fn()),
+    };
+    mockRetry = {
+      execute: vi.fn((_name: string, fn: () => Promise<unknown>) => fn()),
+    };
+
     await TestBed.configureTestingModule({
       imports: [CheckoutComponent],
       providers: [
@@ -248,6 +264,8 @@ describe('CheckoutComponent', () => {
         { provide: ProcessCardPaymentUseCase, useValue: mockCardPaymentUseCase },
         { provide: CalculateCartTotalsUseCase, useValue: mockCartTotals },
         { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
+        { provide: CircuitBreakerService, useValue: mockCircuitBreaker },
+        { provide: RetryService, useValue: mockRetry },
       ],
     }).compileComponents();
 
@@ -589,7 +607,7 @@ describe('CheckoutComponent', () => {
       expect(mockCashPaymentUseCase.completeProcessing).toHaveBeenCalled();
     });
 
-    it('should generate unique transaction IDs for card payments', () => {
+    it('should generate unique transaction IDs for card payments', async () => {
       component.selectMethod('card');
       component.proceedToDetails();
       // Set card validation to valid via mock
@@ -607,10 +625,79 @@ describe('CheckoutComponent', () => {
         const spy = vi.fn();
         component.paymentComplete.subscribe(spy);
         component.confirmPayment();
-        vi.advanceTimersByTime(1500);
+        // Card flow is async (gateway round-trip): flush the ~600ms call.
+        await vi.advanceTimersByTimeAsync(700);
         ids.add(spy.mock.calls[0][0].transactionId);
       }
       expect(ids.size).toBe(10);
+    });
+  });
+
+  describe('Card Payment Resilience (#92)', () => {
+    beforeEach(() => {
+      component.selectMethod('card');
+      component.proceedToDetails();
+      mockCardValidation.set({
+        isValid: true,
+        fields: {
+          cardNumber: { isValid: true, error: null },
+          expiry: { isValid: true, error: null },
+          cvv: { isValid: true, error: null },
+        },
+      });
+    });
+
+    it('routes card payments through the payment-gateway circuit breaker', async () => {
+      vi.useFakeTimers();
+      component.confirmPayment();
+      await vi.advanceTimersByTimeAsync(700);
+      expect(mockCircuitBreaker.execute).toHaveBeenCalledWith(
+        'payment-gateway',
+        expect.any(Function),
+        expect.objectContaining({ failureThreshold: 5 })
+      );
+      vi.useRealTimers();
+    });
+
+    it('lands in the error step when the gateway declines the card', async () => {
+      vi.useFakeTimers();
+      component.cardNumber = '4000000000000002';
+      component.confirmPayment();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(component.step()).toBe('error');
+      expect(component.errorMessage()).toContain('Payment failed');
+      vi.useRealTimers();
+    });
+
+    it('lands in the error step when the circuit breaker is open', async () => {
+      mockCircuitBreaker.execute.mockRejectedValueOnce(new Error('circuit open'));
+      component.confirmPayment();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(component.step()).toBe('error');
+    });
+
+    it('shows the retrying state on a second gateway attempt', async () => {
+      vi.useFakeTimers();
+      const setSpy = vi.spyOn(component.step, 'set');
+      // Make the retry layer invoke the wrapped call twice (first + one retry).
+      mockRetry.execute.mockImplementationOnce(
+        async (_name: string, fn: () => Promise<unknown>) => {
+          await fn();
+          return fn();
+        }
+      );
+      component.confirmPayment();
+      await vi.advanceTimersByTimeAsync(1400);
+      expect(setSpy).toHaveBeenCalledWith('retrying');
+      vi.useRealTimers();
+    });
+
+    it('retryPayment returns to the card entry step and clears the error', () => {
+      component.step.set('error');
+      component.errorMessage.set('Payment failed.');
+      component.retryPayment();
+      expect(component.step()).toBe('card');
+      expect(component.errorMessage()).toBe('');
     });
   });
 
