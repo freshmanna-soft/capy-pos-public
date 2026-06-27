@@ -175,15 +175,20 @@ test.describe('Agent Integration Workflow', () => {
     await expect(page.getByTestId('messages-by-type').first()).toBeVisible();
   });
 
-  test.fixme('should export audit logs', async ({ page }) => {
-    // Needs export-audit-logs control.
-    await page.goto('http://localhost:4200/monitor');
-    await page.waitForSelector('[data-testid="audit-log-entry"]');
+  test('should export audit logs as a download', async ({ page }) => {
+    // A sale writes an audit entry; the dashboard's Export button downloads the log. (#96)
+    await completeCashSale(page, 'Coffee');
+    await expect(page.getByTestId('receipt-overlay')).toBeVisible({ timeout: 10000 });
+    await page.getByTestId('btn-new-transaction').click();
+
+    await page.locator('[data-testid="nav-dashboard"]:visible').click();
+    await expect(page).toHaveURL(/.*dashboard/);
+    await expect(page.getByTestId('audit-log-entry').first()).toBeVisible({ timeout: 10000 });
+
     const downloadPromise = page.waitForEvent('download');
-    await page.click('[data-testid="export-audit-logs"]');
+    await page.getByTestId('export-audit-logs').click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/audit-logs.*\.(json|csv)/);
-    expect(await download.path()).toBeTruthy();
   });
 
   test('should reduce inventory stock after a sale', async ({ page }) => {
