@@ -9,9 +9,12 @@
  *   - Random data corruption (null name/price on one product)
  */
 
+const { initTelemetry, flushTelemetry } = require('./shared/telemetry');
 const { ScanCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('./shared/dynamodb');
 const { log, response } = require('./shared/logger');
+
+initTelemetry();
 
 const PRODUCTS_TABLE = process.env.PRODUCTS_TABLE;
 const failureMode = process.env.ENABLE_FAILURE === 'true';
@@ -20,6 +23,7 @@ exports.handler = async (event) => {
   log('info', 'GetProducts invoked', { table: PRODUCTS_TABLE, failureMode });
 
   try {
+    // ... handler code ...
     // FAILURE SCENARIO 1: Simulated slow DynamoDB query → Lambda timeout
     if (failureMode) {
       log('warn', 'FAILURE_SCENARIO: Simulating slow DynamoDB query', {
@@ -62,5 +66,7 @@ exports.handler = async (event) => {
       message: error.message,
       traceId: process.env._X_AMZN_TRACE_ID || 'unavailable',
     });
+  } finally {
+    await flushTelemetry();
   }
 };

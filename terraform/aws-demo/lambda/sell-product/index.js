@@ -8,6 +8,7 @@
  *   - Sells product even with 0 stock → throws ConditionalCheckFailedException
  */
 
+const { initTelemetry, flushTelemetry } = require('./shared/telemetry');
 const { GetCommand, UpdateCommand, PutCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('./shared/dynamodb');
 const { log, response } = require('./shared/logger');
