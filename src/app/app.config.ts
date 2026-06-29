@@ -4,8 +4,10 @@ import {
   provideZonelessChangeDetection,
   inject,
   provideAppInitializer,
+  HTTP_INTERCEPTORS,
 } from '@angular/core';
 import { provideRouter } from '@angular/router';
+import { provideHttpClient, withInterceptors } from '@angular/common/http';
 
 import { routes } from '@app/app.routes';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
@@ -21,6 +23,8 @@ import { SyncService } from '@core/infrastructure/sync';
 import { AUTH_PROVIDERS } from '@core/infrastructure/auth/auth.providers';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { ThemeService } from '@core/application/services/theme.service';
+import { OtlpExporterService } from '@core/infrastructure/telemetry/otlp-exporter.service';
+import { TraceContextInterceptor } from '@core/infrastructure/telemetry/trace-context.interceptor';
 import { environment } from '../environments/environment';
 
 export const appConfig: ApplicationConfig = {
@@ -28,6 +32,16 @@ export const appConfig: ApplicationConfig = {
     provideZonelessChangeDetection(),
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes),
+    provideHttpClient(withInterceptors([])),
+    {
+      provide: HTTP_INTERCEPTORS,
+      useClass: TraceContextInterceptor,
+      multi: true,
+    },
+    // Initialize OpenTelemetry OTLP exporter (before DB init so traces are captured early)
+    provideAppInitializer(() => {
+      inject(OtlpExporterService);
+    }),
     provideAppInitializer(async () => {
       const db = inject(DexieDatabase);
       try {

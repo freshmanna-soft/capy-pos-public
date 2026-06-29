@@ -98,6 +98,15 @@ export const environment = {
     corsCredentials: true,
     helmetEnabled: true,
   },
+
+  // OpenTelemetry — Grafana Cloud
+  telemetry: {
+    otlp: {
+      enabled: true,
+      endpoint: 'https://otlp-gateway-prod-us-east-3.grafana.net/otlp',
+      apiKey: process.env['GRAFANA_OTLP_API_KEY'] || '',
+    },
+  },
 };
 
 // Made with Bob

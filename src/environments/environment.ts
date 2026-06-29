@@ -91,6 +91,15 @@ export const environment = {
     interval: 86400000, // 24 hours
     retentionDays: 7,
   },
+
+  // OpenTelemetry
+  telemetry: {
+    otlp: {
+      enabled: false,
+      endpoint: 'http://localhost:4317',
+      apiKey: '',
+    },
+  },
 };
 
 // Made with Bob
