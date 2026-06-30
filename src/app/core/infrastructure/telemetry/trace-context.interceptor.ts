@@ -1,10 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import {
-  HttpRequest,
-  HttpHandler,
-  HttpEvent,
-  HttpInterceptor,
-} from '@angular/common/http';
+import { HttpRequest, HttpHandler, HttpEvent, HttpInterceptor } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { trace } from '@opentelemetry/api';
 import { OtlpExporterService } from './otlp-exporter.service';
@@ -18,10 +13,7 @@ export class TraceContextInterceptor implements HttpInterceptor {
   private tracer = trace.getTracer('http-interceptor', '0.0.0');
   private otlpExporter = inject(OtlpExporterService);
 
-  intercept(
-    request: HttpRequest<unknown>,
-    next: HttpHandler,
-  ): Observable<HttpEvent<unknown>> {
+  intercept(request: HttpRequest<unknown>, next: HttpHandler): Observable<HttpEvent<unknown>> {
     // Skip non-API requests (e.g., assets)
     if (this.shouldSkipTracing(request.url)) {
       return next.handle(request);
