@@ -34,8 +34,6 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
   let component: PosTerminalComponent;
   let fixture: ComponentFixture<PosTerminalComponent>;
   let cartService: CartService;
-  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   const mockProducts = {
     coffee: new ProductBuilder()
@@ -111,14 +109,6 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
   beforeEach(async () => {
     vi.useFakeTimers();
 
-    // Silence the component's fire-and-forget async logs (handlePaymentComplete's
-    // `.then()` logs 'Payment completed'). With real console output, that log can
-    // fire as the Vitest worker tears down, raising
-    // "Closing rpc while onUserConsoleLog was pending" (an EnvironmentTeardownError
-    // that fails the run in CI). Mocking removes the teardown race deterministically.
-    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
     // Mock scrollTo for jsdom (not available in test environment)
     Element.prototype.scrollTo = vi.fn();
 
@@ -153,8 +143,6 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     cartService.clearCart();
     fixture.destroy();
     vi.useRealTimers();
-    consoleLogSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
   });
 
   /** Helper to add product and flush setTimeout */
