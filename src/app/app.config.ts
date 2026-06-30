@@ -4,10 +4,9 @@ import {
   provideZonelessChangeDetection,
   inject,
   provideAppInitializer,
-  HTTP_INTERCEPTORS,
 } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { provideHttpClient, withInterceptors } from '@angular/common/http';
+import { provideHttpClient, withInterceptors, HTTP_INTERCEPTORS } from '@angular/common/http';
 
 import { routes } from '@app/app.routes';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
