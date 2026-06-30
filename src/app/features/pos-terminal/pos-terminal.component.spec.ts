@@ -96,6 +96,12 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     search: vi.fn().mockResolvedValue([]),
     findAll: vi.fn().mockResolvedValue([]),
     findById: vi.fn().mockResolvedValue(null),
+    // The real <app-product-search> child loads via ProductService.getActiveProducts(),
+    // which calls repository.findActive(). Without this stub the child's async
+    // ngOnInit chain rejects ("findActive is not a function") and leaks a
+    // console.error across spec boundaries, intermittently tripping the #109
+    // contract gate's `expect(errorSpy).not.toHaveBeenCalled()` under --coverage.
+    findActive: vi.fn().mockResolvedValue([]),
     getCategories: vi.fn().mockResolvedValue([]),
     adjustStock: vi.fn().mockResolvedValue({ id: '1', stock: 49 }),
   };

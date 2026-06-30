@@ -20,6 +20,7 @@ import {
   DexieDatabase,
   IOperatorDB,
   IRoleDB,
+  IUserTenantDB,
 } from '@core/infrastructure/database/dexie-database.service';
 
 // ---------------------------------------------------------------------------
@@ -50,7 +51,8 @@ const seedRole: IRoleDB = {
 
 function makeMockDb(
   operatorOverride?: Partial<IOperatorDB> | null,
-  roleOverride?: Partial<IRoleDB> | null
+  roleOverride?: Partial<IRoleDB> | null,
+  userTenantRows: IUserTenantDB[] = []
 ) {
   const operator = operatorOverride === null ? undefined : { ...seedOperator, ...operatorOverride };
   const role = roleOverride === null ? undefined : { ...seedRole, ...roleOverride };
@@ -65,9 +67,18 @@ function makeMockDb(
     get: vi.fn().mockResolvedValue(role),
   };
 
+  // userTenants mock: supports where('userId').equals(id).toArray()
+  // The `where` + `equals` chain returns the same mock object; `toArray` resolves the rows.
+  const userTenantsTable = {
+    where: vi.fn().mockReturnThis(),
+    equals: vi.fn().mockReturnThis(),
+    toArray: vi.fn().mockResolvedValue(userTenantRows),
+  };
+
   return {
     operators: operatorsTable,
     roles: rolesTable,
+    userTenants: userTenantsTable,
   } as unknown as DexieDatabase;
 }
 
@@ -422,5 +433,216 @@ describe('hashPassword utility', () => {
     const h1 = await hashPassword('same');
     const h2 = await hashPassword('same');
     expect(h1).not.toBe(h2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// authenticate — memberships (Story #43)
+// ---------------------------------------------------------------------------
+
+describe('LocalCredentialAuthAdapter — memberships', () => {
+  const now = new Date();
+
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('embeds memberships from userTenants rows into the returned session', async () => {
+    const userTenantRows: IUserTenantDB[] = [
+      {
+        id: 'ut-op-001-store-a',
+        userId: 'op-001',
+        tenantId: 'store-a',
+        roleId: 'role-admin',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'ut-op-001-store-b',
+        userId: 'op-001',
+        tenantId: 'store-b',
+        roleId: 'role-operator',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    // roles.get must resolve different records per roleId call.
+    // The mock returns the same seedRole by default; we need per-call behaviour.
+    const db = makeMockDb(undefined, undefined, userTenantRows);
+    // Override roles.get to return the correct role per id
+    (db.roles.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) => {
+      if (id === 'role-admin') return Promise.resolve({ id: 'role-admin', name: 'admin' });
+      if (id === 'role-operator') return Promise.resolve({ id: 'role-operator', name: 'operator' });
+      return Promise.resolve(undefined);
+    });
+
+    const adapter = buildAdapter(db);
+    const session = await adapter.authenticate({
+      email: 'admin@capy-pos.local',
+      password: 'admin1234',
+    });
+
+    expect(session.memberships).toBeDefined();
+    expect(session.memberships).toHaveLength(2);
+
+    const tenantIds = session.memberships!.map((m) => m.tenantId);
+    const roles = session.memberships!.map((m) => m.role);
+
+    expect(tenantIds).toContain('store-a');
+    expect(tenantIds).toContain('store-b');
+    expect(roles).toContain('admin');
+    expect(roles).toContain('operator');
+  });
+
+  it('memberships are carried into the JWT (round-trip via getActiveSession)', async () => {
+    const userTenantRows: IUserTenantDB[] = [
+      {
+        id: 'ut-op-001-default-tenant',
+        userId: 'op-001',
+        tenantId: 'default-tenant',
+        roleId: 'role-admin',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    const db = makeMockDb(undefined, undefined, userTenantRows);
+    const adapter = buildAdapter(db);
+
+    await adapter.authenticate({ email: 'admin@capy-pos.local', password: 'admin1234' });
+    const session = await adapter.getActiveSession();
+
+    expect(session?.memberships).toBeDefined();
+    expect(session?.memberships?.[0].tenantId).toBe('default-tenant');
+    expect(session?.memberships?.[0].role).toBe('admin');
+  });
+
+  it('fallback: empty userTenants returns single home membership', async () => {
+    // makeMockDb defaults userTenantRows to [] (empty)
+    const db = makeMockDb();
+    const adapter = buildAdapter(db);
+
+    const session = await adapter.authenticate({
+      email: 'admin@capy-pos.local',
+      password: 'admin1234',
+    });
+
+    expect(session.memberships).toHaveLength(1);
+    expect(session.memberships![0].tenantId).toBe('default-tenant');
+    expect(session.memberships![0].role).toBe('admin');
+  });
+
+  it('resilient mapping: skips a row with an unknown role name instead of throwing', async () => {
+    const userTenantRows: IUserTenantDB[] = [
+      {
+        id: 'ut-op-001-store-a',
+        userId: 'op-001',
+        tenantId: 'store-a',
+        roleId: 'role-admin',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: 'ut-op-001-store-x',
+        userId: 'op-001',
+        tenantId: 'store-x',
+        roleId: 'role-unknown-future-role',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    const db = makeMockDb(undefined, undefined, userTenantRows);
+    (db.roles.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) => {
+      if (id === 'role-admin') return Promise.resolve({ id: 'role-admin', name: 'admin' });
+      // role-unknown-future-role resolves to a name the domain doesn't know
+      return Promise.resolve({ id, name: 'super-kiosk-custom' });
+    });
+
+    const adapter = buildAdapter(db);
+    const session = await adapter.authenticate({
+      email: 'admin@capy-pos.local',
+      password: 'admin1234',
+    });
+
+    // Only the valid row should be present
+    expect(session.memberships).toHaveLength(1);
+    expect(session.memberships![0].tenantId).toBe('store-a');
+    expect(session.memberships![0].role).toBe('admin');
+  });
+
+  it('fallback: when all rows are skipped (all unknown roles), returns home membership', async () => {
+    const userTenantRows: IUserTenantDB[] = [
+      {
+        id: 'ut-op-001-store-x',
+        userId: 'op-001',
+        tenantId: 'store-x',
+        roleId: 'role-bad',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    const db = makeMockDb(undefined, undefined, userTenantRows);
+    (db.roles.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) => {
+      // home role lookup (operator.roleId = 'role-admin') must still resolve for login
+      if (id === 'role-admin') return Promise.resolve({ id: 'role-admin', name: 'admin' });
+      return Promise.resolve({ id, name: 'super-kiosk-custom' });
+    });
+
+    const adapter = buildAdapter(db);
+    const session = await adapter.authenticate({
+      email: 'admin@capy-pos.local',
+      password: 'admin1234',
+    });
+
+    expect(session.memberships).toHaveLength(1);
+    expect(session.memberships![0].tenantId).toBe('default-tenant');
+    expect(session.memberships![0].role).toBe('admin');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getActiveSession — back-compat with old tokens (no memberships claim)
+// ---------------------------------------------------------------------------
+
+describe('LocalCredentialAuthAdapter — getActiveSession back-compat', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
+  it('synthesises a single membership from tenantId+role when token has no memberships claim', async () => {
+    // Build a token that lacks the `memberships` claim by using the old authenticate flow
+    // (empty userTenants returns fallback, then we manually remove the memberships claim
+    // from the token by signing a minimal JWT).
+    // Easiest: sign a minimal JWT without memberships and plant it in sessionStorage.
+    const { SignJWT } = await import('jose');
+    const secret = new TextEncoder().encode('capy-pos-local-jwt-secret-change-in-production');
+    const now = Math.floor(Date.now() / 1000);
+    const exp = now + 8 * 60 * 60;
+
+    const oldToken = await new SignJWT({
+      sub: 'op-old',
+      tenantId: 'legacy-tenant',
+      roles: ['manager'],
+      permissions: ['sale:process'],
+      // no memberships field
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt(now)
+      .setExpirationTime(exp)
+      .sign(secret);
+
+    sessionStorage.setItem('capy_pos_access_token', oldToken);
+
+    const db = makeMockDb();
+    const adapter = buildAdapter(db);
+    const session = await adapter.getActiveSession();
+
+    expect(session).not.toBeNull();
+    expect(session?.memberships).toHaveLength(1);
+    expect(session?.memberships![0].tenantId).toBe('legacy-tenant');
+    expect(session?.memberships![0].role).toBe('manager');
   });
 });
