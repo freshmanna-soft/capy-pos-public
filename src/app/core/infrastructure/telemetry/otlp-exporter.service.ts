@@ -1,5 +1,5 @@
-import { Injectable, inject } from '@angular/core';
-import { trace, context, SpanStatusCode } from '@opentelemetry/api';
+import { Injectable } from '@angular/core';
+import { trace } from '@opentelemetry/api';
 import { WebTracerProvider, BatchSpanProcessor } from '@opentelemetry/sdk-trace-web';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { Resource } from '@opentelemetry/resources';
@@ -27,10 +27,7 @@ export class OtlpExporterService {
   }
 
   private shouldInitialize(): boolean {
-    return (
-      environment.features.telemetry &&
-      environment.telemetry?.otlp?.enabled !== false
-    );
+    return environment.features.telemetry && environment.telemetry?.otlp?.enabled !== false;
   }
 
   private initialize(): void {
@@ -40,7 +37,7 @@ export class OtlpExporterService {
           [SEMRESATTRS_SERVICE_NAME]: 'capy-pos',
           [SEMRESATTRS_SERVICE_VERSION]: '0.0.0',
           [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]: environment.name,
-        }),
+        })
       );
 
       this.tracerProvider = new WebTracerProvider({ resource });

@@ -20,7 +20,7 @@ export class SyncTracerService {
    */
   startSyncOperation(
     operation: 'enqueue' | 'flush' | 'merge' | 'conflict' | 'retry',
-    metadata?: Record<string, unknown>,
+    metadata?: Record<string, unknown>
   ): Span {
     return this.tracer.startSpan(`sync.${operation}`, {
       attributes: {
@@ -37,7 +37,7 @@ export class SyncTracerService {
   startProductPush(
     productId: string,
     action: 'create' | 'update' | 'delete',
-    metadata?: Record<string, unknown>,
+    metadata?: Record<string, unknown>
   ): Span {
     const spanName = `sync.product_push.${action}`;
     const span = this.tracer.startSpan(spanName, {
@@ -72,7 +72,7 @@ export class SyncTracerService {
   recordConflictResolution(
     productId: string,
     conflictType: 'data_mismatch' | 'version_conflict' | 'concurrent_edit',
-    resolution: Record<string, unknown>,
+    resolution: Record<string, unknown>
   ): void {
     const span = this.syncSpans.get(productId);
     if (span) {
@@ -126,7 +126,7 @@ export class SyncTracerService {
     successCount: number,
     failureCount: number,
     avgDuration: number,
-    timeWindowMs: number,
+    timeWindowMs: number
   ): void {
     const span = this.tracer.startSpan('sync.health_check', {
       attributes: {
@@ -152,7 +152,7 @@ export class SyncTracerService {
    */
   async flushSyncSpans(): Promise<void> {
     // End any open product sync spans
-    for (const [productId, span] of this.syncSpans.entries()) {
+    for (const span of this.syncSpans.values()) {
       span.setStatus({ code: SpanStatusCode.ERROR, message: 'Incomplete sync on shutdown' });
       span.end();
     }

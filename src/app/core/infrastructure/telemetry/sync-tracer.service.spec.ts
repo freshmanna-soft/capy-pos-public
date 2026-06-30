@@ -4,7 +4,6 @@ import { OtlpExporterService } from './otlp-exporter.service';
 
 describe('SyncTracerService', () => {
   let service: SyncTracerService;
-  let otlpExporter: OtlpExporterService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
@@ -12,7 +11,6 @@ describe('SyncTracerService', () => {
     });
 
     service = TestBed.inject(SyncTracerService);
-    otlpExporter = TestBed.inject(OtlpExporterService);
   });
 
   it('should be created', () => {
@@ -56,7 +54,7 @@ describe('SyncTracerService', () => {
 
   it('should end product push with success', () => {
     const productId = 'prod-success';
-    const span = service.startProductPush(productId, 'create');
+    service.startProductPush(productId, 'create');
 
     service.recordRetry(productId, 1);
     service.endProductPush(productId, true, {
@@ -69,7 +67,7 @@ describe('SyncTracerService', () => {
 
   it('should end product push with failure', () => {
     const productId = 'prod-fail';
-    const span = service.startProductPush(productId, 'delete');
+    service.startProductPush(productId, 'delete');
 
     service.recordRetry(productId, 1, new Error('Permission denied'));
     service.endProductPush(productId, false, {
