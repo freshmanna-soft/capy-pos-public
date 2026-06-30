@@ -41,7 +41,7 @@ echo ""
 
 # Step 2: Copy shared modules into each Lambda function directory
 echo "📋 Step 2: Copying shared modules into Lambda functions..."
-for fn in get-products sell-product get-transactions health; do
+for fn in create-product delete-product get-products get-transactions health sell-product update-product; do
   mkdir -p "$DEMO_DIR/lambda/$fn/shared"
   cp "$DEMO_DIR/lambda/shared/"*.js "$DEMO_DIR/lambda/$fn/shared/"
   echo "   ✅ Shared → $fn/shared/"
