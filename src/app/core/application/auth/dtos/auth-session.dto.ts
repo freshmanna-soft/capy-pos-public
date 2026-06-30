@@ -1,4 +1,15 @@
 /**
+ * TenantMembershipDto
+ *
+ * A single tenant + role pairing carried in the JWT and session DTO.
+ * Mirrors the userTenants join-table row at the application boundary.
+ */
+export interface TenantMembershipDto {
+  readonly tenantId: string;
+  readonly role: string; // role NAME: operator|manager|admin
+}
+
+/**
  * AuthSessionDto
  *
  * Read model returned after a successful authentication.
@@ -16,4 +27,6 @@ export interface AuthSessionDto {
   readonly accessToken: string;
   /** ISO-8601 expiry timestamp */
   readonly expiresAt: string;
+  /** All tenants this operator belongs to, with the role held in each. */
+  readonly memberships?: readonly TenantMembershipDto[];
 }
