@@ -10,6 +10,7 @@
  * existing product (use POST /api/products to create).
  */
 
+const { initTelemetry, flushTelemetry } = require('./shared/telemetry');
 const { GetCommand, PutCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('./shared/dynamodb');
 const { log, response } = require('./shared/logger');

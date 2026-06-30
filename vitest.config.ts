@@ -17,6 +17,13 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
+    // Write console output straight to stdout instead of routing it through the
+    // worker RPC. Fire-and-forget async logs (e.g. a component's `.then()` that
+    // logs after its test/fixture is torn down) otherwise race worker shutdown
+    // and raise "Closing rpc while onUserConsoleLog was pending" — an
+    // EnvironmentTeardownError that fails the run. Disabling the intercept
+    // removes that RPC entirely, so the race cannot occur.
+    disableConsoleIntercept: true,
     include: ['src/**/*.{test,spec}.ts'],
     exclude: ['tests/e2e/**', 'node_modules/**', 'dist/**', 'src/environments/**'],
     coverage: {

@@ -1,6 +1,48 @@
 import { Page } from '@playwright/test';
 
 /**
+ * stubLiveSyncEndpoints
+ *
+ * Hermetic-isolation guard for e2e. The dev build (served by `npm run start`
+ * for Playwright) has `apiUrl` pointed at the LIVE AWS API, and the app is
+ * offline-first: on boot it seeds local Dexie fixtures AND syncs the remote
+ * catalogue. When the remote is reachable, live products (e.g. `prod-007`
+ * "Latte") merge alongside the local seed (`id: '4'` "Latte"), producing
+ * duplicates that break product-by-name selectors with a strict-mode violation
+ * — and making the suite depend on live, drifting shared data.
+ *
+ * Stub the read/pull endpoints with empty payloads so sync is a no-op and the
+ * app relies solely on the deterministic local Dexie seed the tests target.
+ * Only GET is intercepted; mutations pass through unchanged. Must be registered
+ * before the first navigation, hence it runs at the top of loginAsAdmin().
+ */
+export async function stubLiveSyncEndpoints(page: Page): Promise<void> {
+  await page.route(
+    (url) => url.pathname.endsWith('/api/products'),
+    (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ products: [], count: 0 }),
+          })
+        : route.continue(),
+  );
+
+  await page.route(
+    (url) => url.pathname.endsWith('/api/transactions'),
+    (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ transactions: [], count: 0 }),
+          })
+        : route.continue(),
+  );
+}
+
+/**
  * loginAsAdmin
  *
  * Performs a full UI login as the seeded admin operator.
@@ -28,6 +70,9 @@ import { Page } from '@playwright/test';
  *   data-testid="btn-login"      — submit <button>
  */
 export async function loginAsAdmin(page: Page): Promise<void> {
+  // Step 0: Isolate from the live AWS API before any navigation triggers sync.
+  await stubLiveSyncEndpoints(page);
+
   // Step 1: Navigate to /login and wait for Angular + Dexie to initialise.
   // APP_INITIALIZER (including seedRbacDefaults) completes before routing, so
   // the login form being visible means the seed has already run.

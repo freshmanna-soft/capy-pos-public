@@ -1,8 +1,10 @@
 name: CI
 
-# Fast, deterministic PR gates: lint, unit tests (+coverage), tooling tests, and
-# a production build. These run on every PR to main (the affected Playwright e2e
-# lives in e2e.yml; deploy lives in deploy-pages.yml on push to main).
+# PR gates for main. The fast, deterministic checks (lint, unit tests +coverage,
+# tooling tests, production build) run first and in parallel; the slower affected
+# Playwright e2e job runs only after all of them pass (needs: [lint, test, build]),
+# so a fast-check failure short-circuits the ~7-min e2e run.
+# (deploy lives in deploy-pages.yml on push to main.)
 on:
   pull_request:
     branches: [main]
@@ -112,3 +114,44 @@ jobs:
         run: npx ng build --configuration=${{ env.ANGULAR_BUILD_CONFIG }} --base-href ${{ env.BASE_HREF }}
       - name: Verify build output
         run: test -d ./dist/capy-pos/browser && echo "✅ build output present"
+
+  e2e:
+    name: 🎭 Affected Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Gate the slow e2e behind the fast checks: skip it entirely when lint, unit,
+    # or build fail, instead of burning ~7 min in parallel on a PR that can't merge.
+    # Runs the SAME affected-spec selection as the husky pre-push hook
+    # (scripts/affected-e2e.mjs): only specs impacted by the PR's changed files,
+    # escalating to the full suite on core/config changes.
+    needs: [lint, test, build]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so the affected runner can diff against the base branch.
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Ensure base ref is available
+        run: git fetch --no-tags origin ${{ github.base_ref }}
+      - name: Run affected e2e
+        # Mirrors the pre-push hook; diffs against the PR base branch.
+        env:
+          AFFECTED_BASE: origin/${{ github.base_ref }}
+          PLAYWRIGHT_PROJECT: chromium
+        run: node scripts/affected-e2e.mjs
+      - name: Upload Playwright report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
