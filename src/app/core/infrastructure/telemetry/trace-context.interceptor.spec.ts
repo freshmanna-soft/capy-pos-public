@@ -7,7 +7,6 @@ import { OtlpExporterService } from './otlp-exporter.service';
 describe('TraceContextInterceptor', () => {
   let httpClient: HttpClient;
   let httpMock: HttpTestingController;
-  let otlpExporter: OtlpExporterService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
@@ -24,7 +23,6 @@ describe('TraceContextInterceptor', () => {
 
     httpClient = TestBed.inject(HttpClient);
     httpMock = TestBed.inject(HttpTestingController);
-    otlpExporter = TestBed.inject(OtlpExporterService);
   });
 
   afterEach(() => {
@@ -49,32 +47,34 @@ describe('TraceContextInterceptor', () => {
     req.flush({});
   });
 
-  it('should capture HTTP response status', (done) => {
-    httpClient.get('/api/test').subscribe(
-      () => {
-        done();
-      },
-      () => {
-        done();
-      },
-    );
+  it('should capture HTTP response status', async () => {
+    const settled = new Promise<void>((resolve) => {
+      httpClient.get('/api/test').subscribe({
+        next: () => resolve(),
+        error: () => resolve(),
+      });
+    });
 
     const req = httpMock.expectOne('/api/test');
     req.flush({ data: 'test' }, { status: 200, statusText: 'OK' });
+
+    await settled;
   });
 
-  it('should handle HTTP errors', (done) => {
-    httpClient.get('/api/test').subscribe(
-      () => {
-        fail('should not succeed');
-      },
-      (error) => {
-        expect(error).toBeTruthy();
-        done();
-      },
-    );
+  it('should handle HTTP errors', async () => {
+    const settled = new Promise<void>((resolve, reject) => {
+      httpClient.get('/api/test').subscribe({
+        next: () => reject(new Error('should not succeed')),
+        error: (error) => {
+          expect(error).toBeTruthy();
+          resolve();
+        },
+      });
+    });
 
     const req = httpMock.expectOne('/api/test');
     req.error(new ErrorEvent('Network error'));
+
+    await settled;
   });
 });

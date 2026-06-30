@@ -1,5 +1,4 @@
 import { TestBed } from '@angular/core/testing';
-import { trace } from '@opentelemetry/api';
 import { OtlpExporterService } from './otlp-exporter.service';
 
 describe('OtlpExporterService', () => {
@@ -21,17 +20,11 @@ describe('OtlpExporterService', () => {
     expect(tracer).toBeTruthy();
   });
 
-  it('should handle flush gracefully', (done) => {
-    service.flush().then(() => {
-      expect(true).toBe(true);
-      done();
-    });
+  it('should handle flush gracefully', async () => {
+    await expect(service.flush()).resolves.toBeUndefined();
   });
 
-  it('should handle shutdown gracefully', (done) => {
-    service.shutdown().then(() => {
-      expect(true).toBe(true);
-      done();
-    });
+  it('should handle shutdown gracefully', async () => {
+    await expect(service.shutdown()).resolves.toBeUndefined();
   });
 });
