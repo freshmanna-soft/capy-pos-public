@@ -209,6 +209,52 @@ describe('CurrentUserService', () => {
     });
   });
 
+  // ── resilient claim handling ─────────────────────────────────────────────
+  // A corrupted or forward-incompatible session claim must never crash the
+  // signal graph: memberships()/activeRole() swallow the parse error and the
+  // service degrades gracefully to the flat session roles/permissions claims.
+
+  describe('resilient claim handling', () => {
+    it('returns an empty membership set when a memberships row has an unknown role', () => {
+      service.setSession({
+        ...baseSession,
+        memberships: [{ tenantId: 'store-a', role: 'super-kiosk-custom' }],
+      });
+      expect(service.memberships().isEmpty).toBe(true);
+    });
+
+    it('returns an empty membership set when memberships contain a duplicate tenant', () => {
+      service.setSession({
+        ...baseSession,
+        memberships: [
+          { tenantId: 'store-a', role: 'admin' },
+          { tenantId: 'store-a', role: 'operator' },
+        ],
+      });
+      expect(service.memberships().isEmpty).toBe(true);
+    });
+
+    it('falls back to session roles/permissions when the memberships claim is malformed', () => {
+      service.setSession({
+        ...baseSession,
+        memberships: [{ tenantId: 'store-a', role: 'super-kiosk-custom' }],
+      });
+      expect(service.roles()).toEqual(['admin']);
+      expect(service.permissions()).toContain('admin:settings');
+    });
+
+    it('resolves no active role (falls back) when the active tenant id is not a valid TenantId', () => {
+      service.setSession({
+        ...baseSession,
+        tenantId: 'bad tenant!', // illegal chars → TenantId construction throws in activeRole()
+        memberships: [{ tenantId: 'store-a', role: 'admin' }],
+      });
+      // activeRole() swallows the TenantId validation error and falls back to the session claim.
+      expect(service.roles()).toEqual(['admin']);
+      expect(service.hasRole('admin')).toBe(true);
+    });
+  });
+
   // ── logout ─────────────────────────────────────────────────────────────
 
   describe('logout()', () => {
