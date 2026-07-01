@@ -140,7 +140,7 @@ export class DexieCustomerRepository
       .limit(limit)
       .toArray();
 
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -168,21 +168,23 @@ export class DexieCustomerRepository
       })
       .toArray();
 
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
-   * Get top customers by loyalty points
+   * Get top customers by loyalty points.
+   *
+   * `loyaltyPoints` is not a Dexie index (see the customers store definition),
+   * so ordering happens in memory rather than via `orderBy('loyaltyPoints')`,
+   * which would throw a SchemaError. Records are mapped through the resilient
+   * mapper first so a single corrupt record can't crash the whole list.
    */
   async getTopCustomers(limit = 10): Promise<Customer[]> {
-    const records = await this.table
-      .orderBy('loyaltyPoints')
-      .reverse()
-      .filter((record) => !record.deletedAt)
-      .limit(limit)
-      .toArray();
+    const records = await this.table.filter((record) => !record.deletedAt).toArray();
 
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records)
+      .sort((a, b) => b.loyaltyPoints - a.loyaltyPoints)
+      .slice(0, limit);
   }
 
   /**
