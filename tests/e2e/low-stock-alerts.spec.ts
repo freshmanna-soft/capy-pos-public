@@ -32,7 +32,10 @@ test.describe('Low Stock Alerts - Settings Configuration', () => {
     const input = page.locator('[data-testid="input-threshold"]');
     const increaseBtn = page.locator('[data-testid="btn-increase-threshold"]');
 
-    const before = parseInt(await input.inputValue());
+    // Wait for the numeric default before reading — reading too early yields
+    // '' → parseInt → NaN (source of the flake).
+    await expect(input).toHaveValue(/^\d+$/);
+    const before = parseInt(await input.inputValue(), 10);
     await increaseBtn.click();
     // toHaveValue retries, avoiding a stale read before the signal updates.
     await expect(input).toHaveValue(String(before + 1));
@@ -44,7 +47,8 @@ test.describe('Low Stock Alerts - Settings Configuration', () => {
 
     // First increase so we're safely above the minimum.
     const increaseBtn = page.locator('[data-testid="btn-increase-threshold"]');
-    const start = parseInt(await input.inputValue());
+    await expect(input).toHaveValue(/^\d+$/);
+    const start = parseInt(await input.inputValue(), 10);
     await increaseBtn.click();
     await expect(input).toHaveValue(String(start + 1));
 
