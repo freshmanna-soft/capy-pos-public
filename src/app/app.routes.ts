@@ -1,5 +1,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/presentation/guards/auth.guard';
+import { permissionGuard } from '@core/presentation/guards/permission.guard';
+import { Permission } from '@core/domain/auth/permission.constants';
 
 export const routes: Routes = [
   {
@@ -61,6 +63,15 @@ export const routes: Routes = [
     loadComponent: () =>
       import('./features/settings/settings.component').then((m) => m.SettingsComponent),
     title: 'Settings',
+  },
+  {
+    path: 'admin/users',
+    canActivate: [authGuard, permissionGuard(Permission.MANAGE_OPERATORS)],
+    loadComponent: () =>
+      import('./features/admin/operator-list/operator-list.component').then(
+        (m) => m.OperatorListComponent
+      ),
+    title: 'Users & Roles · Capy-POS',
   },
   {
     path: 'login',

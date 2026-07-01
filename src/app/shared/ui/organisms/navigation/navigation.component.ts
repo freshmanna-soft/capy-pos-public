@@ -1,5 +1,19 @@
-import { Component, ChangeDetectionStrategy, signal } from '@angular/core';
+import { Component, ChangeDetectionStrategy, signal, computed, inject } from '@angular/core';
 import { RouterModule } from '@angular/router';
+import { CurrentUserService } from '@core/application/auth/current-user.service';
+import { Permission } from '@core/domain/auth/permission.constants';
+
+/** A single navigation entry. `permission`, when set, gates visibility via RBAC. */
+interface NavItem {
+  id: string;
+  path: string;
+  label: string;
+  shortLabel: string;
+  icon: string;
+  exact: boolean;
+  /** When present, the item is shown only if the current operator holds it. */
+  permission?: Permission;
+}
 
 /**
  * Navigation Component (Mobile-First)
@@ -31,7 +45,7 @@ import { RouterModule } from '@angular/router';
       data-testid="navigation"
       aria-label="Main navigation"
     >
-      @for (item of mobileNavItems; track item.path) {
+      @for (item of mobileNavItems(); track item.path) {
         <a
           [routerLink]="item.path"
           routerLinkActive="text-blue-400"
@@ -72,7 +86,7 @@ import { RouterModule } from '@angular/router';
         role="menu"
       >
         <div class="grid grid-cols-4 gap-3">
-          @for (item of overflowNavItems; track item.path) {
+          @for (item of overflowNavItems(); track item.path) {
             <a
               [routerLink]="item.path"
               routerLinkActive="text-blue-400"
@@ -136,7 +150,7 @@ import { RouterModule } from '@angular/router';
 
       <!-- Navigation Links -->
       <ul class="list-none p-2 m-0 flex-1 flex flex-col gap-1 overflow-y-auto">
-        @for (item of navItems; track item.path) {
+        @for (item of navItems(); track item.path) {
           <li>
             <a
               [routerLink]="item.path"
@@ -186,11 +200,13 @@ import { RouterModule } from '@angular/router';
   ],
 })
 export class NavigationComponent {
+  private readonly currentUser = inject(CurrentUserService);
+
   readonly collapsed = signal(false);
   readonly mobileMenuOpen = signal(false);
 
-  /** All navigation items */
-  readonly navItems = [
+  /** Full catalogue of navigation items (before RBAC filtering). */
+  private readonly allNavItems: NavItem[] = [
     { id: 'pos', path: '/pos', label: 'Norma POS', shortLabel: 'POS', icon: '🌸', exact: false },
     {
       id: 'history',
@@ -233,6 +249,15 @@ export class NavigationComponent {
       exact: false,
     },
     {
+      id: 'admin-users',
+      path: '/admin/users',
+      label: 'Users & Roles',
+      shortLabel: 'Users',
+      icon: '🛡️',
+      exact: false,
+      permission: Permission.MANAGE_OPERATORS,
+    },
+    {
       id: 'settings',
       path: '/settings',
       label: 'Settings',
@@ -242,11 +267,22 @@ export class NavigationComponent {
     },
   ];
 
+  /**
+   * Navigation items visible to the current operator. Items carrying a
+   * `permission` are hidden unless it is held; reactive to login/logout and
+   * tenant switches because it reads CurrentUserService.permissions().
+   */
+  readonly navItems = computed<NavItem[]>(() =>
+    this.allNavItems.filter(
+      (item) => !item.permission || this.currentUser.hasPermission(item.permission)
+    )
+  );
+
   /** Primary items shown in mobile bottom bar (max 4) */
-  readonly mobileNavItems = this.navItems.slice(0, 4);
+  readonly mobileNavItems = computed<NavItem[]>(() => this.navItems().slice(0, 4));
 
   /** Overflow items shown in "More" menu */
-  readonly overflowNavItems = this.navItems.slice(4);
+  readonly overflowNavItems = computed<NavItem[]>(() => this.navItems().slice(4));
 
   toggleCollapse(): void {
     this.collapsed.update((v) => !v);
