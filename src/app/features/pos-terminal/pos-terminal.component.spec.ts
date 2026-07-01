@@ -613,4 +613,62 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       expect(errorSpy).toHaveBeenCalledWith('[POS] Checkout failed:', expect.any(Error));
     });
   });
+
+  describe('AC (Phase 2, #14): Search / Browse toggle', () => {
+    // The app has recurring timers (sync worker), so runAllTimers would loop.
+    // The browse load only awaits a resolved findActive() promise — flushing the
+    // microtask queue is enough to let loadBrowseProducts() settle.
+    const flushMicrotasks = async (): Promise<void> => {
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+    };
+
+    it('defaults to the search view', () => {
+      expect(component.leftView()).toBe('search');
+    });
+
+    it('switches to browse and lazily loads the active catalog into the grid', async () => {
+      mockProductRepository.findActive.mockResolvedValueOnce([
+        mockProducts.coffee,
+        mockProducts.tea,
+      ]);
+
+      component.setLeftView('browse');
+      await flushMicrotasks();
+
+      expect(component.leftView()).toBe('browse');
+      expect(mockProductRepository.findActive).toHaveBeenCalled();
+      expect(component.browseProducts().map((p) => p.id)).toEqual(['1', '2']);
+      expect(component.browseLoading()).toBe(false);
+    });
+
+    it('does not reload the catalog when toggling back to browse', async () => {
+      component.setLeftView('browse');
+      await flushMicrotasks();
+      const callsAfterFirstLoad = mockProductRepository.findActive.mock.calls.length;
+
+      component.setLeftView('search');
+      component.setLeftView('browse');
+      await flushMicrotasks();
+
+      expect(mockProductRepository.findActive.mock.calls.length).toBe(callsAfterFirstLoad);
+    });
+
+    it('routes a product selected from the browse grid through addToCart', () => {
+      component.setLeftView('browse');
+
+      // The grid emits (productSelected) → the same handler the search uses.
+      component.handleProductSelected(mockProducts.chocolate);
+      vi.advanceTimersByTime(0);
+
+      expect(cartService.items().some((i) => i.product.id === '3')).toBe(true);
+    });
+
+    it('handleAddProduct returns to the search view before focusing', () => {
+      component.setLeftView('browse');
+
+      component.handleAddProduct();
+
+      expect(component.leftView()).toBe('search');
+    });
+  });
 });

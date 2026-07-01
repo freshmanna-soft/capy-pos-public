@@ -77,9 +77,62 @@
 
   <!-- Main Content: stacked on mobile, side-by-side on desktop -->
   <main class="flex-1 flex flex-col lg:flex-row lg:gap-4 p-3 md:p-4 lg:p-6 overflow-hidden">
-    <!-- Product Search Section -->
-    <section class="flex-1 min-h-0 overflow-auto" data-testid="search-section">
-      <app-product-search (productSelected)="handleProductSelected($event)"> </app-product-search>
+    <!-- Product Search / Browse Section -->
+    <section class="flex-1 min-h-0 flex flex-col overflow-hidden" data-testid="search-section">
+      <!-- Search | Browse toggle -->
+      <div
+        class="flex gap-1 p-1 mb-3 bg-gray-200 rounded-lg self-start"
+        role="tablist"
+        aria-label="Product panel view"
+        data-testid="pos-view-toggle"
+      >
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="leftView() === 'search'"
+          (click)="setLeftView('search')"
+          class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors"
+          [class]="
+            leftView() === 'search'
+              ? 'bg-white text-indigo-700 shadow'
+              : 'text-gray-600 hover:text-gray-900'
+          "
+          data-testid="pos-view-search"
+        >
+          🔍 Search
+        </button>
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="leftView() === 'browse'"
+          (click)="setLeftView('browse')"
+          class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors"
+          [class]="
+            leftView() === 'browse'
+              ? 'bg-white text-indigo-700 shadow'
+              : 'text-gray-600 hover:text-gray-900'
+          "
+          data-testid="pos-view-browse"
+        >
+          🗂️ Browse
+        </button>
+      </div>
+
+      <!-- product-search stays untouched (BUG-001); grid is the browse pilot -->
+      <div class="flex-1 min-h-0 overflow-auto">
+        @if (leftView() === 'browse') {
+          <app-product-grid
+            [products]="browseProducts()"
+            [isLoading]="browseLoading()"
+            (productSelected)="handleProductSelected($event)"
+            data-testid="browse-grid"
+          ></app-product-grid>
+        } @else {
+          <app-product-search
+            (productSelected)="handleProductSelected($event)"
+          ></app-product-search>
+        }
+      </div>
     </section>
 
     <!-- Shopping Cart Section -->
