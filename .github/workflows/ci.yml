@@ -155,3 +155,36 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  smoke:
+    name: 🔥 Production route smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # ALWAYS runs — deliberately NOT gated by affected-spec selection. A page
+    # broken by a change usually isn't "affected" by that change's files, and
+    # prod-only bugs (e.g. `process.env` in environment.prod.ts, which threw
+    # "process is not defined" and broke every page) never surface in the
+    # dev-server e2e. This serves the PRODUCTION build and asserts every
+    # top-level route renders without a runtime error.
+    needs: [lint, test, build]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Route smoke against the production build
+        run: npm run test:e2e:smoke
+      - name: Upload smoke report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: playwright-report/
+          retention-days: 7

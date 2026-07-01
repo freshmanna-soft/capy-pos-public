@@ -97,6 +97,7 @@ export const environment = {
     otlp: {
       enabled: false,
       endpoint: 'http://localhost:4317',
+      instanceId: '',
       apiKey: '',
     },
   },
