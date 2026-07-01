@@ -148,6 +148,22 @@ export class CurrentUserService {
     this._activeTenantId.set(session.tenantId);
   }
 
+  /**
+   * Re-issue the session from current persisted state (roles/memberships) without
+   * re-login, then re-apply it so guards, the `*appHasPermission` directive and
+   * every RBAC computed signal recompute. Call this after an admin action that
+   * changes the CURRENT operator's own access (AC4, #44). Preserves the tenant the
+   * user is actively working in when they still hold a membership there.
+   */
+  async refresh(): Promise<void> {
+    const previousActive = this._activeTenantId();
+    const session = await this.gateway.refresh();
+    this._session.set(session);
+    const stillMember =
+      !!previousActive && (session.memberships ?? []).some((m) => m.tenantId === previousActive);
+    this._activeTenantId.set(stillMember ? previousActive : session.tenantId);
+  }
+
   // ── tenant switching ─────────────────────────────────────────────────────
 
   /**

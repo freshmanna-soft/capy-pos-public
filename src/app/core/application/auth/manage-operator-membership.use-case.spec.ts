@@ -2,12 +2,19 @@ import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ManageOperatorMembershipUseCase } from './manage-operator-membership.use-case';
 import { OPERATOR_ADMIN_PORT } from './ports/operator-admin.port';
+import { ROLE_ADMIN_PORT } from './ports/role-admin.port';
 import { CurrentUserService } from './current-user.service';
 import { AngularAuthorizationService, AuthorizationError } from './angular-authorization.service';
 import { Permission } from '@core/domain/auth/permission.constants';
 
 describe('ManageOperatorMembershipUseCase', () => {
   const port = { listOperatorsForTenant: vi.fn(), assignRole: vi.fn(), revokeMembership: vi.fn() };
+  const rolePort = {
+    listRoles: vi.fn().mockResolvedValue([{ id: 'role-admin', name: 'admin' }]),
+    createRole: vi.fn(),
+    updateRolePermissions: vi.fn(),
+    deleteRole: vi.fn(),
+  };
   let allowed: boolean;
   let activeTenant: string | null;
 
@@ -28,11 +35,19 @@ describe('ManageOperatorMembershipUseCase', () => {
       providers: [
         ManageOperatorMembershipUseCase,
         { provide: OPERATOR_ADMIN_PORT, useValue: port },
+        { provide: ROLE_ADMIN_PORT, useValue: rolePort },
         { provide: CurrentUserService, useValue: currentUser },
         { provide: AngularAuthorizationService, useValue: authz },
       ],
     });
     useCase = TestBed.inject(ManageOperatorMembershipUseCase);
+  });
+
+  it('listAssignableRoles asserts MANAGE_OPERATORS then returns roles from the role port', async () => {
+    const roles = await useCase.listAssignableRoles();
+    expect(authz.assert).toHaveBeenCalledWith(Permission.MANAGE_OPERATORS);
+    expect(rolePort.listRoles).toHaveBeenCalled();
+    expect(roles).toEqual([{ id: 'role-admin', name: 'admin' }]);
   });
 
   it('assignRole asserts MANAGE_OPERATORS then writes to the active tenant', async () => {

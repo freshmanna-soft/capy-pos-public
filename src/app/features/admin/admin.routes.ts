@@ -22,4 +22,11 @@ export const ADMIN_ROUTES: Routes = [
       import('./operator-list/operator-list.component').then((m) => m.OperatorListComponent),
     title: 'Users & Roles · Capy-POS',
   },
+  {
+    path: 'roles',
+    canActivate: [authGuard, permissionGuard(Permission.MANAGE_ROLES)],
+    loadComponent: () =>
+      import('./role-management/role-management.component').then((m) => m.RoleManagementComponent),
+    title: 'Roles & Permissions · Capy-POS',
+  },
 ];

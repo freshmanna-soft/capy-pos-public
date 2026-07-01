@@ -1,6 +1,10 @@
 import { Injectable, inject } from '@angular/core';
-import { SignJWT, jwtVerify, decodeJwt } from 'jose';
-import { DexieDatabase, IRoleDB } from '@core/infrastructure/database/dexie-database.service';
+import { SignJWT, jwtVerify } from 'jose';
+import {
+  DexieDatabase,
+  IOperatorDB,
+  IRoleDB,
+} from '@core/infrastructure/database/dexie-database.service';
 import { AuthGateway } from '@core/application/auth/ports/auth-gateway.port';
 import { CredentialsDto } from '@core/application/auth/dtos/credentials.dto';
 import { AuthSessionDto, TenantMembershipDto } from '@core/application/auth/dtos/auth-session.dto';
@@ -252,17 +256,26 @@ export class LocalCredentialAuthAdapter implements AuthGateway {
       throw new InvalidCredentialsError();
     }
 
+    return this.buildSession(operator);
+  }
+
+  /**
+   * Build (and persist) a signed session for an operator from CURRENT database
+   * state — the home role + permissions and the multi-tenant membership list read
+   * from `roles`/`userTenants`. Shared by authenticate() and refresh() so a
+   * refreshed session always reflects live role/membership changes (AC4, #44),
+   * never stale JWT claims.
+   */
+  private async buildSession(operator: IOperatorDB): Promise<AuthSessionDto> {
     const roleRecord = await this.db.roles.get(operator.roleId);
     const roleName = roleRecord?.name ?? operator.roleId;
 
-    // Permissions are derived from the domain Role (the single source of truth in
-    // permission.constants.ts) rather than the stored role JSON. This keeps the
-    // JWT `permissions` claim — consumed by the *appHasPermission directive — in
-    // lockstep with the role-name authorization path used by AuthorizationService.
-    // Falls back to the persisted JSON only for custom roles unknown to the domain.
+    // Permissions for the home role. Falls back to the persisted JSON for custom
+    // roles unknown to the domain (see resolvePermissions).
     const permissions: string[] = resolvePermissions(roleName, roleRecord?.permissions);
 
-    // Build multi-tenant membership list from the userTenants join table.
+    // Multi-tenant membership list from the userTenants join table (each carries
+    // its role's permissions + level so the client reconstructs data-driven roles).
     const memberships = await this._resolveMemberships(operator.id, operator.tenantId, roleName);
 
     const now = Math.floor(Date.now() / 1000);
@@ -332,32 +345,17 @@ export class LocalCredentialAuthAdapter implements AuthGateway {
       throw new Error('No active session to refresh');
     }
 
-    // Decode existing claims without re-verifying (already verified above)
-    const claims = decodeJwt(current.accessToken);
-
-    const now = Math.floor(Date.now() / 1000);
-    const exp = now + SESSION_TTL_SECONDS;
-
-    const accessToken = await new SignJWT({
-      sub: claims['sub'],
-      tenantId: claims['tenantId'],
-      roles: claims['roles'],
-      permissions: claims['permissions'],
-      memberships: claims['memberships'],
-    })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setIssuedAt(now)
-      .setExpirationTime(exp)
-      .sign(getJwtSecret());
-
-    const session: AuthSessionDto = {
-      ...current,
-      accessToken,
-      expiresAt: new Date(exp * 1000).toISOString(),
-    };
-
-    storeToken(accessToken);
-    return session;
+    // Rebuild from CURRENT database state (not the stale token claims) so a role
+    // reassignment or permission change made while signed in takes effect on the
+    // next refresh — this is what makes admin changes reach the current user's
+    // guards and gated UI live (AC4, #44).
+    const operator = await this.db.operators.get(current.operatorId);
+    if (!operator || !operator.isActive) {
+      // The operator was removed or deactivated — treat as signed out.
+      clearToken();
+      throw new Error('Operator no longer active — session refresh denied');
+    }
+    return this.buildSession(operator);
   }
 
   /**
