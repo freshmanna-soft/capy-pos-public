@@ -1,7 +1,5 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/presentation/guards/auth.guard';
-import { permissionGuard } from '@core/presentation/guards/permission.guard';
-import { Permission } from '@core/domain/auth/permission.constants';
 
 export const routes: Routes = [
   {
@@ -65,13 +63,11 @@ export const routes: Routes = [
     title: 'Settings',
   },
   {
-    path: 'admin/users',
-    canActivate: [authGuard, permissionGuard(Permission.MANAGE_OPERATORS)],
-    loadComponent: () =>
-      import('./features/admin/operator-list/operator-list.component').then(
-        (m) => m.OperatorListComponent
-      ),
-    title: 'Users & Roles · Capy-POS',
+    // Admin area (Users & Roles, and future admin screens) lives in its own
+    // lazily-loaded route table — keeps guard/permission wiring out of the
+    // root routes. Leaf routes carry their own RBAC guards.
+    path: 'admin',
+    loadChildren: () => import('./features/admin/admin.routes').then((m) => m.ADMIN_ROUTES),
   },
   {
     path: 'login',
