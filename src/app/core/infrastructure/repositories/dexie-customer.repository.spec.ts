@@ -2,7 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import { TestBed } from '@angular/core/testing';
 import { DexieCustomerRepository } from './dexie-customer.repository';
 import { DexieDatabase, ICustomerDB } from '@core/infrastructure/database/dexie-database.service';
-import { CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
+import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
 
 /**
  * Unit tests for DexieCustomerRepository against a real Dexie table backed by
@@ -216,6 +216,140 @@ describe('DexieCustomerRepository (real Dexie + fake-indexeddb)', () => {
     it('updateLoyaltyPoints / updateStatus throw for a missing customer', async () => {
       await expect(repo.updateLoyaltyPoints('x', 10)).rejects.toThrow();
       await expect(repo.updateStatus('x', CustomerStatus.VIP)).rejects.toThrow();
+    });
+
+    it('updateLoyaltyPoints redeems points when given a negative amount', async () => {
+      const updated = await repo.updateLoyaltyPoints('1', -40);
+      expect(updated.loyaltyPoints).toBe(60);
+      expect((await db.customers.get('1'))?.loyaltyPoints).toBe(60);
+    });
+
+    it('updateLoyaltyPoints leaves the balance unchanged for a zero amount', async () => {
+      const updated = await repo.updateLoyaltyPoints('1', 0);
+      expect(updated.loyaltyPoints).toBe(100);
+    });
+
+    it('updateStatus deactivates an active customer', async () => {
+      const updated = await repo.updateStatus('1', CustomerStatus.INACTIVE);
+      expect(updated.status).toBe(CustomerStatus.INACTIVE);
+      expect((await db.customers.get('1'))?.status).toBe(CustomerStatus.INACTIVE);
+    });
+
+    it('updateStatus blocks an active customer', async () => {
+      const updated = await repo.updateStatus('1', CustomerStatus.BLOCKED);
+      expect(updated.status).toBe(CustomerStatus.BLOCKED);
+      expect((await db.customers.get('1'))?.status).toBe(CustomerStatus.BLOCKED);
+    });
+
+    it('updateStatus reactivates an inactive customer', async () => {
+      await repo.updateStatus('1', CustomerStatus.INACTIVE);
+      const updated = await repo.updateStatus('1', CustomerStatus.ACTIVE);
+      expect(updated.status).toBe(CustomerStatus.ACTIVE);
+    });
+  });
+
+  describe('additional finders', () => {
+    beforeEach(async () => {
+      await db.customers.bulkAdd([
+        record({
+          id: '1',
+          name: 'Coffee Lover',
+          status: CustomerStatus.VIP,
+          tier: CustomerTier.GOLD,
+          loyaltyPoints: 500,
+        }),
+        record({
+          id: '2',
+          name: 'Croissant Fan',
+          status: CustomerStatus.ACTIVE,
+          tier: CustomerTier.GOLD,
+          loyaltyPoints: 250,
+        }),
+        record({
+          id: '3',
+          name: 'Tea Enjoyer',
+          status: CustomerStatus.ACTIVE,
+          tier: CustomerTier.BRONZE,
+          loyaltyPoints: 50,
+        }),
+      ]);
+    });
+
+    it('findByStatusAndTier filters on the compound index', async () => {
+      expect(
+        (await repo.findByStatusAndTier(CustomerStatus.ACTIVE, CustomerTier.GOLD)).map((c) => c.id)
+      ).toEqual(['2']);
+    });
+
+    it('findVIPCustomers returns only VIP customers', async () => {
+      expect((await repo.findVIPCustomers()).map((c) => c.id)).toEqual(['1']);
+    });
+
+    it('findActiveCustomers returns only active customers', async () => {
+      expect((await repo.findActiveCustomers()).map((c) => c.id).sort()).toEqual(['2', '3']);
+    });
+
+    // `name` and `loyaltyPoints` are NOT Dexie indexes, so these sort in memory
+    // (via the resilient mapper) rather than orderBy(), which would throw a
+    // SchemaError — same defect class #110 fixed for getTopCustomers.
+    it('findSortedByName orders ascending by default and descending on request', async () => {
+      expect((await repo.findSortedByName()).map((c) => c.id)).toEqual(['1', '2', '3']);
+      expect((await repo.findSortedByName('desc')).map((c) => c.id)).toEqual(['3', '2', '1']);
+    });
+
+    it('findSortedByLoyaltyPoints orders descending by default and ascending on request', async () => {
+      expect((await repo.findSortedByLoyaltyPoints()).map((c) => c.id)).toEqual(['1', '2', '3']);
+      expect((await repo.findSortedByLoyaltyPoints('asc')).map((c) => c.id)).toEqual([
+        '3',
+        '2',
+        '1',
+      ]);
+    });
+  });
+
+  describe('entity <-> record mapping', () => {
+    // Direct access to the protected mappers to exercise every optional-field branch.
+    const mapper = () =>
+      repo as unknown as {
+        mapToEntity(r: ICustomerDB): Customer;
+      };
+
+    it('create maps a fully-populated entity to the DB and reads it back intact', async () => {
+      const full = record({
+        id: 'full-1',
+        createdBy: 'admin',
+        updatedBy: 'clerk',
+        address: '1 Analytical Engine Way',
+        city: 'London',
+        state: 'LDN',
+        zipCode: 'EC1',
+        country: 'UK',
+        dateOfBirth: new Date('1815-12-10'),
+        notes: 'First programmer',
+      });
+      const entity = mapper().mapToEntity(full); // exercises the optional withX() branches
+      await repo.create(entity); // exercises mapToDatabase
+
+      const back = await repo.findById('full-1');
+      expect(back).not.toBeNull();
+      expect(back?.createdBy).toBe('admin');
+      expect(back?.updatedBy).toBe('clerk');
+      expect(back?.address).toBe('1 Analytical Engine Way');
+      expect(back?.city).toBe('London');
+      expect(back?.state).toBe('LDN');
+      expect(back?.zipCode).toBe('EC1');
+      expect(back?.country).toBe('UK');
+      expect(back?.notes).toBe('First programmer');
+    });
+
+    it('mapToEntity maps soft-delete metadata and defaults a missing country to USA', () => {
+      const now = new Date();
+      const deleted = mapper().mapToEntity(
+        record({ id: 'del-1', country: undefined, deletedAt: now, deletedBy: 'admin' })
+      );
+      expect(deleted.country).toBe('USA'); // record.country ?? 'USA' fallback
+      expect(deleted.deletedAt).toEqual(now);
+      expect(deleted.deletedBy).toBe('admin');
     });
   });
 });
