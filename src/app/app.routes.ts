@@ -63,6 +63,13 @@ export const routes: Routes = [
     title: 'Settings',
   },
   {
+    // Admin area (Users & Roles, and future admin screens) lives in its own
+    // lazily-loaded route table — keeps guard/permission wiring out of the
+    // root routes. Leaf routes carry their own RBAC guards.
+    path: 'admin',
+    loadChildren: () => import('./features/admin/admin.routes').then((m) => m.ADMIN_ROUTES),
+  },
+  {
     path: 'login',
     loadComponent: () => import('./features/login/login.component').then((m) => m.LoginComponent),
     title: 'Sign In',
