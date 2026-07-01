@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { SignJWT, jwtVerify, decodeJwt } from 'jose';
-import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
+import { DexieDatabase, IRoleDB } from '@core/infrastructure/database/dexie-database.service';
 import { AuthGateway } from '@core/application/auth/ports/auth-gateway.port';
 import { CredentialsDto } from '@core/application/auth/dtos/credentials.dto';
 import { AuthSessionDto, TenantMembershipDto } from '@core/application/auth/dtos/auth-session.dto';
@@ -204,6 +204,32 @@ function resolvePermissions(roleName: string, storedJson?: string): string[] {
   }
 }
 
+/**
+ * Resolve a domain Role from a stored role record. Built-in names resolve to
+ * canonical permissions + level; custom roles are rebuilt from the record's
+ * persisted permissions JSON + level (unknown permission strings are dropped by
+ * Role.fromRecord). Returns null only for an unknown role with no record.
+ */
+function resolveRole(name: string, roleRecord?: IRoleDB): Role | null {
+  try {
+    return Role.fromName(name); // built-in
+  } catch {
+    if (!roleRecord) return null;
+    let permissions: string[];
+    try {
+      permissions = JSON.parse(roleRecord.permissions) as string[];
+    } catch {
+      permissions = [];
+    }
+    return Role.fromRecord({ name, permissions, level: roleRecord.level ?? 1 });
+  }
+}
+
+/** Serialise a resolved Role into the tenant-membership claim (data-driven). */
+function toMembershipDto(tenantId: string, role: Role): TenantMembershipDto {
+  return { tenantId, role: role.name, permissions: [...role.permissions], level: role.level };
+}
+
 // ---------------------------------------------------------------------------
 // Adapter
 // ---------------------------------------------------------------------------
@@ -351,31 +377,37 @@ export class LocalCredentialAuthAdapter implements AuthGateway {
   ): Promise<TenantMembershipDto[]> {
     const membershipRows = await this.db.userTenants.where('userId').equals(userId).toArray();
 
+    const homeFallback = (): TenantMembershipDto[] => {
+      const role = resolveRole(homeRoleName);
+      return [
+        role ? toMembershipDto(homeTenantId, role) : { tenantId: homeTenantId, role: homeRoleName },
+      ];
+    };
+
     if (membershipRows.length === 0) {
-      return [{ tenantId: homeTenantId, role: homeRoleName }];
+      return homeFallback();
     }
 
     const resolved = await Promise.all(
       membershipRows.map(async (row) => {
         const roleRecord = await this.db.roles.get(row.roleId);
         const name = roleRecord?.name ?? row.roleId;
-        try {
-          Role.fromName(name); // validate; throws for unknown names
-          return { tenantId: row.tenantId, role: name } satisfies TenantMembershipDto;
-        } catch {
+        const role = resolveRole(name, roleRecord);
+        if (!role) {
           console.warn(
             `[LocalCredentialAuthAdapter] Skipping membership row for tenant '${row.tenantId}': ` +
-              `role '${name}' is not a known domain Role.`
+              `role '${name}' is unknown and has no stored record.`
           );
           return null;
         }
+        return toMembershipDto(row.tenantId, role);
       })
     );
 
     const valid = resolved.filter((m): m is TenantMembershipDto => m !== null);
 
     // Fallback: if all rows were skipped, return the home membership.
-    return valid.length > 0 ? valid : [{ tenantId: homeTenantId, role: homeRoleName }];
+    return valid.length > 0 ? valid : homeFallback();
   }
 
   async signOut(): Promise<void> {

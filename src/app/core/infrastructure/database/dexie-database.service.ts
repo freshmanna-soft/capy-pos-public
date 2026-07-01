@@ -267,6 +267,9 @@ export interface IRoleDB {
   id: string;
   name: string;
   permissions: string; // JSON array of Permission strings
+  /** Hierarchy level (higher == more privileged). Built-ins: operator 1 < manager 2 < admin 3.
+   *  Custom roles carry their own level; defaults to 1 when absent (legacy rows). */
+  level?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -398,6 +401,7 @@ export class DexieDatabase extends Dexie {
               id: `role-${role.name}`,
               name: role.name,
               permissions: JSON.stringify([...role.permissions]),
+              level: role.level,
               createdAt: now,
               updatedAt: now,
             }))
@@ -786,6 +790,7 @@ export class DexieDatabase extends Dexie {
           id: `role-${role.name}`,
           name: role.name,
           permissions: JSON.stringify([...role.permissions]),
+          level: role.level,
           createdAt: now,
           updatedAt: now,
         }))

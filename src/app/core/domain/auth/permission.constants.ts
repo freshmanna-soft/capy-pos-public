@@ -81,3 +81,20 @@ export const ADMIN_PERMISSIONS: ReadonlySet<Permission> = new Set([
   Permission.MANAGE_ROLES,
   Permission.MANAGE_SETTINGS,
 ]);
+
+/** Every known permission — the menu offered when authoring a custom role. */
+export const ALL_PERMISSIONS: readonly Permission[] = Object.freeze(
+  Object.values(Permission) as Permission[]
+);
+
+const PERMISSION_VALUES: ReadonlySet<string> = new Set<string>(ALL_PERMISSIONS);
+
+/**
+ * Type-guard for a stored permission string. Data-driven (custom) roles persist
+ * their permissions as free JSON, so unknown/renamed permission strings must be
+ * skipped — never trusted — when reconstructing a Role (resilient-mapping rule,
+ * mirrors the repository lesson from #110).
+ */
+export function isPermission(value: unknown): value is Permission {
+  return typeof value === 'string' && PERMISSION_VALUES.has(value);
+}

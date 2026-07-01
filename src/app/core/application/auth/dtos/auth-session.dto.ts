@@ -6,7 +6,12 @@
  */
 export interface TenantMembershipDto {
   readonly tenantId: string;
-  readonly role: string; // role NAME: operator|manager|admin
+  readonly role: string; // role NAME (built-in operator|manager|admin, or a custom role name)
+  /** The role's permissions in this tenant. Enables data-driven/custom roles;
+   *  omitted for legacy sessions, where built-in defaults are resolved by name. */
+  readonly permissions?: readonly string[];
+  /** The role's hierarchy level. Omitted for legacy sessions (built-ins resolve by name). */
+  readonly level?: number;
 }
 
 /**

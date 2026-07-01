@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { TenantMembershipSet, TenantIsolationError } from './tenant-membership-set';
 import { TenantMembership } from './tenant-membership.value-object';
 import { TenantId } from './tenant-id.value-object';
-import { RoleName } from './role.value-object';
+import { Role, RoleName } from './role.value-object';
 
 const storeA = new TenantId('store-a');
 const storeB = new TenantId('store-b');
@@ -138,8 +138,18 @@ describe('TenantMembershipSet', () => {
         TenantMembership.of('store-b', RoleName.OPERATOR),
       ]);
       expect(set.toJSON()).toEqual([
-        { tenantId: 'store-a', role: RoleName.ADMIN },
-        { tenantId: 'store-b', role: RoleName.OPERATOR },
+        {
+          tenantId: 'store-a',
+          role: RoleName.ADMIN,
+          permissions: [...Role.admin().permissions],
+          level: Role.admin().level,
+        },
+        {
+          tenantId: 'store-b',
+          role: RoleName.OPERATOR,
+          permissions: [...Role.operator().permissions],
+          level: Role.operator().level,
+        },
       ]);
     });
 

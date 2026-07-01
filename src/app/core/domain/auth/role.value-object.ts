@@ -4,7 +4,15 @@ import {
   OPERATOR_PERMISSIONS,
   MANAGER_PERMISSIONS,
   ADMIN_PERMISSIONS,
+  isPermission,
 } from './permission.constants';
+
+/** Serialisable shape of a role — the source of truth for data-driven roles. */
+export interface RoleRecord {
+  name: string;
+  permissions: readonly string[];
+  level: number;
+}
 
 /**
  * Well-known role names.
@@ -30,26 +38,46 @@ const ROLE_PERMISSIONS: Record<RoleName, ReadonlySet<Permission>> = {
   [RoleName.ADMIN]: ADMIN_PERMISSIONS,
 };
 
+/** The built-in role names, which cannot be deleted or renamed. */
+export const BUILT_IN_ROLE_NAMES: readonly string[] = Object.freeze(Object.values(RoleName));
+
 /**
  * Role Value Object
  *
- * Encapsulates a role name and its associated permission set.
- * Hierarchy: Operator (level 1) < Manager (level 2) < Admin (level 3).
+ * Encapsulates a role name, its permission set, and a hierarchy level.
  *
- * Immutable, compared by name (value equality).
+ * Two construction paths:
+ *  - **Built-in** (`new Role(RoleName.X)` / `operator()`/`manager()`/`admin()`):
+ *    permissions + level come from the fixed domain defaults.
+ *  - **Data-driven** (`Role.fromRecord({ name, permissions, level })`): permissions
+ *    and level come from a stored role record, so admins can author custom roles.
+ *    Unknown permission strings are skipped (resilient mapping).
+ *
+ * Hierarchy: Operator (level 1) < Manager (level 2) < Admin (level 3); custom
+ * roles carry their own level. Immutable, compared by name (value equality).
  */
 export class Role extends BaseValueObject<Role> {
-  private readonly _name: RoleName;
+  private readonly _name: string;
   private readonly _permissions: ReadonlySet<Permission>;
+  private readonly _level: number;
 
-  constructor(name: RoleName) {
+  constructor(name: RoleName);
+  constructor(name: string, permissions: ReadonlySet<Permission>, level: number);
+  constructor(name: string, permissions?: ReadonlySet<Permission>, level?: number) {
     super();
     this._name = name;
-    this._permissions = ROLE_PERMISSIONS[name];
+    if (permissions !== undefined && level !== undefined) {
+      this._permissions = permissions;
+      this._level = level;
+    } else {
+      // Built-in path — resolve the fixed defaults by name.
+      this._permissions = ROLE_PERMISSIONS[name as RoleName] ?? new Set<Permission>();
+      this._level = ROLE_LEVEL[name as RoleName] ?? 1;
+    }
     this.freeze();
   }
 
-  get name(): RoleName {
+  get name(): string {
     return this._name;
   }
 
@@ -58,7 +86,12 @@ export class Role extends BaseValueObject<Role> {
   }
 
   get level(): number {
-    return ROLE_LEVEL[this._name];
+    return this._level;
+  }
+
+  /** True when this is one of the fixed, non-deletable built-in roles. */
+  get isBuiltIn(): boolean {
+    return BUILT_IN_ROLE_NAMES.includes(this._name);
   }
 
   /** Returns true if this role has the requested permission. */
@@ -84,10 +117,11 @@ export class Role extends BaseValueObject<Role> {
     return this._name === other._name;
   }
 
-  toJSON(): { name: RoleName; permissions: Permission[] } {
+  toJSON(): RoleRecord {
     return {
       name: this._name,
       permissions: [...this._permissions],
+      level: this._level,
     };
   }
 
@@ -117,6 +151,22 @@ export class Role extends BaseValueObject<Role> {
       throw new Error(`Unknown role: "${name}". Valid roles: ${known.join(', ')}`);
     }
     return new Role(name as RoleName);
+  }
+
+  /**
+   * Reconstruct a role from a stored record (data-driven / custom roles).
+   * Unknown permission strings are dropped (resilient mapping) so a renamed or
+   * stale permission in storage can never grant access it shouldn't. Built-in
+   * names still resolve to their canonical fixed permissions + level, so a
+   * tampered built-in record cannot escalate privileges.
+   */
+  static fromRecord(record: RoleRecord): Role {
+    if ((BUILT_IN_ROLE_NAMES as string[]).includes(record.name)) {
+      return new Role(record.name as RoleName);
+    }
+    const permissions = new Set<Permission>(record.permissions.filter(isPermission));
+    const level = Number.isFinite(record.level) ? record.level : 1;
+    return new Role(record.name, permissions, level);
   }
 
   /** All roles ordered lowest → highest privilege. */

@@ -18,50 +18,36 @@ import { Permission } from './permission.constants';
 export class AuthorizationService {
   /**
    * Returns true when at least one of the supplied roles has the given permission.
+   * Roles carry their own permission set (built-in or data-driven), so evaluation
+   * never re-derives permissions from a role name.
    *
-   * @param roleNames - role names as stored in AuthSessionDto.roles
+   * @param roles - the principal's resolved roles for the active tenant
    * @param permission - the permission constant to check
    */
-  can(roleNames: readonly string[], permission: Permission): boolean {
-    if (roleNames.length === 0) return false;
-
-    return roleNames.some((name) => {
-      try {
-        const role = Role.fromName(name);
-        return role.hasPermission(permission);
-      } catch {
-        return false;
-      }
-    });
+  can(roles: readonly Role[], permission: Permission): boolean {
+    if (roles.length === 0) return false;
+    return roles.some((role) => role.hasPermission(permission));
   }
 
   /**
    * Returns true when at least one of the supplied roles is at least as
-   * privileged as the required minimum role.
+   * privileged (by level) as the required minimum role.
    *
-   * @param roleNames - actor's role name strings
-   * @param minRole   - the minimum RoleName required
+   * @param roles   - the principal's resolved roles
+   * @param minRole - the minimum built-in RoleName required
    */
-  atLeast(roleNames: readonly string[], minRole: RoleName): boolean {
-    if (roleNames.length === 0) return false;
+  atLeast(roles: readonly Role[], minRole: RoleName): boolean {
+    if (roles.length === 0) return false;
     const threshold = new Role(minRole);
-
-    return roleNames.some((name) => {
-      try {
-        const role = Role.fromName(name);
-        return role.atLeast(threshold);
-      } catch {
-        return false;
-      }
-    });
+    return roles.some((role) => role.atLeast(threshold));
   }
 
   /**
    * Asserts the principal has the given permission.
    * Throws `AuthorizationError` when denied.
    */
-  assert(roleNames: readonly string[], permission: Permission): void {
-    if (!this.can(roleNames, permission)) {
+  assert(roles: readonly Role[], permission: Permission): void {
+    if (!this.can(roles, permission)) {
       throw new AuthorizationError(permission);
     }
   }

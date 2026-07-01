@@ -215,12 +215,23 @@ describe('CurrentUserService', () => {
   // service degrades gracefully to the flat session roles/permissions claims.
 
   describe('resilient claim handling', () => {
-    it('returns an empty membership set when a memberships row has an unknown role', () => {
+    it('retains a data-driven custom-role membership and grants its claimed permissions', () => {
+      // Custom roles are valid — the claim carries the role's permissions + level,
+      // so the active tenant resolves to exactly what was granted (no fixed-map lookup).
       service.setSession({
         ...baseSession,
-        memberships: [{ tenantId: 'store-a', role: 'super-kiosk-custom' }],
+        memberships: [
+          {
+            tenantId: 'store-a',
+            role: 'super-kiosk-custom',
+            permissions: ['sale:process'],
+            level: 1,
+          },
+        ],
       });
-      expect(service.memberships().isEmpty).toBe(true);
+      expect(service.memberships().isEmpty).toBe(false);
+      expect(service.roles()).toEqual(['super-kiosk-custom']);
+      expect(service.permissions()).toEqual(['sale:process']);
     });
 
     it('returns an empty membership set when memberships contain a duplicate tenant', () => {
@@ -234,10 +245,29 @@ describe('CurrentUserService', () => {
       expect(service.memberships().isEmpty).toBe(true);
     });
 
+    it('principalRoles reconstructs built-in AND custom roles from session claims without an active membership', () => {
+      service.setSession({
+        ...baseSession,
+        roles: ['admin', 'kiosk'], // admin → built-in (fromName), kiosk → custom (fromRecord)
+        permissions: ['admin:settings', 'sale:process'],
+        memberships: [], // no active membership → principalRoles uses the session fallback
+      });
+      const roles = service.principalRoles();
+      expect(roles.map((r) => r.name).sort()).toEqual(['admin', 'kiosk']);
+      // admin resolves to its canonical permissions; the custom role trusts the claim.
+      expect(roles.find((r) => r.name === 'admin')?.hasPermission(Permission.MANAGE_SETTINGS)).toBe(
+        true
+      );
+      expect(roles.find((r) => r.name === 'kiosk')?.hasPermission(Permission.PROCESS_SALE)).toBe(
+        true
+      );
+    });
+
     it('falls back to session roles/permissions when the memberships claim is malformed', () => {
       service.setSession({
         ...baseSession,
-        memberships: [{ tenantId: 'store-a', role: 'super-kiosk-custom' }],
+        // Not an array → fromJSON throws → empty set → no active role → session claim wins.
+        memberships: {} as unknown as AuthSessionDto['memberships'],
       });
       expect(service.roles()).toEqual(['admin']);
       expect(service.permissions()).toContain('admin:settings');
