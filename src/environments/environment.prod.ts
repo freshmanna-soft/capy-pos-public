@@ -99,12 +99,19 @@ export const environment = {
     helmetEnabled: true,
   },
 
-  // OpenTelemetry — Grafana Cloud
+  // OpenTelemetry — Grafana Cloud.
+  // NOTE: this is a CLIENT bundle — `process.env` does not exist in the browser
+  // (Angular's esbuild never substitutes it), so referencing it here threw
+  // "process is not defined" at bootstrap and broke every page in prod. Secrets
+  // must not be baked into a client bundle regardless. Credentials are left empty;
+  // when absent the OTLP exporter exports unauthenticated (dropped) instead of
+  // crashing. Inject real creds via a runtime config fetch if telemetry is revived.
   telemetry: {
     otlp: {
       enabled: true,
       endpoint: 'https://otlp-gateway-prod-us-east-3.grafana.net/otlp',
-      apiKey: process.env['GRAFANA_OTLP_API_KEY'] || '',
+      instanceId: '',
+      apiKey: '',
     },
   },
 };

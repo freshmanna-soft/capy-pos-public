@@ -29,7 +29,9 @@
     "graphrag:reindex": "node scripts/graphrag/reindex-all.mjs",
     "graphrag:refresh-graphs": "node scripts/graphrag/reindex-all.mjs --issues-memory",
     "graphrag:serve": "node scripts/graphrag/server.mjs",
-    "graphrag:celebrate": "node scripts/graphrag/celebrate.mjs"
+    "graphrag:celebrate": "node scripts/graphrag/celebrate.mjs",
+    "start:prod": "ng serve --configuration production --base-href /",
+    "test:e2e:smoke": "playwright test --config playwright.smoke.config.ts"
   },
   "private": true,
   "packageManager": "npm@11.12.1",

@@ -99,12 +99,16 @@ export const environment = {
     helmetEnabled: true,
   },
 
-  // OpenTelemetry — Grafana Cloud
+  // OpenTelemetry — Grafana Cloud.
+  // `process.env` does not exist in the browser (client bundle) — referencing it
+  // crashed the app at bootstrap. Leave creds empty; the exporter degrades to
+  // unauthenticated export rather than throwing. See environment.prod.ts.
   telemetry: {
     otlp: {
       enabled: true,
       endpoint: 'https://otlp-gateway-prod-us-east-3.grafana.net/otlp',
-      apiKey: process.env['GRAFANA_OTLP_API_KEY'] || '',
+      instanceId: '',
+      apiKey: '',
     },
   },
 };
