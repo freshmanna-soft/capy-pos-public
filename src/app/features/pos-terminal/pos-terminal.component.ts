@@ -7,8 +7,10 @@ import {
   PaymentResult,
 } from '@features/pos-terminal/components/checkout/checkout.component';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
+import { ProductGridComponent } from '@shared/ui/organisms/product-grid/product-grid.component';
 import { Product } from '@core/domain/entities/product.entity';
 import { PosFacade } from '@core/application/facades';
+import { ProductService } from '@core/application/services/product.service';
 import { ReceiptData } from '@core/application/use-cases/generate-receipt.use-case';
 import { ToastService } from '@shared/ui/toast/toast.service';
 
@@ -31,15 +33,30 @@ import { ToastService } from '@shared/ui/toast/toast.service';
 @Component({
   selector: 'app-pos-terminal',
   standalone: true,
-  imports: [ProductSearchComponent, ShoppingCartComponent, CheckoutComponent, ReceiptComponent],
+  imports: [
+    ProductSearchComponent,
+    ProductGridComponent,
+    ShoppingCartComponent,
+    CheckoutComponent,
+    ReceiptComponent,
+  ],
   templateUrl: './pos-terminal.component.html',
   styleUrl: './pos-terminal.component.scss',
 })
 export class PosTerminalComponent implements OnInit {
   protected readonly posFacade = inject(PosFacade);
+  private readonly productService = inject(ProductService);
   private readonly toast = inject(ToastService);
 
   @ViewChild(ProductSearchComponent) productSearch!: ProductSearchComponent;
+
+  /** Left-panel view: type-to-find search vs. browse the full active catalog. */
+  readonly leftView = signal<'search' | 'browse'>('search');
+
+  /** Active catalog for the browse grid (loaded lazily on first switch to Browse). */
+  readonly browseProducts = signal<Product[]>([]);
+  readonly browseLoading = signal(false);
+  private browseLoaded = false;
 
   /** Controls visibility of the checkout overlay */
   readonly showCheckout = signal(false);
@@ -92,6 +109,35 @@ export class PosTerminalComponent implements OnInit {
   }
 
   /**
+   * Switches the left panel between Search and Browse. The first switch to
+   * Browse lazily loads the active catalog into the product grid.
+   */
+  setLeftView(view: 'search' | 'browse'): void {
+    this.leftView.set(view);
+    if (view === 'browse' && !this.browseLoaded) {
+      void this.loadBrowseProducts();
+    }
+  }
+
+  /**
+   * Loads the active catalog for the browse grid. Errors surface as a toast
+   * (not a silent console failure) and leave the grid empty rather than stuck.
+   */
+  private async loadBrowseProducts(): Promise<void> {
+    this.browseLoading.set(true);
+    try {
+      const products = await this.productService.getActiveProducts();
+      this.browseProducts.set(products);
+      this.browseLoaded = true;
+    } catch (error) {
+      console.error('[POS] Failed to load browse catalog:', error);
+      this.toast.error('Could not load products to browse. Try again.');
+    } finally {
+      this.browseLoading.set(false);
+    }
+  }
+
+  /**
    * Starts a new transaction. Guards against accidental data loss: when the
    * cart already has items, the cashier must confirm before it is discarded
    * (mirrors the in-cart "Clear Cart" confirmation).
@@ -110,6 +156,8 @@ export class PosTerminalComponent implements OnInit {
    * the cashier can immediately type/scan an item.
    */
   handleAddProduct(): void {
+    // Ensure the search panel is showing before focusing it (the grid may be up).
+    this.setLeftView('search');
     this.productSearch?.focusSearch();
   }
 
@@ -145,6 +193,10 @@ export class PosTerminalComponent implements OnInit {
         // Refresh product search to show updated stock numbers
         if (this.productSearch) {
           this.productSearch.refreshProducts();
+        }
+        // Keep the browse grid's stock in sync too, if it's been loaded.
+        if (this.browseLoaded) {
+          void this.loadBrowseProducts();
         }
 
         console.log('Payment completed:', result);
