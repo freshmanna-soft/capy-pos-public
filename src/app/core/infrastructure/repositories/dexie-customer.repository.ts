@@ -272,17 +272,30 @@ export class DexieCustomerRepository
   }
 
   /**
-   * Get customers sorted by name
+   * Get customers sorted by name.
+   *
+   * `name` is not a Dexie index (see the customers store definition), so the
+   * inherited `findSorted` — which calls `orderBy('name')` — would throw a
+   * SchemaError. Sort in memory instead, mapping through the resilient mapper
+   * first so a single corrupt record can't crash the list (mirrors getTopCustomers).
    */
   async findSortedByName(direction: 'asc' | 'desc' = 'asc'): Promise<Customer[]> {
-    return this.findSorted('name', direction);
+    const records = await this.table.filter((record) => !record.deletedAt).toArray();
+    const sorted = this.mapRecords(records).sort((a, b) => a.name.localeCompare(b.name));
+    return direction === 'desc' ? sorted.reverse() : sorted;
   }
 
   /**
-   * Get customers sorted by loyalty points
+   * Get customers sorted by loyalty points.
+   *
+   * `loyaltyPoints` is not a Dexie index, so ordering happens in memory (see the
+   * note on getTopCustomers) rather than via `orderBy`, which would throw a
+   * SchemaError. Records pass through the resilient mapper first.
    */
   async findSortedByLoyaltyPoints(direction: 'asc' | 'desc' = 'desc'): Promise<Customer[]> {
-    return this.findSorted('loyaltyPoints', direction);
+    const records = await this.table.filter((record) => !record.deletedAt).toArray();
+    const sorted = this.mapRecords(records).sort((a, b) => a.loyaltyPoints - b.loyaltyPoints);
+    return direction === 'desc' ? sorted.reverse() : sorted;
   }
 
   /**
