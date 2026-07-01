@@ -66,9 +66,14 @@ describe('TenantMembership Value Object', () => {
   });
 
   describe('serialisation', () => {
-    it('toJSON returns plain tenant + role', () => {
+    it('toJSON returns tenant + role with its permissions and level', () => {
       const m = TenantMembership.of('store-a', RoleName.ADMIN);
-      expect(m.toJSON()).toEqual({ tenantId: 'store-a', role: RoleName.ADMIN });
+      expect(m.toJSON()).toEqual({
+        tenantId: 'store-a',
+        role: RoleName.ADMIN,
+        permissions: [...Role.admin().permissions],
+        level: Role.admin().level,
+      });
     });
 
     it('toString is a compact tenant:role token', () => {

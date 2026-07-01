@@ -556,8 +556,8 @@ describe('LocalCredentialAuthAdapter — memberships', () => {
     const db = makeMockDb(undefined, undefined, userTenantRows);
     (db.roles.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) => {
       if (id === 'role-admin') return Promise.resolve({ id: 'role-admin', name: 'admin' });
-      // role-unknown-future-role resolves to a name the domain doesn't know
-      return Promise.resolve({ id, name: 'super-kiosk-custom' });
+      // role-unknown-future-role has NO stored record → unknown & unresolvable → skipped
+      return Promise.resolve(undefined);
     });
 
     const adapter = buildAdapter(db);
@@ -570,6 +570,76 @@ describe('LocalCredentialAuthAdapter — memberships', () => {
     expect(session.memberships).toHaveLength(1);
     expect(session.memberships![0].tenantId).toBe('store-a');
     expect(session.memberships![0].role).toBe('admin');
+  });
+
+  it('data-driven: retains a custom role that has a stored record, with its permissions', async () => {
+    const userTenantRows: IUserTenantDB[] = [
+      {
+        id: 'ut-op-001-store-a',
+        userId: 'op-001',
+        tenantId: 'store-a',
+        roleId: 'role-kiosk',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    const db = makeMockDb(undefined, undefined, userTenantRows);
+    (db.roles.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) => {
+      if (id === 'role-admin') return Promise.resolve({ id: 'role-admin', name: 'admin' });
+      if (id === 'role-kiosk')
+        return Promise.resolve({
+          id: 'role-kiosk',
+          name: 'kiosk',
+          permissions: JSON.stringify(['sale:process']),
+          level: 1,
+        });
+      return Promise.resolve(undefined);
+    });
+
+    const adapter = buildAdapter(db);
+    const session = await adapter.authenticate({
+      email: 'admin@capy-pos.local',
+      password: 'admin1234',
+    });
+
+    const kiosk = session.memberships!.find((m) => m.tenantId === 'store-a');
+    expect(kiosk?.role).toBe('kiosk');
+    expect(kiosk?.permissions).toEqual(['sale:process']);
+    expect(kiosk?.level).toBe(1);
+  });
+
+  it('data-driven: tolerates a custom role with malformed permissions JSON and no level', async () => {
+    const userTenantRows: IUserTenantDB[] = [
+      {
+        id: 'ut-op-001-store-a',
+        userId: 'op-001',
+        tenantId: 'store-a',
+        roleId: 'role-broken',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    const db = makeMockDb(undefined, undefined, userTenantRows);
+    (db.roles.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) => {
+      if (id === 'role-admin') return Promise.resolve({ id: 'role-admin', name: 'admin' });
+      // Corrupt permissions JSON + missing level → empty permissions, level defaults to 1.
+      if (id === 'role-broken')
+        return Promise.resolve({ id: 'role-broken', name: 'broken', permissions: '{not json' });
+      return Promise.resolve(undefined);
+    });
+
+    const adapter = buildAdapter(db);
+    const session = await adapter.authenticate({
+      email: 'admin@capy-pos.local',
+      password: 'admin1234',
+    });
+
+    const broken = session.memberships!.find((m) => m.tenantId === 'store-a');
+    expect(broken?.role).toBe('broken');
+    expect(broken?.permissions).toEqual([]); // corrupt JSON → no permissions granted
+    expect(broken?.level).toBe(1);
   });
 
   it('fallback: when all rows are skipped (all unknown roles), returns home membership', async () => {
@@ -588,7 +658,8 @@ describe('LocalCredentialAuthAdapter — memberships', () => {
     (db.roles.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) => {
       // home role lookup (operator.roleId = 'role-admin') must still resolve for login
       if (id === 'role-admin') return Promise.resolve({ id: 'role-admin', name: 'admin' });
-      return Promise.resolve({ id, name: 'super-kiosk-custom' });
+      // role-bad has NO stored record → unresolvable → skipped
+      return Promise.resolve(undefined);
     });
 
     const adapter = buildAdapter(db);

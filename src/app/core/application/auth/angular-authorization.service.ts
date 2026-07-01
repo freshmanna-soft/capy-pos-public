@@ -26,8 +26,7 @@ export class AngularAuthorizationService {
    * Returns false when not authenticated.
    */
   can(permission: Permission): boolean {
-    const roles = this.currentUser.roles();
-    return this.authz.can(roles, permission);
+    return this.authz.can(this.currentUser.principalRoles(), permission);
   }
 
   /**
@@ -35,8 +34,7 @@ export class AngularAuthorizationService {
    * as privileged as the given minimum.
    */
   atLeast(minRole: RoleName): boolean {
-    const roles = this.currentUser.roles();
-    return this.authz.atLeast(roles, minRole);
+    return this.authz.atLeast(this.currentUser.principalRoles(), minRole);
   }
 
   /**
@@ -44,7 +42,6 @@ export class AngularAuthorizationService {
    * Use this at the use-case/service layer to enforce boundaries.
    */
   assert(permission: Permission): void {
-    const roles = this.currentUser.roles();
-    this.authz.assert(roles, permission);
+    this.authz.assert(this.currentUser.principalRoles(), permission);
   }
 }

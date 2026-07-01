@@ -42,7 +42,8 @@ export class DexieOperatorAdminAdapter implements OperatorAdminPort {
         let roleName: RoleName;
         try {
           // Validate against the domain — throws for a role the domain does not know.
-          roleName = Role.fromName(rawRoleName).name;
+          // fromName only resolves built-ins, so the name is a RoleName by construction.
+          roleName = Role.fromName(rawRoleName).name as RoleName;
         } catch {
           console.warn(
             `[DexieOperatorAdminAdapter] Skipping operator '${operator.id}' in tenant ` +

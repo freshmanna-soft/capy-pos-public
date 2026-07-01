@@ -3,23 +3,24 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AngularAuthorizationService, AuthorizationError } from './angular-authorization.service';
 import { CurrentUserService } from './current-user.service';
 import { Permission } from '@core/domain/auth/permission.constants';
-import { RoleName } from '@core/domain/auth/role.value-object';
+import { Role, RoleName } from '@core/domain/auth/role.value-object';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal CurrentUserService stand-in: only `roles()` is consumed by
- * AngularAuthorizationService. `roles` is a signal, so the service calls it
- * as a function — a vi.fn returning the current role list mirrors that.
+ * Minimal CurrentUserService stand-in: AngularAuthorizationService consumes
+ * `principalRoles()` (resolved domain Roles). `principalRoles` is a signal, so
+ * the service calls it as a function — a vi.fn returning the current roles
+ * mirrors that. `setRoles` accepts built-in role names for convenience.
  */
 function makeCurrentUser() {
-  let roleNames: string[] = [];
+  let roles: Role[] = [];
   return {
-    roles: vi.fn(() => roleNames),
+    principalRoles: vi.fn(() => roles),
     setRoles(next: string[]) {
-      roleNames = next;
+      roles = next.map((name) => Role.fromName(name));
     },
   };
 }

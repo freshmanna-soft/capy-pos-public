@@ -128,4 +128,48 @@ describe('Role Value Object', () => {
       expect(Object.isFrozen(Role.operator())).toBe(true);
     });
   });
+
+  describe('data-driven roles (fromRecord)', () => {
+    it('builds a custom role with its own permissions and level', () => {
+      const role = Role.fromRecord({
+        name: 'kiosk',
+        permissions: [Permission.PROCESS_SALE, Permission.VIEW_INVENTORY],
+        level: 2,
+      });
+      expect(role.name).toBe('kiosk');
+      expect(role.level).toBe(2);
+      expect(role.hasPermission(Permission.PROCESS_SALE)).toBe(true);
+      expect(role.hasPermission(Permission.DELETE_PRODUCT)).toBe(false);
+      expect(role.isBuiltIn).toBe(false);
+    });
+
+    it('drops unknown permission strings (resilient mapping)', () => {
+      const role = Role.fromRecord({
+        name: 'kiosk',
+        permissions: [Permission.PROCESS_SALE, 'totally:made-up', ''],
+        level: 1,
+      });
+      expect([...role.permissions]).toEqual([Permission.PROCESS_SALE]);
+    });
+
+    it('a built-in name resolves to canonical permissions + level, ignoring a tampered record', () => {
+      const role = Role.fromRecord({ name: RoleName.OPERATOR, permissions: [], level: 99 });
+      expect(role.isBuiltIn).toBe(true);
+      expect(role.level).toBe(Role.operator().level);
+      expect(role.hasPermission(Permission.PROCESS_SALE)).toBe(true);
+    });
+
+    it('defaults a non-finite level to 1', () => {
+      const role = Role.fromRecord({ name: 'kiosk', permissions: [], level: Number.NaN });
+      expect(role.level).toBe(1);
+    });
+  });
+
+  describe('isBuiltIn', () => {
+    it('is true for the three built-in roles', () => {
+      expect(Role.operator().isBuiltIn).toBe(true);
+      expect(Role.manager().isBuiltIn).toBe(true);
+      expect(Role.admin().isBuiltIn).toBe(true);
+    });
+  });
 });

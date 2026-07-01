@@ -1,7 +1,7 @@
 import { Injectable, inject, signal, computed } from '@angular/core';
 import { AUTH_GATEWAY } from './ports/auth-gateway.port';
 import { AuthSessionDto } from './dtos/auth-session.dto';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission, isPermission } from '@core/domain/auth/permission.constants';
 import { TenantMembershipSet, TenantIsolationError } from '@core/domain/auth/tenant-membership-set';
 import { TenantId } from '@core/domain/auth/tenant-id.value-object';
 import { Role } from '@core/domain/auth/role.value-object';
@@ -99,6 +99,31 @@ export class CurrentUserService {
   readonly permissions = computed(() => {
     const role = this.activeRole();
     return role ? [...role.permissions] : (this._session()?.permissions ?? []);
+  });
+
+  /**
+   * The principal's resolved domain Role(s) for the active tenant — the input to
+   * AuthorizationService. Data-driven: a custom role's permissions/level come from
+   * the role it actually holds, not a name lookup. Falls back to reconstructing
+   * roles from the session claims when there is no active membership (fixtures /
+   * pre-membership sessions), so authorization stays correct either way.
+   */
+  readonly principalRoles = computed<Role[]>(() => {
+    const active = this.activeRole();
+    if (active) return [active];
+
+    const s = this._session();
+    if (!s) return [];
+    const sessionPermissions = (s.permissions ?? []).filter(isPermission);
+    return (s.roles ?? []).map((name) => {
+      try {
+        return Role.fromName(name); // built-in → canonical permissions + level
+      } catch {
+        // Custom role with no membership context: trust the session's permission
+        // claim, lowest level (hierarchy checks fall back to permission checks).
+        return Role.fromRecord({ name, permissions: sessionPermissions, level: 1 });
+      }
+    });
   });
 
   // ── hydration ───────────────────────────────────────────────────────────

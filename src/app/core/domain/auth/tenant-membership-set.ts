@@ -1,6 +1,6 @@
 import { TenantId } from './tenant-id.value-object';
 import { Role } from './role.value-object';
-import { TenantMembership } from './tenant-membership.value-object';
+import { TenantMembership, TenantMembershipJSON } from './tenant-membership.value-object';
 
 /**
  * Thrown when a principal attempts to act in a tenant they are not a member of.
@@ -109,7 +109,7 @@ export class TenantMembershipSet {
     return this.memberships.map((m) => m.toJSON());
   }
 
-  static fromJSON(raw: readonly { tenantId: string; role: string }[]): TenantMembershipSet {
+  static fromJSON(raw: readonly TenantMembershipJSON[]): TenantMembershipSet {
     return new TenantMembershipSet(raw.map((row) => TenantMembership.fromJSON(row)));
   }
 }
