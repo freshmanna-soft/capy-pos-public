@@ -30,7 +30,7 @@
     "graphrag:refresh-graphs": "node scripts/graphrag/reindex-all.mjs --issues-memory",
     "graphrag:serve": "node scripts/graphrag/server.mjs",
     "graphrag:celebrate": "node scripts/graphrag/celebrate.mjs",
-    "start:prod": "ng serve --configuration production --base-href /",
+    "start:prod": "ng serve --configuration production --serve-path /",
     "test:e2e:smoke": "playwright test --config playwright.smoke.config.ts"
   },
   "private": true,

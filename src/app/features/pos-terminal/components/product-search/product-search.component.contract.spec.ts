@@ -65,10 +65,21 @@ function record(overrides: Partial<IProductDB> = {}): IProductDB {
   };
 }
 
-/** Flush the async ngOnInit promise chain (getCategories -> loadProducts). */
-async function flushAsync(): Promise<void> {
-  for (let i = 0; i < 5; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+/**
+ * Poll until `predicate` is true, yielding to the macrotask queue between checks
+ * so the async ngOnInit chain (getCategories -> loadProducts, incl. the
+ * fake-indexeddb query) can settle. Condition-based, NOT a fixed tick count — the
+ * old fixed 5-tick flush intermittently asserted before the IndexedDB load
+ * finished under slow CI (searchResults still []). Generous budget (~6s) so a
+ * loaded runner can't exceed it; returns immediately once the condition holds.
+ */
+async function waitUntil(
+  predicate: () => boolean,
+  { tries = 300, stepMs = 20 } = {}
+): Promise<void> {
+  for (let i = 0; i < tries; i++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, stepMs));
   }
 }
 
@@ -114,10 +125,19 @@ describe('ProductSearchComponent — malformed-record contract gate (#109)', () 
   });
 
   it('renders the valid products and skips the corrupt one without erroring', async () => {
+    // Only errors from THIS component's own load path should count (defence in
+    // depth alongside the global afterEach async drain in vitest.setup.ts).
+    errorSpy.mockClear();
     // detectChanges triggers ngOnInit, which loads categories then products.
     expect(() => fixture.detectChanges()).not.toThrow();
-    await flushAsync();
-    fixture.detectChanges();
+    // Wait for the async load to actually SETTLE (results in, or an error surfaced),
+    // re-running change detection each tick — not a fixed number of ticks.
+    await waitUntil(() => {
+      fixture.detectChanges();
+      return (
+        !component.isLoading() && (component.searchResults().length > 0 || !!component.error())
+      );
+    });
 
     // The valid records render; the corrupt one is dropped — not the whole list.
     expect(
@@ -137,10 +157,17 @@ describe('ProductSearchComponent — malformed-record contract gate (#109)', () 
 
   it('paints the valid products into the DOM and shows no error message', async () => {
     fixture.detectChanges();
-    await flushAsync();
-    fixture.detectChanges();
-
     const host: HTMLElement = fixture.nativeElement;
+    // Wait until the DOM actually paints the loaded rows (or an error banner),
+    // rather than a fixed tick count — deterministic under slow CI timing.
+    await waitUntil(() => {
+      fixture.detectChanges();
+      return (
+        host.querySelectorAll('[data-testid="product-result"]').length >= 2 ||
+        !!host.querySelector('[data-testid="error-message"]')
+      );
+    });
+
     const results = host.querySelectorAll('[data-testid="product-result"]');
     expect(results.length).toBe(2);
 
