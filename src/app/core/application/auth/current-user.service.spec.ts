@@ -325,4 +325,52 @@ describe('CurrentUserService', () => {
       expect(service.activeTenantId()).toBeNull();
     });
   });
+
+  describe('refresh (AC4 — live re-issue from current state)', () => {
+    it('applies the gateway-rebuilt session so RBAC signals recompute', async () => {
+      service.setSession(baseSession); // admin — baseSession grants admin:settings
+      expect(service.hasPermission(Permission.MANAGE_SETTINGS)).toBe(true);
+
+      // Simulate the DB-authoritative refresh returning a downgraded session.
+      gateway.refresh.mockResolvedValue({
+        ...baseSession,
+        roles: ['operator'],
+        permissions: ['sale:process'],
+        memberships: [
+          { tenantId: 'store-a', role: 'operator', permissions: ['sale:process'], level: 1 },
+        ],
+      });
+
+      await service.refresh();
+
+      expect(service.roles()).toEqual(['operator']);
+      expect(service.hasPermission(Permission.MANAGE_SETTINGS)).toBe(false);
+    });
+
+    it('preserves the active tenant across refresh when still a member', async () => {
+      service.setSession(sessionWithMemberships); // home store-a, also member of store-b
+      service.switchTenant('store-b');
+      expect(service.activeTenantId()).toBe('store-b');
+
+      gateway.refresh.mockResolvedValue(sessionWithMemberships);
+      await service.refresh();
+
+      expect(service.activeTenantId()).toBe('store-b'); // not bounced back to home
+    });
+
+    it('falls back to the home tenant when the active-tenant membership is gone', async () => {
+      service.setSession(sessionWithMemberships);
+      service.switchTenant('store-b');
+
+      gateway.refresh.mockResolvedValue({
+        ...baseSession,
+        memberships: [
+          { tenantId: 'store-a', role: 'admin', permissions: ['admin:settings'], level: 3 },
+        ],
+      });
+      await service.refresh();
+
+      expect(service.activeTenantId()).toBe('store-a');
+    });
+  });
 });

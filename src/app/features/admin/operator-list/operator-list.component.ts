@@ -2,23 +2,27 @@ import { Component, ChangeDetectionStrategy, inject, signal, OnInit } from '@ang
 import { CommonModule } from '@angular/common';
 import { HasPermissionDirective } from '@shared/ui/directives/has-permission.directive';
 import { ListTenantOperatorsUseCase } from '@core/application/auth/list-tenant-operators.use-case';
+import { ManageOperatorMembershipUseCase } from '@core/application/auth/manage-operator-membership.use-case';
 import { OperatorSummaryDto } from '@core/application/auth/dtos/operator-summary.dto';
+import { RoleSummaryDto } from '@core/application/auth/dtos/role-summary.dto';
+import { CurrentUserService } from '@core/application/auth/current-user.service';
+import { ToastService } from '@shared/ui/toast/toast.service';
 import { Permission } from '@core/domain/auth/permission.constants';
 
 /**
  * OperatorListComponent
  *
- * Admin screen (story #44, phase 1): lists the operators of the active tenant
- * with the role each holds in that tenant. Read-only for now — invite,
- * deactivate and role reassignment are deferred to follow-ups so they can be
- * designed alongside the in-flight multi-tenant membership work (#43).
+ * Admin screen (story #44): lists the operators of the active tenant and lets an
+ * admin reassign each operator's role or revoke their membership in that tenant.
  *
  * Defence in depth:
  *   - the /admin/users route is gated by `permissionGuard(MANAGE_OPERATORS)`;
- *   - the table markup is additionally gated by `*appHasPermission`;
- *   - the underlying use-case asserts `MANAGE_OPERATORS` at the application layer.
- * Any one of these failing denies access; the directive/guard are UX, the
- * use-case assertion is the security control.
+ *   - the table + controls are additionally gated by `*appHasPermission`;
+ *   - the use-cases assert `MANAGE_OPERATORS` at the application layer (the real
+ *     security control — the guard/directive are UX only).
+ *
+ * When an admin changes their OWN membership, the session is refreshed so their
+ * guards and gated UI update live (AC4).
  */
 @Component({
   selector: 'app-operator-list',
@@ -52,6 +56,7 @@ import { Permission } from '@core/domain/auth/permission.constants';
                 <th scope="col">Email</th>
                 <th scope="col">Role</th>
                 <th scope="col">Status</th>
+                <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -60,9 +65,21 @@ import { Permission } from '@core/domain/auth/permission.constants';
                   <td data-testid="operator-name">{{ operator.displayName }}</td>
                   <td>{{ operator.email }}</td>
                   <td>
-                    <span class="role-badge" data-testid="operator-role">{{
-                      operator.roleName
-                    }}</span>
+                    <label class="sr-only" [attr.for]="'role-' + operator.id">Role</label>
+                    <select
+                      class="role-select"
+                      [id]="'role-' + operator.id"
+                      [value]="operator.roleId"
+                      [disabled]="busy()"
+                      (change)="onRoleChange(operator, asValue($event))"
+                      [attr.data-testid]="'operator-role-select-' + operator.id"
+                    >
+                      @for (role of assignableRoles(); track role.id) {
+                        <option [value]="role.id" [selected]="role.id === operator.roleId">
+                          {{ role.name }}
+                        </option>
+                      }
+                    </select>
                   </td>
                   <td>
                     <span
@@ -73,6 +90,17 @@ import { Permission } from '@core/domain/auth/permission.constants';
                     >
                       {{ operator.isActive ? 'Active' : 'Inactive' }}
                     </span>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      class="revoke-btn"
+                      [disabled]="busy()"
+                      (click)="onRevoke(operator)"
+                      [attr.data-testid]="'operator-revoke-' + operator.id"
+                    >
+                      Revoke
+                    </button>
                   </td>
                 </tr>
               }
@@ -86,7 +114,7 @@ import { Permission } from '@core/domain/auth/permission.constants';
     `
       .page-container {
         padding: 2rem;
-        max-width: 800px;
+        max-width: 900px;
         margin: 0 auto;
       }
 
@@ -139,15 +167,20 @@ import { Permission } from '@core/domain/auth/permission.constants';
         border-bottom: none;
       }
 
-      .role-badge {
-        display: inline-block;
-        padding: 0.125rem 0.5rem;
-        border-radius: 9999px;
-        background: #eef2ff;
-        color: #4338ca;
-        font-size: 0.8125rem;
-        font-weight: 600;
+      .role-select {
+        padding: 0.375rem 0.5rem;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        background: white;
+        font-size: 0.875rem;
+        color: #374151;
+        min-width: 8rem;
         text-transform: capitalize;
+      }
+
+      .role-select:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
       }
 
       .status-badge {
@@ -168,6 +201,27 @@ import { Permission } from '@core/domain/auth/permission.constants';
         color: #991b1b;
       }
 
+      .revoke-btn {
+        padding: 0.375rem 0.75rem;
+        border: 1px solid #fca5a5;
+        border-radius: 8px;
+        background: #fef2f2;
+        color: #b91c1c;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        cursor: pointer;
+        min-height: 36px;
+      }
+
+      .revoke-btn:hover:not(:disabled) {
+        background: #fee2e2;
+      }
+
+      .revoke-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
       .sr-only {
         position: absolute;
         width: 1px;
@@ -180,7 +234,6 @@ import { Permission } from '@core/domain/auth/permission.constants';
         border: 0;
       }
 
-      /* Mobile: let the table scroll horizontally rather than break layout. */
       @media (max-width: 640px) {
         .operators-table {
           display: block;
@@ -193,29 +246,83 @@ import { Permission } from '@core/domain/auth/permission.constants';
 })
 export class OperatorListComponent implements OnInit {
   private readonly listOperators = inject(ListTenantOperatorsUseCase);
+  private readonly membership = inject(ManageOperatorMembershipUseCase);
+  private readonly currentUser = inject(CurrentUserService);
+  private readonly toast = inject(ToastService);
 
   /** Bound in the template to the `*appHasPermission` directive. */
   protected readonly manageOperators = Permission.MANAGE_OPERATORS;
 
   protected readonly operators = signal<OperatorSummaryDto[]>([]);
+  protected readonly assignableRoles = signal<RoleSummaryDto[]>([]);
   protected readonly loading = signal(true);
+  protected readonly busy = signal(false);
   protected readonly error = signal<string | null>(null);
 
   ngOnInit(): void {
     void this.load();
   }
 
+  /** Read the changed <select>'s value (typed narrow so the template stays clean). */
+  protected asValue(event: Event): string {
+    return (event.target as HTMLSelectElement).value;
+  }
+
+  protected async onRoleChange(operator: OperatorSummaryDto, roleId: string): Promise<void> {
+    if (roleId === operator.roleId) return;
+    this.busy.set(true);
+    try {
+      await this.membership.assignRole(operator.id, roleId);
+      this.toast.success(`Updated ${operator.displayName}'s role.`);
+      await this.afterMutation(operator.id);
+    } catch {
+      this.toast.error(`Could not update ${operator.displayName}'s role.`);
+      await this.load(); // resync the dropdown to the persisted value
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  protected async onRevoke(operator: OperatorSummaryDto): Promise<void> {
+    if (!confirm(`Revoke ${operator.displayName}'s access to this store?`)) return;
+    this.busy.set(true);
+    try {
+      await this.membership.revokeMembership(operator.id);
+      this.toast.success(`Revoked ${operator.displayName}'s access.`);
+      await this.afterMutation(operator.id);
+    } catch {
+      this.toast.error(`Could not revoke ${operator.displayName}'s access.`);
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  /**
+   * Reload the list and, when the change touched the CURRENT operator's own
+   * membership, refresh the session so their guards/gated UI update live (AC4).
+   */
+  private async afterMutation(mutatedUserId: string): Promise<void> {
+    if (mutatedUserId === this.currentUser.operatorId()) {
+      await this.currentUser.refresh().catch(() => undefined);
+    }
+    await this.load();
+  }
+
   private async load(): Promise<void> {
     this.loading.set(true);
     this.error.set(null);
     try {
-      this.operators.set(await this.listOperators.execute());
+      const [operators, roles] = await Promise.all([
+        this.listOperators.execute(),
+        this.membership.listAssignableRoles(),
+      ]);
+      this.operators.set(operators);
+      this.assignableRoles.set(roles);
     } catch {
       // AuthorizationError or a storage failure — surface a neutral message.
-      // The route guard and directive already prevent unauthorised rendering;
-      // this is the last-resort fallback so the page never shows a blank crash.
       this.error.set('You do not have permission to view operators, or they could not be loaded.');
       this.operators.set([]);
+      this.assignableRoles.set([]);
     } finally {
       this.loading.set(false);
     }

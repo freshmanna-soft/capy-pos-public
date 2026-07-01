@@ -251,11 +251,20 @@ export class NavigationComponent {
     {
       id: 'admin-users',
       path: '/admin/users',
-      label: 'Users & Roles',
+      label: 'Users',
       shortLabel: 'Users',
-      icon: '🛡️',
+      icon: '👥',
       exact: false,
       permission: Permission.MANAGE_OPERATORS,
+    },
+    {
+      id: 'admin-roles',
+      path: '/admin/roles',
+      label: 'Roles & Permissions',
+      shortLabel: 'Roles',
+      icon: '🛡️',
+      exact: false,
+      permission: Permission.MANAGE_ROLES,
     },
     {
       id: 'settings',

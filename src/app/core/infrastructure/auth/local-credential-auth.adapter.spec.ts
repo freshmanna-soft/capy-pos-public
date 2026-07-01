@@ -61,6 +61,7 @@ function makeMockDb(
     where: vi.fn().mockReturnThis(),
     equals: vi.fn().mockReturnThis(),
     first: vi.fn().mockResolvedValue(operator),
+    get: vi.fn().mockResolvedValue(operator), // refresh() re-reads the operator by id
   };
 
   const rolesTable = {
@@ -249,18 +250,43 @@ describe('LocalCredentialAuthAdapter', () => {
   // -------------------------------------------------------------------------
 
   describe('refresh', () => {
-    it('issues a new token with the same claims', async () => {
+    it('rebuilds the session from CURRENT database state (not stale token claims)', async () => {
       const original = await adapter.authenticate({
         email: 'admin@capy-pos.local',
         password: 'admin1234',
       });
+      expect(original.roles).toEqual(['admin']);
+
+      // Simulate an admin reassigning this operator's home role in the DB, then a
+      // refresh — the new session must reflect the change, proving it re-reads the DB.
+      (mockDb.operators.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...seedOperator,
+        roleId: 'role-operator',
+      });
+      (mockDb.roles.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'role-operator',
+        name: 'operator',
+        permissions: JSON.stringify(['sale:process']),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
       const refreshed = await adapter.refresh();
       expect(refreshed.operatorId).toBe(original.operatorId);
-      expect(refreshed.roles).toEqual(original.roles);
+      expect(refreshed.roles).toEqual(['operator']); // reflects the DB change
+      expect(refreshed.permissions).toContain('sale:process');
+      expect(refreshed.permissions).not.toContain('admin:settings');
     });
 
     it('throws when there is no active session', async () => {
       await expect(adapter.refresh()).rejects.toThrow('No active session to refresh');
+    });
+
+    it('denies refresh and clears the token when the operator is gone/inactive', async () => {
+      await adapter.authenticate({ email: 'admin@capy-pos.local', password: 'admin1234' });
+      (mockDb.operators.get as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+      await expect(adapter.refresh()).rejects.toThrow(/no longer active/);
+      expect(adapter.getAccessToken()).toBeNull();
     });
   });
 

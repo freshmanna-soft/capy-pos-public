@@ -268,8 +268,12 @@ test.describe('Transaction History - S3-3', () => {
       // Navigate to history
       await historyPage.navigate();
 
-      // Either empty state or transaction list should be visible
-      // (depends on whether seed data creates transactions)
+      // Wait for the page to actually SETTLE into one of its terminal states
+      // (empty OR list) before reading — the async history load may still be in
+      // flight right after navigate(), which made a point-in-time isVisible() read
+      // flaky (both false → "stuck in loading"). `.or()` retries until one shows.
+      await expect(historyPage.emptyState.or(historyPage.transactionList)).toBeVisible();
+
       const emptyVisible = await historyPage.emptyState.isVisible().catch(() => false);
       const listVisible = await historyPage.transactionList.isVisible().catch(() => false);
 
@@ -280,6 +284,8 @@ test.describe('Transaction History - S3-3', () => {
     test('should show "Start Selling" link in empty state', async () => {
       await historyPage.navigate();
 
+      // Settle into empty-or-list before deciding which branch to assert.
+      await expect(historyPage.emptyState.or(historyPage.transactionList)).toBeVisible();
       const emptyVisible = await historyPage.emptyState.isVisible().catch(() => false);
       if (emptyVisible) {
         await expect(historyPage.startSellingButton).toBeVisible();
