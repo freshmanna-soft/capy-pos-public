@@ -104,3 +104,5 @@ cucumber-report.*
 .scannerwork/
 
 *.patch
+# local Claude Code MCP config (machine-specific GraphRAG endpoint)
+.mcp.json
