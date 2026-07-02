@@ -106,3 +106,7 @@ cucumber-report.*
 *.patch
 # local Claude Code MCP config (machine-specific GraphRAG endpoint)
 .mcp.json
+
+# Terraform secrets
+*.auto.tfvars
+secret.auto.tfvars
