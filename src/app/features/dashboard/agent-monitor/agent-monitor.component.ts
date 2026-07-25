@@ -44,6 +44,48 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
   [WorkerCircuitState.HALF_OPEN]: CircuitState.HALF_OPEN,
 };
 
+/** Snapshot of the sync worker's circuit-breaker state, read from SyncService signals. */
+export interface SyncCircuitSnapshot {
+  isRunning: boolean;
+  circuitState: WorkerCircuitState;
+  totalSyncs: number;
+  totalFailures: number;
+}
+
+/**
+ * Build the combined circuit-breaker view rendered by the dashboard panel (#95).
+ *
+ * Starts from the main-thread breakers (e.g. the 'payment-gateway' breaker the
+ * checkout flow trips) and, when the sync worker is running, appends a synthetic
+ * 'api-sync' breaker. That breaker's real state lives in the sync web worker and
+ * never appears on the main-thread CircuitBreakerService, so SyncService mirrors
+ * it onto signals which we fold in here. Its counts reflect completed sync
+ * cycles, not individual worker calls.
+ */
+export function buildCircuitBreakerView(
+  mainThreadStats: Record<string, CircuitBreakerStats>,
+  sync: SyncCircuitSnapshot
+): Record<string, CircuitBreakerStats> {
+  const stats: Record<string, CircuitBreakerStats> = { ...mainThreadStats };
+
+  if (sync.isRunning) {
+    const successes = sync.totalSyncs;
+    const failures = sync.totalFailures;
+    stats['api-sync'] = {
+      state: WORKER_TO_CIRCUIT_STATE[sync.circuitState],
+      failures,
+      successes,
+      consecutiveFailures: 0,
+      consecutiveSuccesses: 0,
+      totalCalls: successes + failures,
+      totalFailures: failures,
+      totalSuccesses: successes,
+    };
+  }
+
+  return stats;
+}
+
 /**
  * Agent Monitor Component
  * Real-time dashboard for monitoring agent health, metrics, and activity
@@ -496,30 +538,14 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   }
 
   private loadCircuitBreakers(): void {
-    // Start with any breakers registered on the main-thread service.
-    const stats: Record<string, CircuitBreakerStats> = {
-      ...this.circuitBreakerService.getAllStats(),
-    };
-
-    // The real API-sync circuit breaker lives in the sync web worker, so it
-    // never appears in the main-thread CircuitBreakerService. SyncService
-    // mirrors the worker's state (via CIRCUIT_STATE_CHANGED / status reports)
-    // onto the main thread, so surface it here as the "api-sync" breaker.
-    if (this.syncService.isRunning()) {
-      const successes = this.syncService.totalSyncs();
-      const failures = this.syncService.totalFailures();
-      stats['api-sync'] = {
-        state: WORKER_TO_CIRCUIT_STATE[this.syncService.circuitState()],
-        failures,
-        successes,
-        consecutiveFailures: 0,
-        consecutiveSuccesses: 0,
-        // Counts reflect completed sync cycles, not individual worker calls.
-        totalCalls: successes + failures,
-        totalFailures: failures,
-        totalSuccesses: successes,
-      };
-    }
+    // Fold the main-thread breakers together with the sync worker's mirrored
+    // 'api-sync' breaker (see buildCircuitBreakerView for the why).
+    const stats = buildCircuitBreakerView(this.circuitBreakerService.getAllStats(), {
+      isRunning: this.syncService.isRunning(),
+      circuitState: this.syncService.circuitState(),
+      totalSyncs: this.syncService.totalSyncs(),
+      totalFailures: this.syncService.totalFailures(),
+    });
 
     this.circuitBreakers.set(stats);
   }
