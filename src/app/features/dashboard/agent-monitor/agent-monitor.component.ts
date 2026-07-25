@@ -37,6 +37,39 @@ export function sumSkippedRecords(summaries: Record<string, MetricSummary>): num
     .reduce((total, s) => total + s.sum, 0);
 }
 
+/** A single row rendered by the dashboard's Metrics panel (#96). */
+export interface MetricView {
+  /** Raw telemetry map key (e.g. 'payments.processed{method:cash}'); stable @for track. */
+  key: string;
+  /** Metric name without its tag suffix (e.g. 'payments.processed'). */
+  name: string;
+  /** Human-readable tag list (e.g. 'method:cash'), or '' when the metric is untagged. */
+  tags: string;
+  summary: MetricSummary;
+}
+
+/**
+ * Assemble the telemetry Metrics panel's view model (#96).
+ *
+ * TelemetryService keys each metric by name plus its sorted tags (e.g.
+ * 'payments.processed{method:cash}' — see TelemetryService.getMetricKey), so the
+ * raw summary map exposes an opaque, brace-laden key that reads poorly as a card
+ * heading. Split each key back into its metric name and a human tag string, then
+ * sort by name (tags as a tie-breaker) so the panel renders a stable, readable
+ * list regardless of Map insertion order.
+ */
+export function buildMetricsView(summaries: Record<string, MetricSummary>): MetricView[] {
+  return Object.entries(summaries)
+    .map(([key, summary]) => {
+      const braceAt = key.indexOf('{');
+      const name = braceAt === -1 ? key : key.slice(0, braceAt);
+      const rawTags = braceAt === -1 ? '' : key.slice(braceAt + 1).replace(/\}$/, '');
+      const tags = rawTags.split(',').filter(Boolean).join(', ');
+      return { key, name, tags, summary };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name) || a.tags.localeCompare(b.tags));
+}
+
 /** Worker and main-thread circuit-breaker enums share string values; map them explicitly. */
 const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
   [WorkerCircuitState.CLOSED]: CircuitState.CLOSED,
@@ -255,38 +288,47 @@ export function buildCircuitBreakerView(
             Metrics
           </h2>
           <div class="space-y-2">
-            @for (metric of metrics() | keyvalue; track metric) {
+            @for (metric of metricsView(); track metric.key) {
               <div class="p-3 border border-gray-200 rounded-lg" data-testid="metric-card">
-                <h3 class="text-sm font-semibold text-gray-900 mb-2 truncate">{{ metric.key }}</h3>
+                <div class="flex items-center justify-between gap-2 mb-2">
+                  <h3 class="text-sm font-semibold text-gray-900 truncate">{{ metric.name }}</h3>
+                  @if (metric.tags) {
+                    <span
+                      class="px-1.5 py-0.5 rounded bg-gray-100 text-[10px] font-medium text-gray-600 shrink-0"
+                      data-testid="metric-tags"
+                      >{{ metric.tags }}</span
+                    >
+                  }
+                </div>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                   <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
                     <span>Count</span>
                     <span class="font-semibold" data-testid="metric-value">{{
-                      metric.value.count
+                      metric.summary.count
                     }}</span>
                   </div>
                   <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
                     <span>Avg</span>
-                    <span class="font-semibold">{{ metric.value.avg | number: '1.2-2' }}</span>
+                    <span class="font-semibold">{{ metric.summary.avg | number: '1.2-2' }}</span>
                   </div>
                   <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
                     <span>Min</span>
-                    <span class="font-semibold">{{ metric.value.min | number: '1.2-2' }}</span>
+                    <span class="font-semibold">{{ metric.summary.min | number: '1.2-2' }}</span>
                   </div>
                   <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
                     <span>Max</span>
-                    <span class="font-semibold">{{ metric.value.max | number: '1.2-2' }}</span>
+                    <span class="font-semibold">{{ metric.summary.max | number: '1.2-2' }}</span>
                   </div>
-                  @if (metric.value.p95) {
+                  @if (metric.summary.p95) {
                     <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
                       <span>P95</span>
-                      <span class="font-semibold">{{ metric.value.p95 | number: '1.2-2' }}</span>
+                      <span class="font-semibold">{{ metric.summary.p95 | number: '1.2-2' }}</span>
                     </div>
                   }
                 </div>
               </div>
             }
-            @if ((metrics() | keyvalue).length === 0) {
+            @if (metricsView().length === 0) {
               <div class="text-center py-8 text-gray-400 italic">No metrics collected</div>
             }
           </div>
@@ -442,7 +484,8 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   agents = signal<AgentStatus[]>([]);
   runningAgents = signal(0);
   circuitBreakers = signal<Record<string, CircuitBreakerStats>>({});
-  metrics = signal<Record<string, MetricSummary>>({});
+  // Display-ready telemetry rows for the Metrics panel (#96); see buildMetricsView.
+  metricsView = signal<MetricView[]>([]);
   // Total records dropped by resilient repository mapping across all entities (#111).
   skippedRecords = signal(0);
   recentAuditLogs = signal<AuditLogEntry[]>([]);
@@ -552,7 +595,7 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
 
   private loadMetrics(): void {
     const summaries = this.telemetry.getAllMetricSummaries();
-    this.metrics.set(summaries);
+    this.metricsView.set(buildMetricsView(summaries));
     this.skippedRecords.set(sumSkippedRecords(summaries));
   }
 

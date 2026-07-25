@@ -1,4 +1,8 @@
-import { buildCircuitBreakerView, sumSkippedRecords } from './agent-monitor.component';
+import {
+  buildCircuitBreakerView,
+  buildMetricsView,
+  sumSkippedRecords,
+} from './agent-monitor.component';
 import {
   CircuitBreakerStats,
   CircuitState,
@@ -148,5 +152,57 @@ describe('buildCircuitBreakerView', () => {
     expect(Object.keys(view).sort()).toEqual(['api-sync', 'payment-gateway']);
     expect(view['api-sync'].state).toBe(CircuitState.OPEN);
     expect(view['api-sync'].totalCalls).toBe(3);
+  });
+});
+
+/**
+ * Coverage for the Metrics panel's data assembly (#96). TelemetryService keys
+ * metrics by name plus sorted tags (e.g. 'payments.processed{method:cash}');
+ * the panel splits that opaque key into a readable name + tag chip and renders a
+ * stable, name-sorted list. This is the presentation-side counterpart to the
+ * `payments.processed` metric-card the agent-integration e2e asserts.
+ */
+describe('buildMetricsView', () => {
+  it('returns an empty list when there are no metrics', () => {
+    expect(buildMetricsView({})).toEqual([]);
+  });
+
+  it('splits a tagged metric key into a name and a human tag string', () => {
+    const [row] = buildMetricsView({
+      'payments.processed{method:cash}': summary('payments.processed', 3),
+    });
+    expect(row.key).toBe('payments.processed{method:cash}');
+    expect(row.name).toBe('payments.processed');
+    expect(row.tags).toBe('method:cash');
+    expect(row.summary.count).toBe(1);
+  });
+
+  it('leaves an untagged metric key as its name with empty tags', () => {
+    const [row] = buildMetricsView({
+      'system.memory.used': summary('system.memory.used', 1024),
+    });
+    expect(row.name).toBe('system.memory.used');
+    expect(row.tags).toBe('');
+  });
+
+  it('renders multiple tags as a comma-separated list', () => {
+    const [row] = buildMetricsView({
+      'orders.placed{channel:web,method:card}': summary('orders.placed', 5),
+    });
+    expect(row.name).toBe('orders.placed');
+    expect(row.tags).toBe('channel:web, method:card');
+  });
+
+  it('sorts rows by name, then by tags, regardless of insertion order', () => {
+    const view = buildMetricsView({
+      'payments.processed{method:card}': summary('payments.processed', 1),
+      'orders.placed': summary('orders.placed', 1),
+      'payments.processed{method:cash}': summary('payments.processed', 1),
+    });
+    expect(view.map((r) => r.key)).toEqual([
+      'orders.placed',
+      'payments.processed{method:card}',
+      'payments.processed{method:cash}',
+    ]);
   });
 });
