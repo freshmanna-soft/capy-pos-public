@@ -4,6 +4,7 @@ import { Product } from '@core/domain/entities/product.entity';
 import { ProductBuilder } from '@core/domain/entities/product.builder';
 import { IProductRepository } from '@core/domain/interfaces/product.repository.interface';
 import { DexieDatabase, IProductDB } from '@core/infrastructure/database/dexie-database.service';
+import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 
 /**
  * Dexie Product Repository
@@ -21,7 +22,7 @@ export class DexieProductRepository
   constructor() {
     const db = inject(DexieDatabase);
 
-    super(db.products);
+    super(db.products, inject(TelemetryService), 'product');
 
     this.db = db;
   }

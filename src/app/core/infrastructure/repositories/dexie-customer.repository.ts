@@ -4,6 +4,7 @@ import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/cu
 import { CustomerBuilder } from '@core/domain/entities/customer.builder';
 import { ICustomerRepository } from '@core/domain/interfaces/customer.repository.interface';
 import { DexieDatabase, ICustomerDB } from '@core/infrastructure/database/dexie-database.service';
+import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 
 /**
  * Dexie Customer Repository
@@ -21,7 +22,7 @@ export class DexieCustomerRepository
   constructor() {
     const db = inject(DexieDatabase);
 
-    super(db.customers);
+    super(db.customers, inject(TelemetryService), 'customer');
 
     this.db = db;
   }

@@ -1,6 +1,10 @@
 import { IndexableType, Table, UpdateSpec } from 'dexie';
 import { BaseEntity } from '@core/domain/entities/base.entity';
 import { IBaseRepository } from '@core/domain/interfaces/base.repository.interface';
+import {
+  TelemetryService,
+  REPOSITORY_RECORDS_SKIPPED_METRIC,
+} from '@core/infrastructure/telemetry/telemetry.service';
 
 /**
  * Base Dexie Repository
@@ -14,7 +18,19 @@ export abstract class BaseDexieRepository<
   TEntity extends BaseEntity,
   TDB,
 > implements IBaseRepository<TEntity> {
-  constructor(protected readonly table: Table<TDB, string>) {}
+  /**
+   * @param table    Dexie table this repository is bound to.
+   * @param telemetry Optional telemetry sink; when provided, dropped records are
+   *   surfaced as a counter (see mapRecords). Optional so plain-class tests and
+   *   non-DI construction keep working without a telemetry instance.
+   * @param entityTag Short entity name used to tag the skipped-records counter
+   *   (e.g. 'product'); falls back to the repository class name.
+   */
+  constructor(
+    protected readonly table: Table<TDB, string>,
+    private readonly telemetry?: TelemetryService,
+    private readonly entityTag?: string
+  ) {}
 
   /**
    * Abstract method to map database record to domain entity
@@ -59,6 +75,12 @@ export abstract class BaseDexieRepository<
       console.warn(
         `[${this.constructor.name}] Skipped ${skipped} invalid record(s) of ${records.length} while mapping.`
       );
+      // Make silent data corruption observable in ops (#111): emit a counter so
+      // dropped records show up on the agent-monitor dashboard rather than only
+      // in the console.
+      this.telemetry?.recordCounter(REPOSITORY_RECORDS_SKIPPED_METRIC, skipped, {
+        entity: this.entityTag ?? this.constructor.name,
+      });
     }
     return entities;
   }

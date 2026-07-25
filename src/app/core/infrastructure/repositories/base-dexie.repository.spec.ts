@@ -1,5 +1,9 @@
 import Dexie, { type Table, type IndexableType } from 'dexie';
 import { BaseDexieRepository } from './base-dexie.repository';
+import {
+  TelemetryService,
+  REPOSITORY_RECORDS_SKIPPED_METRIC,
+} from '@core/infrastructure/telemetry/telemetry.service';
 
 /**
  * Coverage for the resilient list mapping (`mapRecords`) and the base list
@@ -35,8 +39,8 @@ class FakeEntity {
 
 /** Concrete repo over a real Dexie table, exposing the protected helpers. */
 class TestRepo extends BaseDexieRepository<FakeEntity, FakeRecord> {
-  constructor(table: Table<FakeRecord, string>) {
-    super(table);
+  constructor(table: Table<FakeRecord, string>, telemetry?: TelemetryService, entityTag?: string) {
+    super(table, telemetry, entityTag);
   }
   protected mapToEntity(r: FakeRecord) {
     return new FakeEntity(r.id, r.name, r.group, r.rank);
@@ -99,6 +103,47 @@ describe('BaseDexieRepository — resilient + list helpers', () => {
 
     it('handles an empty input list', () => {
       expect(repo.mapBatch([])).toEqual([]);
+    });
+  });
+
+  describe('skipped-records telemetry (#111)', () => {
+    let telemetry: { recordCounter: ReturnType<typeof vi.fn> };
+    let repo: TestRepo;
+    let warn: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      telemetry = { recordCounter: vi.fn() };
+      repo = new TestRepo(
+        {} as unknown as Table<FakeRecord, string>,
+        telemetry as unknown as TelemetryService,
+        'fake'
+      );
+      warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => warn.mockRestore());
+
+    it('emits the counter with the drop count and entity tag when records are skipped', () => {
+      repo.mapBatch([
+        { id: '1', name: 'Coffee', group: 'a', rank: 'x' },
+        { id: '2', name: '', group: 'a', rank: 'y' }, // corrupt
+        { id: '3', name: '', group: 'a', rank: 'z' }, // corrupt
+      ]);
+      expect(telemetry.recordCounter).toHaveBeenCalledWith(REPOSITORY_RECORDS_SKIPPED_METRIC, 2, {
+        entity: 'fake',
+      });
+    });
+
+    it('does not emit the counter when every record is valid', () => {
+      repo.mapBatch([{ id: '1', name: 'Coffee', group: 'a', rank: 'x' }]);
+      expect(telemetry.recordCounter).not.toHaveBeenCalled();
+    });
+
+    it('does not throw when no telemetry sink is provided', () => {
+      const noTelemetry = new TestRepo({} as unknown as Table<FakeRecord, string>);
+      expect(() =>
+        noTelemetry.mapBatch([{ id: '1', name: '', group: 'a', rank: 'x' }])
+      ).not.toThrow();
     });
   });
 

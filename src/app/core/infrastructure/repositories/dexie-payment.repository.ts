@@ -4,6 +4,7 @@ import { IPaymentRepository } from '@core/domain/interfaces/payment.repository.i
 import { Payment, PaymentStatus, PaymentMethod } from '@core/domain/entities/payment.entity';
 import { PaymentBuilder } from '@core/domain/entities/payment.builder';
 import { DexieDatabase, IPaymentDB } from '@core/infrastructure/database/dexie-database.service';
+import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 
 /**
  * Dexie Payment Repository
@@ -19,7 +20,7 @@ export class DexiePaymentRepository
   constructor() {
     const db = inject(DexieDatabase);
 
-    super(db.payments);
+    super(db.payments, inject(TelemetryService), 'payment');
   }
 
   /**

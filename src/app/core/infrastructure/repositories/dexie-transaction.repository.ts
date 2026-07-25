@@ -12,6 +12,7 @@ import {
   DexieDatabase,
   ITransactionDB,
 } from '@core/infrastructure/database/dexie-database.service';
+import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 
 /**
  * Dexie Transaction Repository
@@ -29,7 +30,7 @@ export class DexieTransactionRepository
   constructor() {
     const db = inject(DexieDatabase);
 
-    super(db.transactions);
+    super(db.transactions, inject(TelemetryService), 'transaction');
 
     this.db = db;
   }

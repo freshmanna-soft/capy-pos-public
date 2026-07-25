@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import { TestBed } from '@angular/core/testing';
 import { DexieProductRepository } from './dexie-product.repository';
 import { DexieDatabase, IProductDB } from '@core/infrastructure/database/dexie-database.service';
+import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 import { Product } from '@core/domain/entities/product.entity';
 
 /**
@@ -66,6 +67,12 @@ describe('DexieProductRepository (real Dexie + fake-indexeddb)', () => {
       providers: [
         DexieProductRepository,
         { provide: DexieDatabase, useValue: db as unknown as DexieDatabase },
+        // Stub telemetry so the repo's skipped-records counter (#111) has a sink
+        // without spinning up the real service's system-monitoring interval.
+        {
+          provide: TelemetryService,
+          useValue: { recordCounter: vi.fn() } as unknown as TelemetryService,
+        },
       ],
     });
     repo = TestBed.inject(DexieProductRepository);
