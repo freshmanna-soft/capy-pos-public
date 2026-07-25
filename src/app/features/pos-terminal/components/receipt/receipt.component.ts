@@ -34,8 +34,10 @@ export interface ReceiptData {
   template: `
     <div class="receipt-overlay" data-testid="receipt-overlay">
       <div class="receipt-panel" data-testid="receipt-panel">
-        <!-- Success Header -->
-        <div class="receipt-header">
+        <!-- Success Header — the post-sale payment-success result surface (POS-93).
+             Scoped to the header (not the outer overlay) so a future non-success
+             receipt variant would not falsely satisfy this assertion. -->
+        <div class="receipt-header" data-testid="payment-success">
           <div class="success-icon">✅</div>
           <h2 class="receipt-title">Payment Successful!</h2>
           <p class="receipt-subtitle">Transaction completed</p>

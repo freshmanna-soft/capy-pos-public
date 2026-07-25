@@ -94,6 +94,8 @@ test.describe('Agent Integration Workflow', () => {
 
     const receipt = page.getByTestId('receipt-overlay');
     await expect(receipt).toBeVisible({ timeout: 10000 });
+    // The success result surface (POS-93): the receipt header confirms approval.
+    await expect(page.getByTestId('payment-success')).toBeVisible();
     await expect(page.getByTestId('transaction-id')).toBeVisible();
     await expect(page.getByTestId('receipt-total')).toBeVisible();
 

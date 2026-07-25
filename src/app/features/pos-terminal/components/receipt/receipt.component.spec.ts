@@ -178,6 +178,29 @@ describe('ReceiptComponent', () => {
     });
   });
 
+  describe('Payment Success Surface (POS-93)', () => {
+    it('should render the payment-success testid on the receipt success header', () => {
+      const el = hostFixture.nativeElement as HTMLElement;
+      const success = el.querySelector('[data-testid="payment-success"]');
+      expect(success).toBeTruthy();
+    });
+
+    it('should scope payment-success to the success header, not the outer overlay', () => {
+      const el = hostFixture.nativeElement as HTMLElement;
+      const success = el.querySelector('[data-testid="payment-success"]');
+      // The success result must live on the header so a future non-success
+      // receipt variant would not falsely satisfy the assertion.
+      expect(success?.classList.contains('receipt-header')).toBe(true);
+      expect(success?.getAttribute('data-testid')).not.toBe('receipt-overlay');
+    });
+
+    it('should present the success confirmation copy alongside the testid', () => {
+      const el = hostFixture.nativeElement as HTMLElement;
+      const success = el.querySelector('[data-testid="payment-success"]');
+      expect(success?.textContent).toContain('Payment Successful!');
+    });
+  });
+
   describe('Output Events (S2-4)', () => {
     it('should emit printReceipt event', () => {
       const spy = vi.fn();
