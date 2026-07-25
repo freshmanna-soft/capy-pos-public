@@ -1,5 +1,6 @@
 import {
   buildCircuitBreakerView,
+  buildEventBusView,
   buildMetricsView,
   sumSkippedRecords,
 } from './agent-monitor.component';
@@ -204,5 +205,72 @@ describe('buildMetricsView', () => {
       'payments.processed{method:card}',
       'payments.processed{method:cash}',
     ]);
+  });
+});
+
+/**
+ * Coverage for the Event Bus Activity panel's data assembly (#98).
+ * EventBusService.getStatistics() returns count maps with undefined key order;
+ * the panel turns each into rows sorted by count descending (label ascending as
+ * a tie-breaker) so the busiest types/sources/priorities surface first. This is
+ * the presentation-side counterpart to the event-bus-stats panel the
+ * agent-integration e2e asserts after a sale.
+ */
+describe('buildEventBusView', () => {
+  const emptyStats = {
+    totalMessages: 0,
+    byType: {},
+    bySource: {},
+    byPriority: {},
+  };
+
+  it('returns empty breakdown lists when there are no messages', () => {
+    expect(buildEventBusView(emptyStats)).toEqual({
+      totalMessages: 0,
+      byType: [],
+      bySource: [],
+      byPriority: [],
+    });
+  });
+
+  it('passes the total message count through unchanged', () => {
+    const view = buildEventBusView({ ...emptyStats, totalMessages: 42 });
+    expect(view.totalMessages).toBe(42);
+  });
+
+  it('sorts each breakdown by count descending so the busiest channel is first', () => {
+    const view = buildEventBusView({
+      totalMessages: 6,
+      byType: { 'inventory.updated': 1, 'sale.completed': 4, 'cart.item.added': 1 },
+      bySource: {},
+      byPriority: {},
+    });
+    expect(view.byType.map((r) => r.label)).toEqual([
+      'sale.completed',
+      // Ties (count 1) fall back to alphabetical label order.
+      'cart.item.added',
+      'inventory.updated',
+    ]);
+    expect(view.byType[0]).toEqual({ label: 'sale.completed', count: 4 });
+  });
+
+  it('breaks count ties alphabetically by label, regardless of insertion order', () => {
+    const view = buildEventBusView({
+      ...emptyStats,
+      bySource: { PosFacade: 2, InventoryService: 2, SyncService: 2 },
+    });
+    expect(view.bySource.map((r) => r.label)).toEqual([
+      'InventoryService',
+      'PosFacade',
+      'SyncService',
+    ]);
+  });
+
+  it('builds priority rows the same way as the other breakdowns', () => {
+    const view = buildEventBusView({
+      ...emptyStats,
+      byPriority: { low: 1, high: 3, normal: 2 },
+    });
+    expect(view.byPriority.map((r) => r.label)).toEqual(['high', 'normal', 'low']);
   });
 });
