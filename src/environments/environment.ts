@@ -17,6 +17,22 @@ export const environment = {
   // Authentication
   jwtExpiration: '24h',
 
+  // AWS Cognito (Story #140) — empty in dev; the local credential adapter is the
+  // default gateway. Fill these in (or swap the provider) to exercise the Cognito
+  // adapter against a real staff user pool. `enabled: false` keeps the swap opt-in.
+  cognito: {
+    enabled: false,
+    region: 'us-east-1',
+    staffUserPoolId: '',
+    staffClientId: '',
+    // A customer-pool token must NEVER satisfy the staff authorizer; the staff
+    // issuer/audience binding enforces this. Kept here for documentation/tooling.
+    customerUserPoolId: '',
+    // When set, the adapter rejects a token whose `custom:store_domain` claim does
+    // not match the domain the SPA is served from. Empty disables the check.
+    allowedStoreDomain: '',
+  },
+
   // Payment Gateway (Stripe Test Mode)
   stripe: {
     publicKey: 'pk_test_51234567890',
