@@ -17,6 +17,17 @@ export const environment = {
   // Authentication
   jwtExpiration: '12h',
 
+  // AWS Cognito (Story #140) — populate from the Terraform outputs when the staff
+  // pool is stood up. `enabled: false` until then keeps the local adapter in play.
+  cognito: {
+    enabled: false,
+    region: 'us-east-1',
+    staffUserPoolId: '', // Set via environment / TF output
+    staffClientId: '', // Set via environment / TF output
+    customerUserPoolId: '',
+    allowedStoreDomain: '',
+  },
+
   // Payment Gateway (Stripe Test Mode)
   stripe: {
     publicKey: '', // Set via environment variable

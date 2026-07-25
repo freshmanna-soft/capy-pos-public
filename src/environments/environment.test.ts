@@ -17,6 +17,17 @@ export const environment = {
   // Authentication
   jwtExpiration: '1h',
 
+  // AWS Cognito (Story #140) — deterministic test defaults. Specs override the
+  // config via the COGNITO_CONFIG token, so these are placeholders only.
+  cognito: {
+    enabled: false,
+    region: 'us-east-1',
+    staffUserPoolId: 'us-east-1_testpool',
+    staffClientId: 'test-client-id',
+    customerUserPoolId: 'us-east-1_custpool',
+    allowedStoreDomain: '',
+  },
+
   // Payment Gateway (Mock)
   stripe: {
     publicKey: 'pk_test_mock',
