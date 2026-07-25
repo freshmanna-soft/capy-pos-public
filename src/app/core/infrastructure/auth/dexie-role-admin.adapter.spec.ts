@@ -61,6 +61,34 @@ describe('DexieRoleAdminAdapter', () => {
     expect(broken?.level).toBe(1); // missing level → default
   });
 
+  it('treats valid-but-non-array permissions JSON as no permissions', async () => {
+    await db.roles.add({
+      id: 'role-object',
+      name: 'object-perms',
+      permissions: '{"process:sale":true}', // valid JSON, but an object, not an array
+      createdAt: now,
+      updatedAt: now,
+    } as IRoleDB);
+    const parsed = (await adapter.listRoles()).find((r) => r.id === 'role-object');
+    expect(parsed?.permissions).toEqual([]); // non-array → dropped, not thrown
+  });
+
+  it('createRole rejects a blank name', async () => {
+    await expect(adapter.createRole({ name: '   ', permissions: [] })).rejects.toThrow(
+      /Role name is required/
+    );
+  });
+
+  it('updateRolePermissions rejects an unknown role id', async () => {
+    await expect(
+      adapter.updateRolePermissions('role-missing', [Permission.PROCESS_SALE])
+    ).rejects.toThrow(/not found/);
+  });
+
+  it('deleteRole rejects an unknown role id', async () => {
+    await expect(adapter.deleteRole('role-missing')).rejects.toThrow(/not found/);
+  });
+
   it('createRole persists a custom role and drops unknown permissions', async () => {
     const id = await adapter.createRole({
       name: 'kiosk',
