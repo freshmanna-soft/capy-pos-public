@@ -2,6 +2,13 @@ import { Injectable } from '@angular/core';
 import { Subject, Observable } from 'rxjs';
 
 /**
+ * Counter metric emitted when a repository skips an invalid/corrupt record
+ * during a list load (see BaseDexieRepository.mapRecords). Tagged by `entity`.
+ * Shared so the emitter (repositories) and the dashboard read the same name.
+ */
+export const REPOSITORY_RECORDS_SKIPPED_METRIC = 'repository.records.skipped';
+
+/**
  * Metric Type
  */
 export enum MetricType {

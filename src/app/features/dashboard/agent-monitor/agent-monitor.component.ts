@@ -9,7 +9,11 @@ import {
   CircuitBreakerStats,
   CircuitState,
 } from '@core/infrastructure/resilience/circuit-breaker.service';
-import { TelemetryService, MetricSummary } from '@core/infrastructure/telemetry/telemetry.service';
+import {
+  TelemetryService,
+  MetricSummary,
+  REPOSITORY_RECORDS_SKIPPED_METRIC,
+} from '@core/infrastructure/telemetry/telemetry.service';
 import { SyncService } from '@core/infrastructure/sync/sync.service';
 import { WorkerCircuitState } from '@core/infrastructure/sync/sync.types';
 import { LowStockWidgetComponent } from '../low-stock-widget/low-stock-widget.component';
@@ -20,6 +24,17 @@ interface AgentStatus {
   state: string;
   isRunning: boolean;
   lastActivity?: Date;
+}
+
+/**
+ * Total number of records dropped by resilient repository mapping (#111),
+ * summed across every entity tag. Reads the `repository.records.skipped`
+ * counter's `sum` (total records skipped), not `count` (number of skip events).
+ */
+export function sumSkippedRecords(summaries: Record<string, MetricSummary>): number {
+  return Object.values(summaries)
+    .filter((s) => s.name === REPOSITORY_RECORDS_SKIPPED_METRIC)
+    .reduce((total, s) => total + s.sum, 0);
 }
 
 /** Worker and main-thread circuit-breaker enums share string values; map them explicitly. */
@@ -71,6 +86,20 @@ const WORKER_TO_CIRCUIT_STATE: Record<WorkerCircuitState, CircuitState> = {
             <span class="text-xl md:text-2xl font-bold text-gray-900">{{
               auditStats().totalLogs
             }}</span>
+          </div>
+          <!-- Data-quality signal: records dropped by resilient mapping (#111). -->
+          <div
+            class="flex flex-col p-3 rounded-lg"
+            [class]="skippedRecords() > 0 ? 'bg-red-50' : 'bg-gray-50'"
+            data-testid="skipped-records"
+          >
+            <span class="text-xs text-gray-500 mb-1">Skipped Records</span>
+            <span
+              class="text-xl md:text-2xl font-bold"
+              [class]="skippedRecords() > 0 ? 'text-red-600' : 'text-gray-900'"
+              data-testid="skipped-records-value"
+              >{{ skippedRecords() }}</span
+            >
           </div>
         </div>
       </header>
@@ -372,6 +401,8 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   runningAgents = signal(0);
   circuitBreakers = signal<Record<string, CircuitBreakerStats>>({});
   metrics = signal<Record<string, MetricSummary>>({});
+  // Total records dropped by resilient repository mapping across all entities (#111).
+  skippedRecords = signal(0);
   recentAuditLogs = signal<AuditLogEntry[]>([]);
   eventBusStats = signal<{
     totalMessages: number;
@@ -494,7 +525,9 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   }
 
   private loadMetrics(): void {
-    this.metrics.set(this.telemetry.getAllMetricSummaries());
+    const summaries = this.telemetry.getAllMetricSummaries();
+    this.metrics.set(summaries);
+    this.skippedRecords.set(sumSkippedRecords(summaries));
   }
 
   private async loadAuditLogs(): Promise<void> {
