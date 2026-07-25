@@ -249,6 +249,14 @@ export class NavigationComponent {
       exact: false,
     },
     {
+      id: 'assistant',
+      path: '/assistant',
+      label: 'AI Assistant',
+      shortLabel: 'Assistant',
+      icon: '💬',
+      exact: false,
+    },
+    {
       id: 'admin-users',
       path: '/admin/users',
       label: 'Users',

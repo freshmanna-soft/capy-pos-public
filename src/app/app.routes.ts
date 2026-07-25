@@ -56,6 +56,13 @@ export const routes: Routes = [
     title: 'Transaction History',
   },
   {
+    path: 'assistant',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./features/assistant/wx-assistant.component').then((m) => m.WxAssistantComponent),
+    title: 'AI Assistant · Capy-POS',
+  },
+  {
     path: 'settings',
     canActivate: [authGuard],
     loadComponent: () =>

@@ -102,6 +102,18 @@ export const environment = {
     interval: 86400000,
     retentionDays: 1,
   },
+
+  // WatsonX Orchestrate — disabled under test so no external loader script is
+  // injected into headless/CI builds.
+  watsonxAssistant: {
+    enabled: false,
+    hostURL: '',
+    orchestrationID: '',
+    crn: '',
+    deploymentPlatform: 'ibmcloud',
+    agentId: '',
+    agentEnvironmentId: '',
+  },
 };
 
 // Made with Bob

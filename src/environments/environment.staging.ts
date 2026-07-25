@@ -122,6 +122,19 @@ export const environment = {
       apiKey: '',
     },
   },
+
+  // WatsonX Orchestrate — embedded AI assistant chat widget. Client-side embed
+  // identifiers (not secrets). Relocated out of the component so each build
+  // target can point at its own orchestration/agent.
+  watsonxAssistant: {
+    enabled: true,
+    hostURL: 'https://jp-tok.watson-orchestrate.cloud.ibm.com',
+    orchestrationID: '7f2f10ff1cde4ea9966b50822b66d0a3_6b4d0af6-bace-4662-980c-57995c7ab2ea',
+    crn: 'crn:v1:bluemix:public:watsonx-orchestrate:jp-tok:a/7f2f10ff1cde4ea9966b50822b66d0a3:6b4d0af6-bace-4662-980c-57995c7ab2ea::',
+    deploymentPlatform: 'ibmcloud',
+    agentId: 'a7e2f127-2b6a-4446-8e7e-aa10b25c2ee0',
+    agentEnvironmentId: '1571b423-085b-48f0-a29d-bf7309a5f8e1',
+  },
 };
 
 // Made with Bob
