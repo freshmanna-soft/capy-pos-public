@@ -18,12 +18,30 @@ import { SyncService } from '@core/infrastructure/sync/sync.service';
 import { WorkerCircuitState } from '@core/infrastructure/sync/sync.types';
 import { LowStockWidgetComponent } from '../low-stock-widget/low-stock-widget.component';
 
-interface AgentStatus {
+export interface AgentStatus {
   id: string;
   name: string;
   state: string;
   isRunning: boolean;
   lastActivity?: Date;
+}
+
+/**
+ * Order the Agents panel so agents needing attention surface first (#94).
+ *
+ * loadAgentStatus builds this list from AgentRegistry.getAllAgents(), which
+ * returns agents in Map insertion order — i.e. the fixed registration order in
+ * AgentRegistry, which is arbitrary as far as an operator is concerned. Every
+ * other dashboard panel surfaces its most relevant row first regardless of Map
+ * order (see buildCircuitBreakerView / buildMetricsView / buildEventBusView /
+ * buildRecentAuditView); the Agents panel should too. Sort stopped/unhealthy
+ * agents (isRunning === false) ahead of running ones, then by name ascending as
+ * a stable tie-breaker, so a down agent is never buried below healthy ones.
+ */
+export function buildAgentsView(agents: AgentStatus[]): AgentStatus[] {
+  return [...agents].sort(
+    (a, b) => Number(a.isRunning) - Number(b.isRunning) || a.name.localeCompare(b.name)
+  );
 }
 
 /**
@@ -642,7 +660,8 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
     });
 
     const results = await Promise.all(agentPromises);
-    this.agents.set(results);
+    // Surface stopped/unhealthy agents first, then by name (see buildAgentsView).
+    this.agents.set(buildAgentsView(results));
     this.runningAgents.set(results.filter((a) => a.isRunning).length);
   }
 

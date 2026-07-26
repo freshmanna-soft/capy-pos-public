@@ -1,4 +1,6 @@
 import {
+  AgentStatus,
+  buildAgentsView,
   buildCircuitBreakerView,
   buildEventBusView,
   buildMetricsView,
@@ -64,6 +66,56 @@ describe('sumSkippedRecords', () => {
       'payments.processed': summary('payments.processed', 99),
     };
     expect(sumSkippedRecords(metrics)).toBe(5);
+  });
+});
+
+/**
+ * Coverage for the Agents panel's ordering (#94). loadAgentStatus builds the
+ * list from AgentRegistry.getAllAgents() (fixed Map registration order); the
+ * panel re-orders it so stopped/unhealthy agents surface first — mirroring how
+ * every other panel surfaces its most relevant row first — with name as a
+ * stable tie-breaker.
+ */
+describe('buildAgentsView', () => {
+  function agent(name: string, isRunning: boolean): AgentStatus {
+    return {
+      id: `${name.toLowerCase()}-agent`,
+      name,
+      state: isRunning ? 'RUNNING' : 'STOPPED',
+      isRunning,
+    };
+  }
+
+  it('returns an empty list when there are no agents', () => {
+    expect(buildAgentsView([])).toEqual([]);
+  });
+
+  it('surfaces stopped agents ahead of running ones regardless of registry order', () => {
+    const view = buildAgentsView([
+      agent('Sales', true),
+      agent('Payment', false),
+      agent('Inventory', true),
+    ]);
+    // The stopped Payment agent leads, then the running ones by name.
+    expect(view.map((a) => a.name)).toEqual(['Payment', 'Inventory', 'Sales']);
+  });
+
+  it('breaks ties by name ascending within the same running state', () => {
+    const view = buildAgentsView([
+      agent('Sales', true),
+      agent('Analytics', true),
+      agent('Inventory', true),
+    ]);
+    expect(view.map((a) => a.name)).toEqual(['Analytics', 'Inventory', 'Sales']);
+  });
+
+  it('does not mutate the supplied array', () => {
+    const agents = [agent('Sales', true), agent('Payment', false)];
+    const originalOrder = agents.map((a) => a.name);
+
+    buildAgentsView(agents);
+
+    expect(agents.map((a) => a.name)).toEqual(originalOrder);
   });
 });
 
