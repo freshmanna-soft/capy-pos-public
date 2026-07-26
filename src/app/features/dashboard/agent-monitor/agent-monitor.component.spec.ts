@@ -2,6 +2,7 @@ import {
   buildCircuitBreakerView,
   buildEventBusView,
   buildMetricsView,
+  buildRecentAuditView,
   sumSkippedRecords,
 } from './agent-monitor.component';
 import {
@@ -14,6 +15,11 @@ import {
   MetricType,
   REPOSITORY_RECORDS_SKIPPED_METRIC,
 } from '@core/infrastructure/telemetry/telemetry.service';
+import {
+  AuditAction,
+  AuditLogEntry,
+  AuditStatus,
+} from '@core/infrastructure/audit/audit-log.service';
 
 /**
  * Coverage for the dashboard's skipped-records aggregation (#111). The Skipped
@@ -272,5 +278,85 @@ describe('buildEventBusView', () => {
       byPriority: { low: 1, high: 3, normal: 2 },
     });
     expect(view.byPriority.map((r) => r.label)).toEqual(['high', 'normal', 'low']);
+  });
+});
+
+/**
+ * Coverage for the Recent Audit Logs panel's data assembly (#97).
+ * AuditLogService.getRecentLogs() returns its cache oldest-first; the panel
+ * flips that to newest-first (id as a stable tie-breaker) and caps the list, so
+ * the just-written entry — e.g. the processPayment entry the agent-integration
+ * e2e asserts after a sale — sits at the top rather than the bottom.
+ */
+describe('buildRecentAuditView', () => {
+  function entry(id: string, operation: string, timestamp: Date): AuditLogEntry {
+    return {
+      id,
+      timestamp,
+      agentName: 'PaymentAgent',
+      operation,
+      entityType: 'Transaction',
+      entityId: id,
+      action: AuditAction.EXECUTE,
+      status: AuditStatus.SUCCESS,
+    };
+  }
+
+  it('returns an empty list when there are no entries', () => {
+    expect(buildRecentAuditView([])).toEqual([]);
+  });
+
+  it('orders entries newest first regardless of cache order', () => {
+    const oldest = entry('audit-1', 'openCart', new Date('2026-07-26T10:00:00Z'));
+    const newest = entry('audit-3', 'processPayment', new Date('2026-07-26T10:00:02Z'));
+    const middle = entry('audit-2', 'addItem', new Date('2026-07-26T10:00:01Z'));
+
+    // Supplied oldest-first, as AuditLogService.getRecentLogs() returns them.
+    const view = buildRecentAuditView([oldest, middle, newest]);
+
+    expect(view.map((e) => e.operation)).toEqual(['processPayment', 'addItem', 'openCart']);
+  });
+
+  it('breaks timestamp ties by id descending (monotonic sequence order)', () => {
+    const sameTime = new Date('2026-07-26T10:00:00Z');
+    const first = entry('audit-000001', 'first', sameTime);
+    const second = entry('audit-000002', 'second', sameTime);
+
+    const view = buildRecentAuditView([first, second]);
+
+    expect(view.map((e) => e.operation)).toEqual(['second', 'first']);
+  });
+
+  it('keeps only the newest `limit` entries', () => {
+    const entries = Array.from({ length: 15 }, (_, i) =>
+      entry(`audit-${i}`, `op${i}`, new Date(2026, 6, 26, 10, 0, i))
+    );
+
+    const view = buildRecentAuditView(entries, 10);
+
+    expect(view).toHaveLength(10);
+    // Newest (op14) first; the oldest five (op0–op4) are dropped.
+    expect(view[0].operation).toBe('op14');
+    expect(view.at(-1)?.operation).toBe('op5');
+  });
+
+  it('defaults to the newest 10 entries when no limit is given', () => {
+    const entries = Array.from({ length: 12 }, (_, i) =>
+      entry(`audit-${i}`, `op${i}`, new Date(2026, 6, 26, 10, 0, i))
+    );
+
+    expect(buildRecentAuditView(entries)).toHaveLength(10);
+  });
+
+  it('does not mutate the supplied array', () => {
+    const entries = [
+      entry('audit-1', 'first', new Date('2026-07-26T10:00:00Z')),
+      entry('audit-2', 'second', new Date('2026-07-26T10:00:01Z')),
+    ];
+    const originalOrder = entries.map((e) => e.id);
+
+    buildRecentAuditView(entries);
+
+    expect(entries.map((e) => e.id)).toEqual(originalOrder);
   });
 });
