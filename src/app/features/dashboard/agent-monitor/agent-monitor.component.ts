@@ -167,6 +167,29 @@ export function buildEventBusView(stats: EventBusStatistics): EventBusView {
 }
 
 /**
+ * Assemble the Recent Audit Logs panel's view model (#97).
+ *
+ * AuditLogService.getRecentLogs() returns the in-memory cache in insertion
+ * order (oldest first — it appends on write and slices the tail), so rendering
+ * it straight through buries the just-written entry at the bottom of the panel.
+ * That's the opposite of how an audit trail reads and of how the other
+ * dashboard panels surface their most relevant row first (see buildMetricsView /
+ * buildEventBusView). Sort newest first, using the entry id as a stable
+ * tie-breaker when two entries share a timestamp — the ids embed a monotonic
+ * sequence counter, so this mirrors AuditLogService.getEntityAuditTrail's own
+ * ordering — then keep only the newest `limit` rows.
+ */
+export function buildRecentAuditView(entries: AuditLogEntry[], limit = 10): AuditLogEntry[] {
+  return [...entries]
+    .sort((a, b) => {
+      const timeDiff = b.timestamp.getTime() - a.timestamp.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return (b.id ?? '').localeCompare(a.id ?? '');
+    })
+    .slice(0, limit);
+}
+
+/**
  * Agent Monitor Component
  * Real-time dashboard for monitoring agent health, metrics, and activity
  */
@@ -643,7 +666,7 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   }
 
   private async loadAuditLogs(): Promise<void> {
-    this.recentAuditLogs.set(this.auditLog.getRecentLogs(10));
+    this.recentAuditLogs.set(buildRecentAuditView(this.auditLog.getRecentLogs(), 10));
     this.auditStats.set(await this.auditLog.getStatistics());
   }
 
