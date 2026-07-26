@@ -119,6 +119,53 @@ export function buildCircuitBreakerView(
   return stats;
 }
 
+/** Raw statistics snapshot returned by EventBusService.getStatistics(). */
+export interface EventBusStatistics {
+  totalMessages: number;
+  byType: Record<string, number>;
+  bySource: Record<string, number>;
+  byPriority: Record<string, number>;
+}
+
+/** A single breakdown row (a type/source/priority label and its message count). */
+export interface EventBusBreakdownRow {
+  label: string;
+  count: number;
+}
+
+/** Display-ready view model for the Event Bus Activity panel (#98). */
+export interface EventBusView {
+  totalMessages: number;
+  byType: EventBusBreakdownRow[];
+  bySource: EventBusBreakdownRow[];
+  byPriority: EventBusBreakdownRow[];
+}
+
+/**
+ * Assemble the Event Bus Activity panel's view model (#98).
+ *
+ * EventBusService.getStatistics() returns three plain count maps (by type,
+ * source, and priority) whose key order is undefined. Rendering them straight
+ * through Angular's `| keyvalue` pipe sorts each breakdown alphabetically,
+ * burying the busiest channels below quiet ones. Instead, turn each map into
+ * rows sorted by count descending (label ascending as a stable tie-breaker) so
+ * the most active types/sources/priorities always surface first, regardless of
+ * Map insertion order. This mirrors buildMetricsView / buildCircuitBreakerView.
+ */
+export function buildEventBusView(stats: EventBusStatistics): EventBusView {
+  const toRows = (counts: Record<string, number>): EventBusBreakdownRow[] =>
+    Object.entries(counts)
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+  return {
+    totalMessages: stats.totalMessages,
+    byType: toRows(stats.byType),
+    bySource: toRows(stats.bySource),
+    byPriority: toRows(stats.byPriority),
+  };
+}
+
 /**
  * Agent Monitor Component
  * Real-time dashboard for monitoring agent health, metrics, and activity
@@ -153,7 +200,7 @@ export function buildCircuitBreakerView(
             <span
               class="text-xl md:text-2xl font-bold text-gray-900"
               data-testid="total-messages"
-              >{{ eventBusStats().totalMessages }}</span
+              >{{ eventBusView().totalMessages }}</span
             >
           </div>
           <div class="flex flex-col p-3 bg-gray-50 rounded-lg">
@@ -422,13 +469,13 @@ export function buildCircuitBreakerView(
             <div>
               <h3 class="text-xs font-medium text-gray-500 mb-2">By Type</h3>
               <div class="space-y-1">
-                @for (type of eventBusStats().byType | keyvalue; track type) {
+                @for (row of eventBusView().byType; track row.label) {
                   <div
                     class="flex justify-between p-2 bg-gray-50 rounded text-xs"
                     data-testid="messages-by-type"
                   >
-                    <span class="truncate">{{ type.key }}</span>
-                    <span class="font-semibold shrink-0 ml-2">{{ type.value }}</span>
+                    <span class="truncate">{{ row.label }}</span>
+                    <span class="font-semibold shrink-0 ml-2">{{ row.count }}</span>
                   </div>
                 }
               </div>
@@ -436,13 +483,13 @@ export function buildCircuitBreakerView(
             <div>
               <h3 class="text-xs font-medium text-gray-500 mb-2">By Source</h3>
               <div class="space-y-1">
-                @for (source of eventBusStats().bySource | keyvalue; track source) {
+                @for (row of eventBusView().bySource; track row.label) {
                   <div
                     class="flex justify-between p-2 bg-gray-50 rounded text-xs"
                     data-testid="messages-by-source"
                   >
-                    <span class="truncate">{{ source.key }}</span>
-                    <span class="font-semibold shrink-0 ml-2">{{ source.value }}</span>
+                    <span class="truncate">{{ row.label }}</span>
+                    <span class="font-semibold shrink-0 ml-2">{{ row.count }}</span>
                   </div>
                 }
               </div>
@@ -450,10 +497,10 @@ export function buildCircuitBreakerView(
             <div>
               <h3 class="text-xs font-medium text-gray-500 mb-2">By Priority</h3>
               <div class="space-y-1">
-                @for (priority of eventBusStats().byPriority | keyvalue; track priority) {
+                @for (row of eventBusView().byPriority; track row.label) {
                   <div class="flex justify-between p-2 bg-gray-50 rounded text-xs">
-                    <span class="truncate">{{ priority.key }}</span>
-                    <span class="font-semibold shrink-0 ml-2">{{ priority.value }}</span>
+                    <span class="truncate">{{ row.label }}</span>
+                    <span class="font-semibold shrink-0 ml-2">{{ row.count }}</span>
                   </div>
                 }
               </div>
@@ -489,16 +536,12 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   // Total records dropped by resilient repository mapping across all entities (#111).
   skippedRecords = signal(0);
   recentAuditLogs = signal<AuditLogEntry[]>([]);
-  eventBusStats = signal<{
-    totalMessages: number;
-    byType: Record<string, number>;
-    bySource: Record<string, number>;
-    byPriority: Record<string, number>;
-  }>({
+  // Display-ready event-bus breakdown rows for the Activity panel (#98); see buildEventBusView.
+  eventBusView = signal<EventBusView>({
     totalMessages: 0,
-    byType: {},
-    bySource: {},
-    byPriority: {},
+    byType: [],
+    bySource: [],
+    byPriority: [],
   });
   auditStats = signal<{ totalLogs: number }>({
     totalLogs: 0,
@@ -605,7 +648,7 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   }
 
   private loadEventBusStats(): void {
-    this.eventBusStats.set(this.eventBus.getStatistics());
+    this.eventBusView.set(buildEventBusView(this.eventBus.getStatistics()));
   }
 }
 
