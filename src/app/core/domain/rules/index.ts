@@ -87,4 +87,17 @@ export {
   provideAppointmentSchedulingServiceImpl,
 } from '@core/domain/rules/appointment-scheduling.service.provider';
 
+// Tenancy Scheduling Service
+export type {
+  ITenancySchedulingService,
+  Tenancy,
+  TenancyRequest,
+} from '@core/domain/rules/tenancy-scheduling.service.interface';
+export { TenancySchedulingService } from '@core/domain/rules/tenancy-scheduling.service';
+export {
+  TENANCY_SCHEDULING_SERVICE,
+  provideTenancySchedulingService,
+  provideTenancySchedulingServiceImpl,
+} from '@core/domain/rules/tenancy-scheduling.service.provider';
+
 // Made with Bob
