@@ -56,4 +56,21 @@ export {
   provideLoyaltyServiceImpl,
 } from '@core/domain/rules/loyalty.service.provider';
 
+// Order Normalization Service
+export type {
+  IOrderNormalizationService,
+  NormalizedOrder,
+  NormalizedOrderItem,
+  PosRegisterOrder,
+  UberEatsOrder,
+  OrderAheadOrder,
+} from '@core/domain/rules/order-normalization.service.interface';
+export { OrderChannel } from '@core/domain/rules/order-normalization.service.interface';
+export { OrderNormalizationService } from '@core/domain/rules/order-normalization.service';
+export {
+  ORDER_NORMALIZATION_SERVICE,
+  provideOrderNormalizationService,
+  provideOrderNormalizationServiceImpl,
+} from '@core/domain/rules/order-normalization.service.provider';
+
 // Made with Bob
