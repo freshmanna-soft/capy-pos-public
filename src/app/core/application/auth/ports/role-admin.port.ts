@@ -1,5 +1,5 @@
 import { InjectionToken } from '@angular/core';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 import { CreateRoleInput, RoleSummaryDto } from '../dtos/role-summary.dto';
 
 /**

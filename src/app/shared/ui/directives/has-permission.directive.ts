@@ -7,7 +7,7 @@ import {
   effect,
   inject,
 } from '@angular/core';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 
 /**

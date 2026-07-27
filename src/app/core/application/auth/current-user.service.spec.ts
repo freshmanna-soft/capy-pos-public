@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CurrentUserService, TenantIsolationError } from './current-user.service';
 import { AUTH_GATEWAY } from './ports/auth-gateway.port';
 import { AuthSessionDto } from './dtos/auth-session.dto';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 // ---------------------------------------------------------------------------
 // Helpers

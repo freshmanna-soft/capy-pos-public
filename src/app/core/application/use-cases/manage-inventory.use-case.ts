@@ -5,7 +5,7 @@ import { Product } from '@core/domain/entities/product.entity';
 import { generateUUID } from '@core/domain/utils/uuid';
 import { EntityNotFoundException } from '@core/domain/exceptions';
 import { AngularAuthorizationService } from '@core/application/auth/angular-authorization.service';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 /**
  * DTO for creating a new product

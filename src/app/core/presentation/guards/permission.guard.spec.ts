@@ -4,7 +4,7 @@ import { ActivatedRouteSnapshot, Router, RouterStateSnapshot, UrlTree } from '@a
 import { permissionGuard } from './permission.guard';
 import { AngularAuthorizationService } from '@core/application/auth/angular-authorization.service';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 // ---------------------------------------------------------------------------
 // Helpers

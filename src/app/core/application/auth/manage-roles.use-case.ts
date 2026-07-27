@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { ROLE_ADMIN_PORT } from './ports/role-admin.port';
 import { AngularAuthorizationService } from './angular-authorization.service';
 import { CreateRoleInput, RoleSummaryDto } from './dtos/role-summary.dto';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 /**
  * ManageRolesUseCase (Application layer)

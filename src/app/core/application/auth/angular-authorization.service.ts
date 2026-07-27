@@ -1,7 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { AuthorizationService, AuthorizationError } from '@core/domain/auth/authorization.service';
-import { Permission } from '@core/domain/auth/permission.constants';
-import { RoleName } from '@core/domain/auth/role.value-object';
+import { AuthorizationService, AuthorizationError, Permission, RoleName } from '@core/domain/auth';
 import { CurrentUserService } from './current-user.service';
 
 export { AuthorizationError };

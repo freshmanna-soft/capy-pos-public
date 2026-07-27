@@ -1,7 +1,6 @@
 import Dexie, { Table } from 'dexie';
 import { Injectable } from '@angular/core';
-import { Role } from '@core/domain/auth/role.value-object';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Role, Permission } from '@core/domain/auth';
 
 /**
  * bcrypt hash (cost 10) of the default admin password "admin1234".

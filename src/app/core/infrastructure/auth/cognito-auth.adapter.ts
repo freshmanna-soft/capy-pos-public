@@ -4,7 +4,7 @@ import { environment } from '../../../../environments/environment';
 import { AuthGateway } from '@core/application/auth/ports/auth-gateway.port';
 import { CredentialsDto } from '@core/application/auth/dtos/credentials.dto';
 import { AuthSessionDto, TenantMembershipDto } from '@core/application/auth/dtos/auth-session.dto';
-import { Role } from '@core/domain/auth/role.value-object';
+import { Role } from '@core/domain/auth';
 import { InvalidCredentialsError } from './local-credential-auth.adapter';
 
 /**

@@ -4,7 +4,7 @@ import { ROLE_ADMIN_PORT } from './ports/role-admin.port';
 import { CurrentUserService } from './current-user.service';
 import { AngularAuthorizationService } from './angular-authorization.service';
 import { RoleSummaryDto } from './dtos/role-summary.dto';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 /**
  * ManageOperatorMembershipUseCase (Application layer)

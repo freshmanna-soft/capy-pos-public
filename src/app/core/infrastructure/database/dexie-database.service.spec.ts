@@ -22,7 +22,7 @@ import {
   IOperatorDB,
   IRolePermissionDB,
 } from './dexie-database.service';
-import { Role } from '@core/domain/auth/role.value-object';
+import { Role } from '@core/domain/auth';
 
 // ---------------------------------------------------------------------------
 // Helper: open a fresh DexieDatabase instance with an isolated DB name.

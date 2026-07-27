@@ -12,7 +12,7 @@ import { HasPermissionDirective } from '@shared/ui/directives/has-permission.dir
 import { ManageRolesUseCase } from '@core/application/auth/manage-roles.use-case';
 import { RoleSummaryDto } from '@core/application/auth/dtos/role-summary.dto';
 import { ToastService } from '@shared/ui/toast/toast.service';
-import { ALL_PERMISSIONS, Permission } from '@core/domain/auth/permission.constants';
+import { ALL_PERMISSIONS, Permission } from '@core/domain/auth';
 
 /** Permissions grouped by their `area:` prefix for a tidy checkbox layout. */
 interface PermissionGroup {

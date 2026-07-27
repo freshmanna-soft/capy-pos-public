@@ -2,8 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { DexieDatabase, IRoleDB } from '@core/infrastructure/database/dexie-database.service';
 import { RoleAdminPort } from '@core/application/auth/ports/role-admin.port';
 import { CreateRoleInput, RoleSummaryDto } from '@core/application/auth/dtos/role-summary.dto';
-import { Permission, isPermission } from '@core/domain/auth/permission.constants';
-import { BUILT_IN_ROLE_NAMES } from '@core/domain/auth/role.value-object';
+import { Permission, isPermission, BUILT_IN_ROLE_NAMES } from '@core/domain/auth';
 
 /**
  * DexieRoleAdminAdapter
