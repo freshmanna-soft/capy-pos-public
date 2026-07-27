@@ -117,4 +117,19 @@ export {
   provideRentCollectionServiceImpl,
 } from '@core/domain/rules/rent-collection.service.provider';
 
+// Deposit Reconciliation Service
+export type {
+  IDepositReconciliationService,
+  DepositDeduction,
+  DepositSettlementRequest,
+  DepositSettlement,
+} from '@core/domain/rules/deposit-reconciliation.service.interface';
+export { DepositDeductionCategory } from '@core/domain/rules/deposit-reconciliation.service.interface';
+export { DepositReconciliationService } from '@core/domain/rules/deposit-reconciliation.service';
+export {
+  DEPOSIT_RECONCILIATION_SERVICE,
+  provideDepositReconciliationService,
+  provideDepositReconciliationServiceImpl,
+} from '@core/domain/rules/deposit-reconciliation.service.provider';
+
 // Made with Bob
