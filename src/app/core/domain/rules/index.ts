@@ -100,4 +100,21 @@ export {
   provideTenancySchedulingServiceImpl,
 } from '@core/domain/rules/tenancy-scheduling.service.provider';
 
+// Rent Collection Service
+export type {
+  IRentCollectionService,
+  ArrearsPolicy,
+  RentScheduleRequest,
+  RentInvoice,
+  ArrearsAssessment,
+  RentCollectionSummary,
+} from '@core/domain/rules/rent-collection.service.interface';
+export { ArrearsStatus } from '@core/domain/rules/rent-collection.service.interface';
+export { RentCollectionService } from '@core/domain/rules/rent-collection.service';
+export {
+  RENT_COLLECTION_SERVICE,
+  provideRentCollectionService,
+  provideRentCollectionServiceImpl,
+} from '@core/domain/rules/rent-collection.service.provider';
+
 // Made with Bob
