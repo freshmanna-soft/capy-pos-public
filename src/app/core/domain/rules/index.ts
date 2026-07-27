@@ -73,4 +73,18 @@ export {
   provideOrderNormalizationServiceImpl,
 } from '@core/domain/rules/order-normalization.service.provider';
 
+// Appointment Scheduling Service
+export type {
+  IAppointmentSchedulingService,
+  ScheduledAppointment,
+  AppointmentRequest,
+} from '@core/domain/rules/appointment-scheduling.service.interface';
+export { AppointmentType } from '@core/domain/rules/appointment-scheduling.service.interface';
+export { AppointmentSchedulingService } from '@core/domain/rules/appointment-scheduling.service';
+export {
+  APPOINTMENT_SCHEDULING_SERVICE,
+  provideAppointmentSchedulingService,
+  provideAppointmentSchedulingServiceImpl,
+} from '@core/domain/rules/appointment-scheduling.service.provider';
+
 // Made with Bob
