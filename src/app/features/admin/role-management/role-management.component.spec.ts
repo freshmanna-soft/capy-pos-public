@@ -7,7 +7,7 @@ import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import { AuthSessionDto } from '@core/application/auth/dtos/auth-session.dto';
 import { RoleSummaryDto } from '@core/application/auth/dtos/role-summary.dto';
 import { ToastService } from '@shared/ui/toast/toast.service';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 const ROLES: RoleSummaryDto[] = [
   {

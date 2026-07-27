@@ -2,8 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AngularAuthorizationService, AuthorizationError } from './angular-authorization.service';
 import { CurrentUserService } from './current-user.service';
-import { Permission } from '@core/domain/auth/permission.constants';
-import { Role, RoleName } from '@core/domain/auth/role.value-object';
+import { Permission, Role, RoleName } from '@core/domain/auth';
 
 // ---------------------------------------------------------------------------
 // Helpers

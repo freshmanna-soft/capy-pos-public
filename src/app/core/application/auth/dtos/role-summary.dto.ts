@@ -1,4 +1,4 @@
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 /**
  * RoleSummaryDto

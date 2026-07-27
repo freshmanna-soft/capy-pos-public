@@ -1,7 +1,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/presentation/guards/auth.guard';
 import { permissionGuard } from '@core/presentation/guards/permission.guard';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 /**
  * Admin feature routes.

@@ -1,10 +1,14 @@
 import { Injectable, inject, signal, computed } from '@angular/core';
 import { AUTH_GATEWAY } from './ports/auth-gateway.port';
 import { AuthSessionDto } from './dtos/auth-session.dto';
-import { Permission, isPermission } from '@core/domain/auth/permission.constants';
-import { TenantMembershipSet, TenantIsolationError } from '@core/domain/auth/tenant-membership-set';
-import { TenantId } from '@core/domain/auth/tenant-id.value-object';
-import { Role } from '@core/domain/auth/role.value-object';
+import {
+  Permission,
+  isPermission,
+  TenantMembershipSet,
+  TenantIsolationError,
+  TenantId,
+  Role,
+} from '@core/domain/auth';
 
 export { TenantIsolationError };
 

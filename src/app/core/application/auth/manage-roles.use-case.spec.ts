@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ManageRolesUseCase } from './manage-roles.use-case';
 import { ROLE_ADMIN_PORT } from './ports/role-admin.port';
 import { AngularAuthorizationService, AuthorizationError } from './angular-authorization.service';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 describe('ManageRolesUseCase', () => {
   const port = {

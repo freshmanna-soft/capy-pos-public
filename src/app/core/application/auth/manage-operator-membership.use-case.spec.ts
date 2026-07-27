@@ -5,7 +5,7 @@ import { OPERATOR_ADMIN_PORT } from './ports/operator-admin.port';
 import { ROLE_ADMIN_PORT } from './ports/role-admin.port';
 import { CurrentUserService } from './current-user.service';
 import { AngularAuthorizationService, AuthorizationError } from './angular-authorization.service';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 describe('ManageOperatorMembershipUseCase', () => {
   const port = { listOperatorsForTenant: vi.fn(), assignRole: vi.fn(), revokeMembership: vi.fn() };

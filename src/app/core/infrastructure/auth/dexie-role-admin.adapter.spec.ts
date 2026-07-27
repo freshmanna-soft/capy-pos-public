@@ -6,7 +6,7 @@ import {
   IRoleDB,
   IUserTenantDB,
 } from '@core/infrastructure/database/dexie-database.service';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 const now = new Date();
 const roleRow = (id: string, name: string, permissions: string[] = [], level = 1): IRoleDB => ({

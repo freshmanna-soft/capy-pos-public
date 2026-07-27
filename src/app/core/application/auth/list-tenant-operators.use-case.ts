@@ -3,7 +3,7 @@ import { OPERATOR_ADMIN_PORT } from './ports/operator-admin.port';
 import { OperatorSummaryDto } from './dtos/operator-summary.dto';
 import { CurrentUserService } from './current-user.service';
 import { AngularAuthorizationService } from './angular-authorization.service';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 /**
  * ListTenantOperatorsUseCase (Application layer)

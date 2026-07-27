@@ -1,6 +1,6 @@
 import { inject } from '@angular/core';
 import { CanActivateFn, Router, UrlTree } from '@angular/router';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 import { AngularAuthorizationService } from '@core/application/auth/angular-authorization.service';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 

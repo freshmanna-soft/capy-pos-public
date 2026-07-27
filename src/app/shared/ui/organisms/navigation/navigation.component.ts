@@ -1,7 +1,7 @@
 import { Component, ChangeDetectionStrategy, signal, computed, inject } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
-import { Permission } from '@core/domain/auth/permission.constants';
+import { Permission } from '@core/domain/auth';
 
 /** A single navigation entry. `permission`, when set, gates visibility via RBAC. */
 interface NavItem {
