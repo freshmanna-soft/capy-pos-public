@@ -20,6 +20,23 @@ export interface RetryConfig {
   backoffMultiplier: number; // For exponential/linear strategies
   retryableErrors?: string[]; // Specific error messages to retry
   shouldRetry?: (error: unknown) => boolean; // Custom retry condition
+  onRetry?: (context: RetryContext) => void; // Observer invoked before each retry
+}
+
+/**
+ * Retry Context
+ * Passed to the {@link RetryConfig.onRetry} observer just before the service
+ * waits and re-invokes the operation. Lets callers react to a retry (e.g. show
+ * a "retrying" UI state or emit telemetry) without threading an attempt counter
+ * through their own operation function.
+ */
+export interface RetryContext {
+  operationName: string;
+  attempt: number; // The attempt that just failed (1-based)
+  nextAttempt: number; // The attempt about to run
+  maxAttempts: number;
+  delay: number; // Delay in ms before the next attempt
+  error: unknown; // The error that triggered the retry
 }
 
 /**
@@ -126,6 +143,15 @@ export class RetryService {
               `Retrying in ${delay}ms...`,
             { error: error instanceof Error ? error.message : error }
           );
+
+          this.notifyRetry(finalConfig, {
+            operationName,
+            attempt,
+            nextAttempt: attempt + 1,
+            maxAttempts: finalConfig.maxAttempts,
+            delay,
+            error,
+          });
 
           await this.delay(delay);
         }
@@ -273,6 +299,22 @@ export class RetryService {
     ];
 
     return !nonRetryablePatterns.some((pattern) => errorMessage.toLowerCase().includes(pattern));
+  }
+
+  private notifyRetry(config: RetryConfig, context: RetryContext): void {
+    if (!config.onRetry) {
+      return;
+    }
+
+    // A misbehaving observer must never abort the retry loop.
+    try {
+      config.onRetry(context);
+    } catch (callbackError) {
+      console.error(
+        `[Retry:${context.operationName}] onRetry callback threw and was ignored`,
+        callbackError
+      );
+    }
   }
 
   private delay(ms: number): Promise<void> {
