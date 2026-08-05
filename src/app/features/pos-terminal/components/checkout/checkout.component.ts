@@ -963,24 +963,18 @@ export class CheckoutComponent {
    */
   private async processCardPayment(transactionId: string): Promise<void> {
     const declined = this.isDeclinedCard();
-    let attempt = 0;
 
     try {
       await this.circuitBreaker.execute(
         PAYMENT_GATEWAY,
         () =>
-          this.retry.execute(
-            'card-payment',
-            () => {
-              attempt += 1;
-              // Surface the retry to the cashier from the second attempt on.
-              if (attempt > 1) {
-                this.step.set('retrying');
-              }
-              return this.simulateGatewayCall(declined);
-            },
-            { maxAttempts: 3, initialDelay: 300, backoffMultiplier: 1.5 }
-          ),
+          this.retry.execute('card-payment', () => this.simulateGatewayCall(declined), {
+            maxAttempts: 3,
+            initialDelay: 300,
+            backoffMultiplier: 1.5,
+            // Surface the retry to the cashier as soon as the gateway is retried.
+            onRetry: () => this.step.set('retrying'),
+          }),
         // Short timeout keeps the demo responsive: an open breaker probes for
         // recovery a few seconds later rather than the production default.
         { failureThreshold: 5, timeout: 5000 }
