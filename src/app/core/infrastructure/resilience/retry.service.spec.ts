@@ -138,6 +138,93 @@ describe('RetryService', () => {
     });
   });
 
+  describe('onRetry callback', () => {
+    it('should invoke onRetry before each retry with attempt context', async () => {
+      let attempts = 0;
+      const fn = vi.fn().mockImplementation(async () => {
+        attempts++;
+        if (attempts < 3) {
+          throw new Error('Temporary failure');
+        }
+        return 'success';
+      });
+      const onRetry = vi.fn();
+
+      await service.execute('test-op', fn, {
+        maxAttempts: 3,
+        initialDelay: 10,
+        onRetry,
+      });
+
+      // Two failed attempts before success => two retry notifications.
+      expect(onRetry).toHaveBeenCalledTimes(2);
+      const first = onRetry.mock.calls[0][0];
+      expect(first.operationName).toBe('test-op');
+      expect(first.attempt).toBe(1);
+      expect(first.nextAttempt).toBe(2);
+      expect(first.maxAttempts).toBe(3);
+      expect(first.delay).toBeGreaterThanOrEqual(0);
+      expect(first.error).toBeInstanceOf(Error);
+      expect((first.error as Error).message).toBe('Temporary failure');
+      expect(onRetry.mock.calls[1][0].attempt).toBe(2);
+    });
+
+    it('should not invoke onRetry when the first attempt succeeds', async () => {
+      const fn = vi.fn().mockResolvedValue('success');
+      const onRetry = vi.fn();
+
+      await service.execute('test-op', fn, { onRetry });
+
+      expect(onRetry).not.toHaveBeenCalled();
+    });
+
+    it('should not invoke onRetry after the final (exhausting) attempt', async () => {
+      const fn = vi.fn().mockRejectedValue(new Error('Persistent failure'));
+      const onRetry = vi.fn();
+
+      await expect(
+        service.execute('test-op', fn, { maxAttempts: 3, initialDelay: 10, onRetry })
+      ).rejects.toBeInstanceOf(RetryExhaustedError);
+
+      // 3 attempts => only the 2 inter-attempt gaps fire onRetry.
+      expect(onRetry).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not invoke onRetry for non-retryable errors', async () => {
+      const fn = vi.fn().mockRejectedValue(new Error('Validation error'));
+      const onRetry = vi.fn();
+
+      await expect(
+        service.execute('test-op', fn, { maxAttempts: 3, initialDelay: 10, onRetry })
+      ).rejects.toThrow('Validation error');
+
+      expect(onRetry).not.toHaveBeenCalled();
+    });
+
+    it('should not let a throwing onRetry break the retry flow', async () => {
+      let attempts = 0;
+      const fn = vi.fn().mockImplementation(async () => {
+        attempts++;
+        if (attempts < 2) {
+          throw new Error('Temporary failure');
+        }
+        return 'success';
+      });
+      const onRetry = vi.fn().mockImplementation(() => {
+        throw new Error('observer blew up');
+      });
+
+      const result = await service.execute('test-op', fn, {
+        maxAttempts: 3,
+        initialDelay: 10,
+        onRetry,
+      });
+
+      expect(result).toBe('success');
+      expect(onRetry).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('Retry Strategies', () => {
     it('should use fixed delay strategy', async () => {
       let attempts = 0;

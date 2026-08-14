@@ -679,10 +679,15 @@ describe('CheckoutComponent', () => {
     it('shows the retrying state on a second gateway attempt', async () => {
       vi.useFakeTimers();
       const setSpy = vi.spyOn(component.step, 'set');
-      // Make the retry layer invoke the wrapped call twice (first + one retry).
+      // Emulate the real service: one failed attempt fires onRetry before the
+      // wrapped call is re-invoked and succeeds.
       mockRetry.execute.mockImplementationOnce(
-        async (_name: string, fn: () => Promise<unknown>) => {
-          await fn();
+        async (
+          _name: string,
+          fn: () => Promise<unknown>,
+          config?: { onRetry?: (ctx: unknown) => void }
+        ) => {
+          config?.onRetry?.({ operationName: _name, attempt: 1, nextAttempt: 2 });
           return fn();
         }
       );
