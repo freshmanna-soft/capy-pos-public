@@ -51,7 +51,13 @@ export class DexiePaymentRepository
   }
 
   /**
-   * Map database record to entity (alias for mapToDomain)
+   * Map database record to entity (alias for mapToDomain).
+   *
+   * This is the hook `BaseDexieRepository.mapRecords` calls per record, so all
+   * list methods below map through the resilient path: a single corrupt record
+   * (e.g. amount <= 0 from a bad sync or failure-injection) is skipped with a
+   * warning + telemetry counter, not thrown out of the whole list. See the
+   * product-load postmortem (2026-06-26 / PR #108) and #110.
    */
   protected mapToEntity(record: IPaymentDB): Payment {
     return this.mapToDomain(record);
@@ -87,7 +93,7 @@ export class DexiePaymentRepository
    */
   async findByTransactionId(transactionId: string): Promise<Payment[]> {
     const records = await this.table.where('orderId').equals(transactionId).toArray();
-    return records.map((r) => this.mapToDomain(r));
+    return this.mapRecords(records);
   }
 
   /**
@@ -107,7 +113,7 @@ export class DexiePaymentRepository
    */
   async findByStatus(status: PaymentStatus): Promise<Payment[]> {
     const records = await this.table.where('status').equals(status).toArray();
-    return records.map((r) => this.mapToDomain(r));
+    return this.mapRecords(records);
   }
 
   /**
@@ -115,7 +121,7 @@ export class DexiePaymentRepository
    */
   async findByMethod(method: PaymentMethod): Promise<Payment[]> {
     const records = await this.table.where('method').equals(method).toArray();
-    return records.map((r) => this.mapToDomain(r));
+    return this.mapRecords(records);
   }
 
   /**
@@ -126,7 +132,7 @@ export class DexiePaymentRepository
       .where('createdAt')
       .between(startDate, endDate, true, true)
       .toArray();
-    return records.map((r) => this.mapToDomain(r));
+    return this.mapRecords(records);
   }
 
   /**
@@ -216,7 +222,7 @@ export class DexiePaymentRepository
       records = records.filter((r) => r.createdAt >= startDate && r.createdAt <= endDate);
     }
 
-    return records.map((r) => this.mapToDomain(r));
+    return this.mapRecords(records);
   }
 
   /**
@@ -230,7 +236,7 @@ export class DexiePaymentRepository
       records = records.filter((r) => r.createdAt >= startDate && r.createdAt <= endDate);
     }
 
-    return records.map((r) => this.mapToDomain(r));
+    return this.mapRecords(records);
   }
 }
 
