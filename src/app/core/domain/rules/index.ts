@@ -117,6 +117,29 @@ export {
   provideRentCollectionServiceImpl,
 } from '@core/domain/rules/rent-collection.service.provider';
 
+// Vaccination Scheduling Service
+export type {
+  IVaccinationSchedulingService,
+  VaccinationProtocolDose,
+  VaccinationScheduleRequest,
+  PlannedVaccination,
+  VaccinationRecord,
+  VaccinationReminderPolicy,
+  VaccinationAssessment,
+  VaccinationSummary,
+} from '@core/domain/rules/vaccination-scheduling.service.interface';
+export {
+  Species,
+  VaccineType,
+  VaccinationStatus,
+} from '@core/domain/rules/vaccination-scheduling.service.interface';
+export { VaccinationSchedulingService } from '@core/domain/rules/vaccination-scheduling.service';
+export {
+  VACCINATION_SCHEDULING_SERVICE,
+  provideVaccinationSchedulingService,
+  provideVaccinationSchedulingServiceImpl,
+} from '@core/domain/rules/vaccination-scheduling.service.provider';
+
 // Deposit Reconciliation Service
 export type {
   IDepositReconciliationService,
