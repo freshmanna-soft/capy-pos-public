@@ -11,6 +11,7 @@ import { EventBusMessage } from './event-bus.service';
 /** Who emitted the event (groups the "By Source" breakdown). */
 export const EventSource = {
   POS_FACADE: 'PosFacade',
+  CLERK_FACADE: 'ClerkFacade',
   SYNC_SERVICE: 'SyncService',
   INVENTORY: 'InventoryManagement',
 } as const;
@@ -22,6 +23,9 @@ export const EventType = {
   CART_ITEM_ADDED: 'cart.item.added',
   CART_ITEM_REMOVED: 'cart.item.removed',
   TRANSACTION_COMPLETED: 'transaction.completed',
+  // AI clerk (camera recognition)
+  CLERK_ITEM_RECOGNIZED: 'clerk.item.recognized',
+  CLERK_ITEM_REJECTED: 'clerk.item.rejected',
   // Sync lifecycle
   SYNC_COMPLETED: 'sync.completed',
   SYNC_PUSH_COMPLETED: 'sync.push.completed',

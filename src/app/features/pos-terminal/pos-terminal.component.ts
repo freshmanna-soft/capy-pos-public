@@ -1,4 +1,5 @@
 import { Component, ViewChild, OnInit, inject, signal } from '@angular/core';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
 import { ProductSearchComponent } from '@features/pos-terminal/components/product-search/product-search.component';
 import { ShoppingCartComponent } from '@features/pos-terminal/components/shopping-cart/shopping-cart.component';
@@ -34,6 +35,7 @@ import { ToastService } from '@shared/ui/toast/toast.service';
   selector: 'app-pos-terminal',
   standalone: true,
   imports: [
+    RouterLink,
     ProductSearchComponent,
     ProductGridComponent,
     ShoppingCartComponent,
@@ -47,6 +49,8 @@ export class PosTerminalComponent implements OnInit {
   protected readonly posFacade = inject(PosFacade);
   private readonly productService = inject(ProductService);
   private readonly toast = inject(ToastService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 
   @ViewChild(ProductSearchComponent) productSearch!: ProductSearchComponent;
 
@@ -84,6 +88,32 @@ export class PosTerminalComponent implements OnInit {
       .catch((error: unknown) => {
         console.error('Failed to initialize database:', error);
       });
+
+    this.consumeCheckoutHandoff();
+  }
+
+  /**
+   * Open checkout when arriving from the AI clerk with `?checkout=1`.
+   *
+   * Checkout is an overlay on this page rather than a route of its own, so the
+   * clerk can't navigate straight to it. A query parameter is the smallest honest
+   * handoff — the alternative is duplicating the payment flow at /clerk.
+   *
+   * The parameter is stripped immediately so a refresh, or a Back into this page,
+   * doesn't reopen a dialog the cashier already dismissed.
+   */
+  private consumeCheckoutHandoff(): void {
+    if (this.route.snapshot.queryParamMap.get('checkout') !== '1') {
+      return;
+    }
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {},
+      replaceUrl: true,
+    });
+    if (!this.posFacade.isCartEmpty()) {
+      this.showCheckout.set(true);
+    }
   }
 
   /**

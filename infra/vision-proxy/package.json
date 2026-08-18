@@ -1,0 +1,19 @@
+{
+  "name": "capy-vision-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-side recognizer for the Capy-POS AI clerk. Holds the model API key so the browser never has to.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --experimental-strip-types src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "~5.9.2"
+  }
+}

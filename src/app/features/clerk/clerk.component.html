@@ -1,0 +1,109 @@
+<!-- Fixed and above the app nav: this is a mode, not a panel. -->
+<div
+  class="fixed inset-0 z-[60] overflow-hidden bg-onsen-deep text-steam"
+  data-testid="clerk-stage"
+>
+  <!-- Layer 1: the feed, treated as steamy bathhouse glass. -->
+  <video
+    #feed
+    class="absolute inset-0 h-full w-full object-cover transition-[filter,opacity] duration-500"
+    [class.clerk-feed--glass]="!clearGlass()"
+    [class.clerk-feed--clear]="clearGlass()"
+    muted
+    playsinline
+    autoplay
+    aria-hidden="true"
+    data-testid="clerk-feed"
+  ></video>
+
+  <!-- Layer 2: the capybara. Transparent, no text, never interactive. -->
+  <app-capybara-stage class="pointer-events-none absolute inset-0" />
+
+  <!-- Layer 3: everything readable. -->
+  <app-clerk-hud class="absolute inset-0" (exit)="exit()" (checkout)="goToCheckout()" />
+
+  <!-- Glass toggle. The treatment is a deliberate risk; this is the way out of it. -->
+  <button
+    type="button"
+    (click)="toggleGlass()"
+    class="absolute bottom-4 right-4 rounded-full border border-kelp/30 bg-onsen-deep/70 px-3 py-2 font-data text-[10px] uppercase tracking-[0.16em] text-kelp backdrop-blur transition-colors hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu md:bottom-6 md:right-6"
+    data-testid="clerk-glass-toggle"
+  >
+    {{ clearGlass() ? 'Steam up' : 'Clear the glass' }}
+  </button>
+
+  <!-- Keyboard map. Voice is the fast path, not the only one, so the
+       alternatives belong on screen rather than in a help menu — but under the
+       header, not over the control row, where it collided with the buttons. -->
+  <p
+    class="pointer-events-none absolute left-1/2 top-14 hidden -translate-x-1/2 whitespace-nowrap font-data text-[10px] uppercase tracking-[0.16em] text-kelp/50 xl:block"
+  >
+    Y confirm · N reject · 1–3 choose · U undo · M mic · C camera · T total · Esc exit
+  </p>
+
+  @if (needsConsent()) {
+    <!-- Frames leave the device on this build, so say so before opening the
+         camera rather than in a settings page nobody reads. -->
+    <div
+      class="absolute inset-0 z-10 grid place-items-center bg-onsen-deep/95 px-6 backdrop-blur"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="clerk-consent-title"
+      data-testid="clerk-consent"
+    >
+      <div class="max-w-md">
+        <p class="font-data text-[10px] uppercase tracking-[0.22em] text-kelp">Before we start</p>
+        <h1 id="clerk-consent-title" class="mt-2 font-display text-3xl font-extrabold text-steam">
+          Capy needs to see the counter.
+        </h1>
+        <p class="mt-4 text-[15px] leading-relaxed text-steam/80">
+          Still images of whatever you hold up are sent to this shop's recognition service to be
+          named, then discarded. Nothing is recorded, and no video leaves the till. Point the camera
+          at products, not at people.
+        </p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            (click)="acceptConsent()"
+            class="min-h-[44px] rounded-full bg-yuzu px-6 font-display text-sm font-bold text-onsen-deep transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-steam"
+            data-testid="clerk-consent-accept"
+          >
+            Start the camera
+          </button>
+          <button
+            type="button"
+            (click)="exit()"
+            class="min-h-[44px] rounded-full border border-kelp/40 px-6 text-sm font-medium text-kelp transition-colors hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          >
+            Not now
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  @if (clerk.phase() === 'blocked') {
+    <!-- Terminal for this session: no camera means no clerk. Say what to do and
+         offer the way back rather than leaving a dead stage. -->
+    <div
+      class="absolute inset-0 z-10 grid place-items-center bg-onsen-deep/95 px-6 backdrop-blur"
+      role="alert"
+      data-testid="clerk-blocked"
+    >
+      <div class="max-w-md">
+        <p class="font-data text-[10px] uppercase tracking-[0.22em] text-tsuba">Camera</p>
+        <h1 class="mt-2 font-display text-2xl font-extrabold text-steam">
+          Capy can't see anything.
+        </h1>
+        <p class="mt-3 text-[15px] leading-relaxed text-steam/80">{{ camera.message() }}</p>
+        <button
+          type="button"
+          (click)="exit()"
+          class="mt-6 min-h-[44px] rounded-full bg-yuzu px-6 font-display text-sm font-bold text-onsen-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-steam"
+        >
+          Back to POS
+        </button>
+      </div>
+    </div>
+  }
+</div>

@@ -209,6 +209,16 @@ export class NavigationComponent {
   private readonly allNavItems: NavItem[] = [
     { id: 'pos', path: '/pos', label: 'Norma POS', shortLabel: 'POS', icon: '🌸', exact: false },
     {
+      // Second on purpose: mobileNavItems is the first four, so this keeps the
+      // clerk in the thumb-reachable bottom bar rather than the overflow sheet.
+      id: 'clerk',
+      path: '/clerk',
+      label: 'Capy Clerk',
+      shortLabel: 'Clerk',
+      icon: '🦫',
+      exact: false,
+    },
+    {
       id: 'history',
       path: '/history',
       label: 'Transactions',

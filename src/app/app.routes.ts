@@ -15,6 +15,14 @@ export const routes: Routes = [
     title: 'POS Terminal · Capy-POS',
   },
   {
+    // Full-screen AI clerk. Shares the cart with /pos through PosFacade, so
+    // scanning here and paying there is one transaction.
+    path: 'clerk',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/clerk/clerk.component').then((m) => m.ClerkComponent),
+    title: 'Capy Clerk · Capy-POS',
+  },
+  {
     path: 'inventory',
     canActivate: [authGuard],
     loadComponent: () =>

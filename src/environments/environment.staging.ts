@@ -10,6 +10,20 @@ export const environment = {
   apiUrl: 'https://api-staging.capy-pos.com/api',
   apiTimeout: 30000,
 
+  // AI clerk vision proxy, relative to apiUrl. The model API key lives in
+  // this endpoint, never in the browser bundle — see infra/vision-proxy.
+  visionApiPath: '/vision/identify',
+
+  // Absolute override for the vision endpoint. Empty means "append visionApiPath
+  // to apiUrl", which is right in production where both are the same gateway.
+  //
+  // It exists so real recognition can be switched on locally against
+  // `npm start` in infra/vision-proxy without repointing `apiUrl` — doing that
+  // would send products, transactions and the whole sync worker at a service
+  // that only answers /vision/identify, and the till would look broken for
+  // reasons that have nothing to do with vision.
+  visionApiUrl: '',
+
   // Database
   databaseName: 'capy_pos_staging',
   enableOfflineMode: true,
@@ -41,6 +55,13 @@ export const environment = {
     auditLogging: true,
     offlineMode: true,
     aiVision: false,
+  },
+
+  // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but
+  // Chromium/Safari only and recognition needs a secure context.
+  clerkVoice: {
+    synthesis: true,
+    recognition: true,
   },
 
   // Logging
