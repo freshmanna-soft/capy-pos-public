@@ -13,7 +13,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- nomic-embed-text emits 768-dimensional vectors -> vector(768).
 CREATE TABLE IF NOT EXISTS rag_embeddings (
     id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    source_type  text        NOT NULL,                 -- 'code' | 'claude_mem' | 'github_issue' | 'memory_link'
+    source_type  text        NOT NULL,                 -- 'code' | 'claude_mem' | 'github_issue' | 'memory_link' | 'build_memory'
     source_id    text        NOT NULL,                 -- canonical id (e.g. 'path:line_start-line_end') reused by the graph pillar + the self-updating loop
     chunk        text        NOT NULL,                 -- the embedded text
     embedding    vector(768) NOT NULL,                 -- nomic-embed-text dimension

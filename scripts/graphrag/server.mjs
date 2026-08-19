@@ -14,8 +14,10 @@
  */
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { makePool } from './db.mjs';
+import { makePool, upsertEmbedding } from './db.mjs';
 import { graphRagSearch, fileNeighborhood, epicStories } from './graph-query.mjs';
+import { search } from './query.mjs';
+import { embed } from './embedding-service.mjs';
 
 const PORT = Number(process.env.GRAPHRAG_PORT || 37777);
 
@@ -35,6 +37,19 @@ export function validateSearch(body) {
   }
   const k = Number.isFinite(body.k) && body.k > 0 ? Math.floor(body.k) : 5;
   return { query: body.query, k };
+}
+
+/** Validate/normalize an /ingest body. Throws on bad input. */
+export function validateIngest(body) {
+  const need = (v, n) => {
+    if (typeof v !== 'string' || v.trim() === '') throw new Error(`\`${n}\` (non-empty string) is required`);
+  };
+  if (!body || typeof body !== 'object') throw new Error('a JSON object body is required');
+  need(body.sourceType, 'sourceType');
+  need(body.sourceId, 'sourceId');
+  need(body.text, 'text');
+  const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata : {};
+  return { sourceType: body.sourceType, sourceId: body.sourceId, text: body.text, metadata };
 }
 
 function send(res, code, obj) {
@@ -82,6 +97,33 @@ export function createServer(pool) {
         const number = url.searchParams.get('number');
         if (!number) return send(res, 400, { error: '`number` query param is required' });
         return send(res, 200, { epic: Number(number), stories: await epicStories(pool, number) });
+      }
+      if (req.method === 'POST' && url.pathname === '/ingest') {
+        // Write a single embedding row of any source_type (e.g. build memories).
+        //
+        // Same opt-in auth as /reindex: when GRAPHRAG_WEBHOOK_SECRET is set it is
+        // enforced, and when it is unset the write is accepted unauthenticated.
+        // Note that `server.listen(PORT)` below passes no host, so this binds every
+        // interface rather than loopback despite the startup log saying localhost —
+        // meaning with no secret configured this is a write path open to anyone on
+        // the network. Set the secret. (Tightening the bind is not a free fix: a
+        // containerised caller reaches the host via host.docker.internal, which is
+        // not loopback.)
+        const auth = authorizeReindex(req.headers);
+        if (auth === 'unauthorized') return send(res, 401, { error: 'invalid x-webhook-secret' });
+        const { sourceType, sourceId, text, metadata } = validateIngest(await readJson(req));
+        const embedding = await embed(text);
+        await upsertEmbedding(pool, { sourceType, sourceId, text, embedding, metadata });
+        return send(res, 200, { ok: true, sourceType, sourceId });
+      }
+      if (req.method === 'POST' && url.pathname === '/recall') {
+        // Semantic recall over a NON-code source_type (default build memories),
+        // leaving the code-only /search contract untouched.
+        const body = await readJson(req);
+        const { query, k } = validateSearch(body);
+        const sourceType = typeof body.sourceType === 'string' && body.sourceType.trim() ? body.sourceType : 'build_memory';
+        const hits = await search(query, { k, sourceType, pool });
+        return send(res, 200, { query, k, sourceType, hits });
       }
       if (req.method === 'POST' && url.pathname === '/reindex') {
         const auth = authorizeReindex(req.headers);
