@@ -15,6 +15,14 @@ export const routes: Routes = [
     title: 'POS Terminal · Capy-POS',
   },
   {
+    // Full-screen AI clerk. Shares the cart with /pos through PosFacade, so
+    // scanning here and paying there is one transaction.
+    path: 'clerk',
+    canActivate: [authGuard],
+    loadComponent: () => import('./features/clerk/clerk.component').then((m) => m.ClerkComponent),
+    title: 'Capy Clerk · Capy-POS',
+  },
+  {
     path: 'inventory',
     canActivate: [authGuard],
     loadComponent: () =>
@@ -54,6 +62,13 @@ export const routes: Routes = [
         (m) => m.TransactionHistoryComponent
       ),
     title: 'Transaction History',
+  },
+  {
+    path: 'assistant',
+    canActivate: [authGuard],
+    loadComponent: () =>
+      import('./features/assistant/wx-assistant.component').then((m) => m.WxAssistantComponent),
+    title: 'AI Assistant · Capy-POS',
   },
   {
     path: 'settings',

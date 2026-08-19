@@ -14,6 +14,7 @@ import {
   REPOSITORY_PROVIDERS,
   TRANSACTION_REPOSITORY,
 } from '@core/infrastructure/factories/repository.factory';
+import { VISION_PROVIDERS } from '@core/infrastructure/vision/vision.factory';
 import { INVENTORY_AGENT_PROVIDERS } from '@app/agents/inventory/infrastructure';
 import { SALES_AGENT_PROVIDERS } from '@app/agents/sales/infrastructure';
 import { PAYMENT_AGENT_PROVIDER } from '@app/agents/payment/infrastructure/payment-agent.provider';
@@ -105,6 +106,8 @@ export const appConfig: ApplicationConfig = {
       provide: 'ITransactionRepository',
       useExisting: TRANSACTION_REPOSITORY,
     },
+    // AI clerk recognizer — mock or Claude, chosen by environment.features.aiVision
+    ...VISION_PROVIDERS,
     // Agent providers
     ...INVENTORY_AGENT_PROVIDERS,
     ...SALES_AGENT_PROVIDERS,

@@ -52,6 +52,19 @@ export default defineConfig({
         'src/app/agents/analytics/**',
         'src/app/agents/base/base-agent.ts',
         'src/app/agents/agent.registry.ts',
+        // Thin wrappers over browser APIs that jsdom does not implement at all:
+        // getUserMedia and the canvas pixel readback, BarcodeDetector,
+        // SpeechSynthesis, and SpeechRecognition. There is no logic here to unit
+        // test — every method is a permission handshake, a feature probe or an
+        // event-handler hookup — and faking the APIs well enough to instrument
+        // would only assert the fakes. They are covered end-to-end in
+        // tests/e2e/clerk.spec.ts, which runs a real MediaStream and a stubbed
+        // detector through a real browser. Every decision that sits on top of them
+        // is unit tested in its own pure module: frame-gate.ts, barcode-gate.ts,
+        // camera-selection.ts, candidate-ranking.ts and clerk.facade.ts.
+        'src/app/core/infrastructure/media/camera.service.ts',
+        'src/app/core/infrastructure/media/barcode-scanner.service.ts',
+        'src/app/core/infrastructure/voice/**',
         'src/app/core/application/dtos/**',
         'src/app/core/application/services/base-application.service.ts',
         'src/app/core/application/services/product.service.ts',

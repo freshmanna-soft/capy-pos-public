@@ -10,6 +10,20 @@ export const environment = {
   apiUrl: 'https://api-staging.capy-pos.com/api',
   apiTimeout: 30000,
 
+  // AI clerk vision proxy, relative to apiUrl. The model API key lives in
+  // this endpoint, never in the browser bundle — see infra/vision-proxy.
+  visionApiPath: '/vision/identify',
+
+  // Absolute override for the vision endpoint. Empty means "append visionApiPath
+  // to apiUrl", which is right in production where both are the same gateway.
+  //
+  // It exists so real recognition can be switched on locally against
+  // `npm start` in infra/vision-proxy without repointing `apiUrl` — doing that
+  // would send products, transactions and the whole sync worker at a service
+  // that only answers /vision/identify, and the till would look broken for
+  // reasons that have nothing to do with vision.
+  visionApiUrl: '',
+
   // Database
   databaseName: 'capy_pos_staging',
   enableOfflineMode: true,
@@ -41,6 +55,13 @@ export const environment = {
     auditLogging: true,
     offlineMode: true,
     aiVision: false,
+  },
+
+  // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but
+  // Chromium/Safari only and recognition needs a secure context.
+  clerkVoice: {
+    synthesis: true,
+    recognition: true,
   },
 
   // Logging
@@ -121,6 +142,19 @@ export const environment = {
       instanceId: '',
       apiKey: '',
     },
+  },
+
+  // WatsonX Orchestrate — embedded AI assistant chat widget. Client-side embed
+  // identifiers (not secrets). Relocated out of the component so each build
+  // target can point at its own orchestration/agent.
+  watsonxAssistant: {
+    enabled: true,
+    hostURL: 'https://jp-tok.watson-orchestrate.cloud.ibm.com',
+    orchestrationID: '7f2f10ff1cde4ea9966b50822b66d0a3_6b4d0af6-bace-4662-980c-57995c7ab2ea',
+    crn: 'crn:v1:bluemix:public:watsonx-orchestrate:jp-tok:a/7f2f10ff1cde4ea9966b50822b66d0a3:6b4d0af6-bace-4662-980c-57995c7ab2ea::',
+    deploymentPlatform: 'ibmcloud',
+    agentId: 'a7e2f127-2b6a-4446-8e7e-aa10b25c2ee0',
+    agentEnvironmentId: '1571b423-085b-48f0-a29d-bf7309a5f8e1',
   },
 };
 

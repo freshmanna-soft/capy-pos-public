@@ -10,6 +10,20 @@ export const environment = {
   apiUrl: 'http://localhost:4200/api',
   apiTimeout: 10000,
 
+  // AI clerk vision proxy, relative to apiUrl. The model API key lives in
+  // this endpoint, never in the browser bundle — see infra/vision-proxy.
+  visionApiPath: '/vision/identify',
+
+  // Absolute override for the vision endpoint. Empty means "append visionApiPath
+  // to apiUrl", which is right in production where both are the same gateway.
+  //
+  // It exists so real recognition can be switched on locally against
+  // `npm start` in infra/vision-proxy without repointing `apiUrl` — doing that
+  // would send products, transactions and the whole sync worker at a service
+  // that only answers /vision/identify, and the till would look broken for
+  // reasons that have nothing to do with vision.
+  visionApiUrl: '',
+
   // Database (in-memory for tests)
   databaseName: 'capy_pos_test',
   enableOfflineMode: true,
@@ -41,6 +55,13 @@ export const environment = {
     auditLogging: false,
     offlineMode: true,
     aiVision: false,
+  },
+
+  // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but
+  // Chromium/Safari only and recognition needs a secure context.
+  clerkVoice: {
+    synthesis: false,
+    recognition: false,
   },
 
   // Logging
@@ -101,6 +122,18 @@ export const environment = {
     enabled: false,
     interval: 86400000,
     retentionDays: 1,
+  },
+
+  // WatsonX Orchestrate — disabled under test so no external loader script is
+  // injected into headless/CI builds.
+  watsonxAssistant: {
+    enabled: false,
+    hostURL: '',
+    orchestrationID: '',
+    crn: '',
+    deploymentPlatform: 'ibmcloud',
+    agentId: '',
+    agentEnvironmentId: '',
   },
 };
 

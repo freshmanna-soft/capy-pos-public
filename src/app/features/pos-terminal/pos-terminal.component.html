@@ -39,6 +39,15 @@
         Norma POS
       </h1>
       <div class="flex gap-2 md:gap-3">
+        <a
+          routerLink="/clerk"
+          class="flex items-center gap-1.5 px-3 py-2.5 md:px-5 md:py-2.5 bg-onsen-water text-steam no-underline border border-kelp/40 rounded-lg text-xs md:text-sm font-semibold cursor-pointer transition-all duration-200 min-h-[44px] hover:border-kelp hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0"
+          data-testid="ask-capy-btn"
+          aria-label="Open Capy Clerk to scan products with the camera"
+        >
+          <span aria-hidden="true">🦫</span>
+          <span class="hidden sm:inline">Ask Capy</span>
+        </a>
         <button
           class="flex items-center gap-1.5 px-3 py-2.5 md:px-5 md:py-2.5 bg-gradient-to-r from-indigo-600 to-purple-700 text-white border-none rounded-lg text-xs md:text-sm font-semibold cursor-pointer transition-all duration-200 min-h-[44px] hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0"
           data-testid="add-product-btn"

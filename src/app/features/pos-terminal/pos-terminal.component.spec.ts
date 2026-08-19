@@ -1,4 +1,5 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
+import { Router, provideRouter } from '@angular/router';
 import { PosTerminalComponent } from '@features/pos-terminal/pos-terminal.component';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
 import {
@@ -127,6 +128,9 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
         ShoppingCartComponent,
       ],
       providers: [
+        // The header links to /clerk and ngOnInit reads the ?checkout= handoff
+        // the AI clerk uses to open payment, so the component needs a router.
+        provideRouter([]),
         CartService,
         GenerateReceiptUseCase,
         AdjustStockOnSaleUseCase,
@@ -141,6 +145,39 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     fixture = TestBed.createComponent(PosTerminalComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
+  });
+
+  describe('AI clerk handoff', () => {
+    it('offers a way into the clerk from the header', () => {
+      const link = fixture.nativeElement.querySelector('[data-testid="ask-capy-btn"]');
+      expect(link).toBeTruthy();
+      expect(link.getAttribute('href')).toBe('/clerk');
+    });
+
+    it('opens checkout when arriving from the clerk with a full cart', async () => {
+      // The clerk cannot navigate straight to checkout — it is an overlay on this
+      // page, not a route — so it asks with ?checkout=1.
+      cartService.addProduct(mockProducts.coffee);
+      const router = TestBed.inject(Router);
+      await router.navigate(['/'], { queryParams: { checkout: 1 } });
+
+      const fresh = TestBed.createComponent(PosTerminalComponent);
+      fresh.detectChanges();
+
+      expect(fresh.componentInstance.showCheckout()).toBe(true);
+      fresh.destroy();
+    });
+
+    it('ignores the handoff when the cart is empty', async () => {
+      const router = TestBed.inject(Router);
+      await router.navigate(['/'], { queryParams: { checkout: 1 } });
+
+      const fresh = TestBed.createComponent(PosTerminalComponent);
+      fresh.detectChanges();
+
+      expect(fresh.componentInstance.showCheckout()).toBe(false);
+      fresh.destroy();
+    });
   });
 
   afterEach(() => {

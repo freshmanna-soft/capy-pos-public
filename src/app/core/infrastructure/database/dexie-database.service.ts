@@ -232,6 +232,43 @@ export interface ISyncQueueDB {
   updatedAt: Date;
 }
 
+/**
+ * One recognition attempt and what the cashier did about it.
+ *
+ * The point of recording this is that recognition accuracy is otherwise
+ * unfalsifiable. "It feels like it picks the first item" is a real complaint that
+ * cannot be acted on, and the fix — a learned sample index — is expensive enough to
+ * be worth aiming at measured failures rather than remembered ones.
+ *
+ * `outcome` is the label. A cashier correcting a proposal is the most valuable row
+ * in this table: it is a known-wrong answer paired with the right one.
+ */
+export interface IRecognitionLogDB {
+  id: string;
+  tenantId?: string;
+  /** Which tier answered: 'barcode' | 'samples' | 'model'. */
+  tier: string;
+  /** What it proposed, or undefined when it proposed nothing. */
+  proposedProductId?: string;
+  /** 0..1 as reported by that tier. */
+  confidence: number;
+  /** How many candidates were offered. */
+  candidateCount: number;
+  /**
+   * What happened next:
+   * - `auto`      acted on without asking, and not undone
+   * - `undone`    acted on and undone inside the window — a wrong answer
+   * - `chosen`    the cashier picked the top candidate offered
+   * - `corrected` the cashier picked a different candidate — wrong answer + truth
+   * - `rejected`  the cashier rejected all of them
+   * - `unknown`   nothing recognised
+   */
+  outcome: string;
+  /** What the cashier actually wanted, when that became known. */
+  actualProductId?: string;
+  createdAt: Date;
+}
+
 export interface ISettingsDB {
   id: string;
   tenantId?: string;
@@ -334,6 +371,7 @@ export class DexieDatabase extends Dexie {
   roles!: Table<IRoleDB, string>;
   userTenants!: Table<IUserTenantDB, string>;
   rolePermissions!: Table<IRolePermissionDB, string>;
+  recognitionLog!: Table<IRecognitionLogDB, string>;
 
   constructor() {
     super('CapyPOSDB');
@@ -543,6 +581,17 @@ export class DexieDatabase extends Dexie {
           }
         }
       });
+
+    // Version 5: recognition telemetry for the AI clerk — do NOT edit v1..v4 above.
+    //
+    // Additive only, so there is no `.upgrade()` hook: Dexie merges a new version's
+    // stores with the previous schema, and an empty table needs no backfill.
+    this.version(5).stores({
+      // Indexed on tenantId + createdAt because every question asked of this table
+      // is "what happened at this till, recently", and on outcome because the
+      // interesting rows are the wrong ones.
+      recognitionLog: 'id, tenantId, tier, outcome, createdAt, [tenantId+createdAt]',
+    });
 
     // Map tables to classes (optional, for better type safety)
     this.products.mapToClass(ProductDBRecord);
