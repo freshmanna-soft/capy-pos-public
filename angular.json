@@ -106,6 +106,18 @@
               "extractLicenses": false,
               "sourceMap": true,
               "namedChunks": true
+            },
+            "vision": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.vision.ts"
+                }
+              ],
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "namedChunks": true
             }
           },
           "defaultConfiguration": "production"
@@ -118,6 +130,9 @@
             },
             "development": {
               "buildTarget": "capy-pos:build:development"
+            },
+            "vision": {
+              "buildTarget": "capy-pos:build:vision"
             }
           },
           "defaultConfiguration": "development"

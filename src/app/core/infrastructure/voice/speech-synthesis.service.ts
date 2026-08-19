@@ -14,6 +14,9 @@ const BOUNDARY_GRACE_MS = 400;
 /** Fallback cadence, roughly a syllable at conversational speed. */
 const FALLBACK_SYLLABLE_MS = 190;
 
+/** Where "this till keeps its voice down" is remembered. */
+const MUTE_KEY = 'capy-clerk-muted';
+
 /** Names that tend to map to a warmer voice, best first. */
 const PREFERRED_VOICES = ['Samantha', 'Karen', 'Moira', 'Google UK English Female', 'Female'];
 
@@ -45,8 +48,17 @@ export class SpeechSynthesisService {
 
   private readonly _speaking = signal(false);
   private readonly _lastBoundaryAt = signal(0);
+  private readonly _muted = signal(readMutePreference());
 
   readonly speaking = this._speaking.asReadonly();
+  /**
+   * Whether she has been told to keep quiet.
+   *
+   * Read by the HUD rather than inferred from `speaking`: a clerk with nothing to
+   * say and a clerk that has been silenced both sit at `speaking() === false`, and
+   * only one of them should show a struck-through speaker.
+   */
+  readonly muted = this._muted.asReadonly();
   /**
    * `performance.now()` of the most recent word start. The stage reads this every
    * frame to shape the mouth; it is a timestamp rather than an amplitude so all
@@ -74,9 +86,13 @@ export class SpeechSynthesisService {
    * Interrupting is the correct policy for a till. If the cashier has already
    * moved on to the next item, finishing the sentence about the previous one is
    * worse than useless — it describes a state that no longer exists.
+   *
+   * Muted, this does nothing at all rather than queueing silently: callers caption
+   * every line they speak, so the words still reach the cashier and there is
+   * nothing waiting to be released when the voice comes back.
    */
   speak(text: string): void {
-    if (!this.supported || text.trim().length === 0) {
+    if (!this.supported || this._muted() || text.trim().length === 0) {
       return;
     }
 
@@ -113,6 +129,40 @@ export class SpeechSynthesisService {
     }
     globalThis.speechSynthesis.cancel();
     this.finish();
+  }
+
+  /**
+   * Silence her, or give the voice back.
+   *
+   * Persisted, unlike the camera and recognition switches. Those are moments in a
+   * shift — not in front of this customer, not for this item — while a shop that
+   * doesn't want a talking till doesn't want one tomorrow either, and a mute that
+   * has to be pressed again every morning gets solved by turning the feature off
+   * instead.
+   *
+   * Two things deliberately keep working while muted. Captions are untouched: the
+   * text was always the real channel and the voice the enhancement on top of it.
+   * And because `speaking` never goes true, the barge-in guard that pauses the
+   * microphone while she talks never fires either — there is no longer any voice
+   * for the microphone to mistake for the cashier, so she listens throughout.
+   */
+  setMuted(muted: boolean): void {
+    if (muted === this._muted()) {
+      return;
+    }
+    this._muted.set(muted);
+    writeMutePreference(muted);
+    if (muted) {
+      // Mid-sentence, not at the end of it. A mute that waits for the current line
+      // to finish is indistinguishable from one that didn't work.
+      this.cancel();
+    }
+  }
+
+  /** Flip the voice. @returns whether she is muted now. */
+  toggleMuted(): boolean {
+    this.setMuted(!this._muted());
+    return this._muted();
   }
 
   private finish(): void {
@@ -170,5 +220,24 @@ export class SpeechSynthesisService {
       }
     }
     this.voice = voices[0] ?? null;
+  }
+}
+
+/** Whether this till was left muted. Silence is opt-in, so absent means audible. */
+function readMutePreference(): boolean {
+  try {
+    return localStorage.getItem(MUTE_KEY) === 'muted';
+  } catch {
+    // Private mode or blocked storage: default to speaking, which is the state the
+    // HUD shows and the one a new till is expected to be in.
+    return false;
+  }
+}
+
+function writeMutePreference(muted: boolean): void {
+  try {
+    localStorage.setItem(MUTE_KEY, muted ? 'muted' : 'audible');
+  } catch {
+    // Not remembering it is survivable; pressing mute again is one key.
   }
 }

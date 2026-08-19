@@ -68,6 +68,9 @@ export class FrameGate {
   private previous: Uint8Array | null = null;
   /** The sample at the moment of the last capture, for deduplication. */
   private captured: Uint8Array | null = null;
+  /** The one before it, so a capture nobody spent can be handed back. */
+  private previousCaptured: Uint8Array | null = null;
+  private previousCaptureAt = 0;
   /** When the scene last stopped moving. Null while it's moving. */
   private stillSince: number | null = null;
   private lastCaptureAt = 0;
@@ -119,6 +122,7 @@ export class FrameGate {
       return 'duplicate';
     }
 
+    this.remember();
     this.captured = Uint8Array.from(sample);
     this.lastCaptureAt = nowMs;
     return 'capture';
@@ -162,8 +166,33 @@ export class FrameGate {
     if (this.previous === null) {
       return;
     }
+    this.remember();
     this.captured = Uint8Array.from(this.previous);
     this.lastCaptureAt = nowMs;
+  }
+
+  /**
+   * Hand back the last claim on the scene, as though this frame had never opened
+   * the gate.
+   *
+   * For a caller that decided not to spend after all — a barcode answered the same
+   * frame for free, most likely. Distinct from `forgetLastCapture`, and the
+   * difference matters in opposite directions: forgetting clears the record
+   * outright, which leaves whatever the gate had identified *before* this frame
+   * unclaimed and invites a second look at something already sold; this restores
+   * that earlier record, so a scene nobody looked at stays lookable while one that
+   * was already answered stays shut.
+   *
+   * Without it, a look refused for a barcode still costs the frame it was refused
+   * on: the gate would go on believing it had identified whatever was in front of
+   * it, and the next item to arrive would be swallowed as a duplicate.
+   *
+   * One level deep, which is all any caller needs — a capture is either acted on or
+   * handed back within the same tick.
+   */
+  undoLastCapture(): void {
+    this.captured = this.previousCaptured;
+    this.lastCaptureAt = this.previousCaptureAt;
   }
 
   /**
@@ -178,12 +207,30 @@ export class FrameGate {
     this.stillSince = null;
   }
 
+  /**
+   * How long a scene must hold still before the gate opens.
+   *
+   * Exposed so a caller that adds its own wait on top can weight a single progress
+   * indicator across both, rather than showing two that each fill from zero.
+   */
+  get settleMs(): number {
+    return this.config.settleMs;
+  }
+
   /** Full reset, for starting or restarting a session. */
   reset(): void {
     this.previous = null;
     this.captured = null;
+    this.previousCaptured = null;
+    this.previousCaptureAt = 0;
     this.stillSince = null;
     this.lastCaptureAt = 0;
+  }
+
+  /** Keep the current claim on the scene, so it can be restored. */
+  private remember(): void {
+    this.previousCaptured = this.captured;
+    this.previousCaptureAt = this.lastCaptureAt;
   }
 }
 

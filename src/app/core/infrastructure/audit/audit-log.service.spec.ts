@@ -4,6 +4,8 @@ import {
   AuditAction,
   AuditStatus,
 } from '@core/infrastructure/audit/audit-log.service';
+import type { Table } from 'dexie';
+import type { AuditLogEntry } from '@core/infrastructure/audit/audit-log.service';
 
 describe('AuditLogService', () => {
   let service: AuditLogService;
@@ -21,6 +23,14 @@ describe('AuditLogService', () => {
       await service.clearAll();
     }
   });
+
+  /**
+   * The service builds its own Dexie instance rather than taking the injected one,
+   * so a test that needs to make a write fail has no seam other than this.
+   */
+  function auditTable(): Table<AuditLogEntry, string> {
+    return (service as unknown as { db: { auditLogs: Table<AuditLogEntry, string> } }).db.auditLogs;
+  }
 
   it('should be created', () => {
     expect(service).toBeTruthy();
@@ -485,6 +495,152 @@ describe('AuditLogService', () => {
 
       const recent = service.getRecentLogs();
       expect(recent.length).toBe(0);
+    });
+  });
+
+  describe('when the database will not take the entry', () => {
+    it('keeps it in memory rather than losing the trail', async () => {
+      // An audit trail that only exists while the write succeeds is not a trail.
+      vi.spyOn(auditTable(), 'add').mockRejectedValue(new Error('quota exceeded'));
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      await service.log({
+        agentName: 'PaymentAgent',
+        operation: 'processPayment',
+        entityType: 'Payment',
+        entityId: 'PAY-1',
+        action: AuditAction.CREATE,
+        status: AuditStatus.FAILURE,
+      });
+
+      expect(error).toHaveBeenCalled();
+      expect(service.getRecentLogs().map((entry) => entry.entityId)).toContain('PAY-1');
+      vi.restoreAllMocks();
+    });
+
+    it('keeps only the most recent entries once the cache is full', async () => {
+      // The cache is a debugging aid, not storage; the database is the record.
+      vi.spyOn(auditTable(), 'add').mockResolvedValue('id' as never);
+
+      for (let i = 0; i < 105; i++) {
+        await service.log({
+          agentName: 'SyncAgent',
+          operation: 'push',
+          entityType: 'Product',
+          entityId: `p${i}`,
+          action: AuditAction.UPDATE,
+          status: AuditStatus.SUCCESS,
+        });
+      }
+
+      const cached = service.getRecentLogs();
+      expect(cached).toHaveLength(100);
+      // The oldest are the ones dropped.
+      expect(cached[0].entityId).toBe('p5');
+      expect(cached[cached.length - 1].entityId).toBe('p104');
+      vi.restoreAllMocks();
+    });
+  });
+
+  describe('narrowing a query', () => {
+    beforeEach(async () => {
+      await service.log({
+        agentName: 'PaymentAgent',
+        operation: 'processPayment',
+        entityType: 'Payment',
+        entityId: 'PAY-1',
+        action: AuditAction.CREATE,
+        status: AuditStatus.SUCCESS,
+      });
+      await service.log({
+        agentName: 'SyncAgent',
+        operation: 'pushProduct',
+        entityType: 'Product',
+        entityId: 'p1',
+        action: AuditAction.UPDATE,
+        status: AuditStatus.SUCCESS,
+      });
+    });
+
+    it('filters by operation', async () => {
+      const logs = await service.query({ operation: 'pushProduct' });
+
+      expect(logs.map((entry) => entry.entityId)).toEqual(['p1']);
+    });
+
+    it('filters by the entity itself, not just its type', async () => {
+      const logs = await service.query({ entityId: 'PAY-1' });
+
+      expect(logs.map((entry) => entry.operation)).toEqual(['processPayment']);
+    });
+
+    it('filters to a window in time', async () => {
+      const now = new Date();
+      const hourAgo = new Date(now.getTime() - 3_600_000);
+      const hourAhead = new Date(now.getTime() + 3_600_000);
+
+      expect(await service.query({ startDate: hourAgo, endDate: hourAhead })).toHaveLength(2);
+      // A window that closed before anything happened must come back empty rather
+      // than falling through to everything.
+      expect(await service.query({ endDate: hourAgo })).toHaveLength(0);
+      expect(await service.query({ startDate: hourAhead })).toHaveLength(0);
+    });
+  });
+
+  describe('ordering entries written in the same millisecond', () => {
+    it('falls back to the sequence in the id so the order is stable', async () => {
+      // Two writes inside one millisecond are ordinary under load, and an unstable
+      // sort makes a trail that reads differently every time it is opened.
+      const stamp = new Date('2026-01-01T00:00:00.000Z');
+
+      for (const id of ['audit-1-000001-aaaaa', 'audit-1-000002-bbbbb', 'audit-1-000003-ccccc']) {
+        await auditTable().add({
+          id,
+          timestamp: stamp,
+          userId: 'u1',
+          agentName: 'SyncAgent',
+          operation: 'push',
+          entityType: 'Product',
+          entityId: 'p1',
+          action: AuditAction.UPDATE,
+          status: AuditStatus.SUCCESS,
+        } as never);
+      }
+
+      const trail = await service.getEntityAuditTrail('Product', 'p1');
+      const activity = await service.getUserActivity('u1');
+
+      expect(trail.map((entry) => entry.id)).toEqual([
+        'audit-1-000003-ccccc',
+        'audit-1-000002-bbbbb',
+        'audit-1-000001-aaaaa',
+      ]);
+      expect(activity.map((entry) => entry.id)).toEqual(trail.map((entry) => entry.id));
+    });
+  });
+
+  describe('exporting', () => {
+    it('returns nothing at all for an empty CSV rather than a lone header row', async () => {
+      expect(await service.export({}, 'csv')).toBe('');
+    });
+
+    it('leaves the optional columns empty instead of writing undefined', async () => {
+      // A CSV with the word "undefined" in it is one somebody has to clean by hand
+      // before it opens in a spreadsheet.
+      await service.log({
+        agentName: 'SyncAgent',
+        operation: 'push',
+        entityType: 'Product',
+        entityId: 'p1',
+        action: AuditAction.UPDATE,
+        status: AuditStatus.SUCCESS,
+      });
+
+      const csv = await service.export({}, 'csv');
+
+      expect(csv).not.toContain('undefined');
+      expect(csv.split('\n')[0]).toContain('Error Message');
+      expect(csv.split('\n')[1]).toContain('"",""');
     });
   });
 });

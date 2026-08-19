@@ -1,4 +1,4 @@
-import { TelemetryService } from './telemetry.service';
+import { Measure, TelemetryService } from './telemetry.service';
 
 /**
  * Unit tests for TelemetryService. Previously untested (mocked everywhere); now
@@ -144,6 +144,104 @@ describe('TelemetryService', () => {
       const parsed = JSON.parse(svc.exportMetrics());
       expect(parsed.metrics.a).toBeDefined();
       expect(parsed.events).toHaveLength(1);
+    });
+  });
+
+  describe('watching the system', () => {
+    it('samples memory on a timer and records it as gauges', () => {
+      // The dashboard's memory panel is fed from here; without the timer it would
+      // show whatever was true the moment the page opened.
+      vi.useFakeTimers();
+      const perf = performance as unknown as {
+        memory?: { usedJSHeapSize: number; totalJSHeapSize: number };
+      };
+      const original = perf.memory;
+      perf.memory = { usedJSHeapSize: 40, totalJSHeapSize: 100 };
+      const monitored = new TelemetryService();
+
+      vi.advanceTimersByTime(5000);
+
+      expect(monitored.getMetricSummary('system.memory.used')?.lastValue).toBe(40);
+      expect(monitored.getMetricSummary('system.memory.percentage')?.lastValue).toBe(40);
+
+      monitored.stopMonitoring();
+      if (original === undefined) {
+        delete perf.memory;
+      } else {
+        perf.memory = original;
+      }
+      vi.useRealTimers();
+    });
+
+    it('records nothing where the browser reports no memory at all', () => {
+      // Firefox and Safari have no `performance.memory`; a gauge of undefined would
+      // draw a chart of NaN.
+      vi.useFakeTimers();
+      const perf = performance as unknown as { memory?: unknown };
+      const original = perf.memory;
+      delete perf.memory;
+      const monitored = new TelemetryService();
+
+      vi.advanceTimersByTime(5000);
+
+      expect(monitored.getMetricSummary('system.memory.used')).toBeNull();
+
+      monitored.stopMonitoring();
+      if (original !== undefined) {
+        perf.memory = original;
+      }
+      vi.useRealTimers();
+    });
+
+    it('stops sampling when told to, and does not mind being told twice', () => {
+      vi.useFakeTimers();
+      const monitored = new TelemetryService();
+
+      monitored.stopMonitoring();
+      monitored.stopMonitoring();
+      vi.advanceTimersByTime(20_000);
+
+      // A service that keeps sampling after shutdown is a leak with a heartbeat.
+      expect(monitored.getMetricSummary('system.memory.used')).toBeNull();
+      vi.useRealTimers();
+    });
+  });
+
+  describe('the @Measure decorator', () => {
+    /** Applied by hand rather than with `@`, so the test says exactly what it does. */
+    function decorate(
+      name: string | undefined,
+      className: string,
+      method: string,
+      impl: () => Promise<unknown>
+    ) {
+      const descriptor: PropertyDescriptor = { value: impl };
+      Measure(name)({ constructor: { name: className } }, method, descriptor);
+      return descriptor.value as () => Promise<unknown>;
+    }
+
+    it('names the metric after the class and method by default', async () => {
+      vi.useFakeTimers();
+      const measureAsync = vi.spyOn(TelemetryService.prototype, 'measureAsync');
+
+      const find = decorate(undefined, 'ProductRepository', 'findAll', async () => 'rows');
+
+      await expect(find()).resolves.toBe('rows');
+      expect(measureAsync).toHaveBeenCalledWith('ProductRepository.findAll', expect.any(Function));
+      measureAsync.mockRestore();
+      vi.useRealTimers();
+    });
+
+    it('uses the name it was given when there is one', async () => {
+      vi.useFakeTimers();
+      const measureAsync = vi.spyOn(TelemetryService.prototype, 'measureAsync');
+
+      const run = decorate('checkout.total', 'PosFacade', 'total', async () => 12);
+
+      await expect(run()).resolves.toBe(12);
+      expect(measureAsync).toHaveBeenCalledWith('checkout.total', expect.any(Function));
+      measureAsync.mockRestore();
+      vi.useRealTimers();
     });
   });
 });

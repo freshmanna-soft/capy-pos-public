@@ -335,6 +335,79 @@ describe('Customer Entity', () => {
       expect(customer.equals(differentCustomer)).toBe(false);
     });
   });
+
+  describe('partially filled records', () => {
+    it('joins only the address parts that are actually there', () => {
+      // Customers are entered in a hurry at a counter; a join that assumes every
+      // field produces "123 Main St, , , , " on a receipt.
+      const sparse = new Customer({
+        id: 'c1',
+        name: 'Jane',
+        email: 'jane@example.com',
+        phone: '+1234567890',
+        address: '12 Bridge Road',
+        zipCode: 'E1 6AN',
+      });
+
+      // The country is defaulted by the entity, so it is always present; the city
+      // and state simply do not appear.
+      expect(sparse.getFullAddress()).toBe('12 Bridge Road, E1 6AN, USA');
+    });
+
+    it('does not count a birthday that has not come round yet', () => {
+      // Off-by-one here is a real problem where age gates a sale.
+      const today = new Date();
+      const tomorrow = new Date(today);
+      tomorrow.setDate(today.getDate() + 1);
+      const notYet = new Date(today.getFullYear() - 30, tomorrow.getMonth(), tomorrow.getDate());
+
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Jane',
+        email: 'jane@example.com',
+        phone: '+1234567890',
+        dateOfBirth: notYet,
+      });
+
+      // 29 unless the constructed date landed on today, which only happens on a
+      // month boundary; either way it must never read as 30 before the day itself.
+      expect(customer.getCustomerAge()).toBeLessThan(30);
+    });
+
+    it('rebuilds from JSON that is missing every optional field', () => {
+      // Rows arrive from a sync that predates half these columns; a rebuild that
+      // assumes them turns absent dates into Invalid Date.
+      const restored = Customer.fromJSON({
+        id: 'c1',
+        name: 'Jane',
+        email: 'jane@example.com',
+        phone: '+1234567890',
+      });
+
+      expect(restored.createdAt).toBeInstanceOf(Date);
+      expect(restored.dateOfBirth).toBeUndefined();
+      expect(restored.deletedAt).toBeUndefined();
+      expect(restored.getFullAddress()).toBeUndefined();
+    });
+
+    it('rebuilds every date it is given', () => {
+      const restored = Customer.fromJSON({
+        id: 'c1',
+        name: 'Jane',
+        email: 'jane@example.com',
+        phone: '+1234567890',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-02-01T00:00:00.000Z',
+        deletedAt: '2026-03-01T00:00:00.000Z',
+        dateOfBirth: '1990-05-04T00:00:00.000Z',
+      });
+
+      expect(restored.createdAt.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+      expect(restored.updatedAt.toISOString()).toBe('2026-02-01T00:00:00.000Z');
+      expect(restored.deletedAt?.toISOString()).toBe('2026-03-01T00:00:00.000Z');
+      expect(restored.dateOfBirth?.toISOString()).toBe('1990-05-04T00:00:00.000Z');
+    });
+  });
 });
 
 // Made with Bob

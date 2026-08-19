@@ -7,14 +7,19 @@ import { SyncService, PushFailedError } from '@core/infrastructure/sync';
 import { AuditLogService, AuditAction, AuditStatus } from '@core/infrastructure/audit';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventType } from '@core/infrastructure/messaging/event-bus.events';
-import { signal, computed } from '@angular/core';
+import { WritableSignal, signal, computed } from '@angular/core';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
+import { ToastService } from '@shared/ui/toast/toast.service';
+import { AuthorizationError } from '@core/application/auth/angular-authorization.service';
 
 describe('InventoryManagementComponent', () => {
   let component: InventoryManagementComponent;
   let fixture: ComponentFixture<InventoryManagementComponent>;
   let mockFacade: Partial<InventoryFacade>;
   let mockEventBus: { publish: ReturnType<typeof vi.fn> };
+
+  let productsSignal: WritableSignal<ProductSummaryDTO[]>;
+  let errorSignal: WritableSignal<string | null>;
 
   const mockProducts: ProductSummaryDTO[] = [
     {
@@ -30,6 +35,7 @@ describe('InventoryManagementComponent', () => {
       lowStockThreshold: 10,
       description: 'Fresh coffee',
       barcode: 'BAR-001',
+      reorderQuantity: 25,
     },
     {
       id: 'p2',
@@ -44,6 +50,7 @@ describe('InventoryManagementComponent', () => {
       lowStockThreshold: 5,
       description: 'Blueberry muffin',
       barcode: 'BAR-002',
+      reorderQuantity: 12,
     },
     {
       id: 'p3',
@@ -58,14 +65,17 @@ describe('InventoryManagementComponent', () => {
       lowStockThreshold: 10,
       description: 'Green tea',
       barcode: 'BAR-003',
+      reorderQuantity: 40,
     },
   ];
 
   beforeEach(async () => {
-    const productsSignal = signal<ProductSummaryDTO[]>(mockProducts);
+    // Hoisted so a test can change what the catalogue contains, or make the facade
+    // report why a save was refused.
+    productsSignal = signal<ProductSummaryDTO[]>(mockProducts);
+    errorSignal = signal<string | null>(null);
     const categoriesSignal = signal<string[]>(['Beverages', 'Food']);
     const loadingSignal = signal<boolean>(false);
-    const errorSignal = signal<string | null>(null);
 
     mockFacade = {
       products: computed(() => productsSignal()),
@@ -292,6 +302,225 @@ describe('InventoryManagementComponent', () => {
     });
   });
 
+  describe('refusing a code that another product already owns', () => {
+    // The till builds one flat lookup keyed on barcode AND sku, first-writer-wins. A
+    // duplicate does not merely fail to scan: it rings up the other product at the
+    // other price, at full confidence, with the fallback suppressed. Nothing
+    // downstream can notice, so registration is the only place to stop it.
+    it('blocks a barcode that belongs to another product', async () => {
+      component.openCreateForm();
+      component.updateFormField('name', 'New Thing');
+      component.updateFormField('sku', 'SKU-FRESH');
+      component.updateFormField('category', 'Food');
+      component.updateFormField('barcode', 'BAR-001');
+
+      await component.saveProduct();
+
+      expect(component.duplicateConflict()?.product.name).toBe('Coffee');
+      expect(mockFacade.createProduct).not.toHaveBeenCalled();
+      expect(component.saveError()).toContain('Coffee');
+    });
+
+    it('blocks a SKU that belongs to another product', async () => {
+      component.openCreateForm();
+      component.updateFormField('name', 'New Thing');
+      component.updateFormField('sku', 'SKU-002');
+      component.updateFormField('category', 'Food');
+
+      await component.saveProduct();
+
+      expect(component.duplicateConflict()?.product.name).toBe('Muffin');
+      expect(mockFacade.createProduct).not.toHaveBeenCalled();
+    });
+
+    it('catches a SKU that collides with another product\u2019s barcode', () => {
+      // Cross-field, because the till indexes both into the same map — a SKU equal to
+      // someone else's barcode shadows it just as completely.
+      component.openCreateForm();
+      component.updateFormField('sku', 'BAR-003');
+
+      expect(component.duplicateConflict()?.field).toBe('sku');
+    });
+
+    it('ignores case when comparing SKUs', () => {
+      component.openCreateForm();
+      component.updateFormField('sku', 'sku-001');
+
+      expect(component.duplicateConflict()?.product.name).toBe('Coffee');
+    });
+
+    it('does not flag a product against its own codes', () => {
+      // The most likely false positive by far: renaming a product leaves its own SKU
+      // and barcode in place, and they still belong to it.
+      component.openEditForm(mockProducts[0]!);
+      component.updateFormField('name', 'Renamed Coffee');
+
+      expect(component.duplicateConflict()).toBeNull();
+    });
+
+    it('never treats an empty barcode as a collision', () => {
+      // Most products legitimately have none; treating '' as a key would make every
+      // one of them collide with every other.
+      component.openCreateForm();
+      component.updateFormField('sku', 'SKU-FRESH');
+      component.updateFormField('barcode', '');
+
+      expect(component.duplicateConflict()).toBeNull();
+    });
+
+    it('matches the same code entered in a different representation', async () => {
+      // A UPC-E and the UPC-A it expands to are different strings and the same
+      // article. A string comparison would let both into the catalogue.
+      productsSignal.set([{ ...mockProducts[0]!, barcode: '012345000065' }]);
+      component.openCreateForm();
+      component.updateFormField('sku', 'SKU-FRESH');
+      component.updateFormField('barcode', '01234565');
+
+      expect(component.duplicateConflict()?.field).toBe('barcode');
+      await component.saveProduct();
+      expect(mockFacade.createProduct).not.toHaveBeenCalled();
+    });
+
+    it('offers the colliding product for editing instead', () => {
+      component.openCreateForm();
+      component.updateFormField('barcode', 'BAR-002');
+
+      component.openConflictingProduct();
+
+      expect(component.formMode()).toBe('edit');
+      expect(component.editingProductId()).toBe('p2');
+    });
+  });
+
+  describe('the reorder quantity that used to be silently 20', () => {
+    it('loads the product\u2019s own value into the edit form', () => {
+      component.openEditForm(mockProducts[0]!);
+      expect(component.formData().reorderQuantity).toBe(25);
+    });
+
+    it('sends it back unchanged on save', async () => {
+      component.openEditForm(mockProducts[1]!);
+
+      await component.saveProduct();
+
+      expect(mockFacade.updateProduct).toHaveBeenCalledWith(
+        expect.objectContaining({ reorderQuantity: 12 })
+      );
+    });
+  });
+
+  describe('guarding unsaved work', () => {
+    it('closes straight away when nothing was touched', () => {
+      component.openCreateForm();
+      component.requestCloseForm();
+
+      expect(component.formMode()).toBe('closed');
+      expect(component.confirmDiscard()).toBe(false);
+    });
+
+    it('asks before throwing away edits', () => {
+      // Escape is easy to hit by accident, and reading small print off packaging
+      // takes minutes.
+      component.openCreateForm();
+      component.updateFormField('name', 'Half typed');
+
+      component.requestCloseForm();
+
+      expect(component.confirmDiscard()).toBe(true);
+      expect(component.formMode()).toBe('create');
+    });
+
+    it('backs out of the question when the dismissal gesture is repeated', () => {
+      // Escape twice must not be the thing that discards, and ignoring the second
+      // press makes the key feel broken. Escape cancels the innermost question.
+      component.openCreateForm();
+      component.updateFormField('name', 'Half typed');
+      component.requestCloseForm();
+
+      component.requestCloseForm();
+
+      expect(component.confirmDiscard()).toBe(false);
+      expect(component.formMode()).toBe('create');
+      expect(component.formData().name).toBe('Half typed');
+    });
+
+    it('keeps the edits when the answer is no', () => {
+      component.openCreateForm();
+      component.updateFormField('name', 'Half typed');
+      component.requestCloseForm();
+
+      component.keepEditing();
+
+      expect(component.formMode()).toBe('create');
+      expect(component.formData().name).toBe('Half typed');
+    });
+
+    it('closes when the answer is yes', () => {
+      component.openCreateForm();
+      component.updateFormField('name', 'Half typed');
+      component.requestCloseForm();
+
+      component.discardAndClose();
+
+      expect(component.formMode()).toBe('closed');
+    });
+
+    it('does not consider an untouched edit form dirty', () => {
+      // It would be if the snapshot came from the DTO while the form defaulted a
+      // field differently — which is exactly what the old hardcoded 20 did.
+      component.openEditForm(mockProducts[0]!);
+      expect(component.isDirty()).toBe(false);
+    });
+  });
+
+  describe('validating what was typed', () => {
+    it('requires a price rather than saving it as zero', async () => {
+      // A cleared number field reports null, and Number(null) is 0 — so a
+      // negative-only rule can never fire and the product saves priced at nothing.
+      component.openCreateForm();
+      component.updateFormField('name', 'Thing');
+      component.updateFormField('sku', 'SKU-FRESH');
+      component.updateFormField('category', 'Food');
+      component.updateFormField('price', null);
+
+      await component.saveProduct();
+
+      expect(component.formErrors()['price']).toBe('Price is required');
+      expect(mockFacade.createProduct).not.toHaveBeenCalled();
+    });
+
+    it('reports the margin the price and cost imply', () => {
+      component.openCreateForm();
+      component.updateFormField('price', 10);
+      component.updateFormField('cost', 6);
+
+      expect(component.margin()).toBe(40);
+    });
+
+    it('has no margin to report until both are set', () => {
+      component.openCreateForm();
+      component.updateFormField('price', 10);
+
+      expect(component.margin()).toBeNull();
+    });
+
+    it('surfaces a refused save inside the dialog', async () => {
+      // The facade's error banner renders behind the modal, where a rejected save
+      // looks exactly like a Save button that does nothing.
+      (mockFacade.createProduct as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      errorSignal.set('Barcode 123 already belongs to Coffee.');
+      component.openCreateForm();
+      component.updateFormField('name', 'Thing');
+      component.updateFormField('sku', 'SKU-FRESH');
+      component.updateFormField('category', 'Food');
+
+      await component.saveProduct();
+
+      expect(component.saveError()).toContain('already belongs to Coffee');
+      expect(component.formMode()).toBe('create');
+    });
+  });
+
   describe('Delete Operations', () => {
     it('should open delete confirmation', () => {
       component.requestDelete('p1');
@@ -392,6 +621,143 @@ describe('InventoryManagementComponent', () => {
     });
   });
 
+  describe('collisions the catalogue already contains', () => {
+    it('names the first owner when two products share a code', () => {
+      // The catalogue can already hold a collision — imported twice, or synced from a
+      // till that had no check. Reporting the first owner is what makes the message
+      // stable rather than dependent on load order.
+      productsSignal.set([
+        { ...mockProducts[0], id: 'p1', name: 'Coffee', barcode: '4006381333931' },
+        { ...mockProducts[1], id: 'p2', name: 'Second Coffee', barcode: '4006381333931' },
+      ]);
+
+      component.openCreateForm();
+      component.updateFormField('barcode', '4006381333931');
+
+      expect(component.duplicateConflict()?.product.name).toBe('Coffee');
+    });
+
+    it('lets a product with no barcode collide with nothing', () => {
+      // An absent code must never key the index, or every product without a barcode
+      // would own the same empty key and collide with all the others.
+      productsSignal.set([
+        { ...mockProducts[0], id: 'p1', barcode: undefined },
+        { ...mockProducts[1], id: 'p2', barcode: undefined },
+      ]);
+
+      component.openCreateForm();
+      component.updateFormField('barcode', '4006381333931');
+
+      expect(component.duplicateConflict()).toBeNull();
+    });
+
+    it('catches a code that no arithmetic can canonicalise', () => {
+      // A shelf code is not a GTIN, so there is no canonical form to compare — only
+      // the raw string, case-insensitively.
+      productsSignal.set([{ ...mockProducts[0], id: 'p1', name: 'Coffee', barcode: 'SHELF-A12' }]);
+
+      component.openCreateForm();
+      component.updateFormField('barcode', 'shelf-a12');
+
+      expect(component.duplicateConflict()).toMatchObject({ field: 'barcode' });
+      expect(component.duplicateConflict()?.product.name).toBe('Coffee');
+    });
+
+    it('does nothing when asked to open a conflict that is no longer there', () => {
+      // The button is only rendered with a conflict showing, but the handler is the
+      // one place a stale click would reopen the form on nothing.
+      component.openCreateForm();
+
+      component.openConflictingProduct();
+
+      expect(component.formMode()).toBe('create');
+      expect(component.editingProductId()).toBeNull();
+    });
+  });
+
+  describe('when a save or a delete does not land', () => {
+    it('reports a refused update inside the dialog, not just behind it', async () => {
+      (mockFacade.updateProduct as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      errorSignal.set(null);
+      component.openEditForm(mockProducts[0]);
+      component.updateFormField('name', 'Coffee Beans');
+
+      await component.saveProduct();
+
+      // No reason from the facade, so it has to supply its own rather than showing
+      // an empty banner.
+      expect(component.saveError()).toContain("didn't save");
+      expect(component.formMode()).toBe('edit');
+    });
+
+    it('does not publish anything when the local delete itself fails', async () => {
+      (mockFacade.deleteProduct as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+      mockEventBus.publish.mockClear();
+
+      component.requestDelete('p1');
+      await component.confirmDelete();
+
+      expect(mockEventBus.publish).not.toHaveBeenCalled();
+      expect(component.deleteConfirmId()).toBeNull();
+    });
+
+    it('survives a sync failure that was not thrown as an Error', async () => {
+      // A worker can reject with a plain string, and a message-building step that
+      // assumed `error.message` would fail inside the failure handler itself.
+      const sync = TestBed.inject(SyncService);
+      vi.spyOn(TestBed.inject(AuditLogService), 'log').mockResolvedValue(undefined);
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      vi.spyOn(sync, 'pushUpdateAsync').mockRejectedValue('worker gone');
+
+      component.requestDelete('p1');
+      await component.confirmDelete();
+
+      expect(component.syncNotice()?.message).toContain('Removed locally');
+    });
+
+    it('says which product the delete dialog is about, and copes when it has gone', () => {
+      component.requestDelete('p1');
+      expect(component.deletingProductName()).toBe('Coffee');
+
+      // Deleted on another till and synced away while the dialog was open.
+      productsSignal.set([]);
+      expect(component.deletingProductName()).toBe('This product');
+    });
+  });
+
+  describe('validating the numbers', () => {
+    it('requires a stock level rather than saving it as zero', async () => {
+      // A cleared number field reports null, and `Number(null)` is 0 — so a
+      // negative-only rule would let a blank field through as "none in stock".
+      component.openCreateForm();
+      component.updateFormField('name', 'Thing');
+      component.updateFormField('sku', 'SKU-NEW');
+      component.updateFormField('category', 'Food');
+      component.updateFormField('price', 3);
+      component.updateFormField('stock', null);
+
+      await component.saveProduct();
+
+      expect(component.formErrors()['stock']).toContain('required');
+      expect(mockFacade.createProduct).not.toHaveBeenCalled();
+    });
+
+    it('refuses a negative cost', async () => {
+      component.openCreateForm();
+      component.updateFormField('name', 'Thing');
+      component.updateFormField('sku', 'SKU-NEW');
+      component.updateFormField('category', 'Food');
+      component.updateFormField('price', 3);
+      component.updateFormField('stock', 1);
+      component.updateFormField('cost', -1);
+
+      await component.saveProduct();
+
+      expect(component.formErrors()['cost']).toContain('negative');
+      expect(mockFacade.createProduct).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Stock Adjustment', () => {
     it('should call adjustStock with positive delta', () => {
       component.adjustStock('p1', 1);
@@ -401,6 +767,28 @@ describe('InventoryManagementComponent', () => {
     it('should call adjustStock with negative delta', () => {
       component.adjustStock('p1', -1);
       expect(mockFacade.adjustStock).toHaveBeenCalledWith('p1', -1);
+    });
+
+    it('says it is a permission problem when that is what it is', async () => {
+      // "Failed, try again" invites the operator to keep pressing a button that is
+      // never going to work for them.
+      const toast = vi.spyOn(TestBed.inject(ToastService), 'error').mockImplementation(() => '');
+      (mockFacade.adjustStock as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new AuthorizationError('inventory:adjust_stock' as never)
+      );
+
+      await component.adjustStock('p1', 1);
+
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining('permission'));
+    });
+
+    it('asks for a retry when the failure is not about permission', async () => {
+      const toast = vi.spyOn(TestBed.inject(ToastService), 'error').mockImplementation(() => '');
+      (mockFacade.adjustStock as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('db down'));
+
+      await component.adjustStock('p1', 1);
+
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining('try again'));
     });
   });
 

@@ -46,6 +46,12 @@ describe('ManageInventoryUseCase', () => {
       findByCategory: vi.fn(),
       findActive: vi.fn(),
       search: vi.fn(),
+      // Default to "code is free". A bare vi.fn() returns undefined, which the
+      // uniqueness check would read as no collision anyway — but being explicit
+      // means a test that forgets to arrange these still exercises the happy path
+      // rather than depending on that coincidence.
+      findBySKU: vi.fn().mockResolvedValue(null),
+      findByBarcode: vi.fn().mockResolvedValue(null),
       findLowStock: vi.fn(),
       updateStock: vi.fn(),
       adjustStock: vi.fn(),
@@ -135,6 +141,44 @@ describe('ManageInventoryUseCase', () => {
       barcode: 'BAR-NEW',
     };
 
+    describe('refusing a code that already identifies another product', () => {
+      // The till builds one flat lookup keyed on barcode AND sku with
+      // first-writer-wins, so a duplicate does not merely fail to scan — it rings
+      // up the other product at the other price. It has to be impossible to create.
+      it('refuses a SKU that is already taken', async () => {
+        mockRepository['findBySKU'].mockResolvedValue(
+          createMockProduct({ id: 'other', name: 'Existing Coffee', sku: 'SKU-NEW' })
+        );
+
+        const result = await useCase.createProduct(validRequest);
+
+        expect(result).toBeNull();
+        expect(mockRepository['create']).not.toHaveBeenCalled();
+        expect(useCase.error()).toContain('Existing Coffee');
+      });
+
+      it('refuses a barcode that is already taken', async () => {
+        mockRepository['findByBarcode'].mockResolvedValue(
+          createMockProduct({ id: 'other', name: 'Existing Coffee', barcode: 'BAR-NEW' })
+        );
+
+        const result = await useCase.createProduct(validRequest);
+
+        expect(result).toBeNull();
+        expect(mockRepository['create']).not.toHaveBeenCalled();
+        expect(useCase.error()).toContain('Existing Coffee');
+      });
+
+      it('never looks up an absent barcode', async () => {
+        // Most products legitimately have none. Checking '' would make every
+        // barcode-less product collide with every other one.
+        await useCase.createProduct({ ...validRequest, barcode: undefined });
+
+        expect(mockRepository['findByBarcode']).not.toHaveBeenCalled();
+        expect(mockRepository['create']).toHaveBeenCalled();
+      });
+    });
+
     it('should create a product and add to state', async () => {
       const createdProduct = createMockProduct({
         id: 'new-id',
@@ -206,6 +250,41 @@ describe('ManageInventoryUseCase', () => {
   });
 
   describe('updateProduct', () => {
+    it('does not flag a product against its own codes', async () => {
+      // The single most likely false positive: editing a product's name leaves its
+      // own SKU and barcode in place, and they of course still belong to it.
+      const existing = createMockProduct({ id: 'p1', sku: 'SKU-1', barcode: 'BAR-1' });
+      mockRepository['findById'].mockResolvedValue(existing);
+      mockRepository['findBySKU'].mockResolvedValue(existing);
+      mockRepository['findByBarcode'].mockResolvedValue(existing);
+      mockRepository['update'].mockResolvedValue(existing);
+      mockRepository['getCategories'].mockResolvedValue(['Beverages']);
+
+      const result = await useCase.updateProduct({
+        id: 'p1',
+        name: 'Renamed',
+        sku: 'SKU-1',
+        barcode: 'BAR-1',
+      });
+
+      expect(result).not.toBeNull();
+      expect(mockRepository['update']).toHaveBeenCalled();
+    });
+
+    it('refuses to move a code onto a product that is not its owner', async () => {
+      const existing = createMockProduct({ id: 'p1', sku: 'SKU-1' });
+      mockRepository['findById'].mockResolvedValue(existing);
+      mockRepository['findBySKU'].mockResolvedValue(
+        createMockProduct({ id: 'p2', name: 'Other Product', sku: 'SKU-2' })
+      );
+
+      const result = await useCase.updateProduct({ id: 'p1', sku: 'SKU-2' });
+
+      expect(result).toBeNull();
+      expect(mockRepository['update']).not.toHaveBeenCalled();
+      expect(useCase.error()).toContain('Other Product');
+    });
+
     it('should update a product and refresh state', async () => {
       const existing = createMockProduct({ id: 'p1', name: 'Old Name', price: 5.0 });
       const updatedProduct = createMockProduct({ id: 'p1', name: 'New Name', price: 7.0 });

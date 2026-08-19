@@ -40,20 +40,53 @@ traces, no key material.
 
 ## Running it
 
-**Locally**, against a real model, without deploying anything:
+**Locally**, against a real model, without deploying anything. Two terminals, from
+the repo root:
 
 ```sh
-cd infra/vision-proxy
-npm install
-ANTHROPIC_API_KEY=sk-ant-... npm start      # listens on :8787
+export ANTHROPIC_API_KEY=sk-ant-...
+npm run vision:proxy      # this proxy, on :8788
+npm run start:vision      # the app, with real recognition switched on
 ```
 
-Then in `src/environments/environment.ts`:
+`start:vision` is `ng serve --configuration vision`, which swaps in
+`src/environments/environment.vision.ts` — a copy of the dev environment with
+`features.aiVision: true` and `visionApiUrl` pointed at the proxy. It is a separate
+build target rather than a flag flipped in `environment.ts` because live vision
+costs money per frame, asks the operator for camera consent before it will start,
+and would leave the e2e suite talking to a proxy that isn't running.
 
-```ts
-apiUrl: 'http://localhost:8787',
-features: { aiVision: true, /* … */ },
+Port **8788** rather than `PORT`'s own 8787 default, only because 8787 was taken on
+the machine this was last run on. The two scripts and `environment.vision.ts` agree
+on it; change all three together or none.
+
+To exercise the proxy without opening the app at all:
+
+```sh
+cd infra/vision-proxy && PORT=8788 node smoke.mjs
 ```
+
+It draws a crude banana — no dependencies, just a hand-rolled PNG encoder — posts
+it twice against a five-product catalog, and prints both replies. Twice
+deliberately: the second call is the only way to see the prompt cache being read.
+A healthy run says
+
+```
+call 1: HTTP 200 in 3125ms
+{"candidates":[{"productId":"p-ban","label":"Banana","confidence":0.88}], …}
+[vision] usage {"input":629,"cacheRead":0,"cacheWrite":758,"output":49}
+[vision] usage {"input":629,"cacheRead":758,"cacheWrite":0,"output":49}
+```
+
+— a cache **write** on the first call and a **read** of the same size on the second.
+
+`npm start` runs this TypeScript directly under Node's type stripping, which
+constrains how the source may import. Relative specifiers name the real file
+(`./identify.ts`, not `./identify.js`), and type-only imports must say
+`import type` — Node cannot tell a type from a value, so a type left in a value
+import survives the strip and fails at load. `tsc` accepts both and rewrites the
+extensions on the way into `dist/`, and `verbatimModuleSyntax` turns a mistake here
+into a build error rather than a crash on startup.
 
 **Deployed**, as a Lambda behind the existing API Gateway:
 
@@ -153,3 +186,11 @@ aimed at the goods.
 - **Visually identical SKUs** (two brands of the same juice) will land in the
   0.5–0.85 band and make the clerk ask. That is the correct outcome for a till,
   not a calibration bug to tune away.
+- **Latency is variable, and the client waits 15s for it.** Measured against this
+  proxy, a look takes roughly 3–8.5 seconds. `REQUEST_TIMEOUT_MS` in
+  `claude-vision.adapter.ts` is therefore set to the Lambda's own 15s ceiling and
+  not below it: at 8s the till abandoned requests the model went on to answer
+  correctly, which bills the shop for the look *and* tells the cashier to try
+  again. If that wait is too long for a counter, shrink the frame
+  (`CAPTURE_MAX_EDGE`) or lower `EFFORT` — do not put the client's deadline back
+  under the server's.

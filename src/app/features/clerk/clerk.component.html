@@ -3,6 +3,13 @@
   class="fixed inset-0 z-[60] overflow-hidden bg-onsen-deep text-steam"
   data-testid="clerk-stage"
 >
+  <!-- Layer 0: what shows through when the camera has been given back. -->
+  <div
+    class="absolute inset-0"
+    [class.clerk-stage--blind]="!clerk.cameraEnabled()"
+    aria-hidden="true"
+  ></div>
+
   <!-- Layer 1: the feed, treated as steamy bathhouse glass. -->
   <video
     #feed
@@ -38,7 +45,8 @@
   <p
     class="pointer-events-none absolute left-1/2 top-14 hidden -translate-x-1/2 whitespace-nowrap font-data text-[10px] uppercase tracking-[0.16em] text-kelp/50 xl:block"
   >
-    Y confirm · N reject · 1–3 choose · U undo · M mic · C camera · T total · Esc exit
+    Y confirm · N reject · 1–3 choose · U undo · M mic · Q mute · C switch camera · V camera off · A
+    ai · T total · Esc exit
   </p>
 
   @if (needsConsent()) {

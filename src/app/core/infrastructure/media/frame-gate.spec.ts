@@ -114,6 +114,42 @@ describe('FrameGate', () => {
     expect(gate.evaluate(flat(220), swap + settleMs + 200)).toBe('capture');
   });
 
+  it('hands a capture back so the same scene can be looked at later', () => {
+    // A look the caller refused to pay for — a barcode answered the frame — must
+    // not leave the gate believing it identified what was in front of it.
+    gate.evaluate(flat(100), 0);
+    gate.evaluate(flat(100), 100);
+    expect(gate.evaluate(flat(100), minIntervalMs + settleMs)).toBe('capture');
+
+    gate.undoLastCapture();
+
+    // No re-settling needed, unlike `forgetLastCapture`: the scene never stopped
+    // being still, and the wait it is owed is the one it had already served.
+    expect(gate.evaluate(flat(100), minIntervalMs * 3)).toBe('capture');
+  });
+
+  it('restores the earlier claim rather than clearing it', () => {
+    // The difference from `forgetLastCapture`, and the reason both exist: the scene
+    // a barcode already rang up has to stay shut, or the model is paid to add a
+    // second one the moment the bars turn away.
+    gate.evaluate(flat(100), 0);
+    gate.evaluate(flat(100), 100);
+    gate.claimCurrentScene(100);
+
+    // A different scene opens the gate; the caller declines to spend on it.
+    const swap = minIntervalMs * 3;
+    gate.evaluate(flat(220), swap);
+    gate.evaluate(flat(220), swap + 100);
+    expect(gate.evaluate(flat(220), swap + settleMs + 200)).toBe('capture');
+    gate.undoLastCapture();
+
+    // Back to the barcoded item, still claimed.
+    const back = minIntervalMs * 6;
+    gate.evaluate(flat(100), back);
+    gate.evaluate(flat(100), back + 100);
+    expect(gate.evaluate(flat(100), back + settleMs + 200)).toBe('duplicate');
+  });
+
   it('ignores a claim made before any frame has been seen', () => {
     gate.claimCurrentScene(0);
     expect(gate.evaluate(flat(100), 0)).toBe('warming');

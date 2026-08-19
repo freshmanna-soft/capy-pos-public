@@ -11,10 +11,20 @@ import { rankCandidates } from '@core/application/services/candidate-ranking';
 import { environment } from '../../../../environments/environment';
 
 /**
- * Wall-clock ceiling for one look. A cashier holding up a jar will not wait
- * longer than this, and the frame is stale after it anyway.
+ * Wall-clock ceiling for one look.
+ *
+ * Set to match the recognition Lambda's own timeout, and deliberately not lower.
+ * At 8 seconds this was under the p95 of a real call — measured against the local
+ * proxy, looks landed anywhere between 3 and 8.3 seconds — so the till would
+ * abandon a request the server went on to answer correctly. That is the worst of
+ * both outcomes: the shop is billed for the look and the cashier is told the
+ * clerk couldn't see, so they hold the item up and are billed again.
+ *
+ * If a look is genuinely too slow to wait for, the fix is a smaller frame
+ * (`CAPTURE_MAX_EDGE`) or a lower effort in the proxy — not giving up on work
+ * that has already been paid for.
  */
-const REQUEST_TIMEOUT_MS = 8000;
+const REQUEST_TIMEOUT_MS = 15000;
 
 /** Anything the proxy sends beyond this is noise the HUD can't show. */
 const MAX_CANDIDATES = 3;

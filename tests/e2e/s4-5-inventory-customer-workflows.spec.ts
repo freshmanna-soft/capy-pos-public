@@ -1,5 +1,41 @@
-import { test, expect } from '@playwright/test';
+import { Locator, Page, expect, test } from '@playwright/test';
 import { loginAsAdmin } from './helpers/auth';
+
+/**
+ * A row in a list, by the text it contains.
+ *
+ * `.first()` is the load-bearing part. Both the inventory and customer templates
+ * render every row twice — a card list for small screens and a table for large —
+ * so each `data-testid` exists twice in the DOM, and which one is visible is
+ * decided purely by Tailwind's responsive CSS. Until that stylesheet has applied,
+ * *both* are visible, and a `toBeVisible()` assertion against two matches is a
+ * strict-mode violation: Playwright throws rather than retrying, so no timeout
+ * saves it. On a dev server under load that window is wide enough to hit, which is
+ * what made these tests fail only inside long runs and never in isolation.
+ *
+ * Taking the first visible match says what every one of these assertions actually
+ * means — "this row is on screen" — instead of "exactly one element matches".
+ */
+function row(page: Page, prefix: 'product' | 'customer', hasText: string): Locator {
+  return page
+    .locator(`[data-testid^="${prefix}-row-"]`, { hasText })
+    .filter({ visible: true })
+    .first();
+}
+
+/**
+ * Read the stock a product row is showing.
+ *
+ * Returns null when the row has no "<n> units" yet, so a caller can wait for it.
+ * The previous code defaulted a failed parse to 0, which turned "the row had not
+ * rendered yet" into an assertion that stock should be −1 — a confusing failure
+ * about the wrong thing.
+ */
+async function readStock(target: Locator): Promise<number | null> {
+  const text = (await target.textContent()) ?? '';
+  const match = /(\d+)\s*units/.exec(text);
+  return match ? Number(match[1]) : null;
+}
 
 /**
  * E2E Tests: Inventory and Customer Management Workflows (S4-5)
@@ -66,7 +102,7 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
 
     // Product should appear in the table
     await page.waitForTimeout(500);
-    const productRow = page.locator('[data-testid^="product-row-"]', { hasText: 'S4-5 Test Espresso' }).filter({ visible: true });
+    const productRow = row(page, 'product', 'S4-5 Test Espresso');
     await expect(productRow).toBeVisible();
   });
 
@@ -88,7 +124,9 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
 
     // Find and click edit on the product we just created
     const editBtn = page
-      .locator('[data-testid^="product-row-"]', { hasText: 'S4-5 Edit Target' }).filter({ visible: true })
+      .locator('[data-testid^="product-row-"]', { hasText: 'S4-5 Edit Target' })
+      .filter({ visible: true })
+      .first()
       .locator('[data-testid^="btn-edit-"]');
     await editBtn.click({ force: true });
 
@@ -106,7 +144,7 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
 
     // Updated product should appear
     await page.waitForTimeout(500);
-    const updatedRow = page.locator('[data-testid^="product-row-"]', { hasText: 'S4-5 Edited Product' }).filter({ visible: true });
+    const updatedRow = row(page, 'product', 'S4-5 Edited Product');
     await expect(updatedRow).toBeVisible();
   });
 
@@ -128,7 +166,9 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
 
     // Click delete on the product
     const deleteBtn = page
-      .locator('[data-testid^="product-row-"]', { hasText: 'S4-5 Delete Me' }).filter({ visible: true })
+      .locator('[data-testid^="product-row-"]', { hasText: 'S4-5 Delete Me' })
+      .filter({ visible: true })
+      .first()
       .locator('[data-testid^="btn-delete-"]');
     await deleteBtn.click({ force: true });
 
@@ -143,8 +183,8 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
 
     // Product should no longer be in the table
     await page.waitForTimeout(500);
-    const deletedRow = page.locator('[data-testid^="product-row-"]', { hasText: 'S4-5 Delete Me' }).filter({ visible: true });
-    await expect(deletedRow).not.toBeVisible();
+    const deletedRow = page.locator('[data-testid^="product-row-"]', { hasText: 'S4-5 Delete Me' });
+    await expect(deletedRow).toHaveCount(0);
   });
 
   test('inventory table reloads after navigation', async ({ page }) => {
@@ -188,8 +228,10 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
 
   test('Carlos can add a new customer with valid data', async ({ page }) => {
     await page.click('[data-testid="nav-customers"]:visible');
-    await expect(page.locator('[data-testid="customers-page"]')).toBeVisible();
-    await page.waitForTimeout(500);
+    // Waiting for the table rather than for 500ms: the table being there is what
+    // "ready to use" actually means, and a sleep that is long enough on an idle
+    // machine is not long enough on a busy one.
+    await expect(page.locator('[data-testid="customers-table"]')).toBeVisible();
 
     // Click Add Customer
     await page.click('[data-testid="btn-add-customer"]');
@@ -207,10 +249,10 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
     // Form should close on success
     await expect(page.locator('[data-testid="customer-form"]')).not.toBeVisible();
 
-    // Customer should appear in the table
-    await page.waitForTimeout(500);
-    const customerRow = page.locator('[data-testid^="customer-row-"]', { hasText: 'S4-5 Test Customer' }).filter({ visible: true });
-    await expect(customerRow).toBeVisible();
+    // Customer should appear in the table. No sleep first: this assertion already
+    // retries until it does, and sleeping only spends part of that budget doing
+    // nothing.
+    await expect(row(page, 'customer', 'S4-5 Test Customer')).toBeVisible();
   });
 
   test('Carlos can edit an existing customer', async ({ page }) => {
@@ -229,7 +271,9 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
 
     // Click edit on the customer
     const editBtn = page
-      .locator('[data-testid^="customer-row-"]', { hasText: 'S4-5 Edit Customer' }).filter({ visible: true })
+      .locator('[data-testid^="customer-row-"]', { hasText: 'S4-5 Edit Customer' })
+      .filter({ visible: true })
+      .first()
       .locator('[data-testid^="btn-edit-"]');
     await editBtn.click({ force: true });
 
@@ -247,7 +291,7 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
 
     // Updated customer should appear
     await page.waitForTimeout(500);
-    const updatedRow = page.locator('[data-testid^="customer-row-"]', { hasText: 'S4-5 Updated Customer' }).filter({ visible: true });
+    const updatedRow = row(page, 'customer', 'S4-5 Updated Customer');
     await expect(updatedRow).toBeVisible();
   });
 
@@ -267,7 +311,9 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
 
     // Click delete
     const deleteBtn = page
-      .locator('[data-testid^="customer-row-"]', { hasText: 'S4-5 Delete Customer' }).filter({ visible: true })
+      .locator('[data-testid^="customer-row-"]', { hasText: 'S4-5 Delete Customer' })
+      .filter({ visible: true })
+      .first()
       .locator('[data-testid^="btn-delete-"]');
     await deleteBtn.click({ force: true });
 
@@ -282,8 +328,8 @@ test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', ()
 
     // Customer should no longer be in the table
     await page.waitForTimeout(500);
-    const deletedRow = page.locator('[data-testid^="customer-row-"]', { hasText: 'S4-5 Delete Customer' }).filter({ visible: true });
-    await expect(deletedRow).not.toBeVisible();
+    const deletedRow = page.locator('[data-testid^="customer-row-"]', { hasText: 'S4-5 Delete Customer' });
+    await expect(deletedRow).toHaveCount(0);
   });
 });
 
@@ -307,7 +353,16 @@ test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
     // Step 2: Navigate to Inventory to check initial stock of a seed product
     await page.click('[data-testid="nav-inventory"]:visible');
     await expect(page.locator('[data-testid="inventory-page"]')).toBeVisible();
-    await page.waitForTimeout(1000);
+    // Wait for the catalogue to have rendered at least one row, rather than for a
+    // guessed second. Seeding is async; if it has not landed yet, the "is Coffee
+    // here?" check below reads an empty list and silently takes the create-a-product
+    // fallback, testing something other than what this test is named for.
+    // `.filter({ visible: true })` before `.first()`, not after: the mobile card list
+    // comes first in the DOM and is hidden at this width, so a bare `.first()` picks
+    // an element that can never become visible and waits out the whole timeout.
+    await expect(
+      page.locator('[data-testid^="product-row-"]').filter({ visible: true }).first()
+    ).toBeVisible({ timeout: 15000 });
 
     // Find a seed product (Coffee) and record its stock
     const productRow = page.locator('[data-testid^="product-row-"]', { hasText: 'Coffee' }).filter({ visible: true }).first();
@@ -331,9 +386,12 @@ test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
       ? productRow
       : page.locator('[data-testid^="product-row-"]', { hasText: 'S4-5 Sale Coffee' }).filter({ visible: true });
     await expect(targetRow).toBeVisible();
-    // The row renders stock as "<n> units"; there's no dedicated stock testid.
-    const stockBeforeText = (await targetRow.textContent()) ?? '';
-    const stockBeforeNum = parseInt(stockBeforeText.match(/(\d+)\s*units/)?.[1] ?? '0');
+    // The row renders stock as "<n> units"; there's no dedicated stock testid. Poll
+    // for it instead of sampling once — a row can be on screen a moment before its
+    // numbers are, and the old code defaulted an unparsed read to 0, turning "not
+    // rendered yet" into an assertion that stock should end at −1.
+    await expect.poll(() => readStock(targetRow), { timeout: 10000 }).not.toBeNull();
+    const stockBeforeNum = (await readStock(targetRow))!;
     const productName = productExists ? 'Coffee' : 'S4-5 Sale Coffee';
 
     // Step 3: Maria navigates to POS and makes a sale
@@ -348,12 +406,13 @@ test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
     await page.waitForTimeout(100);
     await searchInput.type(productName, { delay: 50 });
 
-    // Wait for debounce (300ms) + search results to appear
-    await page.waitForTimeout(500);
+    // Wait for the result itself. The search debounce is 300ms, so a 500ms sleep was
+    // covering debounce *plus* query *plus* render with 200ms to spare — fine idle,
+    // not fine under load.
     const resultVisible = await page
       .locator('[data-testid="product-result"]')
       .first()
-      .isVisible({ timeout: 5000 })
+      .isVisible({ timeout: 10000 })
       .catch(() => false);
 
     if (!resultVisible) {
@@ -393,32 +452,47 @@ test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
     // Confirm payment
     await page.click('[data-testid="btn-confirm-cash"]');
 
-    // Wait for payment processing and receipt to appear
-    await page.waitForTimeout(2000);
-
-    // Dismiss the receipt overlay (it blocks navigation)
+    // Wait for the sale to have actually finished, then clear the receipt.
+    //
+    // This was the sharpest edge in the test. It slept 2s, then asked *once* whether
+    // the receipt was visible and dismissed it only if so. A receipt that arrived
+    // 2.1s later was therefore never dismissed — and since it covers the page, the
+    // next click on the nav bar hit the overlay instead and timed out. A conditional
+    // check on a race resolves the race by coin toss.
     const receiptOverlay = page.locator('[data-testid="receipt-overlay"]');
-    const receiptVisible = await receiptOverlay.isVisible().catch(() => false);
-    if (receiptVisible) {
+    const checkoutOverlay = page.locator('[data-testid="checkout-overlay"]');
+    // One of the two is true once processing ends: a receipt to dismiss, or a
+    // checkout that closed without one.
+    await expect
+      .poll(
+        async () => (await receiptOverlay.isVisible()) || !(await checkoutOverlay.isVisible()),
+        { timeout: 20000 }
+      )
+      .toBe(true);
+
+    if (await receiptOverlay.isVisible()) {
       await page.click('[data-testid="btn-new-transaction"]');
-      await page.waitForTimeout(500);
     }
+    // Asserted gone rather than assumed gone, because anything still covering the
+    // page turns the next navigation click into a timeout that says nothing about
+    // stock.
+    await expect(receiptOverlay).toBeHidden();
 
     // Step 4: Carlos navigates to Inventory to verify stock was reduced
     await page.click('[data-testid="nav-inventory"]:visible');
     await expect(page.locator('[data-testid="inventory-page"]')).toBeVisible();
-    await page.waitForTimeout(1500);
 
-    // Check stock level - should be reduced by 1
-    const productRowAfter = page
-      .locator('[data-testid^="product-row-"]', { hasText: productName })
-      .filter({ visible: true });
+    const productRowAfter = row(page, 'product', productName);
     await expect(productRowAfter).toBeVisible({ timeout: 10000 });
-    const stockAfterText = (await productRowAfter.textContent()) ?? '';
-    const stockAfterNum = parseInt(stockAfterText.match(/(\d+)\s*units/)?.[1] ?? '0');
 
-    // Stock should be reduced by 1 (we added 1 item to cart)
-    expect(stockAfterNum).toBe(stockBeforeNum - 1);
+    // Poll for the expected stock rather than sleeping and reading once. The row can
+    // be on screen showing the *old* number while the reload that carries the new one
+    // is still in flight, so a single read races the refresh and fails by exactly the
+    // one unit the sale removed. Polling waits for it and still fails — with the
+    // value it actually saw — if the decrement never happens.
+    await expect
+      .poll(() => readStock(productRowAfter), { timeout: 15000 })
+      .toBe(stockBeforeNum - 1);
   });
 });
 

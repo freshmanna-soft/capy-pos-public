@@ -150,11 +150,20 @@ export class ClerkComponent implements AfterViewInit, OnDestroy {
       case 'm':
         this.clerk.toggleMic();
         break;
+      case 'q':
+        this.clerk.toggleMute();
+        break;
       case 't':
         this.clerk.speakTotal();
         break;
       case 'c':
         void this.clerk.cycleCamera();
+        break;
+      case 'v':
+        void this.clerk.toggleCamera();
+        break;
+      case 'a':
+        this.clerk.toggleAi();
         break;
       default:
         return;

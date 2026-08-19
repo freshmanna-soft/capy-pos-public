@@ -25,7 +25,7 @@ export type ClerkVisualState =
 /** Longest frame step we will integrate. Guards against a backgrounded tab. */
 const MAX_DT_S = 0.05;
 
-/** Capybara geometry is authored in these units; head width is ~212. */
+/** Capybara geometry is authored in these units; head width is ~224. */
 const LOCAL_WATER_Y = 40;
 
 interface Ripple {
@@ -560,11 +560,15 @@ export class CapybaraRenderer {
     }
 
     const waterY = h * WATER_LINE;
-    // Sized so the whole figure — towel to waterline — occupies roughly a
-    // quarter of the stage height. Bigger than this and she stops being a clerk
-    // at a counter and becomes a mascot filling the screen, which crowds the
-    // caption and the candidate trays that have to be readable over her.
-    const scale = Math.min(h * 0.00125, w * 0.00095);
+    // Sized so the whole figure — towel to waterline — occupies roughly a third
+    // of the stage height. She used to be a quarter, which read as a distant
+    // decoration rather than someone serving you; at this size her expression is
+    // legible across a counter, which is the only reason she has one.
+    //
+    // The ceiling is set by the HUD, not by taste: the caption and candidate
+    // trays own everything below the waterline and the camera preview owns the
+    // top right, so she may grow into the empty middle and no further.
+    const scale = Math.min(h * 0.00168, w * 0.00126);
     // Centred: the yuzu sits to her right and still clears the camera preview.
     const cx = w * 0.5;
     const cy = waterY - LOCAL_WATER_Y * scale;
@@ -726,17 +730,45 @@ export class CapybaraRenderer {
     // reads as a stain on the surface rather than as her own shadow.
     ctx.fillStyle = withAlpha(ONSEN.deep, 0.26);
     ctx.beginPath();
-    ctx.ellipse(4, 44, 148, 20, 0, 0, Math.PI * 2);
+    ctx.ellipse(4, 46, 172, 22, 0, 0, Math.PI * 2);
     ctx.fill();
 
     // Shoulders and back: a broad loaf. Capybaras have almost no waist, and
     // giving her one would read as a different animal.
-    const bodyGradient = ctx.createLinearGradient(0, -60, 0, 170);
+    //
+    // The corner radius is now close to half the width, which turns the loaf from
+    // a rounded box into something soft enough to want to lean on. That costs
+    // nothing in recognisability — the silhouette that says "capybara" is the
+    // barrel body and the blunt head, not the sharpness of either.
+    const top = -20 + breath * 0.4;
+    const bodyGradient = ctx.createLinearGradient(0, -60, 0, 180);
     bodyGradient.addColorStop(0, ONSEN.capyLight);
     bodyGradient.addColorStop(0.4, ONSEN.capy);
     bodyGradient.addColorStop(1, ONSEN.capyDark);
     ctx.fillStyle = bodyGradient;
-    roundedRect(ctx, -132, -18 + breath * 0.4, 264, 220, 84);
+    roundedRect(ctx, -152, top, 304, 240, 122);
+    ctx.fill();
+
+    // A light wrap around the silhouette. Not an outline — a cartoon keyline would
+    // fight the painted water — but enough of a rim to lift her off the bath and
+    // make the volume read as plush rather than flat.
+    ctx.strokeStyle = withAlpha(ONSEN.capyLight, 0.14);
+    ctx.lineWidth = 6;
+    roundedRect(ctx, -152, top, 304, 240, 122);
+    ctx.stroke();
+
+    // Pale chest, as on the animal, and the thing that stops the body reading as
+    // one undifferentiated brown mass now that it is this large.
+    //
+    // A flat ellipse at any useful opacity showed its own edge and turned into a
+    // bubble stuck to her front, so this is a radial gradient that fades out
+    // entirely before it gets there.
+    const chest = ctx.createRadialGradient(0, top + 92, 8, 0, top + 92, 104);
+    chest.addColorStop(0, withAlpha(ONSEN.capyMuzzle, 0.34));
+    chest.addColorStop(1, withAlpha(ONSEN.capyMuzzle, 0));
+    ctx.fillStyle = chest;
+    ctx.beginPath();
+    ctx.ellipse(0, top + 92, 104, 92, 0, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.restore();
@@ -754,23 +786,57 @@ export class CapybaraRenderer {
 
     this.paintEars(turn);
 
-    // Blocky head, wider than tall. The squareness is the single most
-    // recognizable thing about a capybara's face — at a large corner radius she
-    // reads as a bear cub or a hamster instead, so the radius stays well under
-    // a quarter of the height.
-    const headGradient = ctx.createLinearGradient(0, -148, 0, 20);
+    // The head is a drawn shape rather than a rounded rectangle.
+    //
+    // A capybara's skull genuinely is blocky, and the first version leaned on
+    // that: a 216×170 box with a 36 radius. Rendered, it read as a crate with a
+    // face on it — the flat sides and hard corners are what made her look severe
+    // rather than approachable, and no amount of tuning the eyes fixed it.
+    //
+    // What survives from the animal is the proportion (wider than tall) and the
+    // broad flat crown. What changes is everything between: full cheeks that
+    // bulge past the crown, and a jaw that comes to a round chin. That is the
+    // same silhouette a plush toy of the animal has, and it is still obviously
+    // this animal and not a bear cub — the crown is flat and the muzzle is blunt,
+    // which is what a bear's is not.
+    const headGradient = ctx.createLinearGradient(0, -154, 0, 26);
     headGradient.addColorStop(0, ONSEN.capyLight);
     headGradient.addColorStop(0.55, ONSEN.capy);
     headGradient.addColorStop(1, ONSEN.capyDark);
     ctx.fillStyle = headGradient;
-    roundedRect(ctx, -108 + turn * 4, -150, 216, 170, 36);
+    headPath(ctx, turn);
     ctx.fill();
 
+    // Same light wrap as the body, so the two read as one piece of the same toy.
+    ctx.strokeStyle = withAlpha(ONSEN.capyLight, 0.24);
+    ctx.lineWidth = 6;
+    headPath(ctx, turn);
+    ctx.stroke();
+
+    this.paintCheeks(turn);
     this.paintMuzzle(turn);
     this.paintEyes(turn);
     this.paintTowel(tilt);
 
     ctx.restore();
+  }
+
+  /**
+   * Warm patches high on the cheeks.
+   *
+   * The cheapest friendliness in the whole drawing: two soft ellipses of the
+   * persimmon already in the palette, at an alpha low enough that they read as
+   * colour in the skin rather than as makeup. They sit under the eyes and outside
+   * the muzzle so nothing has to move to accommodate them.
+   */
+  private paintCheeks(turn: number): void {
+    const ctx = this.context;
+    for (const side of [-1, 1] as const) {
+      ctx.fillStyle = withAlpha(ONSEN.tsuba, 0.13);
+      ctx.beginPath();
+      ctx.ellipse(side * 84 + turn * 10, -50, 24, 16, side * 0.12, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   private paintEars(turn: number): void {
@@ -779,81 +845,139 @@ export class CapybaraRenderer {
     const forward = this.earForward.value;
     const twitch = this.earTwitch * 0.18;
 
-    // Small, set high and close to the skull. A capybara's ears are almost
-    // vestigial next to a bear's, and oversizing them is the fastest way to draw
-    // the wrong animal.
+    // Set high and close to the skull. A capybara's ears are almost vestigial
+    // next to a bear's, and oversizing them is the fastest way to draw the wrong
+    // animal — but the first pass under-sized them into two dark pips, which read
+    // as damage rather than as ears. These are chunky enough to be legible and
+    // still well short of bear.
+    //
+    // They are also no longer near-black: the fill is the coat colour and the
+    // inner ear is warm, because a dark blob on the skull reads as a hole.
     for (const side of [-1, 1] as const) {
       ctx.save();
-      ctx.translate(side * (90 + turn * 6), -138);
+      ctx.translate(side * (94 + turn * 6), -140);
       ctx.rotate(side * (0.3 - forward * 0.45 + (side > 0 ? twitch : -twitch * 0.6)));
-      ctx.fillStyle = ONSEN.capyDark;
-      roundedRect(ctx, -16, -14, 32, 28, 12);
+      ctx.fillStyle = ONSEN.capy;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 23, 20, side * 0.18, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = withAlpha(ONSEN.ink, 0.32);
-      roundedRect(ctx, -8 - side * 2, -7, 16, 15, 7);
+      ctx.strokeStyle = withAlpha(ONSEN.capyDark, 0.35);
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = withAlpha(ONSEN.tsuba, 0.3);
+      ctx.beginPath();
+      ctx.ellipse(-side * 3, 2, 12, 10, side * 0.18, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
   }
 
+  /**
+   * Muzzle, nose and mouth.
+   *
+   * The mouth is the part that had to change most. The first version drew a
+   * vertical seam down from the nose, a downward-curving line under it, and — when
+   * she spoke — a persimmon-red ellipse. Each choice was defensible on its own and
+   * together they produced a small red hole under a frown, which is what "the
+   * mouth looks freaky" meant. Three fixes, in order of effect:
+   *
+   * 1. **The closed mouth curves up.** Corner height above the centre dip is the
+   *    entire difference between a friendly animal and a resigned one.
+   * 2. **The open mouth is not red.** It is the same near-black ink used for the
+   *    eyes, with the tongue as a muted wash only once she is properly open. A
+   *    saturated red at small scale reads as a wound, not as speech.
+   * 3. **The jaw hinges instead of the hole growing.** The upper lip stays put and
+   *    the lower edge drops, which is how a mouth actually opens; scaling an
+   *    ellipse about its centre made the whole face appear to inflate.
+   */
   private paintMuzzle(turn: number): void {
     const ctx = this.context;
     const mouthOpen = this.mouth.value;
     const mx = turn * 10;
 
-    // Blunt pale muzzle.
+    // The muzzle is a soft block, not an ellipse.
+    //
+    // This is where the capybara went when the head stopped being a box, and it
+    // is the trade that makes the redesign work: the roundness moves to the skull,
+    // where it buys friendliness, and the bluntness moves to the snout, where the
+    // species actually lives. A round snout on a round head was reading as a bear
+    // cub — which is exactly what the original comment warned about, just relocated.
     ctx.fillStyle = ONSEN.capyMuzzle;
-    ctx.beginPath();
-    ctx.ellipse(mx, -14, 76, 50, 0, 0, Math.PI * 2);
+    roundedRect(ctx, mx - 66, -50, 132, 62, 30);
     ctx.fill();
 
-    // Nose: wide, flat, dark.
+    // Nose: wide and flat, but no longer a slab. At the previous size the dark
+    // rectangle was the largest feature on the face and read as the mouth, which
+    // left the actual mouth below it looking like a second one.
     ctx.fillStyle = ONSEN.ink;
-    roundedRect(ctx, mx - 25, -46, 50, 28, 13);
+    roundedRect(ctx, mx - 23, -46, 46, 22, 10);
     ctx.fill();
-    ctx.fillStyle = withAlpha(ONSEN.capyLight, 0.25);
-    roundedRect(ctx, mx - 17, -43, 34, 8, 4);
+    ctx.fillStyle = withAlpha(ONSEN.capyLight, 0.26);
+    roundedRect(ctx, mx - 15, -43, 30, 7, 3.5);
     ctx.fill();
 
-    // Mouth: a closed seam that opens into a rounded shape. Capybaras have a
-    // split upper lip, which is what the centre notch is.
-    ctx.strokeStyle = withAlpha(ONSEN.ink, 0.75);
-    ctx.lineWidth = 4;
+    // The philtrum — a capybara's split upper lip. Short and soft: at the old
+    // length it divided the whole muzzle and read as a scar.
+    ctx.strokeStyle = withAlpha(ONSEN.ink, 0.5);
+    ctx.lineWidth = 3.5;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(mx, -16);
-    ctx.lineTo(mx, -6);
+    ctx.moveTo(mx, -22);
+    ctx.lineTo(mx, -14);
     ctx.stroke();
 
+    // The upper lip: one smile, drawn once, whether or not the jaw is open. The
+    // corners sit sixteen units above the centre — that gap is the smile, and the
+    // first attempt at eight units was close enough to level to read as neither
+    // happy nor sad, which is the most unsettling of the three.
+    const lipY = -4;
+    const corner = 32;
+    const drawUpperLip = (): void => {
+      ctx.moveTo(mx - corner, lipY - 16);
+      ctx.quadraticCurveTo(mx - 16, lipY + 7, mx, lipY);
+      ctx.quadraticCurveTo(mx + 16, lipY + 7, mx + corner, lipY - 16);
+    };
+
     if (mouthOpen > 0.04) {
-      ctx.fillStyle = withAlpha(ONSEN.tsuba, 0.85);
+      // Open: the upper lip is the top edge and the jaw swings down from it.
+      const drop = 4 + mouthOpen * 22;
+      ctx.fillStyle = withAlpha(ONSEN.ink, 0.88);
       ctx.beginPath();
-      ctx.ellipse(
-        mx,
-        -6 + mouthOpen * 4,
-        11 + mouthOpen * 7,
-        2 + mouthOpen * 11,
-        0,
-        0,
-        Math.PI * 2
-      );
+      drawUpperLip();
+      ctx.quadraticCurveTo(mx + corner * 0.5, lipY + drop, mx, lipY + drop);
+      ctx.quadraticCurveTo(mx - corner * 0.5, lipY + drop, mx - corner, lipY - 16);
+      ctx.closePath();
       ctx.fill();
+
+      // Tongue, only once she is open enough for it to be a tongue rather than a
+      // stripe. Muted rather than the palette's full persimmon.
+      if (mouthOpen > 0.4) {
+        ctx.fillStyle = withAlpha(ONSEN.tsuba, 0.55);
+        ctx.beginPath();
+        ctx.ellipse(mx, lipY + drop * 0.72, 13, 5 + mouthOpen * 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
     } else {
+      ctx.strokeStyle = withAlpha(ONSEN.ink, 0.6);
+      ctx.lineWidth = 4;
       ctx.beginPath();
-      ctx.moveTo(mx - 16, -4);
-      ctx.quadraticCurveTo(mx, 4, mx + 16, -4);
+      drawUpperLip();
       ctx.stroke();
     }
 
-    // Whiskers — three a side, fanned. Thin and low-contrast: at full strength
-    // they read as scratches on the screen.
-    ctx.strokeStyle = withAlpha(ONSEN.steam, 0.3);
+    // Whiskers — two a side, faint, and kept short enough to stay over her cheek.
+    //
+    // Six long strokes reaching past the silhouette read as cracks in the screen,
+    // which is what the first version did at this size: crossing the edge of the
+    // head is what turns a whisker into a scratch, because past that boundary
+    // there is nothing for it to be growing out of.
+    ctx.strokeStyle = withAlpha(ONSEN.steam, 0.18);
     ctx.lineWidth = 2;
     for (const side of [-1, 1] as const) {
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         ctx.beginPath();
-        ctx.moveTo(mx + side * 52, -20 + i * 11);
-        ctx.quadraticCurveTo(mx + side * 96, -30 + i * 15, mx + side * 132, -34 + i * 22);
+        ctx.moveTo(mx + side * 72, -26 + i * 14);
+        ctx.quadraticCurveTo(mx + side * 96, -32 + i * 16, mx + side * 116, -32 + i * 22);
         ctx.stroke();
       }
     }
@@ -865,13 +989,19 @@ export class CapybaraRenderer {
     const open = Math.max(0, this.eyeOpen.value * (1 - this.lidClosed));
 
     for (const side of [-1, 1] as const) {
-      const ex = side * 54 + turn * 12;
-      const ey = -94;
+      const ex = side * 58 + turn * 12;
+      // Lower on the head and further apart than before, and bigger. On a real
+      // capybara the eyes sit high and close, and drawing that faithfully is what
+      // made the first version look like it was appraising you: eyes above the
+      // midline of a face is an adult proportion, and we read it as such. Dropping
+      // them to just under halfway is the single largest friendliness lever in the
+      // whole figure — it is the same trick every plush version of any animal uses.
+      const ey = -80;
+      const radius = 21;
 
-      // Set high and far back on the head, as on the animal.
       ctx.fillStyle = ONSEN.ink;
       ctx.beginPath();
-      ctx.ellipse(ex, ey, 15, 15 * clamp01(open), 0, 0, Math.PI * 2);
+      ctx.ellipse(ex, ey, radius, radius * clamp01(open), 0, 0, Math.PI * 2);
       ctx.fill();
 
       if (open > 0.35) {
@@ -880,10 +1010,10 @@ export class CapybaraRenderer {
         ctx.fillStyle = withAlpha(ONSEN.steam, 0.5);
         ctx.beginPath();
         ctx.ellipse(
-          ex - 5 + this.gazeX * 3,
-          ey - 5 + this.gazeY * 2,
-          4.5,
-          4.5 * clamp01(open),
+          ex - 7 + this.gazeX * 4,
+          ey - 7 + this.gazeY * 3,
+          6.5,
+          6.5 * clamp01(open),
           0,
           0,
           Math.PI * 2
@@ -891,18 +1021,27 @@ export class CapybaraRenderer {
         ctx.fill();
         ctx.fillStyle = withAlpha(ONSEN.steam, 0.9);
         ctx.beginPath();
-        ctx.arc(ex - 6 + this.gazeX * 3, ey - 6 + this.gazeY * 2, 1.8, 0, Math.PI * 2);
+        ctx.arc(ex - 8.5 + this.gazeX * 4, ey - 9 + this.gazeY * 3, 2.6, 0, Math.PI * 2);
+        ctx.fill();
+        // A small low light on the far side. Two lights on the same side make a
+        // glass bead; one opposite makes a wet eye.
+        ctx.fillStyle = withAlpha(ONSEN.steam, 0.22);
+        ctx.beginPath();
+        ctx.ellipse(ex + 8, ey + 8, 4, 3 * clamp01(open), 0, 0, Math.PI * 2);
         ctx.fill();
       }
 
       // Brow: a short stroke that lifts when she's surprised and lowers when
-      // she's squinting. Does most of the emotional work for very little ink.
-      const brow = this.state === 'found' ? -10 : this.state === 'scanning' ? -2 : -6;
-      ctx.strokeStyle = withAlpha(ONSEN.capyDark, 0.7);
+      // she's squinting. Does most of the emotional work for very little ink —
+      // which is also why it is drawn lighter than the eye it sits over. At the
+      // old weight it read as a permanent frown on a face this size.
+      const brow = this.state === 'found' ? -12 : this.state === 'scanning' ? -2 : -7;
+      ctx.strokeStyle = withAlpha(ONSEN.capyDark, 0.5);
       ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(ex - 13, ey + brow - 12);
-      ctx.quadraticCurveTo(ex, ey + brow - 17, ex + 13, ey + brow - 12);
+      ctx.moveTo(ex - 16, ey + brow - 20);
+      ctx.quadraticCurveTo(ex, ey + brow - 27, ex + 16, ey + brow - 20);
       ctx.stroke();
     }
   }
@@ -913,17 +1052,20 @@ export class CapybaraRenderer {
     ctx.save();
     ctx.translate(0, -152);
     ctx.rotate(-tilt * 0.35);
+    // Wider and thicker than the head it sits on, with a big radius: a folded
+    // towel is a soft object, and drawing it as a crisp bar reintroduced exactly
+    // the hard horizontal the head no longer has.
     ctx.fillStyle = ONSEN.steam;
-    roundedRect(ctx, -76, -34, 152, 40, 12);
+    roundedRect(ctx, -90, -38, 180, 46, 20);
     ctx.fill();
     ctx.fillStyle = withAlpha(ONSEN.kelp, 0.22);
-    roundedRect(ctx, -76, -18, 152, 8, 4);
+    roundedRect(ctx, -90, -20, 180, 9, 4);
     ctx.fill();
-    ctx.strokeStyle = withAlpha(ONSEN.capyDark, 0.18);
+    ctx.strokeStyle = withAlpha(ONSEN.capyDark, 0.16);
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(-40, -34);
-    ctx.lineTo(-40, 6);
+    ctx.moveTo(-46, -38);
+    ctx.lineTo(-46, 8);
     ctx.stroke();
     ctx.restore();
   }
@@ -937,8 +1079,11 @@ export class CapybaraRenderer {
     const lift = this.yuzuLift.value;
     const bobY = this.reducedMotion ? 0 : Math.sin(this.waterT * 1.8) * 3;
     const y = LOCAL_WATER_Y - 6 - lift * 26 + bobY;
-    const x = 185;
-    const radius = 20 + lift * 4;
+    // Pushed out to clear the wider body. It has to float beside her in open
+    // water — overlapping her flank turns the one thing on this stage allowed to
+    // ask for attention into a button sewn onto her side.
+    const x = 214;
+    const radius = 22 + lift * 4;
 
     // Ripening: unripe green → amber → yuzu. Two-stop ramp so the midpoint is a
     // real colour rather than a muddy average of the ends.
@@ -1310,6 +1455,36 @@ const POSES: Record<
   confused: { lean: -0.1, headTilt: 0.17, earForward: -0.55, eyeOpen: 0.95, mouthBias: 0.05 },
   speaking: { lean: 0.08, headTilt: 0, earForward: 0.2, eyeOpen: 1, mouthBias: 0.1 },
 };
+
+/**
+ * The head outline, as a closed path ready to fill or stroke.
+ *
+ * Symmetric about `turn * 4`, so turning the head shifts the whole shape rather
+ * than skewing it. Four cubic segments: crown, right cheek down to the jaw, chin,
+ * and the mirror back up. The control points are placed so the widest part of the
+ * head is at the cheeks (about a third of the way down) rather than at the crown —
+ * that single relationship is most of what separates "friendly" from "blocky".
+ *
+ * Authored in the same local units as everything else: the head is 224 wide and
+ * 180 tall, sitting from y = -154 to y = 26.
+ */
+function headPath(ctx: CanvasRenderingContext2D, turn: number): void {
+  const x = turn * 4;
+  const hw = 112; // half width, at the cheeks
+  const top = -154;
+  const bottom = 26;
+  const cheek = -58; // where the head is widest
+
+  ctx.beginPath();
+  ctx.moveTo(x, top);
+  // Crown: nearly flat across the middle, then falling away to the cheek.
+  ctx.bezierCurveTo(x + hw * 0.62, top, x + hw, top + 26, x + hw, cheek);
+  // Cheek into the jaw, and a round chin.
+  ctx.bezierCurveTo(x + hw, bottom - 30, x + hw * 0.66, bottom, x, bottom);
+  ctx.bezierCurveTo(x - hw * 0.66, bottom, x - hw, bottom - 30, x - hw, cheek);
+  ctx.bezierCurveTo(x - hw, top + 26, x - hw * 0.62, top, x, top);
+  ctx.closePath();
+}
 
 /** Rounded rectangle via arcTo — supported everywhere, unlike `roundRect`. */
 function roundedRect(

@@ -52,6 +52,35 @@ export class ApiProductRepository implements IProductRepository {
     }
   }
 
+  /**
+   * Find the product with exactly this SKU.
+   *
+   * A missing row is `null`, not an error: "is this SKU already taken?" is a
+   * question whose answer is routinely no, and throwing on the common case would
+   * make every uniqueness check a try/catch.
+   */
+  async findBySKU(sku: string): Promise<Product | null> {
+    return this.findOneBy('sku', sku);
+  }
+
+  /** Find the product with exactly this barcode. */
+  async findByBarcode(barcode: string): Promise<Product | null> {
+    return this.findOneBy('barcode', barcode);
+  }
+
+  private async findOneBy(field: 'sku' | 'barcode', value: string): Promise<Product | null> {
+    try {
+      const response = await firstValueFrom(
+        this.http.get<unknown[]>(`${this.apiUrl}`, { params: { [field]: value, limit: 1 } })
+      );
+      const first = response[0];
+      return first ? this.mapToEntity(first) : null;
+    } catch (error) {
+      console.error(`Error finding product by ${field} "${value}":`, error);
+      throw new Error(`Failed to find product by ${field} from API`, { cause: error });
+    }
+  }
+
   async search(query: string): Promise<Product[]> {
     try {
       const response = await firstValueFrom(

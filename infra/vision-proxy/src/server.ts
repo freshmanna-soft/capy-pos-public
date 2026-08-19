@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { identify, validate } from './identify.js';
+import { identify, validate } from './identify.ts';
 
 /**
  * Local development server.

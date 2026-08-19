@@ -26,6 +26,13 @@ export const EventType = {
   // AI clerk (camera recognition)
   CLERK_ITEM_RECOGNIZED: 'clerk.item.recognized',
   CLERK_ITEM_REJECTED: 'clerk.item.rejected',
+  /**
+   * Something the cashier named was taken back off the sale.
+   *
+   * Its own event because `decreaseQuantity` publishes nothing, so without this a
+   * spoken removal would be the one clerk action that left no trace on the bus.
+   */
+  CLERK_ITEM_REMOVED: 'clerk.item.removed',
   // Sync lifecycle
   SYNC_COMPLETED: 'sync.completed',
   SYNC_PUSH_COMPLETED: 'sync.push.completed',

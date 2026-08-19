@@ -361,4 +361,67 @@ describe('ManageCustomersUseCase', () => {
       expect(useCase.selectedCustomer()).toBeNull();
     });
   });
+
+  describe('rejections that are not Errors', () => {
+    /**
+     * A repository can reject with a string, a Dexie event, or an object from a
+     * worker's postMessage — anything that crossed a boundary. Every one of these
+     * paths reads `error.message`, and the fallback is the difference between a
+     * readable banner and the word "undefined" on screen.
+     */
+    it('still says something readable when a load fails oddly', async () => {
+      mockRepository.findAll.mockRejectedValue('connection reset');
+
+      await expect(useCase.loadCustomers()).resolves.toEqual([]);
+      expect(useCase.error()).toBe('Failed to load customers');
+      expect(useCase.loading()).toBe(false);
+    });
+
+    it('still says something readable when a create fails oddly', async () => {
+      mockRepository.findByEmail.mockResolvedValue(null);
+      mockRepository.create.mockRejectedValue({ code: 'ConstraintError' });
+
+      await expect(
+        useCase.createCustomer({
+          name: 'Jane',
+          email: 'jane@example.com',
+          phone: '+1234567890',
+        } as CreateCustomerRequest)
+      ).resolves.toBeNull();
+      expect(useCase.error()).toBe('Failed to create customer');
+    });
+
+    it('still says something readable when an update fails oddly', async () => {
+      mockRepository.findById.mockResolvedValue(createMockCustomer());
+      mockRepository.update.mockRejectedValue('gone');
+
+      await expect(
+        useCase.updateCustomer({ id: 'customer-1', name: 'Jane' } as UpdateCustomerRequest)
+      ).resolves.toBeNull();
+      expect(useCase.error()).toBe('Failed to update customer');
+    });
+
+    it('still says something readable when a delete fails oddly', async () => {
+      mockRepository.findById.mockResolvedValue(createMockCustomer());
+      mockRepository.delete.mockRejectedValue('gone');
+
+      await expect(useCase.deleteCustomer('customer-1')).resolves.toBe(false);
+      expect(useCase.error()).toBe('Failed to delete customer');
+    });
+
+    it('still says something readable when a search fails oddly', async () => {
+      mockRepository.search.mockRejectedValue('index missing');
+
+      await expect(useCase.searchCustomers('jane')).resolves.toEqual([]);
+      expect(useCase.error()).toBe('Failed to search customers');
+    });
+
+    it('answers null rather than throwing when one customer cannot be read', async () => {
+      // The caller here is a detail view; a thrown error would blank the page it is
+      // trying to decorate.
+      mockRepository.findById.mockRejectedValue(new Error('db closed'));
+
+      await expect(useCase.getCustomerById('customer-1')).resolves.toBeNull();
+    });
+  });
 });

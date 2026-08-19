@@ -1,4 +1,4 @@
-import { Injectable, computed, signal } from '@angular/core';
+import { Injectable, OnDestroy, computed, signal } from '@angular/core';
 import {
   CameraOption,
   fallbackCameraId,
@@ -37,6 +37,14 @@ export type CameraStatus =
   | 'idle'
   | 'requesting'
   | 'live'
+  /**
+   * Deliberately released while the session carries on.
+   *
+   * Distinct from 'idle' because 'idle' means "never started, or finished for
+   * good", and the clerk reads that as the session having ended. A paused camera
+   * is a live till with its eyes shut.
+   */
+  | 'paused'
   /** The person said no, or the browser blocked us. Recoverable by them. */
   | 'denied'
   /** No camera exists, or the browser has no camera API. Not recoverable here. */
@@ -72,7 +80,7 @@ export interface CapturedFrame {
  * tested; this file is the plumbing around them.
  */
 @Injectable({ providedIn: 'root' })
-export class CameraService {
+export class CameraService implements OnDestroy {
   private readonly _status = signal<CameraStatus>('idle');
   private readonly _message = signal<string>('');
 
@@ -100,7 +108,26 @@ export class CameraService {
   private stream: MediaStream | null = null;
   private video: HTMLVideoElement | null = null;
   private preview: HTMLVideoElement | null = null;
+  /**
+   * Aborts the `devicechange` subscription when this instance goes away.
+   *
+   * Needed because the service is no longer only a root singleton: the inventory
+   * scanner provides its own instance per dialog, and a listener that outlived it
+   * would keep calling `refreshCameras()` on a discarded service — one more dead
+   * listener for every scan the shop ever starts.
+   */
+  private readonly deviceWatch = new AbortController();
   private deviceChangeBound = false;
+  /**
+   * True while we are deliberately giving the camera back.
+   *
+   * `stopTracks` ends the tracks before it clears `this.stream`, so an engine that
+   * fires `ended` synchronously from `track.stop()` reaches the loss-recovery
+   * handler while the stream still looks current. Without this flag that handler
+   * treats an intentional release as a yanked cable and reopens a camera — which
+   * during a privacy pause means the indicator light comes back on by itself.
+   */
+  private releasing = false;
 
   /** Reused across frames — allocating a canvas per frame would thrash the GC. */
   private captureCanvas: HTMLCanvasElement | null = null;
@@ -283,7 +310,22 @@ export class CameraService {
       return;
     }
     this.deviceChangeBound = true;
-    navigator.mediaDevices.addEventListener('devicechange', () => void this.refreshCameras());
+    navigator.mediaDevices.addEventListener('devicechange', () => void this.refreshCameras(), {
+      signal: this.deviceWatch.signal,
+    });
+  }
+
+  /**
+   * Release everything when the injector that owns this instance is destroyed.
+   *
+   * Angular destroys a component-level provider's injector but calls nothing on the
+   * instance, so without this a dialog that provides its own `CameraService` would
+   * close with the stream — and the indicator light — still on. The root instance
+   * only reaches this at application teardown, where stopping is right anyway.
+   */
+  ngOnDestroy(): void {
+    this.deviceWatch.abort();
+    this.stop();
   }
 
   /**
@@ -298,8 +340,8 @@ export class CameraService {
     }
     track.addEventListener('ended', () => {
       void (async () => {
-        // Ignore an `ended` from a stream we have already replaced.
-        if (this.stream !== stream) {
+        // Ignore an `ended` we asked for, and one from a stream already replaced.
+        if (this.releasing || this.stream !== stream) {
           return;
         }
         const lost = this._activeCameraId();
@@ -313,11 +355,52 @@ export class CameraService {
     });
   }
 
+  /**
+   * Release the camera without ending anything.
+   *
+   * The hardware really is given back — the indicator light goes out — because a
+   * privacy switch that only blanks the picture is not a privacy switch.
+   *
+   * The device list and the active id are both kept, unlike `stop()`: they are
+   * what `resume()` reopens and what keeps the picker's checked row correct while
+   * the camera is dark.
+   */
+  pause(): void {
+    this.stopTracks();
+    this._status.set('paused');
+    this._message.set('');
+  }
+
+  /**
+   * Reopen the camera that was live when `pause()` was called.
+   *
+   * Not `start()`: that re-reads the saved preference, so a till whose operator
+   * had switched to the shelf camera without making it the default would come
+   * back up looking at the wrong thing. Falls back to the browser's choice when
+   * the remembered device has gone in the meantime.
+   *
+   * @returns true when a stream is live again.
+   */
+  async resume(): Promise<boolean> {
+    if (this._status() === 'live') {
+      return true;
+    }
+    const previous = this._activeCameraId();
+    if (previous !== null && (await this.open({ kind: 'device', deviceId: previous }))) {
+      return true;
+    }
+    return this.open({ kind: 'default' });
+  }
+
   /** Stop the camera and release the hardware. */
   stop(): void {
     this.stopTracks();
     this._activeCameraId.set(null);
-    if (this._status() === 'live' || this._status() === 'requesting') {
+    if (
+      this._status() === 'live' ||
+      this._status() === 'requesting' ||
+      this._status() === 'paused'
+    ) {
       this._status.set('idle');
     }
   }
@@ -329,7 +412,12 @@ export class CameraService {
    * 'idle', which the facade reads as the session having ended.
    */
   private stopTracks(): void {
-    this.stream?.getTracks().forEach((track) => track.stop());
+    this.releasing = true;
+    try {
+      this.stream?.getTracks().forEach((track) => track.stop());
+    } finally {
+      this.releasing = false;
+    }
     this.stream = null;
     if (this.video) {
       this.video.srcObject = null;

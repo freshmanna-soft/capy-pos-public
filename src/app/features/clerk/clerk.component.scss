@@ -19,6 +19,18 @@
   opacity: 0.95;
 }
 
+/**
+ * The stage with the camera switched off.
+ *
+ * A released stream leaves the video element painting nothing, and flat black
+ * behind the capybara reads as a crash rather than a choice. This is the same
+ * warm dark the rest of the bathhouse is lit with, so an off camera looks
+ * deliberate — the HUD says so in words at the same time.
+ */
+.clerk-stage--blind {
+  background: radial-gradient(circle at 50% 35%, #21323a 0%, #131c21 62%, #0d1418 100%);
+}
+
 /* Respect the platform setting for the feed transition too, not just the canvas. */
 @media (prefers-reduced-motion: reduce) {
   .clerk-feed--glass,
