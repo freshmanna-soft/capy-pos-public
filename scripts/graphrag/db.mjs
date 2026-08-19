@@ -64,6 +64,30 @@ export async function upsertFileChunks(pool, { path, lang, rows }) {
   }
 }
 
+/**
+ * Upsert a SINGLE embedding row of any `source_type` (not just code). The unique
+ * index on (source_type, source_id) makes this idempotent — re-ingesting the same
+ * sourceId replaces the row in place. Used for non-code content such as build
+ * memories (source_type='build_memory'), where each record is one self-contained
+ * chunk rather than a file split into many.
+ *
+ * @param {pg.Pool} pool
+ * @param {{sourceType: string, sourceId: string, text: string, embedding: number[], metadata?: object}} row
+ * @returns {Promise<void>}
+ */
+export async function upsertEmbedding(pool, { sourceType, sourceId, text, embedding, metadata = {} }) {
+  await pool.query(
+    `INSERT INTO rag_embeddings (source_type, source_id, chunk, embedding, metadata)
+     VALUES ($1, $2, $3, $4::vector, $5)
+     ON CONFLICT (source_type, source_id) DO UPDATE
+       SET chunk = EXCLUDED.chunk,
+           embedding = EXCLUDED.embedding,
+           metadata = EXCLUDED.metadata,
+           updated_at = now()`,
+    [sourceType, sourceId, text, toVector(embedding), JSON.stringify(metadata)],
+  );
+}
+
 /** Delete all stored code chunks for a file (used for removed files). */
 export async function deleteFileChunks(pool, path) {
   const res = await pool.query(
