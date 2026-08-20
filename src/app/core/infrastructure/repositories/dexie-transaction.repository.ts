@@ -86,6 +86,27 @@ export class DexieTransactionRepository
   }
 
   /**
+   * Parse a record's `items` JSON without letting one corrupt row abort a whole
+   * aggregate. Returns null when the column is not valid JSON.
+   *
+   * `mapRecords` covers the list-mapping seam, but the analytics helpers below
+   * (`getTopProducts`) and the `findByProduct` filter predicate read `items`
+   * directly — outside any mapping — so they need their own guard. A bare
+   * `JSON.parse` there throws mid-query and takes down the entire report.
+   */
+  private parseItems(record: ITransactionDB): ITransactionItem[] | null {
+    try {
+      const items: unknown = JSON.parse(record.items);
+      return Array.isArray(items) ? (items as ITransactionItem[]) : null;
+    } catch {
+      console.warn(
+        `[${this.constructor.name}] Skipping record with unparseable items (id=${record.id}).`
+      );
+      return null;
+    }
+  }
+
+  /**
    * Map Transaction entity to database record
    */
   protected mapToDatabase(entity: Transaction): ITransactionDB {
@@ -126,7 +147,7 @@ export class DexieTransactionRepository
       .equals(customerId)
       .and((record) => !record.deletedAt)
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -138,7 +159,7 @@ export class DexieTransactionRepository
       .equals(status)
       .and((record) => !record.deletedAt)
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -150,7 +171,7 @@ export class DexieTransactionRepository
       .equals(type)
       .and((record) => !record.deletedAt)
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -162,7 +183,7 @@ export class DexieTransactionRepository
       .between(startDate, endDate, true, true)
       .and((record) => !record.deletedAt)
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -266,7 +287,8 @@ export class DexieTransactionRepository
     >();
 
     for (const record of records) {
-      const items: ITransactionItem[] = JSON.parse(record.items);
+      const items = this.parseItems(record);
+      if (!items) continue;
 
       for (const item of items) {
         const existing = productMap.get(item.productId);
@@ -392,7 +414,7 @@ export class DexieTransactionRepository
     }
 
     const records = await query.toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -404,7 +426,7 @@ export class DexieTransactionRepository
       .equals(TransactionStatus.PENDING)
       .and((record) => !record.deletedAt)
       .toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 
   /**
@@ -491,7 +513,9 @@ export class DexieTransactionRepository
     const query = this.table.filter((record) => {
       if (record.deletedAt) return false;
 
-      const items: ITransactionItem[] = JSON.parse(record.items);
+      const items = this.parseItems(record);
+      if (!items) return false;
+
       const hasProduct = items.some((item) => item.productId === productId);
 
       if (!hasProduct) return false;
@@ -505,7 +529,7 @@ export class DexieTransactionRepository
     });
 
     const records = await query.toArray();
-    return records.map((record) => this.mapToEntity(record));
+    return this.mapRecords(records);
   }
 }
 
