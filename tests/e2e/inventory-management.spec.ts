@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { Page, test, expect } from '@playwright/test';
 import { loginAsAdmin } from './helpers/auth';
 
 /**
@@ -233,5 +233,160 @@ test.describe('Inventory Management - Ana the Inventory Clerk', () => {
         await expect(alert).toContainText('low stock');
       }
     });
+  });
+});
+
+test.describe('Product registration — codes and guards', () => {
+  /** Seeded onto Coffee (BEV-COF-001). */
+  const COFFEE_BARCODE = '1234567890123';
+  const COFFEE_SKU = 'BEV-COF-001';
+
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+    await page.goto('/inventory');
+    await page.waitForSelector('[data-testid="inventory-page"]');
+    await page.click('[data-testid="btn-add-product"]');
+    await expect(page.locator('[data-testid="product-form"]')).toBeVisible();
+  });
+
+  /** Everything a product needs except the code under test. */
+  async function fillIdentity(page: Page, sku: string): Promise<void> {
+    await page.fill('[data-testid="input-name"]', 'Duplicate Probe');
+    await page.fill('[data-testid="input-sku"]', sku);
+    await page.fill('[data-testid="input-category"]', 'Beverages');
+    await page.fill('[data-testid="input-price"]', '1.50');
+    await page.fill('[data-testid="input-stock"]', '5');
+  }
+
+  test('refuses a barcode that already belongs to another product', async ({ page }) => {
+    // Not a tidiness rule. The till keys its scan lookup on this value with
+    // first-writer-wins, so a second product carrying it would ring up the first
+    // one at the first one's price, and nothing downstream could notice.
+    await fillIdentity(page, 'PROBE-001');
+    await page.fill('[data-testid="input-barcode"]', COFFEE_BARCODE);
+
+    await expect(page.locator('[data-testid="barcode-status"]')).toContainText(
+      /already registered/i
+    );
+
+    await page.click('[data-testid="btn-save"]');
+
+    await expect(page.locator('[data-testid="product-form"]')).toBeVisible();
+    await expect(page.locator('[data-testid="form-save-error"]')).toContainText('Coffee');
+  });
+
+  test('offers the product that already owns the code', async ({ page }) => {
+    await fillIdentity(page, 'PROBE-002');
+    await page.fill('[data-testid="input-barcode"]', COFFEE_BARCODE);
+
+    await page.click('[data-testid="btn-open-duplicate"]');
+
+    // Straight into the owner's edit form, rather than leaving the person to go and
+    // find it themselves.
+    await expect(page.locator('[data-testid="input-name"]')).toHaveValue('Coffee');
+  });
+
+  test('refuses a SKU that already belongs to another product', async ({ page }) => {
+    await fillIdentity(page, COFFEE_SKU);
+
+    await page.click('[data-testid="btn-save"]');
+
+    await expect(page.locator('[data-testid="product-form"]')).toBeVisible();
+    await expect(page.locator('[data-testid="form-save-error"]')).toContainText('Coffee');
+  });
+
+  test('saves happily with no barcode at all', async ({ page }) => {
+    // Most products legitimately have none, and an empty code must never read as
+    // colliding with every other empty one.
+    await fillIdentity(page, `PROBE-${Date.now()}`);
+
+    await page.click('[data-testid="btn-save"]');
+
+    await expect(page.locator('[data-testid="product-form"]')).not.toBeVisible();
+  });
+
+  test('a scanner gun cannot submit the form with its trailing Enter', async ({ page }) => {
+    // Guns type the digits then press Enter. If that Enter submitted, the product
+    // would save with nothing filled in but a barcode.
+    await page.fill('[data-testid="input-barcode"]', '5901234123457');
+    await page.press('[data-testid="input-barcode"]', 'Enter');
+
+    await expect(page.locator('[data-testid="product-form"]')).toBeVisible();
+    await expect(page.locator('[data-testid="input-barcode"]')).toHaveValue('5901234123457');
+  });
+
+  test('names the format so a mistyped digit is findable', async ({ page }) => {
+    await page.fill('[data-testid="input-barcode"]', '5901234123457');
+    await expect(page.locator('[data-testid="barcode-status"]')).toContainText(/EAN-13/);
+
+    // One digit changed. Advisory only — plenty of shops print their own labels —
+    // but invisible without it.
+    await page.fill('[data-testid="input-barcode"]', '5901234123458');
+    await expect(page.locator('[data-testid="barcode-status"]')).toContainText(/check digit/i);
+  });
+
+  test('asks before throwing away a half-typed product', async ({ page }) => {
+    await page.fill('[data-testid="input-name"]', 'Half typed');
+
+    await page.keyboard.press('Escape');
+
+    await expect(page.locator('[data-testid="discard-confirm"]')).toBeVisible();
+    await page.click('[data-testid="btn-keep-editing-action"]');
+    await expect(page.locator('[data-testid="input-name"]')).toHaveValue('Half typed');
+
+    await page.keyboard.press('Escape');
+    await page.click('[data-testid="btn-discard"]');
+    await expect(page.locator('[data-testid="product-form"]')).not.toBeVisible();
+  });
+
+  test('closes on Escape without asking when nothing was touched', async ({ page }) => {
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-testid="product-form"]')).not.toBeVisible();
+    await expect(page.locator('[data-testid="discard-confirm"]')).not.toBeVisible();
+  });
+
+  test('is announced as a dialog, and traps focus inside itself', async ({ page }) => {
+    const dialog = page.locator('[data-testid="product-form"] [role="dialog"]');
+    await expect(dialog).toHaveAttribute('aria-modal', 'true');
+
+    // Labelled by its own heading, so a screen reader says which dialog this is.
+    const labelId = await dialog.getAttribute('aria-labelledby');
+    expect(labelId).toBeTruthy();
+    await expect(page.locator(`#${labelId}`)).toContainText('Add New Product');
+
+    // Autocapture put focus in the panel; nothing behind it should be reachable.
+    const focusedInsideDialog = await page.evaluate(() =>
+      Boolean(document.activeElement?.closest('[role="dialog"]'))
+    );
+    expect(focusedInsideDialog).toBe(true);
+  });
+
+  test('offers no camera button where the browser cannot decode barcodes', async ({ page }) => {
+    // BarcodeDetector is Chromium-only and absent in this harness. A Scan button that
+    // cannot work is worse than none, and typing always works.
+    const hasDetector = await page.evaluate(() => 'BarcodeDetector' in window);
+    if (hasDetector) {
+      await expect(page.locator('[data-testid="btn-scan"]')).toBeVisible();
+    } else {
+      await expect(page.locator('[data-testid="btn-scan"]')).toHaveCount(0);
+      await expect(page.locator('[data-testid="input-barcode"]')).toBeVisible();
+    }
+  });
+
+  test('round-trips the reorder quantity that used to be pinned at 20', async ({ page }) => {
+    await page.click('[data-testid="btn-cancel"]');
+    const editButton = page.locator('[data-testid^="btn-edit-"]').filter({ visible: true }).first();
+    await editButton.click();
+
+    const reorder = page.locator('[data-testid="input-reorder"]');
+    await expect(reorder).toBeVisible();
+    await reorder.fill('35');
+    await page.click('[data-testid="btn-save"]');
+    await expect(page.locator('[data-testid="product-form"]')).not.toBeVisible();
+
+    // Reopen: the value has to come back, which it never could while the form
+    // hardcoded 20 on load.
+    await editButton.click();
+    await expect(page.locator('[data-testid="input-reorder"]')).toHaveValue('35');
   });
 });

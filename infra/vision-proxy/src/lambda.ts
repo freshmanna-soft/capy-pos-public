@@ -1,4 +1,4 @@
-import { identify, validate } from './identify.js';
+import { identify, validate } from './identify.ts';
 
 /** Minimal API Gateway proxy shapes — avoids a dependency on @types/aws-lambda. */
 interface ProxyEvent {

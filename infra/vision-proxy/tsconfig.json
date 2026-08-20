@@ -4,6 +4,16 @@
     "lib": ["ES2023"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    // Source imports name the real files (`./identify.ts`), because `npm start`
+    // runs the TypeScript directly under Node's type stripping and Node will not
+    // guess that a `.js` specifier means a `.ts` file on disk. These two options
+    // let that same source compile: TS accepts the `.ts` specifier and rewrites it
+    // to `.js` in `dist/`, so the Lambda bundle keeps working.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    // Type stripping cannot tell a type import from a value one, so a type left in
+    // a value import crashes `npm start` at load. This turns that into a build error.
+    "verbatimModuleSyntax": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noPropertyAccessFromIndexSignature": true,

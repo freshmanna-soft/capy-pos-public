@@ -30,6 +30,11 @@ function product(id: string, name: string, stock = 10, price = 3): Product {
   );
 }
 
+/** A product whose barcode and SKU are set deliberately, for index collisions. */
+function coded(id: string, name: string, sku: string, barcode: string): Product {
+  return new Product(id, name, 3, sku, 'Produce', 10, undefined, undefined, barcode);
+}
+
 const AVOCADO = product('p1', 'Avocado');
 const OAT_MILK = product('p2', 'Oat Milk');
 const SOURDOUGH = product('p3', 'Sourdough');
@@ -55,6 +60,11 @@ function unsure(): RecognitionResult {
   };
 }
 
+/** One code filling a good part of the frame — a deliberate presentation. */
+function seen(value: string, width = 0.3): ScannedCode {
+  return { value, format: 'ean_13', box: { x: 0.2, y: 0.3, width, height: 0.2 } };
+}
+
 function nothing(): RecognitionResult {
   return { candidates: [], utterance: "I can't tell what that is.", empty: true };
 }
@@ -67,6 +77,9 @@ describe('ClerkFacade', () => {
   let speak: ReturnType<typeof vi.fn>;
   let cancelSpeech: ReturnType<typeof vi.fn>;
   let speaking: WritableSignal<boolean>;
+  let muted: WritableSignal<boolean>;
+  /** What actually reached the speaker, as opposed to what was handed to it. */
+  let spokenAloud: string[];
   let earPause: ReturnType<typeof vi.fn>;
   let earResume: ReturnType<typeof vi.fn>;
   let earStart: ReturnType<typeof vi.fn>;
@@ -74,6 +87,12 @@ describe('ClerkFacade', () => {
   let onFinalPhrase: (phrase: string) => void;
   let tryAddToCart: ReturnType<typeof vi.fn>;
   let decreaseQuantity: ReturnType<typeof vi.fn>;
+  let removeFromCart: ReturnType<typeof vi.fn>;
+  let getQuantity: ReturnType<typeof vi.fn>;
+  let cartItems: WritableSignal<{ product: Product; quantity: number }[]>;
+  let cameraPause: ReturnType<typeof vi.fn>;
+  let barcodeSupported: WritableSignal<boolean>;
+  let cameraResume: ReturnType<typeof vi.fn>;
   let publish: ReturnType<typeof vi.fn>;
   let getActiveProducts: ReturnType<typeof vi.fn>;
   let sampleFrame: ReturnType<typeof vi.fn>;
@@ -83,6 +102,7 @@ describe('ClerkFacade', () => {
   let detectionSource: ReturnType<typeof vi.fn>;
   let detectCodes: ReturnType<typeof vi.fn>;
   let prepareScanner: ReturnType<typeof vi.fn>;
+  let recordCounter: ReturnType<typeof vi.fn>;
   let logRecord: ReturnType<typeof vi.fn>;
   let logAmend: ReturnType<typeof vi.fn>;
 
@@ -90,15 +110,59 @@ describe('ClerkFacade', () => {
     identify = vi.fn().mockResolvedValue(confident());
     cameraStart = vi.fn().mockResolvedValue(true);
     captureFrame = vi.fn().mockReturnValue({ base64: 'ZmFrZQ==', width: 768, height: 576 });
-    speak = vi.fn();
+    muted = signal(false);
+    spokenAloud = [];
+    // Mirrors the real service, where the mute gate lives: the facade hands over
+    // every line it captions and the voice decides whether any of it is heard.
+    speak = vi.fn((text: string) => {
+      if (!muted()) {
+        spokenAloud.push(text);
+      }
+    });
     cancelSpeech = vi.fn();
     speaking = signal(false);
     earPause = vi.fn();
     earResume = vi.fn();
     earStart = vi.fn();
     earStop = vi.fn();
-    tryAddToCart = vi.fn().mockReturnValue({ added: true });
-    decreaseQuantity = vi.fn();
+    cartItems = signal<{ product: Product; quantity: number }[]>([]);
+    // A cart that actually holds things, rather than one that only says yes. The
+    // facade reads quantities back before it removes anything, so a mock that
+    // accepted adds without recording them would make every removal look like a
+    // removal from an empty cart.
+    tryAddToCart = vi.fn((product: Product) => {
+      cartItems.update((items) =>
+        items.some((item) => item.product.id === product.id)
+          ? items.map((item) =>
+              item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+            )
+          : [...items, { product, quantity: 1 }]
+      );
+      return { added: true };
+    });
+    removeFromCart = vi.fn((productId: string) =>
+      cartItems.update((items) => items.filter((item) => item.product.id !== productId))
+    );
+    // Answers from the cart the test set up, so a removal is bounded by what is
+    // really there — the facade checks this before every decrement.
+    getQuantity = vi.fn(
+      (productId: string) =>
+        cartItems().find((item) => item.product.id === productId)?.quantity ?? 0
+    );
+    cameraPause = vi.fn();
+    barcodeSupported = signal(true);
+    cameraResume = vi.fn().mockResolvedValue(true);
+    decreaseQuantity = vi.fn((productId: string) =>
+      cartItems.update((items) =>
+        items.flatMap((item) =>
+          item.product.id === productId
+            ? item.quantity > 1
+              ? [{ ...item, quantity: item.quantity - 1 }]
+              : []
+            : [item]
+        )
+      )
+    );
     publish = vi.fn();
     getActiveProducts = vi.fn().mockResolvedValue([AVOCADO, OAT_MILK, SOURDOUGH]);
     sampleFrame = vi.fn().mockReturnValue(new Uint8Array(16));
@@ -115,6 +179,7 @@ describe('ClerkFacade', () => {
     detectionSource = vi.fn().mockReturnValue({ videoWidth: 1280, videoHeight: 720 });
     detectCodes = vi.fn().mockResolvedValue([]);
     prepareScanner = vi.fn().mockResolvedValue(true);
+    recordCounter = vi.fn();
     logRecord = vi.fn().mockImplementation(() => 'log-1');
     logAmend = vi.fn();
 
@@ -129,6 +194,8 @@ describe('ClerkFacade', () => {
             message: signal(''),
             start: cameraStart,
             stop: vi.fn(),
+            pause: cameraPause,
+            resume: cameraResume,
             sampleFrame,
             captureFrame,
             cameras,
@@ -148,6 +215,11 @@ describe('ClerkFacade', () => {
             lastBoundaryAt: signal(0),
             speak,
             cancel: cancelSpeech,
+            muted,
+            // The real service refuses to speak while muted, so the mock has to as
+            // well — otherwise a "says nothing while muted" assertion would pass
+            // whether or not the facade got it right.
+            setMuted: (value: boolean) => muted.set(value),
           },
         },
         {
@@ -169,6 +241,9 @@ describe('ClerkFacade', () => {
           useValue: {
             tryAddToCart,
             decreaseQuantity,
+            removeFromCart,
+            getQuantity,
+            cartItems,
             totalItems: signal(2),
             total: signal(7.5),
             isCartEmpty: signal(false),
@@ -176,10 +251,10 @@ describe('ClerkFacade', () => {
         },
         { provide: ProductService, useValue: { getActiveProducts } },
         { provide: EventBusService, useValue: { publish } },
-        { provide: TelemetryService, useValue: { recordCounter: vi.fn() } },
+        { provide: TelemetryService, useValue: { recordCounter } },
         {
           provide: BarcodeScannerService,
-          useValue: { supported: signal(true), prepare: prepareScanner, detect: detectCodes },
+          useValue: { supported: barcodeSupported, prepare: prepareScanner, detect: detectCodes },
         },
         {
           provide: RecognitionLogService,
@@ -261,7 +336,7 @@ describe('ClerkFacade', () => {
       clerk.scanNow();
       await vi.waitFor(() => expect(clerk.pendingAdd()).not.toBeNull());
 
-      expect(clerk.pendingAdd()).toEqual({ productId: 'p1', label: 'Avocado' });
+      expect(clerk.pendingAdd()).toEqual({ productId: 'p1', label: 'Avocado', quantity: 1 });
       expect(clerk.undoMsLeft()).toBe(UNDO_WINDOW_MS);
       expect(clerk.undoSecondsLeft()).toBe(UNDO_WINDOW_MS / 1000);
     });
@@ -798,11 +873,6 @@ describe('ClerkFacade', () => {
   });
 
   describe('scanning a barcode', () => {
-    /** One code filling a good part of the frame — a deliberate presentation. */
-    function seen(value: string, width = 0.3): ScannedCode {
-      return { value, format: 'ean_13', box: { x: 0.2, y: 0.3, width, height: 0.2 } };
-    }
-
     it('prepares the detector and mentions barcodes in the greeting', () => {
       expect(prepareScanner).toHaveBeenCalled();
       expect(clerk.caption()).toContain('barcode');
@@ -966,7 +1036,7 @@ describe('ClerkFacade', () => {
       detectCodes.mockResolvedValue([seen('BAR-p1')]);
 
       await vi.waitFor(() => expect(clerk.pendingAdd()).not.toBeNull());
-      expect(clerk.pendingAdd()).toEqual({ productId: 'p1', label: 'Avocado' });
+      expect(clerk.pendingAdd()).toEqual({ productId: 'p1', label: 'Avocado', quantity: 1 });
     });
 
     it('records that the add came from a barcode', async () => {
@@ -1161,6 +1231,534 @@ describe('ClerkFacade', () => {
     it('hides again once the session ends', () => {
       clerk.stop();
       expect(clerk.scanProgress()).toEqual({ kind: 'hidden' });
+    });
+  });
+
+  describe('waiting before it pays', () => {
+    /** A scene that never changes, so the frame gate has nothing to object to. */
+    function holdStill(value = 120): void {
+      sampleFrame.mockReturnValue(new Uint8Array(16).fill(value));
+    }
+
+    it('holds a settled scene through the debounce window before spending', async () => {
+      clerk.stop();
+      vi.useFakeTimers();
+      holdStill();
+      await clerk.start();
+
+      // Settled, past the gate's minimum interval, and still not paid for: the gate
+      // opening is a nomination, not a decision.
+      await vi.advanceTimersByTimeAsync(1300);
+      expect(identify).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(600);
+      expect(identify).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads as focusing rather than offering to look again while it waits', async () => {
+      // The gate reports its cooldown through the debounce, and the HUD turns that
+      // into a "Look again" button — offered for a look that is already coming.
+      clerk.stop();
+      vi.useFakeTimers();
+      holdStill();
+      await clerk.start();
+
+      await vi.advanceTimersByTimeAsync(1300);
+
+      expect(clerk.verdict()).toBe('holding');
+      expect(clerk.scanProgress().kind).toBe('settling');
+    });
+
+    it('does not lose an item that moved again inside the window', async () => {
+      clerk.stop();
+      vi.useFakeTimers();
+      let scene = 120;
+      sampleFrame.mockImplementation(() => new Uint8Array(16).fill(scene));
+      await clerk.start();
+      await vi.advanceTimersByTimeAsync(1300);
+      expect(identify).not.toHaveBeenCalled();
+
+      // The hand nudges it square. Nothing was looked at, so the gate must not go on
+      // holding the scene back as one it has already identified.
+      scene = 30;
+      await vi.advanceTimersByTimeAsync(250);
+      expect(identify).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(2500);
+      expect(identify).toHaveBeenCalledTimes(1);
+    });
+
+    it('looks at once when the cashier asks out loud', async () => {
+      // The wait exists to find out whether they meant it. Being asked is knowing.
+      clerk.scanNow();
+
+      await vi.waitFor(() => expect(identify).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  describe('barcodes before the model', () => {
+    it('keeps the model out of a frame a stocked barcode is already answering', async () => {
+      clerk.stop();
+      vi.useFakeTimers();
+      let scene = 120;
+      sampleFrame.mockImplementation(() => new Uint8Array(16).fill(scene));
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+      await clerk.start();
+
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(tryAddToCart).toHaveBeenCalledWith(AVOCADO);
+
+      // Still being held, bars still readable, but the scene has changed enough that
+      // the gate no longer recognises it — which is the case claiming the scene does
+      // not cover, and the one that quietly bills for what the bars said for free.
+      scene = 30;
+      await vi.advanceTimersByTimeAsync(2500);
+
+      expect(identify).not.toHaveBeenCalled();
+      expect(clerk.barcodePriority()).toBe(true);
+    });
+
+    it('uses its eyes once the bars have really gone', async () => {
+      clerk.stop();
+      vi.useFakeTimers();
+      sampleFrame.mockReturnValue(new Uint8Array(16).fill(120));
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+      await clerk.start();
+      await vi.advanceTimersByTimeAsync(1500);
+
+      // A loose apple after a barcoded jar: nothing else can name it now.
+      detectCodes.mockResolvedValue([]);
+      sampleFrame.mockReturnValue(new Uint8Array(16).fill(30));
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(identify).toHaveBeenCalledTimes(1);
+      expect(clerk.barcodePriority()).toBe(false);
+    });
+
+    it('does not try to decode a frame it has no picture for', async () => {
+      // Between a camera switch and the new stream arriving there is nothing to
+      // decode. Handing that to the detector would ask it about a null video.
+      clerk.stop();
+      vi.useFakeTimers();
+      detectionSource.mockReturnValue(null);
+      detectCodes.mockClear();
+      await clerk.start();
+
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(detectCodes).not.toHaveBeenCalled();
+      expect(clerk.codes()).toHaveLength(0);
+    });
+
+    it('does not stand down for a code the catalogue has never heard of', async () => {
+      // The catalogue may simply be missing that barcode while the product is
+      // stocked, so the packaging is still worth looking at.
+      clerk.stop();
+      vi.useFakeTimers();
+      sampleFrame.mockReturnValue(new Uint8Array(16).fill(120));
+      detectCodes.mockResolvedValue([seen('NOT-STOCKED')]);
+      await clerk.start();
+
+      await vi.advanceTimersByTimeAsync(2500);
+
+      expect(identify).toHaveBeenCalledTimes(1);
+    });
+
+    it('overrules the barcode when the cashier asks for a look', async () => {
+      clerk.stop();
+      vi.useFakeTimers();
+      sampleFrame.mockReturnValue(new Uint8Array(16).fill(120));
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+      await clerk.start();
+      await vi.advanceTimersByTimeAsync(600);
+
+      clerk.scanNow();
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(identify).toHaveBeenCalledTimes(1);
+      expect(clerk.barcodePriority()).toBe(false);
+    });
+  });
+
+  describe('muting her voice', () => {
+    it('silences the audio and says so in text', () => {
+      // The greeting was spoken before any of this, so measure from here.
+      spokenAloud.length = 0;
+
+      clerk.toggleMute();
+
+      expect(clerk.muted()).toBe(true);
+      // The confirmation still arrives, on the channel that is still open.
+      expect(clerk.caption()).toContain('captioning');
+      expect(spokenAloud).toHaveLength(0);
+    });
+
+    it('keeps captioning everything she would have said', async () => {
+      clerk.toggleMute();
+      spokenAloud.length = 0;
+
+      clerk.scanNow();
+
+      await vi.waitFor(() => expect(clerk.caption()).toBe('One avocado, added.'));
+      expect(tryAddToCart).toHaveBeenCalledWith(AVOCADO);
+      expect(spokenAloud).toHaveLength(0);
+    });
+
+    it('speaks the confirmation when the voice comes back', () => {
+      clerk.toggleMute();
+
+      clerk.toggleMute();
+
+      expect(clerk.muted()).toBe(false);
+      expect(spokenAloud).toContain('Voice back on.');
+    });
+
+    it('ignores being muted twice', () => {
+      clerk.setMuted(true);
+      const captioned = clerk.caption();
+
+      clerk.setMuted(true);
+
+      expect(clerk.caption()).toBe(captioned);
+    });
+
+    it('is asked for by voice, without closing the microphone', () => {
+      clerk.toggleMic();
+
+      onFinalPhrase('be quiet please');
+
+      expect(clerk.muted()).toBe(true);
+      // Muting her is not the same as deafening her: the next spoken command still
+      // has to land, and the mic is the only way it can.
+      expect(clerk.micEnabled()).toBe(true);
+      expect(earStop).not.toHaveBeenCalled();
+    });
+
+    it('gives the voice back when asked', () => {
+      clerk.setMuted(true);
+
+      onFinalPhrase('unmute');
+
+      expect(clerk.muted()).toBe(false);
+    });
+
+    it('closes the microphone when told to stop listening, and leaves it closed', () => {
+      clerk.toggleMic();
+
+      onFinalPhrase('stop listening');
+      expect(clerk.micEnabled()).toBe(false);
+
+      // "Start listening" into a microphone that is off cannot be heard, so a second
+      // phrase must not toggle it back on — that reading would make any stray word
+      // reopen a mic the cashier deliberately closed.
+      onFinalPhrase('stop listening');
+      expect(clerk.micEnabled()).toBe(false);
+    });
+  });
+
+  describe('the rest of the spoken vocabulary', () => {
+    it('rejects the options on a spoken no', async () => {
+      identify.mockResolvedValue(unsure());
+      clerk.scanNow();
+      await vi.waitFor(() => expect(clerk.awaitingChoice()).toBe(true));
+
+      onFinalPhrase('no, none of those');
+
+      expect(clerk.awaitingChoice()).toBe(false);
+      expect(clerk.caption()).toBe('Show me again.');
+    });
+
+    it('switches the camera off when asked, without ending the session', async () => {
+      onFinalPhrase('turn the camera off');
+
+      await vi.waitFor(() => expect(clerk.cameraEnabled()).toBe(false));
+      expect(clerk.phase()).toBe('ready');
+    });
+
+    it('stops guessing when asked, and starts again when asked', () => {
+      onFinalPhrase('barcodes only');
+      expect(clerk.aiEnabled()).toBe(false);
+
+      onFinalPhrase('recognition on');
+      expect(clerk.aiEnabled()).toBe(true);
+    });
+
+    it('looks again when asked out loud', async () => {
+      onFinalPhrase('have another look');
+
+      await vi.waitFor(() => expect(identify).toHaveBeenCalled());
+    });
+
+    it('will not guess when a spoken name fits both options on screen', async () => {
+      // "Which one?" answered with a word that fits both is not an answer, and
+      // picking the first would charge for an item nobody named.
+      clerk.stop();
+      const soy = product('c2', 'Soy Milk');
+      getActiveProducts.mockResolvedValue([OAT_MILK, soy]);
+      identify.mockResolvedValue({
+        candidates: [
+          { productId: 'p2', label: 'Oat Milk', confidence: 0.74 },
+          { productId: 'c2', label: 'Soy Milk', confidence: 0.71 },
+        ],
+        utterance: 'Which one is it?',
+        empty: false,
+      });
+      await clerk.start();
+      clerk.scanNow();
+      await vi.waitFor(() => expect(clerk.awaitingChoice()).toBe(true));
+
+      onFinalPhrase('add milk');
+
+      expect(tryAddToCart).not.toHaveBeenCalled();
+      expect(clerk.caption()).toContain('Which one?');
+    });
+
+    it('says which kind of miss a removal was, on the bus as well as out loud', () => {
+      cartItems.set([{ product: OAT_MILK, quantity: 1 }]);
+
+      // Stocked, but not in this sale.
+      onFinalPhrase('remove the avocado');
+      expect(clerk.caption()).toContain('no avocado in the cart');
+      expect(publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: EventType.CLERK_ITEM_REJECTED,
+          payload: expect.objectContaining({ reason: 'not-in-cart' }),
+        })
+      );
+
+      // Not stocked at all, which is a different thing to check.
+      onFinalPhrase('remove the caviar');
+      expect(clerk.caption()).toContain('in the catalogue');
+      expect(publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ reason: 'unknown-spoken-name' }),
+        })
+      );
+    });
+  });
+
+  describe('what the recognition log is not charged for', () => {
+    it('does not score the recognizer when the cashier picks from a spoken ambiguity', async () => {
+      // Nothing was proposed by a recognizer, so there is no ranking to be right or
+      // wrong about — a row here would drag the model's accuracy down for work it
+      // never did.
+      clerk.stop();
+      getActiveProducts.mockResolvedValue([product('c1', 'Coffee'), product('c2', 'Coffee Beans')]);
+      await clerk.start();
+
+      onFinalPhrase('add a coffee');
+      expect(clerk.candidateCards().length).toBeGreaterThan(1);
+      logRecord.mockClear();
+
+      clerk.chooseCandidate(1);
+
+      expect(tryAddToCart).toHaveBeenCalled();
+      expect(logRecord).not.toHaveBeenCalled();
+    });
+
+    it('does not score the recognizer when a spoken ambiguity is rejected outright', async () => {
+      clerk.stop();
+      getActiveProducts.mockResolvedValue([product('c1', 'Coffee'), product('c2', 'Coffee Beans')]);
+      await clerk.start();
+
+      onFinalPhrase('add a coffee');
+      logRecord.mockClear();
+
+      clerk.reject();
+
+      expect(logRecord).not.toHaveBeenCalled();
+      expect(clerk.awaitingChoice()).toBe(false);
+    });
+
+    it('goes back to idle when an undo window closes on a found pose', async () => {
+      vi.useFakeTimers();
+      clerk.scanNow();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(clerk.visualState()).toBe('found');
+
+      await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS + 500);
+
+      // A face still lit up over an item nobody can undo any more is a lie.
+      expect(clerk.visualState()).toBe('idle');
+    });
+  });
+
+  describe('refusals, misses and the states nobody plans for', () => {
+    it('says the cart is empty when asked to take something off an empty sale', () => {
+      cartItems.set([]);
+
+      onFinalPhrase('remove the avocado');
+
+      expect(clerk.caption()).toBe('The cart is empty.');
+      expect(decreaseQuantity).not.toHaveBeenCalled();
+    });
+
+    it('asks which one when two things in the cart answer to the same word', () => {
+      // Deliberately a question rather than the candidate cards: pressing a card
+      // adds, which is the opposite of what was asked.
+      cartItems.set([
+        { product: OAT_MILK, quantity: 1 },
+        { product: product('p4', 'Soy Milk'), quantity: 1 },
+      ]);
+
+      onFinalPhrase('remove the milk');
+
+      expect(clerk.caption()).toContain('Which one?');
+      expect(clerk.caption()).toContain('oat milk');
+      expect(decreaseQuantity).not.toHaveBeenCalled();
+      expect(removeFromCart).not.toHaveBeenCalled();
+    });
+
+    it('takes off only as many as were asked for when more are in the cart', () => {
+      cartItems.set([{ product: AVOCADO, quantity: 3 }]);
+
+      onFinalPhrase('remove one avocado');
+
+      expect(decreaseQuantity).toHaveBeenCalledTimes(1);
+      // The line survives, so it must not be dropped wholesale.
+      expect(removeFromCart).not.toHaveBeenCalled();
+    });
+
+    it('answers rather than throwing when the line and its quantity disagree', () => {
+      // `decreaseQuantity` throws once the line is gone, and this runs inside a
+      // speech callback where a thrown error is swallowed and reads as silence.
+      cartItems.set([{ product: AVOCADO, quantity: 1 }]);
+      getQuantity.mockReturnValue(0);
+
+      onFinalPhrase('remove the avocado');
+
+      expect(clerk.caption()).toContain('no avocado in the cart');
+      expect(decreaseQuantity).not.toHaveBeenCalled();
+      expect(removeFromCart).not.toHaveBeenCalled();
+    });
+
+    it('leaves the undo window alone when a different item is taken off', () => {
+      cartItems.set([
+        { product: AVOCADO, quantity: 1 },
+        { product: OAT_MILK, quantity: 1 },
+      ]);
+      onFinalPhrase('add an avocado');
+      expect(clerk.pendingAdd()?.productId).toBe('p1');
+
+      onFinalPhrase('remove the oat milk');
+
+      // The window still describes a line that is still there.
+      expect(clerk.pendingAdd()?.productId).toBe('p1');
+    });
+
+    it('says the item is already gone rather than throwing on a stale undo', async () => {
+      clerk.scanNow();
+      await vi.waitFor(() => expect(clerk.pendingAdd()).not.toBeNull());
+      // A checkout, or a spoken removal, emptied the line the window refers to.
+      cartItems.set([]);
+      decreaseQuantity.mockClear();
+
+      clerk.undoLast();
+
+      expect(clerk.caption()).toContain('already off the sale');
+      expect(decreaseQuantity).not.toHaveBeenCalled();
+      expect(clerk.pendingAdd()).toBeNull();
+    });
+
+    it('does not revise a recognizer row when undoing something the cashier named', () => {
+      // There is no row to revise: nothing was proposed, so nothing was wrong.
+      onFinalPhrase('add an avocado');
+      logAmend.mockClear();
+
+      clerk.undoLast();
+
+      expect(logAmend).not.toHaveBeenCalled();
+    });
+
+    it('reads a plural that needs more than an s', async () => {
+      // "2 peachs" is the kind of detail that makes a voice sound broken.
+      clerk.stop();
+      getActiveProducts.mockResolvedValue([product('p6', 'Peach')]);
+      await clerk.start();
+
+      onFinalPhrase('add two peaches');
+
+      expect(clerk.caption()).toBe('2 peaches, added.');
+    });
+
+    it("keeps a deliberate barcode from being shadowed by another product's SKU", async () => {
+      clerk.stop();
+      const jam = coded('p7', 'Jam', 'JAM-SKU', 'DUP-1');
+      const shelfLabel = coded('p8', 'Shelf Label', 'DUP-1', 'LABEL-BAR');
+      getActiveProducts.mockResolvedValue([jam, shelfLabel]);
+      await clerk.start();
+
+      detectCodes.mockResolvedValue([seen('DUP-1')]);
+
+      // First writer wins: the barcode was registered before the colliding SKU.
+      await vi.waitFor(() => expect(tryAddToCart).toHaveBeenCalledWith(jam));
+    });
+
+    it('drops boxes that were decoded after the session ended', async () => {
+      let release: (codes: ScannedCode[]) => void = () => undefined;
+      detectCodes.mockImplementation(
+        () => new Promise<ScannedCode[]>((resolve) => (release = resolve))
+      );
+      await vi.waitFor(() => expect(detectCodes).toHaveBeenCalled());
+
+      clerk.stop();
+      release([seen('BAR-p1')]);
+      await Promise.resolve();
+
+      // Those brackets belong to a frame that no longer exists, and that item
+      // belongs to a sale nobody is making.
+      expect(clerk.codes()).toHaveLength(0);
+      expect(tryAddToCart).not.toHaveBeenCalled();
+    });
+
+    it('rings the sale up even when telemetry is broken', async () => {
+      // The agent-monitor dashboard is useful; it is not worth failing a sale over.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      recordCounter.mockImplementation(() => {
+        throw new Error('exporter down');
+      });
+
+      clerk.scanNow();
+
+      await vi.waitFor(() => expect(tryAddToCart).toHaveBeenCalledWith(AVOCADO));
+      expect(warn).toHaveBeenCalled();
+    });
+
+    it('ignores being told twice to stop guessing', () => {
+      clerk.setAiEnabled(false);
+      const said = clerk.caption();
+
+      clerk.setAiEnabled(false);
+
+      // No second announcement, and nothing else re-run.
+      expect(clerk.caption()).toBe(said);
+    });
+
+    it('ignores being told twice to switch the camera off', async () => {
+      await clerk.setCameraEnabled(false);
+      cameraPause.mockClear();
+
+      await clerk.setCameraEnabled(false);
+
+      expect(cameraPause).not.toHaveBeenCalled();
+    });
+
+    it('will not switch the camera before the session is running', async () => {
+      clerk.stop();
+      cameraPause.mockClear();
+
+      await clerk.setCameraEnabled(false);
+
+      expect(cameraPause).not.toHaveBeenCalled();
+    });
+
+    it('will not cycle cameras while the camera is off, which would reopen one', async () => {
+      await clerk.setCameraEnabled(false);
+      selectCamera.mockClear();
+
+      await clerk.cycleCamera();
+
+      expect(selectCamera).not.toHaveBeenCalled();
     });
   });
 
@@ -1359,6 +1957,260 @@ describe('ClerkFacade', () => {
       expect(tryAddToCart).not.toHaveBeenCalled();
     });
   });
+
+  describe('ringing up by voice', () => {
+    it('adds a product the cashier names out loud', () => {
+      // The bug this feature exists for: saying the name of something used to do
+      // nothing at all, because names were only ever matched against the two or
+      // three candidates already on screen.
+      onFinalPhrase('add a sourdough');
+      expect(tryAddToCart).toHaveBeenCalledWith(SOURDOUGH);
+      expect(clerk.caption()).toBe('One sourdough, added.');
+    });
+
+    it('adds as many as were asked for', () => {
+      tryAddToCart.mockClear();
+      onFinalPhrase('add three sourdoughs');
+      // Three separate adds, so stock is checked three times rather than once.
+      expect(tryAddToCart).toHaveBeenCalledTimes(3);
+      expect(clerk.caption()).toBe('3 sourdoughs, added.');
+    });
+
+    it('adds what stock allows and says it fell short', () => {
+      let calls = 0;
+      tryAddToCart.mockImplementation(() =>
+        ++calls <= 2 ? { added: true } : { added: false, reason: 'out-of-stock' }
+      );
+      onFinalPhrase('add five sourdoughs');
+      expect(calls).toBe(3);
+      expect(clerk.caption()).toContain('Only 2');
+    });
+
+    it('does not score the recognizer for an item the cashier named', () => {
+      // The log measures how good the *camera* is. A spoken add is the cashier
+      // telling the till, so a row here would drag the tier's accuracy down for
+      // work no recognizer did.
+      logRecord.mockClear();
+      onFinalPhrase('add a sourdough');
+      expect(logRecord).not.toHaveBeenCalled();
+    });
+
+    it('offers a choice when the name fits more than one product', async () => {
+      clerk.stop();
+      getActiveProducts.mockResolvedValue([product('m1', 'Oat Milk'), product('m2', 'Soy Milk')]);
+      await clerk.start();
+      tryAddToCart.mockClear();
+
+      onFinalPhrase('add a milk');
+
+      // "milk" does not distinguish them, so nothing is charged for until the
+      // cashier says which — the same cards the camera path uses.
+      expect(tryAddToCart).not.toHaveBeenCalled();
+      expect(clerk.candidateCards().map((card) => card.label)).toEqual(['Oat Milk', 'Soy Milk']);
+    });
+
+    it('answers a name it does not stock instead of going quiet', () => {
+      onFinalPhrase('add a pineapple');
+      expect(tryAddToCart).not.toHaveBeenCalled();
+      expect(clerk.caption()).toContain('pineapple');
+    });
+
+    it('treats naming one of the candidates on screen as answering the question', async () => {
+      identify.mockResolvedValue(unsure());
+      clerk.scanNow();
+      await vi.waitFor(() => expect(clerk.candidateCards().length).toBeGreaterThan(1));
+      logRecord.mockClear();
+
+      onFinalPhrase('add the oat milk');
+
+      // Routed through the choice, not the catalog, so the row that says whether
+      // the recognizer ranked it correctly still gets written.
+      expect(logRecord).toHaveBeenCalled();
+      expect(clerk.candidateCards()).toEqual([]);
+    });
+  });
+
+  describe('taking things off by voice', () => {
+    beforeEach(() => {
+      onFinalPhrase('add a sourdough');
+    });
+
+    it('removes a named item', () => {
+      onFinalPhrase('remove the sourdough');
+      expect(cartItems()).toEqual([]);
+      expect(clerk.caption()).toBe('One sourdough removed.');
+    });
+
+    it('never takes off more than the cart holds', () => {
+      onFinalPhrase('remove three sourdoughs');
+      // One in the cart, so the line goes rather than three decrements running off
+      // the end — `decreaseQuantity` throws once the line is gone.
+      expect(removeFromCart).toHaveBeenCalledWith('p3');
+      expect(decreaseQuantity).not.toHaveBeenCalled();
+    });
+
+    it('says which kind of miss it was rather than throwing', () => {
+      onFinalPhrase('remove the avocado');
+      expect(decreaseQuantity).not.toHaveBeenCalled();
+      expect(removeFromCart).not.toHaveBeenCalled();
+      // Stocked but not rung up, which is a different fix from "we don't sell it".
+      expect(clerk.caption()).toBe("There's no avocado in the cart.");
+    });
+
+    it('closes the undo window it just invalidated', () => {
+      expect(clerk.pendingAdd()).not.toBeNull();
+      onFinalPhrase('remove the sourdough');
+      // Otherwise Undo stays on screen offering to decrement a line that is gone.
+      expect(clerk.pendingAdd()).toBeNull();
+    });
+
+    it('reports the removal on the bus, which a bare decrement never does', () => {
+      publish.mockClear();
+      onFinalPhrase('remove the sourdough');
+      expect(publish).toHaveBeenCalledWith(
+        expect.objectContaining({ type: EventType.CLERK_ITEM_REMOVED })
+      );
+    });
+
+    it('answers a request to empty the cart instead of hunting for a product', () => {
+      onFinalPhrase('clear the cart');
+      expect(removeFromCart).not.toHaveBeenCalled();
+      expect(clerk.caption()).toContain("can't clear the whole cart");
+    });
+
+    it('says something when there is nothing left to undo', () => {
+      onFinalPhrase('remove the sourdough');
+      onFinalPhrase('undo');
+      // Same class of bug as the one being fixed: a control that does nothing is
+      // indistinguishable from a broken one.
+      expect(clerk.caption()).toContain('Nothing to undo');
+    });
+  });
+
+  describe('the recognition switch', () => {
+    it('stops paying the model while barcodes carry on', async () => {
+      identify.mockClear();
+      detectCodes.mockClear();
+
+      clerk.toggleAi();
+
+      expect(clerk.aiEnabled()).toBe(false);
+      // The camera stays live: a barcode still needs a picture to be read from.
+      expect(clerk.cameraEnabled()).toBe(true);
+      expect(cameraPause).not.toHaveBeenCalled();
+      // Barcode detection is still being asked for; the model is not.
+      await vi.waitFor(() => expect(detectCodes).toHaveBeenCalled());
+      expect(identify).not.toHaveBeenCalled();
+    });
+
+    it('still rings up a barcode with recognition off', async () => {
+      clerk.toggleAi();
+      tryAddToCart.mockClear();
+      detectCodes.mockResolvedValue([
+        { value: 'BAR-p1', format: 'ean_13', box: { x: 0.2, y: 0.3, width: 0.3, height: 0.2 } },
+      ]);
+
+      await vi.waitFor(() => expect(tryAddToCart).toHaveBeenCalledWith(AVOCADO));
+      expect(identify).not.toHaveBeenCalled();
+    });
+
+    it('says it cannot name anything when the browser has no barcode reader either', () => {
+      barcodeSupported.set(false);
+      clerk.toggleAi();
+      // Otherwise this setting silently turns the till into a screen that does
+      // nothing, and the cashier finds out while holding an apple.
+      expect(clerk.caption()).toContain("can't read barcodes");
+    });
+
+    it('drops an answer that arrived after being told to stop guessing', async () => {
+      let release: (value: RecognitionResult) => void = () => undefined;
+      identify.mockReturnValue(
+        new Promise<RecognitionResult>((resolve) => {
+          release = resolve;
+        })
+      );
+      clerk.scanNow();
+      await vi.waitFor(() => expect(identify).toHaveBeenCalled());
+      tryAddToCart.mockClear();
+
+      clerk.toggleAi();
+      release(confident());
+      await Promise.resolve();
+
+      // The frame it describes predates the decision to stop.
+      expect(tryAddToCart).not.toHaveBeenCalled();
+    });
+
+    it('explains itself rather than looking broken when asked to look again', () => {
+      clerk.toggleAi();
+      captureFrame.mockClear();
+      clerk.scanNow();
+      expect(captureFrame).not.toHaveBeenCalled();
+      expect(clerk.caption()).toContain('Recognition is off');
+    });
+
+    it('comes back on and looks at the scene it was told to ignore', () => {
+      clerk.toggleAi();
+      clerk.toggleAi();
+      expect(clerk.aiEnabled()).toBe(true);
+      expect(clerk.caption()).toContain('Recognition on');
+    });
+  });
+
+  describe('the camera switch', () => {
+    it('lets go of the camera without ending the session', async () => {
+      clerk.toggleMic();
+      await clerk.toggleCamera();
+
+      expect(cameraPause).toHaveBeenCalled();
+      expect(clerk.cameraEnabled()).toBe(false);
+      // The point of the whole feature: blind, but still open for business.
+      expect(clerk.phase()).toBe('ready');
+      expect(clerk.micEnabled()).toBe(true);
+    });
+
+    it('still rings up spoken items with the camera off', async () => {
+      await clerk.toggleCamera();
+      tryAddToCart.mockClear();
+
+      onFinalPhrase('add a sourdough');
+
+      expect(tryAddToCart).toHaveBeenCalledWith(SOURDOUGH);
+    });
+
+    it('reopens the camera that was live, not the saved favourite', async () => {
+      await clerk.toggleCamera();
+      await clerk.toggleCamera();
+      expect(cameraResume).toHaveBeenCalled();
+      expect(cameraStart).toHaveBeenCalledTimes(1);
+      expect(clerk.cameraEnabled()).toBe(true);
+    });
+
+    it('keeps the session alive when the camera will not come back', async () => {
+      await clerk.toggleCamera();
+      cameraResume.mockResolvedValue(false);
+
+      await clerk.toggleCamera();
+
+      // 'blocked' would throw up the terminal overlay and end a session the
+      // operator only meant to un-pause.
+      expect(clerk.phase()).toBe('ready');
+      expect(clerk.cameraEnabled()).toBe(false);
+    });
+
+    it('refuses to switch cameras while it is off, which would reopen one', async () => {
+      await clerk.toggleCamera();
+      await clerk.selectCamera('cam-b');
+      expect(selectCamera).not.toHaveBeenCalled();
+    });
+
+    it('says the camera is off rather than silently not looking', async () => {
+      await clerk.toggleCamera();
+      clerk.scanNow();
+      expect(captureFrame).not.toHaveBeenCalled();
+      expect(clerk.caption()).toContain('camera is off');
+    });
+  });
 });
 
 /**
@@ -1402,6 +2254,8 @@ describe('ClerkFacade where the browser cannot listen', () => {
             supported: false,
             speaking: signal(false),
             lastBoundaryAt: signal(0),
+            muted: signal(false),
+            setMuted: vi.fn(),
             speak: vi.fn(),
             cancel: vi.fn(),
           },

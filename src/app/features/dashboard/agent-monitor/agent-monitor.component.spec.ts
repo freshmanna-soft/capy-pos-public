@@ -1,4 +1,7 @@
+import { TestBed } from '@angular/core/testing';
+import { Router } from '@angular/router';
 import {
+  AgentMonitorComponent,
   AgentStatus,
   buildAgentsView,
   buildCircuitBreakerView,
@@ -8,6 +11,7 @@ import {
   sumSkippedRecords,
 } from './agent-monitor.component';
 import {
+  CircuitBreakerService,
   CircuitBreakerStats,
   CircuitState,
 } from '@core/infrastructure/resilience/circuit-breaker.service';
@@ -16,12 +20,19 @@ import {
   MetricSummary,
   MetricType,
   REPOSITORY_RECORDS_SKIPPED_METRIC,
+  TelemetryService,
 } from '@core/infrastructure/telemetry/telemetry.service';
 import {
   AuditAction,
   AuditLogEntry,
+  AuditLogService,
   AuditStatus,
 } from '@core/infrastructure/audit/audit-log.service';
+import { AgentRegistry } from '@app/agents/agent.registry';
+import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
+import { SyncService } from '@core/infrastructure/sync/sync.service';
+import { GetLowStockAlertsUseCase } from '@core/application/use-cases/get-low-stock-alerts.use-case';
+import { LowStockSettingsService } from '@core/application/services/low-stock-settings.service';
 
 /**
  * Coverage for the dashboard's skipped-records aggregation (#111). The Skipped
@@ -410,5 +421,236 @@ describe('buildRecentAuditView', () => {
     buildRecentAuditView(entries);
 
     expect(entries.map((e) => e.id)).toEqual(originalOrder);
+  });
+});
+
+describe('AgentMonitorComponent', () => {
+  let getAllAgents: ReturnType<typeof vi.fn>;
+  let getAllStats: ReturnType<typeof vi.fn>;
+  let getAllMetricSummaries: ReturnType<typeof vi.fn>;
+  let getRecentLogs: ReturnType<typeof vi.fn>;
+  let getStatistics: ReturnType<typeof vi.fn>;
+  let getBusStatistics: ReturnType<typeof vi.fn>;
+  let exportLogs: ReturnType<typeof vi.fn>;
+  let getHealth: ReturnType<typeof vi.fn>;
+
+  /** One registered agent, healthy unless a test says otherwise. */
+  function agent(id: string, name: string, healthy = true) {
+    return {
+      id,
+      name,
+      getHealth: getHealth.mockResolvedValue({ healthy, lastActivity: new Date(0) }),
+      getStatus: () => (healthy ? 'running' : 'stopped'),
+    };
+  }
+
+  beforeEach(() => {
+    getHealth = vi.fn().mockResolvedValue({ healthy: true, lastActivity: new Date(0) });
+    getAllAgents = vi.fn().mockReturnValue([]);
+    getAllStats = vi.fn().mockReturnValue({});
+    getAllMetricSummaries = vi.fn().mockReturnValue({});
+    getRecentLogs = vi.fn().mockReturnValue([]);
+    getStatistics = vi.fn().mockResolvedValue({ totalLogs: 0 });
+    getBusStatistics = vi.fn().mockReturnValue({
+      totalMessages: 0,
+      byType: {},
+      bySource: {},
+      byPriority: {},
+    });
+    exportLogs = vi.fn().mockResolvedValue('[]');
+
+    TestBed.configureTestingModule({
+      imports: [AgentMonitorComponent],
+      providers: [
+        { provide: AgentRegistry, useValue: { getAllAgents } },
+        { provide: EventBusService, useValue: { getStatistics: getBusStatistics } },
+        {
+          provide: AuditLogService,
+          useValue: { getRecentLogs, getStatistics, export: exportLogs },
+        },
+        { provide: CircuitBreakerService, useValue: { getAllStats } },
+        { provide: TelemetryService, useValue: { getAllMetricSummaries } },
+        {
+          provide: SyncService,
+          useValue: {
+            isRunning: () => false,
+            circuitState: () => 'CLOSED' as WorkerCircuitState,
+            totalSyncs: () => 0,
+            totalFailures: () => 0,
+          },
+        },
+        // The low-stock widget renders inside this dashboard and fetches on init.
+        {
+          provide: GetLowStockAlertsUseCase,
+          useValue: {
+            execute: vi
+              .fn()
+              .mockResolvedValue({ totalCount: 0, criticalCount: 0, warningCount: 0, alerts: [] }),
+          },
+        },
+        {
+          provide: LowStockSettingsService,
+          useValue: { loadThreshold: vi.fn().mockResolvedValue(5) },
+        },
+        { provide: Router, useValue: { navigate: vi.fn() } },
+      ],
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mount() {
+    const fixture = TestBed.createComponent(AgentMonitorComponent);
+    fixture.detectChanges();
+    return fixture;
+  }
+
+  it('shows every registered agent, unhealthy ones first, and counts what is running', async () => {
+    getAllAgents.mockReturnValue([
+      {
+        ...agent('a1', 'Sync'),
+        getHealth: vi.fn().mockResolvedValue({ healthy: true, lastActivity: new Date(0) }),
+        getStatus: () => 'running',
+      },
+      {
+        ...agent('a2', 'Analytics'),
+        getHealth: vi.fn().mockResolvedValue({ healthy: false, lastActivity: new Date(0) }),
+        getStatus: () => 'stopped',
+      },
+    ]);
+
+    const fixture = mount();
+    await vi.waitFor(() => expect(fixture.componentInstance.agents()).toHaveLength(2));
+
+    // An agent that has stopped is the reason someone opened this page.
+    expect(fixture.componentInstance.agents()[0]!.name).toBe('Analytics');
+    expect(fixture.componentInstance.runningAgents()).toBe(1);
+    fixture.destroy();
+  });
+
+  it("reads the dashboard's panels from the services on open", async () => {
+    getAllStats.mockReturnValue({
+      'payment-gateway': {
+        state: CircuitState.OPEN,
+        failures: 3,
+        successes: 1,
+        lastFailureTime: new Date(0),
+        nextAttemptTime: new Date(0),
+      },
+    });
+    getAllMetricSummaries.mockReturnValue({
+      'clerk.recognitions{recognizer:claude}': summary('clerk.recognitions', 4),
+      [`${REPOSITORY_RECORDS_SKIPPED_METRIC}{entity:product}`]: summary(
+        REPOSITORY_RECORDS_SKIPPED_METRIC,
+        2
+      ),
+    });
+    getBusStatistics.mockReturnValue({
+      totalMessages: 7,
+      byType: { 'cart.item.added': 5, 'sync.push.failed': 2 },
+      bySource: { PosFacade: 7 },
+      byPriority: { normal: 7 },
+    });
+    getStatistics.mockResolvedValue({ totalLogs: 12 });
+
+    const fixture = mount();
+    await vi.waitFor(() => expect(fixture.componentInstance.auditStats().totalLogs).toBe(12));
+
+    const monitor = fixture.componentInstance;
+    expect(Object.keys(monitor.circuitBreakers())).toContain('payment-gateway');
+    expect(monitor.metricsView().map((row) => row.name)).toContain('clerk.recognitions');
+    // The tile reports records dropped, not the number of skip events.
+    expect(monitor.skippedRecords()).toBe(2);
+    expect(monitor.eventBusView().totalMessages).toBe(7);
+    expect(monitor.eventBusView().byType[0]!.label).toBe('cart.item.added');
+    fixture.destroy();
+  });
+
+  it('keeps refreshing while the page is open, and stops when it closes', async () => {
+    vi.useFakeTimers();
+    const fixture = mount();
+    await vi.advanceTimersByTimeAsync(1);
+    const initial = getAllStats.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(getAllStats.mock.calls.length).toBeGreaterThan(initial);
+
+    fixture.destroy();
+    const afterDestroy = getAllStats.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    // A dashboard that keeps polling after it is gone is a leak with a heartbeat.
+    expect(getAllStats.mock.calls.length).toBe(afterDestroy);
+    vi.useRealTimers();
+  });
+
+  it('finds a trace id in an audit entry, and ignores one that is not a string', () => {
+    const fixture = mount();
+    const monitor = fixture.componentInstance;
+    const base = {
+      id: 'a1',
+      timestamp: new Date(0),
+      action: AuditAction.DELETE,
+      status: AuditStatus.FAILURE,
+      entityType: 'Product',
+      entityId: 'p1',
+    } as AuditLogEntry;
+
+    expect(monitor.traceIdOf({ ...base, metadata: { traceId: 'trace-1' } })).toBe('trace-1');
+    expect(monitor.traceIdOf({ ...base, metadata: { traceId: 42 } })).toBeUndefined();
+    expect(monitor.traceIdOf({ ...base, metadata: { traceId: '' } })).toBeUndefined();
+    expect(monitor.traceIdOf(base)).toBeUndefined();
+    fixture.destroy();
+  });
+
+  it('copies a trace id and clears the tick afterwards', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const fixture = mount();
+
+    await fixture.componentInstance.copyTrace('trace-1');
+    expect(fixture.componentInstance.copiedTraceId()).toBe('trace-1');
+
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(fixture.componentInstance.copiedTraceId()).toBeNull();
+    fixture.destroy();
+    vi.useRealTimers();
+  });
+
+  it('says nothing when the clipboard is unavailable', async () => {
+    // Insecure context, or permission refused. Not being able to copy a trace ref is
+    // not a reason to break the page.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+      configurable: true,
+    });
+    const fixture = mount();
+
+    await expect(fixture.componentInstance.copyTrace('trace-1')).resolves.toBeUndefined();
+    expect(fixture.componentInstance.copiedTraceId()).toBeNull();
+    fixture.destroy();
+  });
+
+  it('exports the audit log as a downloadable file', async () => {
+    const url = 'blob:audit';
+    const createObjectURL = vi.fn().mockReturnValue(url);
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined);
+    const fixture = mount();
+
+    await fixture.componentInstance.exportAuditLogs();
+
+    expect(exportLogs).toHaveBeenCalledWith({}, 'json');
+    expect(click).toHaveBeenCalled();
+    // Revoked in the same breath it was created, so the blob is not held forever.
+    expect(revokeObjectURL).toHaveBeenCalledWith(url);
+    fixture.destroy();
+    vi.unstubAllGlobals();
   });
 });

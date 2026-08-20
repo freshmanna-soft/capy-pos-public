@@ -30,6 +30,7 @@ function stubCanvas(): { canvas: HTMLCanvasElement; calls: string[] } {
     moveTo: record('moveTo'),
     lineTo: record('lineTo'),
     quadraticCurveTo: record('quadraticCurveTo'),
+    bezierCurveTo: record('bezierCurveTo'),
     arcTo: record('arcTo'),
     arc: record('arc'),
     rect: record('rect'),

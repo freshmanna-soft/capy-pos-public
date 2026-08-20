@@ -34,6 +34,30 @@ export interface IProductRepository extends IBaseRepository<Product> {
   search(query: string, limit?: number): Promise<Product[]>;
 
   /**
+   * Finds the product carrying an exact SKU.
+   *
+   * Exact, unlike `search`, because this answers an identity question rather than a
+   * lookup one: whether registering this SKU would collide with a product that
+   * already exists.
+   *
+   * @param sku - The SKU to match exactly
+   * @returns The product, or null when the SKU is unused
+   */
+  findBySKU(sku: string): Promise<Product | null>;
+
+  /**
+   * Finds the product carrying an exact barcode.
+   *
+   * The till keys its scan lookup on this value and rings the result up at full
+   * confidence, so two products sharing one is a wrong price rather than untidy
+   * data. This is what lets a collision be refused before it is created.
+   *
+   * @param barcode - The barcode to match exactly
+   * @returns The product, or null when the barcode is unused
+   */
+  findByBarcode(barcode: string): Promise<Product | null>;
+
+  /**
    * Retrieves products with low stock
    * @param threshold - Stock threshold (default: 10)
    * @returns Promise resolving to array of low-stock products

@@ -59,6 +59,33 @@ export class SQLiteProductRepository
   }
 
   /**
+   * Find the product with exactly this SKU.
+   *
+   * `LIMIT 1` rather than a uniqueness assertion: the column is declared UNIQUE in
+   * this schema but the Dexie store it has to agree with is not, so rows that
+   * predate any constraint can exist and returning the first is the honest answer.
+   */
+  async findBySKU(sku: string): Promise<Product | null> {
+    return this.findOneWhere('sku', sku);
+  }
+
+  /** Find the product with exactly this barcode. */
+  async findByBarcode(barcode: string): Promise<Product | null> {
+    return this.findOneWhere('barcode', barcode);
+  }
+
+  private async findOneWhere(column: 'sku' | 'barcode', value: string): Promise<Product | null> {
+    const sql = `
+      SELECT * FROM ${this.tableName}
+      WHERE ${column} = ? AND deleted_at IS NULL
+      LIMIT 1
+    `;
+    const rows = this.db.query(sql, [value] as import('sql.js').BindParams);
+    const row = rows[0];
+    return row ? this.mapToEntity(row) : null;
+  }
+
+  /**
    * Find products with low stock
    */
   async findLowStock(threshold = 10): Promise<Product[]> {

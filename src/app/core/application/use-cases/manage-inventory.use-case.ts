@@ -68,6 +68,14 @@ export interface ProductSummaryDTO {
   lowStockThreshold: number;
   description: string;
   barcode: string;
+  /**
+   * Included so the edit form can round-trip it.
+   *
+   * Absent from this DTO, the form had nothing to load and hardcoded 20 — meaning
+   * every product ever saved through it carried a reorder quantity of 20 whatever
+   * had been configured.
+   */
+  reorderQuantity: number;
 }
 
 /**
@@ -149,6 +157,8 @@ export class ManageInventoryUseCase {
     this._error.set(null);
 
     try {
+      await this.assertCodesAreFree(request.sku, request.barcode);
+
       const id = generateUUID();
       const product = new Product(
         id,
@@ -198,6 +208,8 @@ export class ManageInventoryUseCase {
       if (!existing) {
         throw new EntityNotFoundException('Product', request.id);
       }
+
+      await this.assertCodesAreFree(request.sku, request.barcode, request.id);
 
       // Apply updates using field mapping to reduce complexity
       this.applyProductUpdates(existing, request);
@@ -304,6 +316,48 @@ export class ManageInventoryUseCase {
   /**
    * Maps a Product entity to a ProductSummaryDTO
    */
+  /**
+   * Refuse a SKU or barcode that already identifies a different product.
+   *
+   * This is the invariant, not a convenience. The till builds one flat lookup keyed
+   * on barcode *and* SKU with first-writer-wins, so a second product carrying a code
+   * that already exists is not merely unscannable — scanning that code rings up the
+   * *other* product at the *other* price, at full confidence, with the fallback that
+   * might have caught it deliberately suppressed. Nothing downstream can detect it
+   * afterwards, which is why it has to be impossible to create.
+   *
+   * Enforced here rather than only in the form so no other caller can route around
+   * it, and matched on the exact stored string because that is precisely what the
+   * till collides on. The form does the friendlier, wider comparison — spotting the
+   * same code entered in two different representations — and this is the backstop
+   * for the case the form cannot see, such as two tabs saving at once.
+   *
+   * @param excludeId The product being edited, which must not collide with itself.
+   */
+  private async assertCodesAreFree(
+    sku: string | undefined,
+    barcode: string | undefined,
+    excludeId?: string
+  ): Promise<void> {
+    const trimmedSku = sku?.trim() ?? '';
+    if (trimmedSku.length > 0) {
+      const owner = await this.productRepository.findBySKU(trimmedSku);
+      if (owner && owner.id !== excludeId) {
+        throw new Error(`SKU ${trimmedSku} already belongs to ${owner.name}.`);
+      }
+    }
+
+    // An absent barcode is normal — plenty of products have none — and must never
+    // read as every one of them colliding with every other.
+    const trimmedBarcode = barcode?.trim() ?? '';
+    if (trimmedBarcode.length > 0) {
+      const owner = await this.productRepository.findByBarcode(trimmedBarcode);
+      if (owner && owner.id !== excludeId) {
+        throw new Error(`Barcode ${trimmedBarcode} already belongs to ${owner.name}.`);
+      }
+    }
+  }
+
   private mapToSummary(product: Product): ProductSummaryDTO {
     return {
       id: product.id,
@@ -318,6 +372,7 @@ export class ManageInventoryUseCase {
       lowStockThreshold: product.lowStockThreshold,
       description: product.description ?? '',
       barcode: product.barcode ?? '',
+      reorderQuantity: product.reorderQuantity,
     };
   }
 }

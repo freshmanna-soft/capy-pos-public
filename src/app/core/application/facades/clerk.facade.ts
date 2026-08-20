@@ -11,7 +11,10 @@ import {
   RecognitionLogService,
   RecognitionTier,
 } from '@core/application/services/recognition-log.service';
-import { parseClerkIntent } from '@core/application/services/voice-intent.parser';
+import {
+  parseClerkIntent,
+  rankLabelsBySpokenWords,
+} from '@core/application/services/voice-intent.parser';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import {
   BarcodeGate,
@@ -20,6 +23,7 @@ import {
 } from '@core/infrastructure/media/barcode-gate';
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
 import { FrameGate, GateVerdict } from '@core/infrastructure/media/frame-gate';
+import { LookScheduler } from '@core/infrastructure/media/look-scheduler';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
 import { SpeechRecognitionService } from '@core/infrastructure/voice/speech-recognition.service';
@@ -52,6 +56,11 @@ export type ClerkPhase = 'off' | 'starting' | 'ready' | 'blocked';
 export interface PendingAdd {
   productId: string;
   label: string;
+  /**
+   * How many went in, so undo takes back exactly what one command put in.
+   * Without this a spoken "add three coffees" would undo to two, silently.
+   */
+  quantity: number;
 }
 
 /**
@@ -98,6 +107,8 @@ export class ClerkFacade {
   private readonly _pendingAdd = signal<PendingAdd | null>(null);
   private readonly _undoMsLeft = signal(0);
   private readonly _micEnabled = signal(false);
+  private readonly _cameraEnabled = signal(false);
+  private readonly _aiEnabled = signal(true);
   private readonly _verdict = signal<GateVerdict>('warming');
   private readonly _busy = signal(false);
   private readonly _recognized = signal(0);
@@ -106,6 +117,7 @@ export class ClerkFacade {
   private readonly _codes = signal<CodeOverlay[]>([]);
   private readonly _frameSize = signal({ width: 0, height: 0 });
   private readonly _scanProgress = signal<ScanProgress>({ kind: 'hidden' });
+  private readonly _barcodePriority = signal(false);
 
   readonly phase = this._phase.asReadonly();
   readonly visualState = this._visualState.asReadonly();
@@ -119,8 +131,34 @@ export class ClerkFacade {
   readonly pendingAdd = this._pendingAdd.asReadonly();
   readonly undoMsLeft = this._undoMsLeft.asReadonly();
   readonly micEnabled = this._micEnabled.asReadonly();
+  /**
+   * Whether she is currently allowed to look.
+   *
+   * Separate from `phase` because a camera the cashier switched off is not a
+   * session that ended: the mic, the cart, undo and checkout all keep working,
+   * and voice alone is enough to ring a sale through.
+   */
+  readonly cameraEnabled = this._cameraEnabled.asReadonly();
+  /**
+   * Whether she is allowed to *guess*.
+   *
+   * Separate from the camera, and the reason it exists: a barcode is free and
+   * certain, while a model call costs money and can be wrong. A shop whose stock
+   * is all barcoded has no reason to pay for the second, and should be able to say
+   * so without giving up the scanner or the voice commands.
+   */
+  readonly aiEnabled = this._aiEnabled.asReadonly();
   /** Why the clerk isn't looking right now — drives the HUD's status hint. */
   readonly verdict = this._verdict.asReadonly();
+  /**
+   * Whether a barcode is currently holding the model back.
+   *
+   * Its own signal rather than a verdict, because the frame gate has no vocabulary
+   * for it: from the gate's side this is a perfectly good frame it was refused
+   * permission to spend on. The cashier waiting for a guess that is deliberately
+   * not coming is exactly who needs told why.
+   */
+  readonly barcodePriority = this._barcodePriority.asReadonly();
   readonly busy = this._busy.asReadonly();
   readonly recognizedCount = this._recognized.asReadonly();
   readonly addedCount = this._added.asReadonly();
@@ -154,6 +192,11 @@ export class ClerkFacade {
   readonly earSupported = this.ear.supported;
   readonly recognizerKind = this.recognizer.kind;
   readonly speaking = this.voice.speaking;
+  /**
+   * Whether her voice is off. Remembered between sessions, unlike the camera and
+   * recognition switches — see `SpeechSynthesisService.setMuted`.
+   */
+  readonly muted = this.voice.muted;
   readonly lastBoundaryAt = this.voice.lastBoundaryAt;
 
   /**
@@ -207,6 +250,12 @@ export class ClerkFacade {
   private readonly gate = new FrameGate();
   private readonly barcodeGate = new BarcodeGate();
   /**
+   * Decides when — and whether — the frame gate's verdict actually becomes a
+   * recognition call. The gate says a frame is worth looking at; this says the
+   * scene has finished changing and that no barcode is about to answer for free.
+   */
+  private readonly looks = new LookScheduler();
+  /**
    * Barcode and SKU to product, rebuilt with the catalogue.
    *
    * In memory rather than a repository query: this is consulted on every frame a
@@ -223,6 +272,15 @@ export class ClerkFacade {
    * the row is written optimistically and amended when the window closes.
    */
   private openLogEntry: { id: string; productId: string } | null = null;
+  /**
+   * Who put the candidates on screen.
+   *
+   * The recognition log measures how good the *recognizer* is, so a choice
+   * between products the cashier named out loud must not be written to it — it
+   * would look like a model proposal that needed correcting and drag the tier's
+   * accuracy down for work the model never did.
+   */
+  private candidateOrigin: 'model' | 'voice' = 'model';
   /** A signal so `candidateCards` can join against it reactively. */
   private readonly _catalog = signal<Product[]>([]);
   private hints: CatalogHint[] = [];
@@ -288,7 +346,8 @@ export class ClerkFacade {
 
     this._phase.set('ready');
     this._visualState.set('idle');
-    this.sampleTimer = setInterval(() => this.tick(), SAMPLE_INTERVAL_MS);
+    this._cameraEnabled.set(true);
+    this.startSampling();
     this.say(
       canScan ? 'Hold something up, or show me a barcode.' : "Hold something up and I'll name it."
     );
@@ -296,22 +355,24 @@ export class ClerkFacade {
 
   /** Close the session and release the camera and microphone. */
   stop(): void {
-    if (this.sampleTimer !== null) {
-      clearInterval(this.sampleTimer);
-      this.sampleTimer = null;
-    }
+    this.stopSampling();
     this.clearUndo();
     this.abortLook();
     this.ear.stop();
     this.voice.cancel();
     this.camera.stop();
     this._micEnabled.set(false);
+    this._cameraEnabled.set(false);
     this._candidates.set([]);
     this._confidence.set(0);
     this._verdict.set('warming');
     this._codes.set([]);
     this._scanProgress.set({ kind: 'hidden' });
     this.barcodeGate.reset();
+    // Both gates and the scheduler: the frame a look was waiting on, and the code
+    // that was holding one back, belong to a session that has ended.
+    this.looks.reset();
+    this._barcodePriority.set(false);
     this._visualState.set('idle');
     this._phase.set('off');
   }
@@ -328,6 +389,10 @@ export class ClerkFacade {
    */
   async selectCamera(deviceId: string): Promise<void> {
     if (this._phase() !== 'ready' || deviceId === this.activeCameraId()) {
+      return;
+    }
+    // Opening a camera to switch to it would defeat the privacy switch.
+    if (!this._cameraEnabled()) {
       return;
     }
     this.abortLook();
@@ -356,6 +421,9 @@ export class ClerkFacade {
 
   /** Next camera in the list — the `C` shortcut. */
   async cycleCamera(): Promise<void> {
+    if (!this._cameraEnabled()) {
+      return;
+    }
     const cameras = this.cameras();
     const current = this.activeCameraId();
     const index = cameras.findIndex((camera) => camera.deviceId === current);
@@ -363,6 +431,147 @@ export class ClerkFacade {
     if (next && next.deviceId !== current) {
       await this.selectCamera(next.deviceId);
     }
+  }
+
+  /**
+   * Switch looking on or off without ending the session.
+   *
+   * A privacy control, not a shutdown: the stream is genuinely released so the
+   * camera light goes out, while the mic, the cart, the undo window and checkout
+   * carry on. That is the point — with the spoken add and remove commands the
+   * till is fully usable blind, and a cashier serving someone who would rather
+   * not be filmed should not have to leave the screen.
+   *
+   * Everything mid-flight belongs to a camera that is about to stop, so it all
+   * goes: the look on the wire, the motion history, the codes drawn on screen and
+   * any candidates nobody has answered.
+   */
+  async setCameraEnabled(on: boolean): Promise<void> {
+    if (this._phase() !== 'ready' || on === this._cameraEnabled()) {
+      return;
+    }
+
+    if (!on) {
+      this._cameraEnabled.set(false);
+      this.abortLook();
+      this.stopSampling();
+      this.camera.pause();
+      this._codes.set([]);
+      this._frameSize.set({ width: 0, height: 0 });
+      this._confidence.set(0);
+      this._verdict.set('warming');
+      this._scanProgress.set({ kind: 'hidden' });
+      // Candidates deliberately survive: answering "which one?" needs the catalog,
+      // not the camera, and throwing away an unanswered question buys no privacy.
+      // The barcode gate survives too — resetting it would let a code still lying
+      // in front of a re-opened camera count as new and ring the item up twice.
+      // She is still in the room, just not looking.
+      this._visualState.set(this._micEnabled() ? 'listening' : 'idle');
+      this.say(
+        this._micEnabled()
+          ? 'Camera off. Tell me what to add.'
+          : 'Camera off. Turn it back on when you need me to look.'
+      );
+      return;
+    }
+
+    // Held busy across the reopen so a tick cannot capture a half-started stream.
+    this._busy.set(true);
+    try {
+      // `resume`, not `start`: start re-reads the saved preference, so an operator
+      // who had switched to the shelf camera without making it the default would
+      // come back up looking at the wrong thing. The phase deliberately stays
+      // 'ready' on failure — 'blocked' would throw up the terminal overlay and end
+      // a session they only meant to un-pause.
+      if (!(await this.camera.resume())) {
+        this.say(this.camera.message());
+        return;
+      }
+      this._cameraEnabled.set(true);
+      // Motion history from before the pause describes a scene that is long gone.
+      this.gate.reset();
+      this.startSampling();
+      this.goIdle();
+      this.say('Camera on.');
+    } finally {
+      this._busy.set(false);
+    }
+  }
+
+  /** Flip the camera — the `V` key and the HUD button. */
+  toggleCamera(): Promise<void> {
+    return this.setCameraEnabled(!this._cameraEnabled());
+  }
+
+  /**
+   * Stop paying the model to look, without switching anything else off.
+   *
+   * Barcodes carry on being read, the camera stays live, and the voice commands
+   * still work — so a shop with a barcode on everything gets a till that costs
+   * nothing per item and is never wrong about what it sold. Turning it back on
+   * costs nothing but the next frame.
+   *
+   * Anything the model was in the middle of goes: its answer describes a frame
+   * from before the decision, and acting on it after being told to stop guessing
+   * is exactly what this switch says not to do.
+   */
+  setAiEnabled(on: boolean): void {
+    if (on === this._aiEnabled()) {
+      return;
+    }
+    this._aiEnabled.set(on);
+
+    if (!on) {
+      this.abortLook();
+      this._candidates.set([]);
+      this._confidence.set(0);
+      this._scanProgress.set({ kind: 'hidden' });
+      this.goIdle();
+      // Said plainly, because with no barcode reader this leaves her unable to
+      // identify anything at all and the cashier needs to know that now rather
+      // than after holding up an apple.
+      this.say(
+        this.barcodeSupported()
+          ? 'Recognition off. Barcodes only from here.'
+          : "Recognition off — and this browser can't read barcodes, so I won't be able to name anything. Use the terminal, or turn me back on."
+      );
+      return;
+    }
+
+    // The scene she last looked at was judged under the old setting, so let it be
+    // read again rather than held back as a duplicate.
+    this.gate.forgetLastCapture();
+    this.say('Recognition on. Hold something up.');
+  }
+
+  /** Flip recognition — the `A` key and the HUD button. */
+  toggleAi(): void {
+    this.setAiEnabled(!this._aiEnabled());
+  }
+
+  /**
+   * Silence her, or give her voice back.
+   *
+   * Nothing about how the till works changes: she still recognises, still rings
+   * items up, still asks which of two jars it is. The only channel that closes is
+   * the audio one, and the captions were already carrying every word of it — which
+   * is why this is a mute rather than a "quiet mode" that also stops her asking.
+   *
+   * Confirmed either way, and the confirmation lands either way: muting captions
+   * the line without speaking it, unmuting speaks it as well. A switch whose only
+   * feedback is the absence of feedback is a switch nobody trusts.
+   */
+  setMuted(muted: boolean): void {
+    if (muted === this.voice.muted()) {
+      return;
+    }
+    this.voice.setMuted(muted);
+    this.say(muted ? "Muted. I'll keep captioning everything." : 'Voice back on.');
+  }
+
+  /** Flip the voice — the `Q` key and the HUD button. */
+  toggleMute(): void {
+    this.setMuted(!this.voice.muted());
   }
 
   toggleMic(): void {
@@ -382,6 +591,18 @@ export class ClerkFacade {
 
   // ─── Scanning loop ────────────────────────────────────────────────────────
 
+  private startSampling(): void {
+    this.stopSampling();
+    this.sampleTimer = setInterval(() => this.tick(), SAMPLE_INTERVAL_MS);
+  }
+
+  private stopSampling(): void {
+    if (this.sampleTimer !== null) {
+      clearInterval(this.sampleTimer);
+      this.sampleTimer = null;
+    }
+  }
+
   /**
    * One sampling tick: look at the frame, decide whether it's worth identifying.
    *
@@ -390,6 +611,11 @@ export class ClerkFacade {
    * replace the question they were about to answer.
    */
   private tick(): void {
+    // The camera being off already stops the timer; the guard is here so a stray
+    // tick in flight at that moment cannot sample a stream that is going away.
+    if (!this._cameraEnabled()) {
+      return;
+    }
     if (this._phase() !== 'ready' || this._busy() || this.awaitingChoice()) {
       this._scanProgress.set({ kind: this._busy() ? 'reading' : 'hidden' });
       return;
@@ -400,6 +626,14 @@ export class ClerkFacade {
     // to pay a model to confirm what the bars already say.
     void this.scanForCodes();
 
+    // Everything below is the model's path. The frame gate exists to decide when a
+    // recognition call is worth paying for, so with recognition off there is
+    // nothing for it to schedule — and a barcode never needed it in the first
+    // place.
+    if (!this._aiEnabled()) {
+      return;
+    }
+
     const sample = this.camera.sampleFrame();
     if (!sample) {
       return;
@@ -407,15 +641,82 @@ export class ClerkFacade {
 
     const now = performance.now();
     const verdict = this.gate.evaluate(sample, now);
-    this._verdict.set(verdict);
-    this._scanProgress.set(progressFor(verdict, this.gate.progress(now)));
+
+    // A waiting look belongs to the scene that armed it, so motion abandons it —
+    // and hands the gate back the capture it spent, because nothing was actually
+    // looked at and the item must not be refused as a duplicate when it finally
+    // does settle.
+    if (this.looks.pending && verdict === 'moving') {
+      this.looks.cancel();
+      this.gate.forgetLastCapture();
+    }
 
     if (verdict === 'moving' && this._visualState() === 'idle' && this._micEnabled()) {
       this._visualState.set('listening');
     }
-    if (verdict === 'capture') {
-      void this.identify();
+
+    // The gate opens once per settled scene and reports its cooldown afterwards, so
+    // the scheduler has to be asked again on the ticks in between or a debounced
+    // look would be armed and never released.
+    if (verdict === 'capture' || this.looks.pending) {
+      this.decideLook(now);
+      return;
     }
+
+    this._barcodePriority.set(this.looks.barcodeHasPriority(now));
+    this._verdict.set(verdict);
+    this._scanProgress.set(progressFor(verdict, this.gate.progress(now)));
+  }
+
+  /**
+   * Spend on this frame, wait a little longer, or stand down for a barcode.
+   *
+   * Kept separate from `tick` because these three are the money decision and the
+   * rest of the tick is bookkeeping.
+   */
+  private decideLook(now: number): void {
+    switch (this.looks.request(now)) {
+      case 'look':
+        this._barcodePriority.set(false);
+        this._verdict.set('capture');
+        this._scanProgress.set({ kind: 'reading' });
+        void this.identify();
+        return;
+      case 'deferred':
+        // Reported as a duplicate because that is what it is — this scene has
+        // already been identified, just not by the model. It also puts "Look again"
+        // back on screen, which is the way to overrule that on the rare frame where
+        // the code belongs to something other than the item being sold.
+        // The gate spent a capture opening for this frame, and nothing was paid on
+        // it. Handing it back is what stops the *next* item being swallowed as a
+        // duplicate of a scene the model never actually looked at.
+        this.gate.undoLastCapture();
+        this._barcodePriority.set(true);
+        this._verdict.set('duplicate');
+        this._scanProgress.set({ kind: 'hidden' });
+        return;
+      case 'settling':
+        // From where the cashier is standing this is still the settle window they
+        // were already in — "keep it there" — so the ring carries on filling
+        // instead of dropping to zero and starting again, which would read as the
+        // till having lost its place.
+        this._barcodePriority.set(false);
+        this._verdict.set('holding');
+        this._scanProgress.set({ kind: 'settling', value: this.debounceRing(now) });
+        return;
+    }
+  }
+
+  /**
+   * Where the ring should sit while the debounce runs.
+   *
+   * The two waits are weighted by their real lengths, so one continuous fill moves
+   * at a constant rate across the gate's settle window and the debounce that
+   * follows it.
+   */
+  private debounceRing(now: number): number {
+    const share = this.looks.debounceMs / (this.gate.settleMs + this.looks.debounceMs);
+    return 1 - share + share * this.looks.progress(now);
   }
 
   /**
@@ -447,7 +748,17 @@ export class ClerkFacade {
     this._frameSize.set({ width: video.videoWidth, height: video.videoHeight });
 
     const presented = pickPresentedCode(found, this.barcodeGate.minWidth);
-    this._codes.set(this.overlaysFor(found, presented));
+    const overlays = this.overlaysFor(found, presented);
+    this._codes.set(overlays);
+
+    // Barcodes first, and this is where that is enforced rather than hoped for. A
+    // code we stock is a free and certain answer to the question the model would be
+    // paid to guess at, so while one is in frame the model stands down — including
+    // the case that costs the most, where the decode is still running when the
+    // frame gate opens and both would otherwise answer the same frame.
+    if (overlays.some((overlay) => overlay.matched)) {
+      this.looks.noteStockedCode(performance.now());
+    }
 
     const verdict = this.barcodeGate.observe(presented?.value ?? null, performance.now());
     if (verdict === 'new' && presented) {
@@ -514,8 +825,21 @@ export class ClerkFacade {
     if (this._phase() !== 'ready' || this._busy()) {
       return;
     }
+    if (!this._cameraEnabled()) {
+      this.say('The camera is off. Say "camera on" when you want me to look.');
+      return;
+    }
+    if (!this._aiEnabled()) {
+      this.say('Recognition is off. Show me a barcode, or tell me what to add.');
+      return;
+    }
     this._candidates.set([]);
     this.gate.forgetLastCapture();
+    // Neither wait applies to a look that was asked for out loud. The debounce
+    // exists to find out whether the cashier meant it, and a barcode's priority
+    // exists to save money the cashier has just decided to spend.
+    this.looks.cancel();
+    this._barcodePriority.set(false);
     void this.identify();
   }
 
@@ -529,6 +853,9 @@ export class ClerkFacade {
     this.inFlight?.abort();
     this.inFlight = null;
     this._busy.set(false);
+    // A look still inside its debounce window is abandoned for the same reason as
+    // one already on the wire: it was armed for a scene that no longer applies.
+    this.looks.cancel();
   }
 
   private async identify(): Promise<void> {
@@ -581,8 +908,21 @@ export class ClerkFacade {
 
   // ─── Confidence gates ─────────────────────────────────────────────────────
 
-  /** Confident: put it in the cart and say so, with a way back. */
-  private autoAdd(candidate: VisionCandidate, utterance: string): void {
+  /**
+   * Confident: put it in the cart and say so, with a way back.
+   *
+   * @param tier which recognizer gets the credit, or null when nothing should be
+   *   logged because no recognizer was involved — a spoken "add a coffee" is the
+   *   cashier telling the till, not a proposal that could have been wrong.
+   * @param quantity how many to ring up. Every unit still goes through stock
+   *   validation on its own.
+   */
+  private autoAdd(
+    candidate: VisionCandidate,
+    utterance: string,
+    tier: RecognitionTier | null = 'model',
+    quantity = 1
+  ): void {
     const product = this.findProduct(candidate.productId);
     if (!product) {
       this.askAgain("That isn't something I can ring up.");
@@ -593,7 +933,8 @@ export class ClerkFacade {
       product,
       utterance,
       { confidence: candidate.confidence, auto: true },
-      { tier: 'model', confidence: candidate.confidence, candidateCount: 1 }
+      tier === null ? undefined : { tier, confidence: candidate.confidence, candidateCount: 1 },
+      quantity
     );
     if (!added) {
       // Let the same scene be read again — the cashier is about to try something
@@ -610,16 +951,32 @@ export class ClerkFacade {
    * identical whichever route was taken. The two callers differ only in which gate
    * they release when the add is refused, which is why that is left to them.
    *
-   * @returns whether the product actually went in.
+   * Quantity is applied by running the same single-item add that many times
+   * rather than by writing a quantity straight into the cart: stock is checked
+   * per unit, so "add three" against two in stock puts two in and says so,
+   * instead of failing the whole command or overselling by one.
+   *
+   * @returns whether anything at all went in.
    */
   private addProduct(
     product: Product,
     utterance: string,
     meta: Record<string, unknown>,
-    provenance?: { tier: RecognitionTier; confidence: number; candidateCount: number }
+    provenance?: { tier: RecognitionTier; confidence: number; candidateCount: number },
+    quantity = 1
   ): boolean {
-    const result = this.pos.tryAddToCart(product);
-    if (!result.added) {
+    const wanted = Math.max(1, quantity);
+    let added = 0;
+    let result = this.pos.tryAddToCart(product);
+    while (result.added) {
+      added++;
+      if (added >= wanted) {
+        break;
+      }
+      result = this.pos.tryAddToCart(product);
+    }
+
+    if (added === 0 && !result.added) {
       // Stock rules are the terminal's, not the clerk's — she just reports them.
       this._visualState.set('confused');
       this._candidates.set([]);
@@ -646,15 +1003,21 @@ export class ClerkFacade {
       return false;
     }
 
-    this._added.update((n) => n + 1);
+    this._added.update((n) => n + added);
     this._candidates.set([]);
     this._visualState.set('found');
-    this._plopToken.update((token) => token + 1);
-    this.say(utterance || `One ${product.name.toLowerCase()}, added.`);
+    this._plopToken.update((token) => token + added);
+    // A short count is reported rather than glossed over: the cashier has to know
+    // the sale is one short before the customer is at the door.
+    this.say(
+      added < wanted
+        ? `Only ${added} ${product.name.toLowerCase()} in stock, so that's what I added.`
+        : utterance || `${describeQuantity(added, product.name)}, added.`
+    );
     // Opened first, and only then tracked: `openUndoWindow` clears the previous
     // window, and clearing a window stops tracking its log row — so assigning
     // before this call would have the new row wiped by its own window opening.
-    this.openUndoWindow({ productId: product.id, label: product.name });
+    this.openUndoWindow({ productId: product.id, label: product.name, quantity: added });
     if (provenance) {
       this.openLogEntry = {
         id: this.log.record({
@@ -671,14 +1034,20 @@ export class ClerkFacade {
     this.publish(EventType.CLERK_ITEM_RECOGNIZED, {
       productId: product.id,
       name: product.name,
+      quantity: added,
       ...meta,
     });
-    this.count('clerk.autoadds');
+    this.count('clerk.autoadds', undefined, added);
     return true;
   }
 
   /** Unsure between a few: show them and wait. */
-  private offerChoice(candidates: VisionCandidate[], utterance: string): void {
+  private offerChoice(
+    candidates: VisionCandidate[],
+    utterance: string,
+    origin: 'model' | 'voice' = 'model'
+  ): void {
+    this.candidateOrigin = origin;
     this._candidates.set(candidates.slice(0, 3));
     this._visualState.set('confused');
     this.say(utterance || 'Which one is it?');
@@ -716,6 +1085,7 @@ export class ClerkFacade {
     }
     const product = this.findProduct(candidate.productId);
     const top = offered[0];
+    const origin = this.candidateOrigin;
     this._candidates.set([]);
     if (!product) {
       this.askAgain("I've lost track of that one. Show me again?");
@@ -724,23 +1094,31 @@ export class ClerkFacade {
 
     // The most valuable row in the log: what was offered first, and what the cashier
     // actually wanted. `corrected` means the ranking was wrong and here is the truth.
-    this.log.record({
-      tier: 'model',
-      proposedProductId: top?.productId,
-      confidence: top?.confidence ?? 0,
-      candidateCount: offered.length,
-      outcome: position === 1 ? 'chosen' : 'corrected',
-      actualProductId: product.id,
-    });
+    // Skipped when the cashier named the product themselves — no recognizer
+    // proposed anything, so there is no accuracy to score.
+    if (origin === 'model') {
+      this.log.record({
+        tier: 'model',
+        proposedProductId: top?.productId,
+        confidence: top?.confidence ?? 0,
+        candidateCount: offered.length,
+        outcome: position === 1 ? 'chosen' : 'corrected',
+        actualProductId: product.id,
+      });
+    }
     // Route through the same auto-add path: a hand-picked item still has to
     // satisfy stock, still gets an undo window, still emits the same event.
-    this.autoAdd({ ...candidate, confidence: 1 }, `One ${product.name.toLowerCase()}, added.`);
+    this.autoAdd(
+      { ...candidate, confidence: 1 },
+      `One ${product.name.toLowerCase()}, added.`,
+      origin === 'model' ? 'model' : null
+    );
   }
 
   /** None of those. Look again. */
   reject(): void {
     const offered = this._candidates();
-    if (offered.length > 0) {
+    if (offered.length > 0 && this.candidateOrigin === 'model') {
       this.log.record({
         tier: 'model',
         proposedProductId: offered[0]?.productId,
@@ -760,9 +1138,23 @@ export class ClerkFacade {
   undoLast(): void {
     const pending = this._pendingAdd();
     if (!pending) {
+      // Silence here is the same bug as an unheard command: the cashier pressed
+      // undo, or said it, and has no way to tell that from a dead control.
+      this.say('Nothing to undo. Tell me which item to take off.');
       return;
     }
-    this.pos.decreaseQuantity(pending.productId);
+    // The window can outlive the line it refers to — a spoken removal, or a
+    // checkout, may have emptied it. Decrementing then throws.
+    if (this.pos.getQuantity(pending.productId) === 0) {
+      this.clearUndo();
+      this.say(`${pending.label} is already off the sale.`);
+      return;
+    }
+    // As many decrements as that one command caused, so "add three coffees"
+    // undoes to none rather than leaving two behind.
+    for (let i = 0; i < pending.quantity; i++) {
+      this.pos.decreaseQuantity(pending.productId);
+    }
     // The undo window exists to make a mistake cheap; it is also the cleanest
     // label available for "that was wrong", so it revises the optimistic row.
     if (this.openLogEntry?.productId === pending.productId) {
@@ -770,9 +1162,9 @@ export class ClerkFacade {
     }
     this.openLogEntry = null;
     this.clearUndo();
-    this._added.update((n) => Math.max(0, n - 1));
+    this._added.update((n) => Math.max(0, n - pending.quantity));
     this.goIdle();
-    this.say(`${pending.label} removed.`);
+    this.say(`${describeQuantity(pending.quantity, pending.label)} removed.`);
     // Let the same item be recognized again — undo usually means "wrong item",
     // and the cashier is about to hold up the right one. Both gates, because the
     // item may have been identified by sight or by its barcode.
@@ -815,14 +1207,43 @@ export class ClerkFacade {
       case 'choose':
         this.chooseCandidate(intent.index);
         return 'handled';
+      case 'add':
+        this.addByName(intent.query, intent.quantity);
+        return 'handled';
+      case 'clearRequested':
+        // Understood and refused. Emptying a sale is not undoable by the four
+        // second window, so it stays a deliberate act on the terminal.
+        this.say(
+          "I can't clear the whole cart. Take items off one at a time, or use the terminal."
+        );
+        return 'handled';
+      case 'remove':
+        this.removeByName(intent.query, intent.quantity);
+        return 'handled';
+      case 'camera':
+        void this.setCameraEnabled(intent.on);
+        return 'handled';
+      case 'ai':
+        this.setAiEnabled(intent.on);
+        return 'handled';
+      case 'look':
+        this.scanNow();
+        return 'handled';
       case 'undo':
         this.undoLast();
         return 'handled';
       case 'total':
         this.speakTotal();
         return 'handled';
-      case 'mute':
-        this.toggleMic();
+      case 'voice':
+        this.setMuted(!intent.on);
+        return 'handled';
+      case 'mic':
+        // Only ever off by voice. "Start listening" into a microphone that is
+        // already off cannot be heard, so the way back in is the key or the button.
+        if (this._micEnabled()) {
+          this.toggleMic();
+        }
         return 'handled';
       case 'checkout':
         this.checkoutRequested.set(this.checkoutRequested() + 1);
@@ -830,6 +1251,191 @@ export class ClerkFacade {
       default:
         return 'ignored';
     }
+  }
+
+  /**
+   * Ring up something the cashier named out loud.
+   *
+   * Matched against the whole catalogue rather than against whatever is on screen,
+   * which is the entire point: "add a sandwich" has to work with the camera off,
+   * with nothing in frame, and with no candidates showing.
+   *
+   * A name that fits more than one product is shown as a choice rather than
+   * guessed at. The cards, the number keys and `chooseCandidate` are the ones
+   * already there, so a spoken ambiguity is answered exactly the way a visual one
+   * is — and neither path can charge for an item nobody named.
+   */
+  private addByName(query: string[], quantity: number): void {
+    // Naming one of the products already on screen is answering the question she
+    // asked, not starting a new command — and answering it through
+    // `chooseCandidate` is what writes the 'chosen' / 'corrected' row that tells
+    // us whether the recognizer's ranking was any good.
+    const offered = this._candidates();
+    if (offered.length > 0) {
+      const onScreen = rankLabelsBySpokenWords(
+        query,
+        offered.map((candidate) => candidate.label)
+      );
+      const top = onScreen[0];
+      const next = onScreen[1];
+      const decisive =
+        top !== undefined &&
+        (next === undefined || next.score !== top.score || next.coverage !== top.coverage);
+      if (decisive) {
+        this.chooseCandidate(top.index + 1);
+        return;
+      }
+    }
+
+    const catalog = this._catalog();
+    const ranked = rankLabelsBySpokenWords(
+      query,
+      catalog.map((product) => product.name)
+    );
+    const best = ranked[0];
+
+    if (!best) {
+      this._visualState.set('confused');
+      this.say(`I don't have ${spokenName(query)} in the catalogue.`);
+      this.publish(EventType.CLERK_ITEM_REJECTED, {
+        reason: 'unknown-spoken-name',
+        heard: query.join(' '),
+      });
+      return;
+    }
+
+    const tied = ranked.filter((match) => match.score === best.score);
+    if (tied.length > 1) {
+      this.offerChoice(
+        tied.slice(0, 3).map((match) => ({
+          productId: catalog[match.index]!.id,
+          label: catalog[match.index]!.name,
+          // Certainty about the name, which is not certainty about which one —
+          // that is what the choice is for.
+          confidence: 1,
+        })),
+        `I have a few of those. Which one?`,
+        'voice'
+      );
+      return;
+    }
+
+    const product = catalog[best.index]!;
+    // Left at zero on purpose: the yuzu reports how sure she is about what she can
+    // *see*, and she was told this one. A full glow would claim a reading that
+    // never happened.
+    this.autoAdd(
+      { productId: product.id, label: product.name, confidence: 1 },
+      `${describeQuantity(quantity, product.name)}, added.`,
+      // Nothing recognized anything here, so nothing is scored for it.
+      null,
+      quantity
+    );
+  }
+
+  /**
+   * Take something the cashier named back off the sale.
+   *
+   * Matched against the cart, not the catalogue: "remove the water bottle" is a
+   * statement about this sale, and ranking against everything the shop sells
+   * would happily match a product that was never rung up.
+   *
+   * An ambiguous removal asks instead of offering the candidate cards — those
+   * cards add when you press them, so using them here would do the opposite of
+   * what was asked.
+   */
+  private removeByName(query: string[], quantity: number): void {
+    const items = this.pos.cartItems();
+    if (items.length === 0) {
+      this.say('The cart is empty.');
+      return;
+    }
+
+    const ranked = rankLabelsBySpokenWords(
+      query,
+      items.map((item) => item.product.name)
+    );
+    const best = ranked[0];
+    if (!best) {
+      // Two different failures with two different fixes: a product this till
+      // doesn't sell, or one it sells that simply hasn't been rung up. Saying
+      // which one saves the cashier from checking the wrong thing.
+      const stocked =
+        rankLabelsBySpokenWords(
+          query,
+          this._catalog().map((product) => product.name)
+        ).length > 0;
+      this._visualState.set('confused');
+      this.say(
+        stocked
+          ? `There's no ${query.join(' ')} in the cart.`
+          : `I don't have ${spokenName(query)} in the catalogue.`
+      );
+      this.publish(EventType.CLERK_ITEM_REJECTED, {
+        reason: stocked ? 'not-in-cart' : 'unknown-spoken-name',
+        heard: query.join(' '),
+      });
+      return;
+    }
+
+    const tied = ranked.filter((match) => match.score === best.score);
+    if (tied.length > 1) {
+      this._visualState.set('confused');
+      this.say(
+        `I have ${tied
+          .slice(0, 3)
+          .map((match) => items[match.index]!.product.name.toLowerCase())
+          .join(' and ')}. Which one?`
+      );
+      return;
+    }
+
+    const product = items[best.index]!.product;
+    // Checked before decrementing, not after: `decreaseQuantity` throws when the
+    // product isn't there, and this runs inside a speech callback where a thrown
+    // error would be swallowed and the cashier would just see nothing happen.
+    const inCart = this.pos.getQuantity(product.id);
+    if (inCart === 0) {
+      this.say(`There's no ${product.name.toLowerCase()} in the cart.`);
+      return;
+    }
+
+    const removing = Math.min(Math.max(1, quantity), inCart);
+    // Bounded by what is actually in the cart, never by what was asked for:
+    // `decreaseQuantity` throws once the line is gone, and this runs inside a
+    // speech callback where that error would be swallowed and look like silence.
+    if (removing >= inCart) {
+      this.pos.removeFromCart(product.id);
+    } else {
+      for (let i = 0; i < removing; i++) {
+        this.pos.decreaseQuantity(product.id);
+      }
+    }
+
+    // The pending undo describes a cart that no longer looks like that. Left alone
+    // it would offer an "Undo" button that decrements a line this just emptied.
+    // Amended first: a cashier taking off the item she had just proposed is the
+    // clearest ground truth the recognizer's accuracy ever gets.
+    if (this._pendingAdd()?.productId === product.id) {
+      if (this.openLogEntry?.productId === product.id) {
+        this.log.amend(this.openLogEntry.id, 'undone');
+      }
+      this.clearUndo();
+    }
+
+    this._added.update((n) => Math.max(0, n - removing));
+    this.goIdle();
+    this.say(`${describeQuantity(removing, product.name)} removed.`);
+    this.publish(EventType.CLERK_ITEM_REMOVED, {
+      productId: product.id,
+      name: product.name,
+      quantity: removing,
+    });
+    // Deliberately not touching either gate, unlike `undoLast`. Undo means "wrong
+    // item, the right one is coming"; naming an item to remove usually corrects
+    // something from earlier in the sale. If it does happen to still be in frame,
+    // releasing the barcode gate would ring it straight back and the removal would
+    // look broken.
   }
 
   /** Say something, and caption it at the same moment. */
@@ -899,9 +1505,9 @@ export class ClerkFacade {
    * Telemetry is never allowed to break a scan. The agent-monitor dashboard is
    * useful; it is not worth failing a sale over.
    */
-  private count(name: string, tags?: Record<string, string>): void {
+  private count(name: string, tags?: Record<string, string>, amount = 1): void {
     try {
-      this.telemetry.recordCounter(name, 1, tags);
+      this.telemetry.recordCounter(name, amount, tags);
     } catch (error) {
       console.warn(`[Clerk] Telemetry counter ${name} failed:`, error);
     }
@@ -909,6 +1515,25 @@ export class ClerkFacade {
 }
 
 type ClerkIntentOutcome = 'handled' | 'ignored';
+
+/**
+ * "One coffee" / "three coffees" — a count and a name that read aloud correctly.
+ *
+ * Naive pluralization, which is the right amount for spoken confirmations: the
+ * cashier is listening for the number and already knows what they asked for.
+ */
+function describeQuantity(quantity: number, name: string): string {
+  const label = name.toLowerCase();
+  if (quantity <= 1) {
+    return `One ${label}`;
+  }
+  return `${quantity} ${label}${/(?:s|x|z|ch|sh)$/.test(label) ? 'es' : 's'}`;
+}
+
+/** Read back what was heard, for a name that matched nothing. */
+function spokenName(query: string[]): string {
+  return query.length > 0 ? `"${query.join(' ')}"` : 'that';
+}
 
 /**
  * Index a catalogue by every code that might be scanned off it.
@@ -936,14 +1561,17 @@ function buildCodeIndex(catalog: readonly Product[]): Map<string, Product> {
  *
  * Nothing is shown when no look is coming: a full ring over a scene the gate has
  * already read would promise something that is never going to happen.
+ *
+ * Deliberately has no case for `capture`: a frame the gate opened for goes to
+ * `decideLook`, which owns the ring from that point — it is the only thing that
+ * knows whether the look is happening now, waiting out the debounce, or standing
+ * down for a barcode.
  */
 function progressFor(verdict: GateVerdict, value: number): ScanProgress {
   switch (verdict) {
     case 'holding':
     case 'cooling':
       return { kind: 'settling', value };
-    case 'capture':
-      return { kind: 'reading' };
     default:
       return { kind: 'hidden' };
   }

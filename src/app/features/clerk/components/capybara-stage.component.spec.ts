@@ -66,6 +66,8 @@ describe('CapybaraStageComponent', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // Globals are stubbed rather than spied, so restoring mocks does not undo them.
+    vi.unstubAllGlobals();
   });
 
   function mount() {
@@ -150,6 +152,98 @@ describe('CapybaraStageComponent', () => {
 
     expect(render.mock.calls.length).toBeGreaterThan(1);
     expect(error).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+  });
+
+  it('stops drawing in a hidden tab, and picks up again on return', () => {
+    // Browsers throttle rAF in a hidden tab but do not stop it, so the loop would
+    // keep integrating on a stale clock.
+    const cancel = vi.spyOn(globalThis, 'cancelAnimationFrame');
+    const request = vi.spyOn(globalThis, 'requestAnimationFrame');
+    const fixture = mount();
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(cancel).toHaveBeenCalled();
+
+    request.mockClear();
+    hidden.mockReturnValue(false);
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(request).toHaveBeenCalled();
+    fixture.destroy();
+  });
+
+  it('does not start a second loop when it is already running', () => {
+    // Two loops would double every spring step, which reads as the animation
+    // running at twice speed for the rest of the session.
+    const fixture = mount();
+    const request = vi.spyOn(globalThis, 'requestAnimationFrame');
+
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(request).not.toHaveBeenCalled();
+    fixture.destroy();
+  });
+
+  it('follows the reduced-motion setting being changed while the page is open', () => {
+    // Some platforms let this be toggled live, and a clerk left mid-animation would
+    // otherwise be stuck with whatever was true when the page loaded.
+    const setReducedMotion = vi
+      .spyOn(CapybaraRenderer.prototype, 'setReducedMotion')
+      .mockImplementation(() => undefined);
+    let onChange: ((event: MediaQueryListEvent) => void) | null = null;
+    vi.stubGlobal('matchMedia', () => ({
+      matches: false,
+      addEventListener: (_: string, handler: (event: MediaQueryListEvent) => void) => {
+        onChange = handler;
+      },
+      removeEventListener: () => undefined,
+    }));
+
+    const fixture = mount();
+    expect(setReducedMotion).toHaveBeenCalledWith(false);
+
+    onChange?.({ matches: true } as MediaQueryListEvent);
+
+    expect(setReducedMotion).toHaveBeenLastCalledWith(true);
+    fixture.destroy();
+  });
+
+  it('works on a platform with no media queries at all', () => {
+    // Reduced motion is a preference, not a requirement; its absence must not stop
+    // the stage from drawing.
+    vi.stubGlobal('matchMedia', undefined);
+
+    const fixture = mount();
+
+    expect(setState).toHaveBeenCalled();
+    fixture.destroy();
+  });
+
+  it('caps the canvas at twice the device pixel ratio', () => {
+    // Beyond 2x the extra pixels are invisible at counter distance and the fill
+    // cost is real on a cheap tablet.
+    const resize = vi
+      .spyOn(CapybaraRenderer.prototype, 'resize')
+      .mockImplementation(() => undefined);
+    vi.stubGlobal('devicePixelRatio', 3);
+
+    const fixture = mount();
+
+    expect(resize).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), 2);
+    fixture.destroy();
+  });
+
+  it('assumes one device pixel where the browser reports none', () => {
+    const resize = vi
+      .spyOn(CapybaraRenderer.prototype, 'resize')
+      .mockImplementation(() => undefined);
+    vi.stubGlobal('devicePixelRatio', 0);
+
+    const fixture = mount();
+
+    expect(resize).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), 1);
     fixture.destroy();
   });
 

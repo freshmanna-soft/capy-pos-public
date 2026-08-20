@@ -386,4 +386,49 @@ describe('ProcessCardPaymentUseCase', () => {
       expect(useCase.isProcessing()).toBe(false);
     });
   });
+
+  describe('the errors a half-filled form does not have yet', () => {
+    it('refuses an empty form with a general message rather than a blank one', () => {
+      // An untouched field is invalid but has nothing to complain about — showing
+      // "Invalid card number" before anything is typed reads as a broken form, so
+      // the specific errors stay null and the refusal needs its own wording.
+      const result = useCase.execute();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Card validation failed');
+      expect(result.transactionId).toBe('');
+    });
+
+    it('reports the expiry once the card number itself is fine', () => {
+      useCase.setCardNumber(VALID_VISA);
+      useCase.setExpiry('13/30');
+      useCase.setCvv('123');
+
+      expect(useCase.execute().error).toBe('Invalid month');
+    });
+
+    it('reports the CVV last, when it is the only thing left wrong', () => {
+      useCase.setCardNumber(VALID_VISA);
+      useCase.setExpiry('12/30');
+      useCase.setCvv('12');
+
+      expect(useCase.execute().error).toBe('CVV must be 3-4 digits');
+    });
+
+    it('rejects a card that expired earlier this year', () => {
+      // The year alone is not enough: January of this year is expired in December.
+      const now = new Date();
+      const lastMonth = now.getMonth();
+      if (lastMonth === 0) {
+        // In January there is no earlier month this year; the year check covers it.
+        useCase.setExpiry(`12/${String((now.getFullYear() - 1) % 100).padStart(2, '0')}`);
+      } else {
+        useCase.setExpiry(
+          `${String(lastMonth).padStart(2, '0')}/${String(now.getFullYear() % 100).padStart(2, '0')}`
+        );
+      }
+
+      expect(useCase.validation().fields.expiry.error).toBe('Card has expired');
+    });
+  });
 });

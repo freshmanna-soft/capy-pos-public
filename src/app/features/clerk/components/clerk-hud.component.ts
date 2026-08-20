@@ -50,6 +50,17 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
         <span class="text-kelp/60"
           >· {{ clerk.recognizerKind === 'claude' ? 'live' : 'demo' }}</span
         >
+        <!-- Stated up here as well as on the button: a till that has stopped
+             guessing looks identical to one that is failing to, and the difference
+             matters to whoever is wondering why the apples need typing in. -->
+        @if (!clerk.aiEnabled()) {
+          <span class="text-tsuba" data-testid="clerk-ai-off-badge">· barcodes only</span>
+        }
+        <!-- Same reasoning for the voice: silence is a setting here, and it is
+             remembered, so it cannot be left to look like a broken speaker. -->
+        @if (clerk.muted()) {
+          <span class="text-tsuba" data-testid="clerk-muted-badge">· muted</span>
+        }
       </p>
 
       <div
@@ -75,7 +86,7 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
       <!-- What she's actually looking at. Unfiltered, because the main feed is
            styled for atmosphere and you cannot aim a camera through it. -->
       <div
-        class="overflow-hidden rounded-xl border border-kelp/25 bg-onsen-deep/80 shadow-2xl"
+        class="relative overflow-hidden rounded-xl border border-kelp/25 bg-onsen-deep/80 shadow-2xl"
         [class.ring-2]="clerk.busy()"
         [class.ring-yuzu]="clerk.busy()"
         data-testid="clerk-preview"
@@ -88,7 +99,21 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
           autoplay
           aria-hidden="true"
         ></video>
-        <p class="px-2 py-1 font-data text-[9px] uppercase tracking-[0.18em] text-kelp">
+        <!-- Laid over the video rather than replacing it: the element is bound
+             once via a static ViewChild, so an @if here would drop the reference
+             and the preview would never come back after one toggle. -->
+        @if (!clerk.cameraEnabled()) {
+          <div
+            class="absolute inset-x-0 top-0 grid aspect-[4/3] place-items-center gap-1 bg-onsen-deep/95 text-center"
+            data-testid="clerk-preview-off"
+          >
+            <span class="text-2xl" aria-hidden="true">🙈</span>
+            <p class="px-2 font-data text-[9px] uppercase tracking-[0.18em] text-kelp">
+              Camera off
+            </p>
+          </div>
+        }
+        <p class="relative px-2 py-1 font-data text-[9px] uppercase tracking-[0.18em] text-kelp">
           {{ clerk.busy() ? 'Reading' : hint() }}
         </p>
       </div>
@@ -96,7 +121,9 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
       <!-- Rendered only when there is genuinely a choice: a single row reading
            "Camera 1" is noise. Scrolls rather than growing, for the rare till with
            more cameras than counter. -->
-      @if (clerk.hasCameraChoice()) {
+      <!-- Hidden while the camera is off: picking a row calls getUserMedia, which
+           would turn the light back on behind the operator's back. -->
+      @if (clerk.hasCameraChoice() && clerk.cameraEnabled()) {
         <div
           class="pointer-events-auto max-h-[168px] overflow-y-auto rounded-xl border border-kelp/25 bg-onsen-deep/85 p-1 backdrop-blur"
           role="radiogroup"
@@ -203,7 +230,10 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
               [style.width.%]="undoProgress()"
               aria-hidden="true"
             ></span>
-            <span class="relative">Undo {{ pending.label }}</span>
+            <span class="relative"
+              >Undo {{ pending.quantity > 1 ? pending.quantity + ' × ' : ''
+              }}{{ pending.label }}</span
+            >
             <span class="relative font-data text-[10px] tabular-nums text-steam/70"
               >{{ clerk.undoSecondsLeft() }}s</span
             >
@@ -221,6 +251,38 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
           </button>
         }
 
+        <button
+          type="button"
+          (click)="clerk.toggleCamera()"
+          [attr.aria-pressed]="clerk.cameraEnabled()"
+          class="flex min-h-[44px] items-center gap-2 rounded-full border px-5 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          [class]="
+            clerk.cameraEnabled()
+              ? 'border-kelp/40 bg-onsen-deep/70 text-kelp hover:border-kelp'
+              : 'border-tsuba bg-tsuba/15 text-steam'
+          "
+          data-testid="clerk-camera-toggle"
+        >
+          <span aria-hidden="true">{{ clerk.cameraEnabled() ? '📷' : '🙈' }}</span>
+          {{ clerk.cameraEnabled() ? 'Looking' : 'Camera off' }}
+        </button>
+
+        <button
+          type="button"
+          (click)="clerk.toggleAi()"
+          [attr.aria-pressed]="clerk.aiEnabled()"
+          class="flex min-h-[44px] items-center gap-2 rounded-full border px-5 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          [class]="
+            clerk.aiEnabled()
+              ? 'border-kelp/40 bg-onsen-deep/70 text-kelp hover:border-kelp'
+              : 'border-tsuba bg-tsuba/15 text-steam'
+          "
+          data-testid="clerk-ai-toggle"
+        >
+          <span aria-hidden="true">{{ clerk.aiEnabled() ? '✨' : '🏷️' }}</span>
+          {{ clerk.aiEnabled() ? 'Recognizing' : 'Barcodes only' }}
+        </button>
+
         @if (clerk.earSupported) {
           <button
             type="button"
@@ -236,6 +298,27 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
           >
             <span aria-hidden="true">🎤</span>
             {{ clerk.micEnabled() ? 'Listening' : 'Talk to Capy' }}
+          </button>
+        }
+
+        <!-- Muting is the one control here that outlives the session, so it has to
+             read as a state rather than as an action: a cashier who finds the till
+             silent on Monday needs to see that someone chose that on Friday. -->
+        @if (clerk.voiceSupported) {
+          <button
+            type="button"
+            (click)="clerk.toggleMute()"
+            [attr.aria-pressed]="clerk.muted()"
+            class="flex min-h-[44px] items-center gap-2 rounded-full border px-5 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+            [class]="
+              clerk.muted()
+                ? 'border-tsuba bg-tsuba/15 text-steam'
+                : 'border-kelp/40 bg-onsen-deep/70 text-kelp hover:border-kelp'
+            "
+            data-testid="clerk-mute"
+          >
+            <span aria-hidden="true">{{ clerk.muted() ? '🔇' : '🔊' }}</span>
+            {{ clerk.muted() ? 'Muted' : 'Speaking' }}
           </button>
         }
 
@@ -310,6 +393,23 @@ export class ClerkHudComponent implements AfterViewInit {
    * deliberately waiting has no way to tell that from a camera that has hung.
    */
   protected hint(): string {
+    // Checked before the gate verdict, which still reads 'warming' while off and
+    // would render as "Waiting" — a camera that has been switched off is not
+    // waiting for anything.
+    if (!this.clerk.cameraEnabled()) {
+      return 'Camera off';
+    }
+    // The gate verdict is frozen wherever it stopped when recognition went off, so
+    // reporting it would describe a decision nothing is going to act on.
+    if (!this.clerk.aiEnabled()) {
+      return this.clerk.barcodeSupported() ? 'Barcodes only' : 'Not looking';
+    }
+    // A code we stock is in frame, so the answer is already on its way for free and
+    // the model has been told to stand down. Reported before the gate verdict,
+    // which describes a frame nobody is going to pay for.
+    if (this.clerk.barcodePriority()) {
+      return 'Barcode first';
+    }
     switch (this.clerk.verdict()) {
       case 'moving':
         return 'Hold still';

@@ -1,13 +1,16 @@
 import Anthropic from '@anthropic-ai/sdk';
-import {
+// Types are imported with `import type` and values without, because Node runs
+// this file by stripping the types rather than compiling it: a type name left in
+// a value import survives the strip and then fails at runtime as a missing
+// export. `verbatimModuleSyntax` in tsconfig.json makes that a compile error
+// instead of a startup crash.
+import type {
   CatalogHint,
   IdentifyRequest,
-  RECOGNITION_SCHEMA,
   RecognitionResult,
-  SYSTEM_PROMPT,
   VisionCandidate,
-  formatCatalog,
-} from './recognition-contract.js';
+} from './recognition-contract.ts';
+import { RECOGNITION_SCHEMA, SYSTEM_PROMPT, formatCatalog } from './recognition-contract.ts';
 
 /**
  * Claude Opus 5. Do not downgrade this to save money without measuring first —

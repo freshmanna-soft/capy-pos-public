@@ -4,5 +4,6 @@
  */
 
 export * from '@shared/ui/molecules/product-card/product-card.component';
+export * from '@shared/ui/molecules/modal/modal.component';
 
 // Made with Bob

@@ -221,4 +221,86 @@ describe('DexieProductRepository (real Dexie + fake-indexeddb)', () => {
       expect(await repo.exists('1')).toBe(false); // soft-deleted
     });
   });
+
+  describe('columns that are only sometimes there', () => {
+    it('carries every optional column back onto the entity', async () => {
+      // Each of these is written by a different path — a sync, an import, an edit —
+      // and a mapper that quietly drops one loses it on the next save.
+      await db.products.add(
+        record({
+          id: 'full',
+          description: 'Single origin',
+          imageUrl: 'https://example.test/coffee.png',
+          barcode: '4006381333931',
+          createdBy: 'u1',
+          updatedBy: 'u2',
+        })
+      );
+
+      const found = await repo.findById('full');
+
+      expect(found).not.toBeNull();
+      expect(found!.description).toBe('Single origin');
+      expect(found!.imageUrl).toBe('https://example.test/coffee.png');
+      expect(found!.barcode).toBe('4006381333931');
+      expect(found!.createdBy).toBe('u1');
+      expect(found!.updatedBy).toBe('u2');
+    });
+
+    it('maps the deletion columns too, though no query returns a deleted row', async () => {
+      // Every read path filters `deletedAt`, so the mapper is exercised directly:
+      // the columns still have to survive a round trip, because the day a query
+      // stops filtering — an audit view, an undelete — is not the day to find out
+      // they were being dropped.
+      const stamp = new Date('2026-01-02T03:04:05.000Z');
+      const mapped = (repo as unknown as { mapToEntity: (row: IProductDB) => Product }).mapToEntity(
+        record({ id: 'gone', deletedAt: stamp, deletedBy: 'u3' })
+      );
+
+      expect(mapped.deletedAt).toEqual(stamp);
+      expect(mapped.deletedBy).toBe('u3');
+    });
+
+    it('treats a legacy numeric isActive as active', async () => {
+      // Rows synced from the API arrive with 1 rather than true, and a strict
+      // comparison would hide the whole remote catalogue from the till.
+      await db.products.bulkAdd([
+        record({ id: 'legacy', name: 'Legacy', isActive: 1 as unknown as boolean }),
+        record({ id: 'modern', name: 'Modern', isActive: true }),
+      ]);
+
+      const active = await repo.findActive();
+
+      expect(active.map((product) => product.id).sort()).toEqual(['legacy', 'modern']);
+    });
+
+    it('keeps soft-deleted products out of the low-stock list', async () => {
+      // Reordering something that was deleted is how phantom stock gets bought.
+      await db.products.bulkAdd([
+        record({ id: 'gone', name: 'Gone', quantity: 1, deletedAt: new Date() }),
+        record({ id: 'low', name: 'Low', quantity: 2 }),
+      ]);
+
+      const low = await repo.findLowStock();
+
+      expect(low.map((product) => product.id)).toEqual(['low']);
+    });
+
+    it('searches a product with no barcode without tripping over it', async () => {
+      await db.products.add(record({ id: 'nobar', name: 'Nobar', barcode: undefined }));
+
+      await expect(repo.search('nobar')).resolves.toHaveLength(1);
+    });
+
+    it('leaves cost alone when only the price was changed', async () => {
+      await db.products.add(record({ id: 'priced', price: 4.5, cost: 2 }));
+
+      await repo.updatePrice('priced', 6);
+
+      const row = await db.products.get('priced');
+      expect(row!.price).toBe(6);
+      // Not zeroed, and not overwritten with undefined: the margin report reads this.
+      expect(row!.cost).toBe(2);
+    });
+  });
 });

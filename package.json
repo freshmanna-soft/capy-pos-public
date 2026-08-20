@@ -4,6 +4,8 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
+    "start:vision": "ng serve --configuration vision",
+    "vision:proxy": "cd infra/vision-proxy && PORT=8788 npm start",
     "build": "ng build",
     "test": "NODE_OPTIONS='--disable-warning=DEP0205' vitest run",
     "test:unit": "NODE_OPTIONS='--disable-warning=DEP0205' vitest run",

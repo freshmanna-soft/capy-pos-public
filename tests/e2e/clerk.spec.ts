@@ -25,7 +25,28 @@ import { loginAsAdmin } from './helpers/auth';
  * Runs as an init script so it is in place before Angular boots and before the
  * clerk asks for the camera.
  */
+/**
+ * Answer the frame-consent dialog before it is asked.
+ *
+ * The dialog only appears on a build with `aiVision` on, so a suite written
+ * against the default dev build never meets it — and then every camera test in
+ * here fails the moment it runs against the vision configuration, which is the
+ * build a developer working on recognition actually has running. None of these
+ * tests are about consent, so the answer is pre-recorded exactly as a returning
+ * cashier's browser would have it.
+ */
+async function grantFrameConsent(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('capy-clerk-camera-consent', 'granted');
+    } catch {
+      // Blocked storage: the dialog will appear and the test will say so.
+    }
+  });
+}
+
 async function installFakeMedia(page: Page): Promise<void> {
+  await grantFrameConsent(page);
   await page.addInitScript(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 640;
@@ -82,6 +103,12 @@ async function installFakeMedia(page: Page): Promise<void> {
     const opened: string[] = [];
     (window as unknown as { __openedCameras: string[] }).__openedCameras = opened;
 
+    // Every track ever handed out. `srcObject === null` only says the element
+    // stopped showing a picture; a track's readyState is the closest this harness
+    // gets to asking whether the camera light is off.
+    const issued: MediaStreamTrack[] = [];
+    (window as unknown as { __issuedTracks: MediaStreamTrack[] }).__issuedTracks = issued;
+
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: {
@@ -101,6 +128,7 @@ async function installFakeMedia(page: Page): Promise<void> {
           // can mark the row that is actually live.
           for (const track of stream.getVideoTracks()) {
             track.getSettings = () => ({ deviceId: id });
+            issued.push(track);
           }
           return Promise.resolve(stream);
         },
@@ -140,6 +168,67 @@ async function installFakeMedia(page: Page): Promise<void> {
       value: FakeBarcodeDetector,
     });
 
+    // Speech recognition, driven by the test rather than by a microphone.
+    //
+    // Stubbed here rather than skipped because the path from a final transcript to
+    // an intent is the whole feature, and it is the one part no unit test can
+    // reach: the service resolves its constructor at field-init of a root
+    // singleton, so this has to exist before the app boots.
+    interface FakeRecognition {
+      continuous: boolean;
+      interimResults: boolean;
+      lang: string;
+      maxAlternatives: number;
+      onstart: (() => void) | null;
+      onresult: ((event: unknown) => void) | null;
+      onend: (() => void) | null;
+      onerror: ((event: { error: string }) => void) | null;
+      start(): void;
+      stop(): void;
+      abort(): void;
+    }
+
+    let current: FakeRecognition | null = null;
+    // A constructor function that returns its own object, so `new` gets it and
+    // nothing has to alias `this`. The service only checks `typeof ctor` before
+    // calling `new`, so this satisfies it.
+    function FakeSpeechRecognition(): FakeRecognition {
+      const recognition: FakeRecognition = {
+        continuous: false,
+        interimResults: false,
+        lang: '',
+        maxAlternatives: 1,
+        onstart: null,
+        onresult: null,
+        onend: null,
+        onerror: null,
+        start: () => {
+          current = recognition;
+          recognition.onstart?.();
+        },
+        // The service detaches its handlers before aborting, so firing `onend`
+        // here is what a real engine does without triggering the restart watchdog.
+        stop: () => recognition.onend?.(),
+        abort: () => recognition.onend?.(),
+      };
+      return recognition;
+    }
+    Object.defineProperty(window, 'SpeechRecognition', {
+      configurable: true,
+      value: FakeSpeechRecognition,
+    });
+
+    // Deliver one finished phrase, shaped the way the Web Speech API shapes it.
+    (window as unknown as { __say: (phrase: string) => boolean }).__say = (phrase) => {
+      if (!current?.onresult) {
+        return false;
+      }
+      const alternative = { transcript: phrase, confidence: 0.95 };
+      const result = { isFinal: true, length: 1, item: () => alternative };
+      current.onresult({ resultIndex: 0, results: { length: 1, item: () => result } });
+      return true;
+    };
+
     // Speech synthesis: record what was said, never make a sound.
     const spoken: string[] = [];
     (window as unknown as { __spoken: string[] }).__spoken = spoken;
@@ -161,6 +250,7 @@ async function installFakeMedia(page: Page): Promise<void> {
 
 /** Deny the camera, to exercise the blocked path. */
 async function installDeniedCamera(page: Page): Promise<void> {
+  await grantFrameConsent(page);
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
@@ -201,6 +291,47 @@ class ClerkPage {
   }
   get glassToggle() {
     return this.page.getByTestId('clerk-glass-toggle');
+  }
+  get cameraToggle() {
+    return this.page.getByTestId('clerk-camera-toggle');
+  }
+  get micButton() {
+    return this.page.getByTestId('clerk-mic');
+  }
+  get previewOff() {
+    return this.page.getByTestId('clerk-preview-off');
+  }
+  get aiToggle() {
+    return this.page.getByTestId('clerk-ai-toggle');
+  }
+  get aiOffBadge() {
+    return this.page.getByTestId('clerk-ai-off-badge');
+  }
+  get muteButton() {
+    return this.page.getByTestId('clerk-mute');
+  }
+  get mutedBadge() {
+    return this.page.getByTestId('clerk-muted-badge');
+  }
+
+  /** Everything that actually reached the synthesizer this session. */
+  spokenAloud(): Promise<string[]> {
+    return this.page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken);
+  }
+
+  /** True once every camera track this page was ever handed has ended. */
+  allTracksEnded(): Promise<boolean> {
+    return this.page.evaluate(() => {
+      const issued = (window as unknown as { __issuedTracks: MediaStreamTrack[] }).__issuedTracks;
+      return issued.length > 0 && issued.every((track) => track.readyState === 'ended');
+    });
+  }
+
+  /** Turn the mic on and say something to it. */
+  async say(phrase: string): Promise<void> {
+    await this.page.evaluate((text) => {
+      (window as unknown as { __say: (phrase: string) => boolean }).__say(text);
+    }, phrase);
   }
 
   async open(): Promise<void> {
@@ -361,6 +492,11 @@ test.describe('Capy Clerk', () => {
       )
     );
     expect(live).toBe(false);
+    // Asserted on the tracks as well, because a paused camera also leaves
+    // `srcObject` null — the element letting go is not the hardware letting go,
+    // and only one of those two claims is what this test is about.
+    expect(await clerk.allTracksEnded()).toBe(true);
+    await expect(clerk.stage).toBeHidden();
   });
 
   test('leaves via the keyboard', async ({ page }) => {
@@ -626,5 +762,211 @@ test.describe('Capy Clerk without a camera', () => {
     // And there is a way back, not just a dead end.
     await blocked.getByRole('button').click();
     await expect(page.getByTestId('pos-terminal')).toBeVisible();
+  });
+});
+
+test.describe('Capy Clerk with the camera switched off', () => {
+  test.skip(({ browserName }) => browserName !== 'chromium', 'Chromium-only APIs');
+
+  test.beforeEach(async ({ page, context }) => {
+    await context.grantPermissions(['camera']);
+    await installFakeMedia(page);
+    await loginAsAdmin(page);
+  });
+
+  test('gives the camera back without ending the session', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+    await expect(clerk.caption).toBeVisible({ timeout: 15000 });
+
+    await clerk.cameraToggle.click();
+
+    // The hardware is really released — a privacy switch that only blanks the
+    // picture is not a privacy switch.
+    await expect.poll(() => clerk.allTracksEnded()).toBe(true);
+    // And the till is still open for business, which is the whole point.
+    await expect(clerk.stage).toBeVisible();
+    await expect(clerk.cartSummary).toBeVisible();
+    await expect(clerk.previewOff).toBeVisible();
+    // Picking a camera from the list would call getUserMedia and turn the light
+    // back on behind the operator's back.
+    await expect(page.getByTestId('clerk-camera-picker')).toBeHidden();
+  });
+
+  test('comes back on from the keyboard', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+    await expect(clerk.caption).toBeVisible({ timeout: 15000 });
+
+    const openedBefore = await page.evaluate(
+      () => (window as unknown as { __openedCameras: string[] }).__openedCameras.length
+    );
+
+    await page.keyboard.press('v');
+    await expect(clerk.previewOff).toBeVisible();
+    await page.keyboard.press('v');
+    await expect(clerk.previewOff).toBeHidden();
+
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as unknown as { __openedCameras: string[] }).__openedCameras.length
+        )
+      )
+      .toBeGreaterThan(openedBefore);
+  });
+
+  test('rings a sale through on voice alone', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+    await expect(clerk.caption).toBeVisible({ timeout: 15000 });
+
+    // Camera off first, so nothing that lands in the cart could have come from
+    // the recognizer — every item here was spoken.
+    await clerk.cameraToggle.click();
+    await expect(clerk.previewOff).toBeVisible();
+    await clerk.micButton.click();
+
+    await clerk.say('add two coffees');
+    await expect(clerk.cartSummary).toContainText('2 items');
+
+    await clerk.say('remove a coffee');
+    await expect(clerk.cartSummary).toContainText('1 item');
+
+    // The bug that started this: an understood command must never be answered
+    // with silence.
+    await clerk.say('add a pineapple');
+    await expect(clerk.caption).toContainText('pineapple');
+  });
+});
+
+test.describe('Capy Clerk in barcode-only mode', () => {
+  test.skip(({ browserName }) => browserName !== 'chromium', 'Chromium-only APIs');
+
+  /** A barcode the seeded catalogue knows. */
+  const STOCKED = '1234567890123';
+
+  test.beforeEach(async ({ page, context }) => {
+    await context.grantPermissions(['camera']);
+    await installFakeMedia(page);
+    await loginAsAdmin(page);
+  });
+
+  test('rings up barcodes with recognition switched off', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+    await expect(clerk.caption).toBeVisible({ timeout: 15000 });
+
+    await clerk.aiToggle.click();
+    // Said in two places, because a till that has stopped guessing looks exactly
+    // like one that is failing to.
+    await expect(clerk.aiOffBadge).toBeVisible();
+    await expect(clerk.aiToggle).toContainText('Barcodes only');
+
+    // The camera is deliberately still live — a barcode needs a picture too.
+    expect(await clerk.allTracksEnded()).toBe(false);
+
+    // A cashier presenting a code holds it still.
+    await page.evaluate(() =>
+      (window as unknown as { __setSceneMotion: (x: boolean) => void }).__setSceneMotion(false)
+    );
+    await page.evaluate(
+      (value) =>
+        (window as unknown as { __showBarcode: (x: string | null) => void }).__showBarcode(value),
+      STOCKED
+    );
+
+    await expect(clerk.cartSummary).toContainText('1 item', { timeout: 15000 });
+  });
+
+  test('comes back from the keyboard', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+    await expect(clerk.caption).toBeVisible({ timeout: 15000 });
+
+    await page.keyboard.press('a');
+    await expect(clerk.aiOffBadge).toBeVisible();
+    await page.keyboard.press('a');
+    await expect(clerk.aiOffBadge).toBeHidden();
+    await expect(clerk.aiToggle).toContainText('Recognizing');
+  });
+});
+
+test.describe('Capy Clerk with her voice muted', () => {
+  test.skip(({ browserName }) => browserName !== 'chromium', 'Chromium-only APIs');
+
+  test.beforeEach(async ({ page, context }) => {
+    await context.grantPermissions(['camera']);
+    await installFakeMedia(page);
+    await loginAsAdmin(page);
+  });
+
+  test('stops speaking and keeps captioning', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+    await expect(clerk.caption).toContainText('Hold something up', { timeout: 15000 });
+
+    await clerk.muteButton.click();
+    await expect(clerk.muteButton).toContainText('Muted');
+    // Said in two places, like recognition being off: a silent till and a broken
+    // speaker look identical from the other side of the counter.
+    await expect(clerk.mutedBadge).toBeVisible();
+
+    // The confirmation itself makes the point: captioned, never uttered.
+    await expect(clerk.caption).toContainText('captioning');
+    const before = await clerk.spokenAloud();
+
+    // And she carries on working. A barcode rings an item up — deliberately the
+    // barcode rather than the recognizer, so this test says the same thing whether
+    // the build in front of it uses the offline recognizer or a live one.
+    await page.evaluate(() =>
+      (window as unknown as { __setSceneMotion: (x: boolean) => void }).__setSceneMotion(false)
+    );
+    await page.evaluate(
+      (value) =>
+        (window as unknown as { __showBarcode: (x: string | null) => void }).__showBarcode(value),
+      '1234567890123'
+    );
+    await expect(clerk.cartSummary).toContainText(/[1-9]\d* item/, { timeout: 15000 });
+
+    // That add came with a line she would have spoken, and the synthesizer never
+    // heard about any of it.
+    await expect(clerk.caption).toContainText('added');
+    expect(await clerk.spokenAloud()).toEqual(before);
+  });
+
+  test('mutes and unmutes from the keyboard, and remembers it', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+    await expect(clerk.caption).toBeVisible({ timeout: 15000 });
+
+    await page.keyboard.press('q');
+    await expect(clerk.mutedBadge).toBeVisible();
+
+    // A shop that does not want a talking till does not want one tomorrow either.
+    await page.reload();
+    await expect(clerk.mutedBadge).toBeVisible({ timeout: 15000 });
+    await expect(clerk.muteButton).toContainText('Muted');
+
+    await page.keyboard.press('q');
+    await expect(clerk.mutedBadge).toBeHidden();
+    await expect(clerk.muteButton).toContainText('Speaking');
+    expect((await clerk.spokenAloud()).join(' ')).toContain('Voice back on');
+  });
+
+  test('goes quiet when asked out loud, and still listens', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+    await expect(clerk.caption).toBeVisible({ timeout: 15000 });
+    await clerk.micButton.click();
+
+    await clerk.say('be quiet');
+    await expect(clerk.mutedBadge).toBeVisible();
+
+    // Silencing her is not deafening her: the next command still has to land, and
+    // the microphone is the only way it can.
+    await expect(clerk.micButton).toContainText('Listening');
+    await clerk.say('unmute');
+    await expect(clerk.mutedBadge).toBeHidden();
   });
 });

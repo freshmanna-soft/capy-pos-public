@@ -1,4 +1,4 @@
-import { parseClerkIntent } from './voice-intent.parser';
+import { parseClerkIntent, rankLabelsBySpokenWords } from './voice-intent.parser';
 
 const CANDIDATES = ['Oat Milk', 'Soy Milk', 'Almond Butter'];
 
@@ -93,10 +93,31 @@ describe('parseClerkIntent', () => {
       ['checkout', 'checkout'],
       ['pay', 'checkout'],
       ["that's everything", 'checkout'],
-      ['stop listening', 'mute'],
-      ['be quiet', 'mute'],
+      ['stop listening', 'mic'],
+      ['mute', 'voice'],
+      ['be quiet', 'voice'],
+      ['stop talking', 'voice'],
+      ['unmute', 'voice'],
+      ['speak up', 'voice'],
     ])('reads "%s" as %s', (phrase, kind) => {
       expect(parseClerkIntent(phrase, CANDIDATES).kind).toBe(kind);
+    });
+
+    it('tells silencing her voice from closing the microphone', () => {
+      // One phrase stops her talking over a customer, the other stops her hearing
+      // the counter. They were a single intent once, which meant "be quiet" turned
+      // the microphone off and left the voice running — the opposite of the ask.
+      expect(parseClerkIntent('be quiet', CANDIDATES)).toEqual({ kind: 'voice', on: false });
+      expect(parseClerkIntent('stop listening', CANDIDATES)).toEqual({ kind: 'mic', on: false });
+    });
+
+    it('reads asking for the voice back as unmuting, not as muting again', () => {
+      // Whole-word matching is what keeps "unmute" out of "mute".
+      expect(parseClerkIntent('unmute', CANDIDATES)).toEqual({ kind: 'voice', on: true });
+      expect(parseClerkIntent('you can talk now', CANDIDATES)).toEqual({
+        kind: 'voice',
+        on: true,
+      });
     });
 
     it('lets a command win over a product name in the same phrase', () => {
@@ -128,5 +149,172 @@ describe('parseClerkIntent', () => {
     it('defaults the candidate list so it can be called before anything is offered', () => {
       expect(parseClerkIntent('yes')).toEqual({ kind: 'confirm' });
     });
+  });
+
+  describe('adding by name', () => {
+    it.each([
+      ['add a sandwich', ['sandwich'], 1],
+      ['ring up a coffee', ['coffee'], 1],
+      ['another coffee', ['coffee'], 1],
+      ['one more coffee', ['coffee'], 1],
+      ['put in a water bottle', ['water', 'bottle'], 1],
+    ])('reads "%s" as adding %j', (phrase, query, quantity) => {
+      expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'add', query, quantity });
+    });
+
+    it.each([
+      ['add two sandwiches', 2],
+      ['add three coffees', 3],
+      ['add five coffees', 5],
+    ])('reads the count in "%s" as %i', (phrase, quantity) => {
+      expect(parseClerkIntent(phrase, CANDIDATES)).toMatchObject({ kind: 'add', quantity });
+    });
+
+    it('does not let an uncounted number word inflate the order', () => {
+      // "twenty" is not in the counting vocabulary, so it stays part of the name
+      // and fails to resolve — she says she cannot find it. That is deliberate:
+      // ringing up one coffee when twenty were asked for is a quiet wrong answer,
+      // and twenty when one was meant empties the shelf.
+      expect(parseClerkIntent('add twenty coffees', CANDIDATES)).toEqual({
+        kind: 'add',
+        query: ['twenty', 'coffees'],
+        quantity: 1,
+      });
+    });
+
+    it('reads an instruction that opens with a refusal as the instruction', () => {
+      // "no, add a coffee" is a correction, not a rejection — the same reasoning
+      // that puts undo above reject.
+      expect(parseClerkIntent('no add a coffee', CANDIDATES)).toEqual({
+        kind: 'add',
+        query: ['coffee'],
+        quantity: 1,
+      });
+    });
+
+    it('leaves an add with nothing nameable to the candidate list', () => {
+      // "add two" while three products are on offer is a choice, not an add.
+      expect(parseClerkIntent('add two', CANDIDATES)).toEqual({ kind: 'choose', index: 2 });
+    });
+  });
+
+  describe('removing by name', () => {
+    it.each([
+      ['remove the water bottle', ['water', 'bottle'], 1],
+      ['take off the coffee', ['coffee'], 1],
+      ['take off two coffees', ['coffees'], 2],
+      ['drop the oat milk', ['oat', 'milk'], 1],
+    ])('reads "%s" as removing %j', (phrase, query, quantity) => {
+      expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'remove', query, quantity });
+    });
+
+    it('reads a removal whose particle trails the name', () => {
+      // "take the coffee off" is as natural as "take off the coffee", and a
+      // contiguous "take off" match only ever catches one of them.
+      expect(parseClerkIntent('take the coffee off', CANDIDATES)).toEqual({
+        kind: 'remove',
+        query: ['coffee'],
+        quantity: 1,
+      });
+    });
+
+    it.each(['remove everything', 'clear the cart', 'start over'])(
+      'answers "%s" instead of hunting for a product called everything',
+      (phrase) => {
+        expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'clearRequested' });
+      }
+    );
+
+    it('still reads "that\u2019s everything" as checkout', () => {
+      // The bulk-clear branch sits behind a removal verb for exactly this reason.
+      expect(parseClerkIntent("that's everything", CANDIDATES).kind).toBe('checkout');
+    });
+
+    it.each(['remove that', 'remove it', 'remove the last one', 'take it off'])(
+      'still reads "%s" as undo, because it names nothing',
+      (phrase) => {
+        expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'undo' });
+      }
+    );
+  });
+
+  describe('the camera switch', () => {
+    it.each(['camera off', 'turn the camera off', 'turn off the camera', 'no camera'])(
+      'reads "%s" as switching the camera off',
+      (phrase) => {
+        expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'camera', on: false });
+      }
+    );
+
+    it.each(['camera on', 'turn the camera on', 'start the camera'])(
+      'reads "%s" as switching the camera on',
+      (phrase) => {
+        expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'camera', on: true });
+      }
+    );
+  });
+
+  describe('the recognition switch', () => {
+    it.each(['ai off', 'turn off the ai', 'barcodes only', 'stop guessing'])(
+      'reads "%s" as switching recognition off',
+      (phrase) => {
+        expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'ai', on: false });
+      }
+    );
+
+    it.each(['ai on', 'turn the ai on', 'recognition on'])(
+      'reads "%s" as switching recognition on',
+      (phrase) => {
+        expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'ai', on: true });
+      }
+    );
+
+    it('does not confuse the camera switch with the recognition switch', () => {
+      expect(parseClerkIntent('camera off', CANDIDATES)).toEqual({ kind: 'camera', on: false });
+      expect(parseClerkIntent('ai off', CANDIDATES)).toEqual({ kind: 'ai', on: false });
+    });
+  });
+
+  describe('looking again', () => {
+    it.each(['look again', 'scan again', 'have another look'])(
+      'reads "%s" as another look',
+      (phrase) => {
+        // "have another look" carries an add verb; it is not a request to ring up
+        // a product called "look", which is why this is matched first.
+        expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'look' });
+      }
+    );
+  });
+});
+
+describe('rankLabelsBySpokenWords', () => {
+  it('folds plurals on both sides, because nobody says "add two sandwich"', () => {
+    expect(rankLabelsBySpokenWords(['sandwiches'], ['Sandwich', 'Coffee'])).toEqual([
+      { index: 0, score: 2, coverage: 1 },
+    ]);
+  });
+
+  it('returns every match, best first', () => {
+    const ranked = rankLabelsBySpokenWords(['soy', 'milk'], ['Oat Milk', 'Soy Milk']);
+    expect(ranked.map((match) => match.index)).toEqual([1, 0]);
+  });
+
+  it('reports a tie as a tie rather than picking one', () => {
+    // The caller decides what a tie means: choosing between candidates refuses to
+    // guess, while adding by name offers the tied products as a choice.
+    const ranked = rankLabelsBySpokenWords(['milk'], ['Oat Milk', 'Soy Milk']);
+    expect(ranked).toHaveLength(2);
+    expect(ranked[0]?.score).toBe(ranked[1]?.score);
+  });
+
+  it('scores nothing for a word that only appears inside another', () => {
+    expect(rankLabelsBySpokenWords(['tea'], ['Steak Pie'])).toEqual([]);
+  });
+
+  it('breaks a scoring tie in favour of the name that was said completely', () => {
+    // "Coffee" and "Coffee Cake" both score one for a bare "coffee". Coverage is
+    // what knows the cashier named one of them entirely and the other halfway.
+    const ranked = rankLabelsBySpokenWords(['coffee'], ['Coffee Cake', 'Coffee']);
+    expect(ranked[0]?.index).toBe(1);
   });
 });

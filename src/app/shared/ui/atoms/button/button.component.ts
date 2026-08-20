@@ -2,9 +2,13 @@ import { Component, computed, input, output } from '@angular/core';
 
 /**
  * Button Component (Atom)
- * Reusable button following Atomic Design principles
- * Can be used across all microservices agents
- * Uses Angular Signals API (input/output/computed)
+ *
+ * Reusable button following Atomic Design principles. Uses the Angular Signals
+ * API (input/output/computed).
+ *
+ * `type` defaults to `button` on purpose: the moment one of these sits inside a
+ * `<form>`, a default of `submit` would make every secondary action — Cancel,
+ * Scan, a disclosure toggle — save the form instead.
  */
 @Component({
   selector: 'app-button',
@@ -15,18 +19,24 @@ import { Component, computed, input, output } from '@angular/core';
       [type]="type()"
       [disabled]="disabled() || loading()"
       [class]="buttonClasses()"
+      [attr.data-testid]="testId() || null"
+      [attr.aria-label]="ariaLabel() || null"
+      [attr.aria-busy]="loading() ? 'true' : null"
       (click)="handleClick($event)"
     >
       @if (loading()) {
-        <span class="spinner"></span>
+        <!-- Decorative: the aria-busy attribute above is what announces the wait.
+             A readable spinner would be announced as a meaningless graphic. -->
+        <span class="spinner" aria-hidden="true"></span>
       }
       <ng-content></ng-content>
     </button>
   `,
   styles: [
     `
+      /* 44px minimum — touch target on a till, not a decoration. */
       .btn {
-        @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 
+        @apply min-h-[44px] px-4 py-2 rounded-lg font-medium transition-all duration-200 
              focus:outline-none focus:ring-2 focus:ring-offset-2
              disabled:opacity-50 disabled:cursor-not-allowed
              flex items-center justify-center gap-2;
@@ -53,11 +63,11 @@ import { Component, computed, input, output } from '@angular/core';
       }
 
       .btn-sm {
-        @apply px-3 py-1.5 text-sm;
+        @apply min-h-[36px] px-3 py-1.5 text-sm;
       }
 
       .btn-lg {
-        @apply px-6 py-3 text-lg;
+        @apply min-h-[52px] px-6 py-3 text-lg;
       }
 
       .spinner {
@@ -75,6 +85,9 @@ export class ButtonComponent {
   readonly disabled = input(false);
   readonly loading = input(false);
   readonly fullWidth = input(false);
+  /** Required for icon-only buttons, where the glyph is the whole label. */
+  readonly ariaLabel = input('');
+  readonly testId = input('');
 
   // Signal-based output
   readonly clicked = output<MouseEvent>();
