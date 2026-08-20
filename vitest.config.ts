@@ -36,14 +36,13 @@ export default defineConfig({
         '**/*.test.ts',
         '**/*.stories.ts',
         '**/index.ts',
-        // Repositories are measured now that they have tests. base-dexie,
-        // dexie-product, dexie-customer and dexie-payment are covered (incl. the
-        // malformed-record negative path); the rest stay excluded until they
-        // get their own tests (tracked in #110).
-        'src/app/core/infrastructure/repositories/dexie-transaction.repository.ts',
-        'src/app/core/infrastructure/repositories/api-product.repository.ts',
-        'src/app/core/infrastructure/repositories/sqlite-product.repository.ts',
-        'src/app/core/infrastructure/repositories/base-sqlite.repository.ts',
+        // Every repository is measured now (#110 closed): base-dexie,
+        // dexie-product, dexie-customer, dexie-payment and dexie-transaction all
+        // have tests covering the malformed-record negative path, so there is no
+        // unmeasured data-mapping seam left. The api-product and sql.js
+        // repositories that used to sit here were deleted instead of tested —
+        // nothing referenced them and the app migrated off SQLite to Dexie (see
+        // docs/DEXIE_MIGRATION.md).
         'src/app/core/infrastructure/sqlite/**',
         'src/app/core/infrastructure/messaging/**',
         'src/app/core/infrastructure/factories/**',

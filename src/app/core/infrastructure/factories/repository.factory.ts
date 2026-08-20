@@ -72,8 +72,11 @@ export class RepositoryFactory {
         return this.dexieProductRepo;
 
       case RepositoryType.API:
-        // Future: Return API implementation
-        // return new ApiProductRepository(config.apiBaseUrl);
+        // Future: return an HTTP-backed IProductRepository built from
+        // config.apiBaseUrl. The previous half-written api-product.repository.ts
+        // was deleted in #110 rather than carried untested — nothing constructed
+        // it, and a stub that silently diverges from the interface is worse than
+        // this explicit throw.
         throw new Error(RepositoryFactory.API_NOT_IMPLEMENTED);
 
       default:
