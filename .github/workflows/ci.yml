@@ -139,7 +139,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        # Bounded and retried, because THIS step — not the tests — is the
+        # historical failure mode. `--with-deps` shells out to apt-get, and on
+        # 2026-08-19 both e2e jobs hung inside it against a stalled Ubuntu
+        # mirror until they hit their JOB timeouts (25m/20m). GitHub reports a
+        # timed-out job as "cancelled", so the PR looked like it had failing
+        # e2e when nothing was wrong with the code.
+        #
+        # Capping each attempt well under the job budget turns that 25-minute
+        # silent stall into a ~3-minute retry, and a hard failure here names
+        # itself instead of masquerading as a test problem. Caching the browser
+        # binaries would NOT help: the stall was in apt, which `--with-deps`
+        # runs on every hit.
+        timeout-minutes: 11
+        run: |
+          for attempt in 1 2 3; do
+            if timeout -k 30s 3m npx playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::playwright install attempt ${attempt}/3 failed or stalled; retrying"
+            sleep 10
+          done
+          echo "::error::playwright install failed after 3 attempts (see warnings above)"
+          exit 1
       - name: Ensure base ref is available
         run: git fetch --no-tags origin ${{ github.base_ref }}
       - name: Run affected e2e
@@ -178,7 +200,29 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        # Bounded and retried, because THIS step — not the tests — is the
+        # historical failure mode. `--with-deps` shells out to apt-get, and on
+        # 2026-08-19 both e2e jobs hung inside it against a stalled Ubuntu
+        # mirror until they hit their JOB timeouts (25m/20m). GitHub reports a
+        # timed-out job as "cancelled", so the PR looked like it had failing
+        # e2e when nothing was wrong with the code.
+        #
+        # Capping each attempt well under the job budget turns that 25-minute
+        # silent stall into a ~3-minute retry, and a hard failure here names
+        # itself instead of masquerading as a test problem. Caching the browser
+        # binaries would NOT help: the stall was in apt, which `--with-deps`
+        # runs on every hit.
+        timeout-minutes: 11
+        run: |
+          for attempt in 1 2 3; do
+            if timeout -k 30s 3m npx playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::playwright install attempt ${attempt}/3 failed or stalled; retrying"
+            sleep 10
+          done
+          echo "::error::playwright install failed after 3 attempts (see warnings above)"
+          exit 1
       - name: Route smoke against the production build
         run: npm run test:e2e:smoke
       - name: Upload smoke report
