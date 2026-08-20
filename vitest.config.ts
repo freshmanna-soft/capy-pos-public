@@ -42,8 +42,7 @@ export default defineConfig({
         // unmeasured data-mapping seam left. The api-product and sql.js
         // repositories that used to sit here were deleted instead of tested —
         // nothing referenced them and the app migrated off SQLite to Dexie (see
-        // docs/DEXIE_MIGRATION.md).
-        'src/app/core/infrastructure/sqlite/**',
+        // docs/DEXIE_MIGRATION.md), taking the whole sql.js layer with them.
         'src/app/core/infrastructure/messaging/**',
         'src/app/core/infrastructure/factories/**',
         'src/app/core/infrastructure/database/**',
