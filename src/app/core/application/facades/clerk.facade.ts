@@ -18,6 +18,8 @@ import {
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import {
   BarcodeGate,
+  GATED_TIMING,
+  INSTANT_TIMING,
   ScannedCode,
   pickPresentedCode,
 } from '@core/infrastructure/media/barcode-gate';
@@ -32,6 +34,7 @@ import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.servi
 import { Product } from '@core/domain/entities/product.entity';
 import {
   CodeOverlay,
+  ClerkMood,
   ClerkVisualState,
   ScanProgress,
 } from '@features/clerk/canvas/capybara-renderer';
@@ -48,6 +51,15 @@ export const UNDO_WINDOW_MS = 4000;
 
 /** Motion sampling cadence. 8Hz is ample for settle detection and nearly free. */
 const SAMPLE_INTERVAL_MS = 125;
+
+/**
+ * How long a mood lasts before she settles back to neutral.
+ *
+ * Just longer than the undo window, so the reaction to an add is still on her face
+ * for as long as taking it back is cheap. An expression that outlives what caused
+ * it has stopped describing anything.
+ */
+export const MOOD_HOLD_MS = 4600;
 
 /** Whether the camera is up and the clerk is working. */
 export type ClerkPhase = 'off' | 'starting' | 'ready' | 'blocked';
@@ -118,9 +130,21 @@ export class ClerkFacade {
   private readonly _frameSize = signal({ width: 0, height: 0 });
   private readonly _scanProgress = signal<ScanProgress>({ kind: 'hidden' });
   private readonly _barcodePriority = signal(false);
+  private readonly _barcodeDwell = signal<number | null>(null);
+  private readonly _mood = signal<ClerkMood>(ClerkMood.NEUTRAL);
 
   readonly phase = this._phase.asReadonly();
   readonly visualState = this._visualState.asReadonly();
+  /**
+   * How the last thing that happened went, as distinct from what she is doing.
+   *
+   * `visualState` is a job — looking, listening, waiting. This is the reaction to
+   * an outcome, and it exists because the outcomes are what the voice was carrying:
+   * an item went in, stock refused one, a code is not in the catalogue, she cannot
+   * tell what she is looking at. Muting her closes that channel and leaves the
+   * captions, which a cashier watching their own hands is not reading.
+   */
+  readonly mood = this._mood.asReadonly();
   /**
    * Everything she says, as text. Rendered in a live region alongside the audio
    * so the voice is an enhancement and never the only channel.
@@ -159,6 +183,14 @@ export class ClerkFacade {
    * not coming is exactly who needs told why.
    */
   readonly barcodePriority = this._barcodePriority.asReadonly();
+  /**
+   * How far through its dwell the code being presented is, or null when none is.
+   *
+   * The dwell is a deliberate refusal to ring up a code that has only been glimpsed,
+   * and a refusal the cashier cannot see is indistinguishable from a broken reader —
+   * so it drives the same ring the model's waits do.
+   */
+  readonly barcodeDwell = this._barcodeDwell.asReadonly();
   readonly busy = this._busy.asReadonly();
   readonly recognizedCount = this._recognized.asReadonly();
   readonly addedCount = this._added.asReadonly();
@@ -197,6 +229,14 @@ export class ClerkFacade {
    * recognition switches — see `SpeechSynthesisService.setMuted`.
    */
   readonly muted = this.voice.muted;
+  /**
+   * How hard the mood should be played, 0..1.
+   *
+   * Full while she is muted, because the body is then the only channel left. Held
+   * back when she can speak, where the words are already carrying it and a figure
+   * mugging along with every sentence is the more annoying failure.
+   */
+  readonly moodIntensity = computed(() => (this.muted() ? 1 : 0.55));
   readonly lastBoundaryAt = this.voice.lastBoundaryAt;
 
   /**
@@ -286,6 +326,7 @@ export class ClerkFacade {
   private hints: CatalogHint[] = [];
   private sampleTimer: ReturnType<typeof setInterval> | null = null;
   private undoTimer: ReturnType<typeof setInterval> | null = null;
+  private moodTimer: ReturnType<typeof setTimeout> | null = null;
   private inFlight: AbortController | null = null;
 
   constructor() {
@@ -335,6 +376,7 @@ export class ClerkFacade {
     if (!(await this.camera.start())) {
       this._phase.set('blocked');
       this._visualState.set('confused');
+      this.setMood(ClerkMood.ALERT);
       this.say(this.camera.message());
       return;
     }
@@ -368,6 +410,10 @@ export class ClerkFacade {
     this._verdict.set('warming');
     this._codes.set([]);
     this._scanProgress.set({ kind: 'hidden' });
+    this._barcodeDwell.set(null);
+    // Nothing is left to react to, and a mood timer outliving the session would put
+    // an expression back on a stage that has gone.
+    this.setMood(ClerkMood.NEUTRAL);
     this.barcodeGate.reset();
     // Both gates and the scheduler: the frame a look was waiting on, and the code
     // that was holding one back, belong to a session that has ended.
@@ -398,6 +444,7 @@ export class ClerkFacade {
     this.abortLook();
     this._candidates.set([]);
     this._codes.set([]);
+    this._barcodeDwell.set(null);
     this.barcodeGate.release();
     this.goIdle();
 
@@ -408,6 +455,9 @@ export class ClerkFacade {
     try {
       const opened = await this.camera.select(deviceId);
       this.gate.reset();
+      if (!opened) {
+        this.setMood(ClerkMood.ALERT);
+      }
       this.say(
         opened
           ? `Looking through ${this.camera.activeCameraLabel()}.`
@@ -457,6 +507,7 @@ export class ClerkFacade {
       this.stopSampling();
       this.camera.pause();
       this._codes.set([]);
+      this._barcodeDwell.set(null);
       this._frameSize.set({ width: 0, height: 0 });
       this._confidence.set(0);
       this._verdict.set('warming');
@@ -484,6 +535,7 @@ export class ClerkFacade {
       // 'ready' on failure — 'blocked' would throw up the terminal overlay and end
       // a session they only meant to un-pause.
       if (!(await this.camera.resume())) {
+        this.setMood(ClerkMood.ALERT);
         this.say(this.camera.message());
         return;
       }
@@ -526,6 +578,9 @@ export class ClerkFacade {
       this._candidates.set([]);
       this._confidence.set(0);
       this._scanProgress.set({ kind: 'hidden' });
+      // Any dwell in progress was measured against the gated profile; from here the
+      // next read is instant, so there is no wait left to report.
+      this._barcodeDwell.set(null);
       this.goIdle();
       // Said plainly, because with no barcode reader this leaves her unable to
       // identify anything at all and the cashier needs to know that now rather
@@ -665,7 +720,19 @@ export class ClerkFacade {
 
     this._barcodePriority.set(this.looks.barcodeHasPriority(now));
     this._verdict.set(verdict);
-    this._scanProgress.set(progressFor(verdict, this.gate.progress(now)));
+    this._scanProgress.set(this.orDwell(progressFor(verdict, this.gate.progress(now))));
+  }
+
+  /**
+   * Let a barcode's dwell speak over the model's waits.
+   *
+   * One ring, two things that can be waiting on it, and a rule for which wins: the
+   * dwell is about to produce an answer, while the frame gate's progress describes
+   * a look that this very code is standing in the way of.
+   */
+  private orDwell(fallback: ScanProgress): ScanProgress {
+    const dwell = this._barcodeDwell();
+    return dwell === null ? fallback : { kind: 'settling', value: dwell };
   }
 
   /**
@@ -693,7 +760,9 @@ export class ClerkFacade {
         this.gate.undoLastCapture();
         this._barcodePriority.set(true);
         this._verdict.set('duplicate');
-        this._scanProgress.set({ kind: 'hidden' });
+        // Nothing to report unless a code is mid-dwell — in which case that dwell is
+        // the reason this look stood down, and it is what the ring should show.
+        this._scanProgress.set(this.orDwell({ kind: 'hidden' }));
         return;
       case 'settling':
         // From where the cashier is standing this is still the settle window they
@@ -702,7 +771,7 @@ export class ClerkFacade {
         // till having lost its place.
         this._barcodePriority.set(false);
         this._verdict.set('holding');
-        this._scanProgress.set({ kind: 'settling', value: this.debounceRing(now) });
+        this._scanProgress.set(this.orDwell({ kind: 'settling', value: this.debounceRing(now) }));
         return;
     }
   }
@@ -751,16 +820,37 @@ export class ClerkFacade {
     const overlays = this.overlaysFor(found, presented);
     this._codes.set(overlays);
 
+    const now = performance.now();
+
     // Barcodes first, and this is where that is enforced rather than hoped for. A
     // code we stock is a free and certain answer to the question the model would be
     // paid to guess at, so while one is in frame the model stands down — including
     // the case that costs the most, where the decode is still running when the
     // frame gate opens and both would otherwise answer the same frame.
+    //
+    // Noted from the first frame a stocked code appears, dwell or no dwell: the
+    // whole point of the wait is to be sure about the code, and paying the model to
+    // guess during it would be spending money to answer a question that is already
+    // being answered for free.
     if (overlays.some((overlay) => overlay.matched)) {
-      this.looks.noteStockedCode(performance.now());
+      this.looks.noteStockedCode(now);
     }
 
-    const verdict = this.barcodeGate.observe(presented?.value ?? null, performance.now());
+    // Which pair of waits applies. With recognition off the bars are the only thing
+    // the till is listening to, so presenting one is the whole command and there is
+    // nothing left for a dwell to protect — it lands on the frame it is read.
+    const timing = this._aiEnabled() ? GATED_TIMING : INSTANT_TIMING;
+    const verdict = this.barcodeGate.observe(presented?.value ?? null, now, timing);
+
+    const dwell = verdict === 'dwelling' ? this.barcodeGate.dwellProgress(now, timing) : null;
+    this._barcodeDwell.set(dwell);
+    if (dwell !== null) {
+      // Written here as well as in `tick` because the tick that armed this dwell has
+      // already finished its own synchronous pass over the ring by the time the
+      // decode resolves. Without this the first dwell would show nothing at all.
+      this._scanProgress.set({ kind: 'settling', value: dwell });
+    }
+
     if (verdict === 'new' && presented) {
       this.ringUpCode(presented.value);
     }
@@ -786,6 +876,7 @@ export class ClerkFacade {
     const product = this.codeIndex.get(value);
     if (!product) {
       this._visualState.set('confused');
+      this.setMood(ClerkMood.ALERT);
       this.say("That barcode isn't in the catalogue.");
       this.publish(EventType.CLERK_ITEM_REJECTED, { reason: 'unknown-barcode', barcode: value });
       return;
@@ -980,6 +1071,7 @@ export class ClerkFacade {
       // Stock rules are the terminal's, not the clerk's — she just reports them.
       this._visualState.set('confused');
       this._candidates.set([]);
+      this.setMood(ClerkMood.SORRY);
       this.say(
         result.reason === 'out-of-stock'
           ? `${product.name} is out of stock.`
@@ -1006,6 +1098,9 @@ export class ClerkFacade {
     this._added.update((n) => n + added);
     this._candidates.set([]);
     this._visualState.set('found');
+    // A short count is not a win. She says so out loud below, and with the voice off
+    // this is the only place that survives to say it.
+    this.setMood(added < wanted ? ClerkMood.SORRY : ClerkMood.HAPPY);
     this._plopToken.update((token) => token + added);
     // A short count is reported rather than glossed over: the cashier has to know
     // the sale is one short before the customer is at the door.
@@ -1050,6 +1145,7 @@ export class ClerkFacade {
     this.candidateOrigin = origin;
     this._candidates.set(candidates.slice(0, 3));
     this._visualState.set('confused');
+    this.setMood(ClerkMood.UNSURE);
     this.say(utterance || 'Which one is it?');
   }
 
@@ -1063,6 +1159,7 @@ export class ClerkFacade {
     });
     this._candidates.set([]);
     this._visualState.set('confused');
+    this.setMood(ClerkMood.UNSURE);
     this.say(utterance || "I can't tell what that is. Turn the label towards me?");
     // Without this the identical frame would be rejected as a duplicate and she
     // would repeat the request forever.
@@ -1164,6 +1261,8 @@ export class ClerkFacade {
     this.clearUndo();
     this._added.update((n) => Math.max(0, n - pending.quantity));
     this.goIdle();
+    // An undo is her mistake being corrected, not a routine edit.
+    this.setMood(ClerkMood.SORRY);
     this.say(`${describeQuantity(pending.quantity, pending.label)} removed.`);
     // Let the same item be recognized again — undo usually means "wrong item",
     // and the cashier is about to hold up the right one. Both gates, because the
@@ -1296,6 +1395,7 @@ export class ClerkFacade {
 
     if (!best) {
       this._visualState.set('confused');
+      this.setMood(ClerkMood.UNSURE);
       this.say(`I don't have ${spokenName(query)} in the catalogue.`);
       this.publish(EventType.CLERK_ITEM_REJECTED, {
         reason: 'unknown-spoken-name',
@@ -1366,6 +1466,7 @@ export class ClerkFacade {
           this._catalog().map((product) => product.name)
         ).length > 0;
       this._visualState.set('confused');
+      this.setMood(ClerkMood.UNSURE);
       this.say(
         stocked
           ? `There's no ${query.join(' ')} in the cart.`
@@ -1381,6 +1482,7 @@ export class ClerkFacade {
     const tied = ranked.filter((match) => match.score === best.score);
     if (tied.length > 1) {
       this._visualState.set('confused');
+      this.setMood(ClerkMood.UNSURE);
       this.say(
         `I have ${tied
           .slice(0, 3)
@@ -1425,6 +1527,9 @@ export class ClerkFacade {
 
     this._added.update((n) => Math.max(0, n - removing));
     this.goIdle();
+    // Deliberately neutral, unlike undo: taking a line off is an ordinary edit to
+    // the sale, and an apology for it would be noise.
+    this.setMood(ClerkMood.NEUTRAL);
     this.say(`${describeQuantity(removing, product.name)} removed.`);
     this.publish(EventType.CLERK_ITEM_REMOVED, {
       productId: product.id,
@@ -1445,6 +1550,30 @@ export class ClerkFacade {
     }
     this._caption.set(text);
     this.voice.speak(text);
+  }
+
+  /**
+   * Put her in a mood, and start it fading.
+   *
+   * Every mood replaces the one before it and cancels its fade rather than queueing
+   * behind it, so a run of quick scans reads as a run of quick reactions instead of
+   * one long held expression. `neutral` is also how the mood is cleared — asking for
+   * it stops the timer and settles her immediately, which is what ending a session
+   * or a plain cart edit wants.
+   */
+  private setMood(mood: ClerkMood): void {
+    if (this.moodTimer !== null) {
+      clearTimeout(this.moodTimer);
+      this.moodTimer = null;
+    }
+    this._mood.set(mood);
+    if (mood === ClerkMood.NEUTRAL) {
+      return;
+    }
+    this.moodTimer = setTimeout(() => {
+      this.moodTimer = null;
+      this._mood.set(ClerkMood.NEUTRAL);
+    }, MOOD_HOLD_MS);
   }
 
   // ─── Undo window ──────────────────────────────────────────────────────────

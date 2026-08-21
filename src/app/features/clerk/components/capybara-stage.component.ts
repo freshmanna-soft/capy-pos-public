@@ -74,6 +74,8 @@ export class CapybaraStageComponent implements AfterViewInit, OnDestroy {
       const codes = this.clerk.codes();
       const frameSize = this.clerk.frameSize();
       const scanProgress = this.clerk.scanProgress();
+      const mood = this.clerk.mood();
+      const moodIntensity = this.clerk.moodIntensity();
 
       const renderer = this.renderer;
       if (!renderer) {
@@ -85,6 +87,7 @@ export class CapybaraStageComponent implements AfterViewInit, OnDestroy {
       renderer.setSpeech(speaking, lastBoundaryAt);
       renderer.setCodes(codes, frameSize);
       renderer.setScanProgress(scanProgress);
+      renderer.setMood(mood, moodIntensity);
     });
 
     // A change of token means an item really reached the cart. Reading it here
@@ -119,6 +122,7 @@ export class CapybaraStageComponent implements AfterViewInit, OnDestroy {
     // created; the effect above will keep it in step from here.
     this.renderer.setState(this.clerk.visualState());
     this.renderer.setConfidence(this.clerk.confidence());
+    this.renderer.setMood(this.clerk.mood(), this.clerk.moodIntensity());
     this.renderer.resetEntrance();
     this.start();
   }
