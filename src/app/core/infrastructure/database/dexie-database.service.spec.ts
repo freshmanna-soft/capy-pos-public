@@ -20,6 +20,7 @@ import {
   IProductDB,
   ICustomerDB,
   IOperatorDB,
+  IOperatorCredentialDB,
   IRolePermissionDB,
 } from './dexie-database.service';
 import { Role } from '@core/domain/auth';
@@ -809,5 +810,142 @@ describe('DexieDatabase v4 — products [tenantId+id] secondary index (R1)', () 
 
     const all = await db.products.toArray();
     expect(all.length).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite: v6 — operator passkey credentials
+//
+// The v3→v4 suites above already replay the whole version chain every time they
+// instantiate DexieDatabase, so they cover the fact that v6 opens at all. What is
+// left to prove is what v6 itself adds: a usable table with the indexes the
+// settings screen and the sign-in path query by, a PIN field that persists without
+// a schema entry, and — because this is the table that would quietly lose an
+// operator's enrollment — that reopening the database does not drop it.
+// ---------------------------------------------------------------------------
+
+describe('DexieDatabase v6 — operator credentials', () => {
+  let db: DexieDatabase;
+
+  const credential = (overrides: Partial<IOperatorCredentialDB> = {}): IOperatorCredentialDB => ({
+    credentialId: 'Y3JlZC1vbmU',
+    operatorId: 'op-001',
+    tenantId: DEFAULT_TENANT_ID,
+    publicKeyJwk: JSON.stringify({ kty: 'EC', crv: 'P-256', x: 'eA', y: 'eQ' }),
+    algorithm: -7,
+    signCount: 0,
+    label: 'Counter till',
+    transports: JSON.stringify(['internal']),
+    createdAt: new Date('2026-08-20T09:00:00Z'),
+    ...overrides,
+  });
+
+  beforeEach(async () => {
+    db = makeDb();
+    await openDb(db);
+  });
+
+  afterEach(async () => {
+    await teardownDb(db);
+  });
+
+  it('exposes the operatorCredentials table on a fresh database', async () => {
+    await db.operatorCredentials.add(credential());
+    const stored = await db.operatorCredentials.get('Y3JlZC1vbmU');
+    expect(stored?.operatorId).toBe('op-001');
+    expect(stored?.algorithm).toBe(-7);
+  });
+
+  it('stores no biometric data — only a public key, an algorithm and a counter', async () => {
+    await db.operatorCredentials.add(credential());
+    const stored = await db.operatorCredentials.get('Y3JlZC1vbmU');
+    const parsed = JSON.parse(stored?.publicKeyJwk ?? '{}') as Record<string, unknown>;
+    // A JWK carrying a private key would have `d`; a template would be raw bytes.
+    expect(parsed['d']).toBeUndefined();
+    expect(Object.keys(stored ?? {}).sort()).toEqual([
+      'algorithm',
+      'createdAt',
+      'credentialId',
+      'label',
+      'operatorId',
+      'publicKeyJwk',
+      'signCount',
+      'tenantId',
+      'transports',
+    ]);
+  });
+
+  it('treats credentialId as the primary key, so the same credential cannot enroll twice', async () => {
+    await db.operatorCredentials.add(credential());
+    await expect(db.operatorCredentials.add(credential({ label: 'Duplicate' }))).rejects.toThrow();
+  });
+
+  it('lists an operator’s credentials by the operatorId index', async () => {
+    await db.operatorCredentials.bulkAdd([
+      credential({ credentialId: 'a', label: 'Counter till' }),
+      credential({ credentialId: 'b', label: 'Back office' }),
+      credential({ credentialId: 'c', operatorId: 'op-002' }),
+    ]);
+
+    const forOperator = await db.operatorCredentials.where('operatorId').equals('op-001').toArray();
+    expect(forOperator.map((row) => row.label).sort()).toEqual(['Back office', 'Counter till']);
+  });
+
+  it('queries the [operatorId+tenantId] compound index', async () => {
+    await db.operatorCredentials.bulkAdd([
+      credential({ credentialId: 'a' }),
+      credential({ credentialId: 'b', tenantId: 'other-tenant' }),
+    ]);
+
+    const scoped = await db.operatorCredentials
+      .where('[operatorId+tenantId]')
+      .equals(['op-001', DEFAULT_TENANT_ID])
+      .toArray();
+    expect(scoped.map((row) => row.credentialId)).toEqual(['a']);
+  });
+
+  it('persists an advanced signature counter, so a replay can be spotted later', async () => {
+    await db.operatorCredentials.add(credential({ signCount: 4 }));
+    await db.operatorCredentials.update('Y3JlZC1vbmU', {
+      signCount: 5,
+      lastUsedAt: new Date('2026-08-20T10:00:00Z'),
+    });
+
+    const stored = await db.operatorCredentials.get('Y3JlZC1vbmU');
+    expect(stored?.signCount).toBe(5);
+    // Compared by instant rather than with toBeInstanceOf: fake-indexeddb structured-
+    // clones values through another realm, so a round-tripped Date is a Date without
+    // being *this* realm's Date. The timestamp surviving is what this test is about.
+    expect(new Date(stored!.lastUsedAt!).toISOString()).toBe('2026-08-20T10:00:00.000Z');
+  });
+
+  it('keeps enrolled credentials across a close and reopen', async () => {
+    await db.operatorCredentials.add(credential());
+    db.close();
+    await db.open();
+
+    expect(await db.operatorCredentials.count()).toBe(1);
+  });
+
+  it('stores a PIN hash on an operator without needing its own schema entry', async () => {
+    await db.seedRbacDefaults();
+    const admin = await db.operators.toCollection().first();
+    expect(admin).toBeDefined();
+
+    await db.operators.update(admin!.id, {
+      pinHash: 'pbkdf2:100000:abcd:ef01',
+      pinUpdatedAt: new Date('2026-08-20T11:00:00Z'),
+    });
+
+    const updated = await db.operators.get(admin!.id);
+    expect(updated?.pinHash).toBe('pbkdf2:100000:abcd:ef01');
+    expect(new Date(updated!.pinUpdatedAt!).toISOString()).toBe('2026-08-20T11:00:00.000Z');
+  });
+
+  it('leaves an operator with no PIN distinguishable from one with an empty PIN', async () => {
+    await db.seedRbacDefaults();
+    const admin = await db.operators.toCollection().first();
+    // Absent, not empty string — the PIN path must not be offered to this operator.
+    expect(admin?.pinHash).toBeUndefined();
   });
 });

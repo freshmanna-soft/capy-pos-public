@@ -10,6 +10,19 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { LowStockSettingsService } from '@core/application/services/low-stock-settings.service';
 import { ThemeService } from '@core/application/services/theme.service';
+import { CurrentUserService } from '@core/application/auth/current-user.service';
+import {
+  PasskeyAlreadyEnrolledError,
+  QUICK_AUTH_ADMIN_PORT,
+  WeakPinError,
+} from '@core/application/auth/ports/quick-auth-admin.port';
+import {
+  PasskeyCancelledError,
+  PasskeyUnavailableError,
+  QUICK_AUTH_GATEWAY,
+} from '@core/application/auth/ports/quick-auth.port';
+import { PasskeySummaryDto } from '@core/application/auth/dtos/quick-auth.dto';
+import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webauthn/pin-policy';
 
 /**
  * Settings Component
@@ -17,6 +30,7 @@ import { ThemeService } from '@core/application/services/theme.service';
  * Provides configuration UI for system preferences including:
  * - Appearance / dark mode (persisted to IndexedDB)
  * - Low stock threshold (persisted to IndexedDB)
+ * - How the signed-in operator signs in on this device (passkey, PIN)
  *
  * Uses OnPush change detection with signals for reactivity.
  */
@@ -130,6 +144,147 @@ import { ThemeService } from '@core/application/services/theme.service';
         }
         @if (saveError()) {
           <div class="message message-error" data-testid="save-error">❌ {{ saveError() }}</div>
+        }
+      </div>
+
+      <!-- Sign-in on this device -->
+      <div class="settings-section" data-testid="signin-settings">
+        <div class="section-header">
+          <h2>🔑 Signing in on this device</h2>
+          <p class="section-description">
+            Set up a faster way to start your shift. Your fingerprint or face never leaves this
+            device — Capy-POS only stores a public key.
+          </p>
+        </div>
+
+        @if (!signedIn()) {
+          <div class="coming-soon-card" data-testid="signin-needs-session">
+            <span class="coming-icon">🔒</span>
+            <p>Sign in first to set up a passkey or a PIN.</p>
+          </div>
+        } @else {
+          <div class="setting-card">
+            <!-- Passkeys -->
+            <div class="setting-info">
+              <h3>Passkeys</h3>
+              @if (!passkeySupported()) {
+                <p data-testid="passkey-unsupported">
+                  This device has no fingerprint or face reader available to the browser, so a PIN
+                  is the quicker option here.
+                </p>
+              } @else {
+                <p>One touch to sign in, with nothing to type or overhear.</p>
+              }
+            </div>
+
+            @if (passkeySupported()) {
+              @if (passkeys().length > 0) {
+                <ul class="passkey-list" data-testid="passkey-list">
+                  @for (passkey of passkeys(); track passkey.credentialId) {
+                    <li class="passkey-row">
+                      <span class="passkey-label">{{ passkey.label }}</span>
+                      <span class="passkey-meta">
+                        @if (passkey.lastUsedAt) {
+                          Last used {{ passkey.lastUsedAt | date: 'mediumDate' }}
+                        } @else if (passkey.createdAt) {
+                          Added {{ passkey.createdAt | date: 'mediumDate' }}
+                        } @else {
+                          Added earlier
+                        }
+                      </span>
+                      <button
+                        type="button"
+                        class="btn-remove"
+                        (click)="removePasskey(passkey.credentialId)"
+                        [disabled]="busy()"
+                        [attr.data-testid]="'btn-remove-passkey'"
+                        [attr.aria-label]="'Remove passkey ' + passkey.label"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  }
+                </ul>
+              }
+
+              <div class="setting-control">
+                <input
+                  type="text"
+                  class="threshold-input passkey-name"
+                  [ngModel]="newPasskeyLabel()"
+                  (ngModelChange)="newPasskeyLabel.set($event)"
+                  placeholder="Name this device"
+                  aria-label="Name for this passkey"
+                  data-testid="input-passkey-label"
+                />
+                <button
+                  type="button"
+                  class="btn-save"
+                  (click)="addPasskey()"
+                  [disabled]="busy()"
+                  data-testid="btn-add-passkey"
+                >
+                  {{ enrolling() ? 'Waiting for you…' : 'Add this device' }}
+                </button>
+              </div>
+            }
+          </div>
+
+          <!-- PIN -->
+          <div class="setting-card">
+            <div class="setting-info">
+              <h3>Till PIN</h3>
+              <p>
+                A {{ minPinLength }}–{{ maxPinLength }} digit fallback for a device with no reader.
+                Weaker than a passkey — someone can watch you type it.
+              </p>
+            </div>
+
+            <div class="setting-control">
+              <input
+                type="password"
+                inputmode="numeric"
+                autocomplete="new-password"
+                class="threshold-input"
+                [ngModel]="newPin()"
+                (ngModelChange)="newPin.set($event)"
+                placeholder="New PIN"
+                aria-label="New till PIN"
+                data-testid="input-new-pin"
+              />
+              <button
+                type="button"
+                class="btn-save"
+                (click)="savePin()"
+                [disabled]="busy()"
+                data-testid="btn-save-pin"
+              >
+                {{ hasPin() ? 'Change PIN' : 'Set PIN' }}
+              </button>
+              @if (hasPin()) {
+                <button
+                  type="button"
+                  class="btn-remove"
+                  (click)="removePin()"
+                  [disabled]="busy()"
+                  data-testid="btn-clear-pin"
+                >
+                  Remove PIN
+                </button>
+              }
+            </div>
+          </div>
+
+          @if (signinMessage()) {
+            <div class="message message-success" data-testid="signin-success">
+              ✅ {{ signinMessage() }}
+            </div>
+          }
+          @if (signinError()) {
+            <div class="message message-error" data-testid="signin-error">
+              ❌ {{ signinError() }}
+            </div>
+          }
         }
       </div>
 
@@ -394,6 +549,71 @@ import { ThemeService } from '@core/application/services/theme.service';
         outline-offset: 2px;
       }
 
+      /* --- Sign-in on this device -------------------------------------- */
+
+      .passkey-list {
+        list-style: none;
+        margin: 0 0 1rem;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .passkey-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.625rem 0.75rem;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+      }
+
+      .passkey-label {
+        font-weight: 600;
+        color: #111827;
+      }
+
+      .passkey-meta {
+        flex: 1;
+        font-size: 0.8125rem;
+        color: #6b7280;
+      }
+
+      .passkey-name {
+        min-width: 12rem;
+      }
+
+      .btn-remove {
+        padding: 0.5rem 0.875rem;
+        background: none;
+        border: 1px solid #fca5a5;
+        border-radius: 8px;
+        color: #b91c1c;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .btn-remove:hover:not(:disabled) {
+        background: #fef2f2;
+      }
+
+      .btn-remove:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      :host-context(html.dark) .passkey-row {
+        background: #111827;
+        border-color: #374151;
+      }
+
+      :host-context(html.dark) .passkey-label {
+        color: #e5e7eb;
+      }
+
       @media (max-width: 640px) {
         .page-container {
           padding: 1rem;
@@ -450,6 +670,27 @@ import { ThemeService } from '@core/application/services/theme.service';
   ],
 })
 export class SettingsComponent implements OnInit {
+  private readonly quickAuthAdmin = inject(QUICK_AUTH_ADMIN_PORT);
+  private readonly quickAuth = inject(QUICK_AUTH_GATEWAY);
+  private readonly currentUser = inject(CurrentUserService);
+
+  readonly minPinLength = MIN_PIN_LENGTH;
+  readonly maxPinLength = MAX_PIN_LENGTH;
+
+  readonly passkeys = signal<PasskeySummaryDto[]>([]);
+  readonly passkeySupported = signal(false);
+  readonly hasPin = signal(false);
+  readonly newPasskeyLabel = signal('');
+  readonly newPin = signal('');
+  readonly enrolling = signal(false);
+  readonly savingPin = signal(false);
+  readonly signinMessage = signal<string | null>(null);
+  readonly signinError = signal<string | null>(null);
+
+  /** Nothing here can be set up for nobody — see QuickAuthAdminPort. */
+  readonly signedIn = computed(() => this.currentUser.operatorId() !== null);
+  readonly busy = computed(() => this.enrolling() || this.savingPin());
+
   readonly lowStockSettings = inject(LowStockSettingsService);
   private readonly themeService = inject(ThemeService);
 
@@ -468,6 +709,146 @@ export class SettingsComponent implements OnInit {
   async ngOnInit(): Promise<void> {
     const threshold = await this.lowStockSettings.loadThreshold();
     this.thresholdInput.set(threshold);
+    await this.loadSignInMethods();
+  }
+
+  // ─── Sign-in on this device ────────────────────────────────────────────────
+
+  /**
+   * Read what the signed-in operator has already set up here.
+   *
+   * Failures are swallowed to a console warning rather than shown: this is one
+   * section of a settings page, and a red banner about it would sit above the theme
+   * toggle and the stock threshold, both of which are working fine.
+   */
+  private async loadSignInMethods(): Promise<void> {
+    const operatorId = this.currentUser.operatorId();
+    if (!operatorId) {
+      return;
+    }
+    try {
+      const [capabilities, passkeys] = await Promise.all([
+        this.quickAuth.capabilities(),
+        this.quickAuthAdmin.listPasskeys(operatorId),
+      ]);
+      this.passkeySupported.set(capabilities.passkeySupported);
+      this.passkeys.set(passkeys);
+      // Whether *this* operator has a PIN, not whether anyone does: the button has to
+      // say "Set" or "Change", and the remove button must not offer to clear a PIN
+      // belonging to somebody else.
+      const operators = await this.quickAuth.listPinOperators();
+      this.hasPin.set(operators.some((entry) => entry.operatorId === operatorId));
+    } catch (error) {
+      console.warn('[Settings] Could not read sign-in methods:', error);
+    }
+  }
+
+  async addPasskey(): Promise<void> {
+    const operatorId = this.currentUser.operatorId();
+    if (!operatorId || this.busy()) {
+      return;
+    }
+    this.clearSignInMessages();
+    this.enrolling.set(true);
+    try {
+      const label = this.newPasskeyLabel().trim();
+      const created = await this.quickAuthAdmin.enrollPasskey(operatorId, label);
+      this.passkeys.update((current) => [...current, created]);
+      this.newPasskeyLabel.set('');
+      this.signinMessage.set(`${created.label} can now sign you in.`);
+    } catch (error) {
+      // Cancelling an OS prompt is not an error worth reporting — the operator
+      // decided not to, and the page already shows what they have.
+      if (!(error instanceof PasskeyCancelledError)) {
+        this.signinError.set(this.describeSignInError(error));
+      }
+    } finally {
+      this.enrolling.set(false);
+    }
+  }
+
+  /**
+   * Forget a passkey.
+   *
+   * Deliberately worded as "this till will no longer accept it": the credential
+   * itself lives in the operating system's keychain and is the operator's to delete
+   * there. Claiming to have removed something we cannot reach would be a lie.
+   */
+  async removePasskey(credentialId: string): Promise<void> {
+    if (this.busy()) {
+      return;
+    }
+    this.clearSignInMessages();
+    try {
+      await this.quickAuthAdmin.revokePasskey(credentialId);
+      this.passkeys.update((current) =>
+        current.filter((entry) => entry.credentialId !== credentialId)
+      );
+      this.signinMessage.set('This till will no longer accept that passkey.');
+    } catch (error) {
+      this.signinError.set(this.describeSignInError(error));
+    }
+  }
+
+  async savePin(): Promise<void> {
+    const operatorId = this.currentUser.operatorId();
+    if (!operatorId || this.busy()) {
+      return;
+    }
+    this.clearSignInMessages();
+    this.savingPin.set(true);
+    try {
+      await this.quickAuthAdmin.setPin(operatorId, this.newPin());
+      this.hasPin.set(true);
+      this.signinMessage.set('PIN saved.');
+    } catch (error) {
+      this.signinError.set(this.describeSignInError(error));
+    } finally {
+      // Cleared whatever happened: a rejected PIN is retyped, and an accepted one
+      // must not sit in an input where the next person can reveal it.
+      this.newPin.set('');
+      this.savingPin.set(false);
+    }
+  }
+
+  async removePin(): Promise<void> {
+    const operatorId = this.currentUser.operatorId();
+    if (!operatorId || this.busy()) {
+      return;
+    }
+    this.clearSignInMessages();
+    try {
+      await this.quickAuthAdmin.clearPin(operatorId);
+      this.hasPin.set(false);
+      this.newPin.set('');
+      this.signinMessage.set('PIN removed.');
+    } catch (error) {
+      this.signinError.set(this.describeSignInError(error));
+    }
+  }
+
+  private clearSignInMessages(): void {
+    this.signinMessage.set(null);
+    this.signinError.set(null);
+  }
+
+  /**
+   * Wording for a failure, each pointing at a different next step.
+   *
+   * A weak PIN carries its own explanation from the domain rule that rejected it,
+   * which is the only place that knows *which* rule was broken.
+   */
+  private describeSignInError(error: unknown): string {
+    if (error instanceof WeakPinError) {
+      return error.message;
+    }
+    if (error instanceof PasskeyAlreadyEnrolledError) {
+      return 'This device already has a passkey for you.';
+    }
+    if (error instanceof PasskeyUnavailableError) {
+      return 'This device cannot add a passkey. Set a PIN instead.';
+    }
+    return 'That did not work. Please try again.';
   }
 
   increaseThreshold(): void {
