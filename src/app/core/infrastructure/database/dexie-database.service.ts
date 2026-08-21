@@ -10,6 +10,17 @@ import { Role, Permission } from '@core/domain/auth';
 const DEFAULT_ADMIN_PASSWORD_HASH = '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW';
 
 /**
+ * Re-exported for the auth layer.
+ *
+ * `compareSecret` in `secret-hash.ts` has to recognise the seeded admin's bcrypt
+ * hash, because bcrypt cannot be verified with WebCrypto and that one account has
+ * to be signable-into on a fresh install. It reads the value from here rather than
+ * carrying its own copy — one definition, so the seeder and the comparison can
+ * never disagree about which hash is the seeded one.
+ */
+export { DEFAULT_ADMIN_PASSWORD_HASH };
+
+/**
  * Migration sentinel: every pre-v4 row and every single-tenant install
  * is stamped with this tenantId during the v4 upgrade pass.
  *
@@ -292,6 +303,18 @@ export interface IOperatorDB {
    */
   tenantId: string;
   passwordHash: string;
+  /**
+   * PBKDF2 hash of the operator's till PIN, when they have set one.
+   *
+   * The fallback for a device with no platform authenticator — see
+   * `webauthn-auth.adapter.ts`. Unindexed, so adding it needed no schema version:
+   * Dexie only declares indexes, not columns.
+   *
+   * Absent means no PIN, which is not the same as an empty one: the PIN sign-in
+   * path must not be offered to an operator who never opted into it.
+   */
+  pinHash?: string;
+  pinUpdatedAt?: Date;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -346,6 +369,47 @@ interface ExportEnvelope {
 }
 
 /**
+ * IOperatorCredentialDB
+ *
+ * One enrolled passkey, as stored on this device.
+ *
+ * Worth being precise about what this row is, because the whole privacy argument
+ * for passkeys rests on it: there is no biometric here. The fingerprint or face
+ * never leaves the operating system's secure enclave, and neither does the private
+ * key. What we keep is the *public* half, an identifier, and a counter — none of
+ * which identifies a person or can be replayed against another system. A copy of
+ * this table tells an attacker which operators can sign in at this till and
+ * nothing whatsoever about how they look.
+ */
+export interface IOperatorCredentialDB {
+  /**
+   * The authenticator's credential id, base64url. Primary key: it is globally
+   * unique by construction, so there is no second identifier to keep in step.
+   */
+  credentialId: string;
+  operatorId: string;
+  tenantId: string;
+  /** The public key, as a JWK, serialised. Never a private key. */
+  publicKeyJwk: string;
+  /** COSE algorithm identifier: -7 (ES256) or -257 (RS256). */
+  algorithm: number;
+  /**
+   * Last signature counter seen for this credential.
+   *
+   * Written back after every accepted assertion — a counter that stops advancing
+   * is how a cloned credential shows itself. Many platform authenticators report
+   * 0 forever; see `isCounterAcceptable`.
+   */
+  signCount: number;
+  /** How the operator recognises this entry — "Counter till", "Back office". */
+  label: string;
+  /** e.g. ['internal'], as reported by the authenticator. */
+  transports: string;
+  createdAt: Date;
+  lastUsedAt?: Date;
+}
+
+/**
  * Dexie Database Service
  * Provides ORM-like interface for IndexedDB
  * Supports offline-first architecture with automatic indexing
@@ -372,6 +436,7 @@ export class DexieDatabase extends Dexie {
   userTenants!: Table<IUserTenantDB, string>;
   rolePermissions!: Table<IRolePermissionDB, string>;
   recognitionLog!: Table<IRecognitionLogDB, string>;
+  operatorCredentials!: Table<IOperatorCredentialDB, string>;
 
   constructor() {
     super('CapyPOSDB');
@@ -591,6 +656,20 @@ export class DexieDatabase extends Dexie {
       // is "what happened at this till, recently", and on outcome because the
       // interesting rows are the wrong ones.
       recognitionLog: 'id, tenantId, tier, outcome, createdAt, [tenantId+createdAt]',
+    });
+
+    // Version 6: passkey credentials for quick operator sign-in — do NOT edit v1..v5.
+    //
+    // Additive only, so there is no `.upgrade()` hook, same as v5: Dexie merges a
+    // new version's stores with the previous schema and an empty table needs no
+    // backfill. The operator PIN needed no entry here at all — `pinHash` is an
+    // unindexed field on an existing record, and Dexie declares only indexes.
+    this.version(6).stores({
+      // credentialId is the primary key: the authenticator already guarantees it is
+      // unique, so inventing a surrogate id would only add a second thing to keep
+      // in step. Indexed by operatorId for the "this device" list in settings, and
+      // by tenantId so a till can be asked what it will accept.
+      operatorCredentials: 'credentialId, operatorId, tenantId, createdAt, [operatorId+tenantId]',
     });
 
     // Map tables to classes (optional, for better type safety)

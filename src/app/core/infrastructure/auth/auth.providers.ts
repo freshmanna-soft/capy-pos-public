@@ -3,10 +3,13 @@ import { environment } from '../../../../environments/environment';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import { OPERATOR_ADMIN_PORT } from '@core/application/auth/ports/operator-admin.port';
 import { ROLE_ADMIN_PORT } from '@core/application/auth/ports/role-admin.port';
+import { QUICK_AUTH_GATEWAY } from '@core/application/auth/ports/quick-auth.port';
+import { QUICK_AUTH_ADMIN_PORT } from '@core/application/auth/ports/quick-auth-admin.port';
 import { LocalCredentialAuthAdapter } from './local-credential-auth.adapter';
 import { CognitoAuthAdapter } from './cognito-auth.adapter';
 import { DexieOperatorAdminAdapter } from './dexie-operator-admin.adapter';
 import { DexieRoleAdminAdapter } from './dexie-role-admin.adapter';
+import { WebAuthnAuthAdapter } from './webauthn/webauthn-auth.adapter';
 
 /**
  * The AuthGateway swap seam (Story #140).
@@ -24,8 +27,17 @@ const useCognitoGateway = environment.cognito?.enabled === true;
  *
  * Binds the auth ports to their adapters:
  *   - AuthGateway        → Cognito (when enabled) or LocalCredentialAuthAdapter
+ *   - QuickAuthGateway   → WebAuthnAuthAdapter (passkey + PIN sign-in)
+ *   - QuickAuthAdminPort → WebAuthnAuthAdapter (enrollment + PIN management)
  *   - OperatorAdminPort  → DexieOperatorAdminAdapter (admin user management)
  *   - RoleAdminPort      → DexieRoleAdminAdapter (data-driven role authoring)
+ *
+ * Quick sign-in is deliberately NOT switched by the Cognito flag. It is a local
+ * capability of this device — the credential lives in this machine's secure enclave
+ * — and both of its ports are served by the one adapter, which implements them
+ * together because enrolling and asserting share the same ceremony plumbing. When
+ * verification moves server-side (see the TODO in that adapter) this binding is
+ * where the swap happens.
  *
  * OperatorAdmin/RoleAdmin remain Dexie-backed until their Cognito/admin-API
  * counterparts land (Story #42/#43 follow-ups).
@@ -36,6 +48,15 @@ export const AUTH_PROVIDERS: Provider[] = [
   {
     provide: AUTH_GATEWAY,
     useExisting: useCognitoGateway ? CognitoAuthAdapter : LocalCredentialAuthAdapter,
+  },
+  WebAuthnAuthAdapter,
+  {
+    provide: QUICK_AUTH_GATEWAY,
+    useExisting: WebAuthnAuthAdapter,
+  },
+  {
+    provide: QUICK_AUTH_ADMIN_PORT,
+    useExisting: WebAuthnAuthAdapter,
   },
   DexieOperatorAdminAdapter,
   {

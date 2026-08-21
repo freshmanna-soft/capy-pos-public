@@ -35,6 +35,10 @@ export default defineConfig({
         '**/*.spec.ts',
         '**/*.test.ts',
         '**/*.stories.ts',
+        // Test-only fixtures. `fake-authenticator.fixture.ts` builds real signed
+        // WebAuthn responses for the passkey specs; it is exercised by them but is
+        // not app code, so measuring it would inflate the numbers either way.
+        '**/*.fixture.ts',
         '**/index.ts',
         // Every repository is measured now (#110 closed): base-dexie,
         // dexie-product, dexie-customer, dexie-payment and dexie-transaction all

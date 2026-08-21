@@ -5,7 +5,16 @@ import { RouterTestingModule } from '@angular/router/testing';
 import { LoginComponent } from './login.component';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import { InvalidCredentialsError } from '@core/infrastructure/auth/local-credential-auth.adapter';
+import {
+  InvalidPinError,
+  OperatorInactiveError,
+  PasskeyCancelledError,
+  PasskeyUnavailableError,
+  PasskeyVerificationError,
+  QUICK_AUTH_GATEWAY,
+} from '@core/application/auth/ports/quick-auth.port';
 import type { AuthSessionDto } from '@core/application/auth/dtos/auth-session.dto';
+import type { QuickAuthCapabilitiesDto } from '@core/application/auth/dtos/quick-auth.dto';
 
 const mockSession: AuthSessionDto = {
   operatorId: 'op-001',
@@ -28,13 +37,48 @@ function makeGateway(opts: { succeeds: boolean }) {
   };
 }
 
-async function createComponent(gateway: ReturnType<typeof makeGateway>) {
+/**
+ * A quick-auth stub that offers nothing.
+ *
+ * The default, so the password-path tests below describe a plain desktop browser
+ * with no sensor and no PINs set — which is also the only configuration where the
+ * form is the whole screen.
+ */
+function makeQuickAuth(
+  capabilities: Partial<QuickAuthCapabilitiesDto> = {},
+  operators: { operatorId: string; displayName: string }[] = []
+) {
+  return {
+    capabilities: vi.fn().mockResolvedValue({
+      passkeySupported: false,
+      passkeyEnrolledHere: false,
+      pinAvailable: false,
+      ...capabilities,
+    } satisfies QuickAuthCapabilitiesDto),
+    signInWithPasskey: vi.fn().mockResolvedValue(mockSession),
+    signInWithPin: vi.fn().mockResolvedValue(mockSession),
+    listPinOperators: vi.fn().mockResolvedValue(operators),
+  };
+}
+
+async function createComponent(
+  gateway: ReturnType<typeof makeGateway>,
+  quickAuth: ReturnType<typeof makeQuickAuth> = makeQuickAuth()
+) {
   await TestBed.configureTestingModule({
     imports: [LoginComponent, RouterTestingModule],
-    providers: [{ provide: AUTH_GATEWAY, useValue: gateway }],
+    providers: [
+      { provide: AUTH_GATEWAY, useValue: gateway },
+      { provide: QUICK_AUTH_GATEWAY, useValue: quickAuth },
+    ],
   }).compileComponents();
 
   const fixture = TestBed.createComponent(LoginComponent);
+  fixture.detectChanges();
+  // ngOnInit probes capabilities asynchronously; let it settle so the quick
+  // options are rendered (or deliberately absent) before anything is asserted.
+  await Promise.resolve();
+  await Promise.resolve();
   fixture.detectChanges();
   return fixture;
 }
@@ -249,5 +293,276 @@ describe('LoginComponent', () => {
 
       expect(component.loading()).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Quick sign-in: passkey and PIN
+// ---------------------------------------------------------------------------
+
+describe('LoginComponent — passkey sign-in', () => {
+  const supported = { passkeySupported: true, passkeyEnrolledHere: true };
+
+  it('offers the passkey button when the device has a sensor and an enrollment', async () => {
+    const fixture = await createComponent(
+      makeGateway({ succeeds: true }),
+      makeQuickAuth(supported)
+    );
+    expect(getEl(fixture, '[data-testid="btn-passkey"]')).toBeTruthy();
+  });
+
+  it('hides the button on a device with no platform authenticator', async () => {
+    const fixture = await createComponent(
+      makeGateway({ succeeds: true }),
+      makeQuickAuth({ passkeySupported: false, passkeyEnrolledHere: true })
+    );
+    // Hidden rather than disabled: a greyed-out button invites repeated pressing.
+    expect(getEl(fixture, '[data-testid="btn-passkey"]')).toBeNull();
+  });
+
+  it('hides the button when the device supports passkeys but nobody has enrolled', async () => {
+    const fixture = await createComponent(
+      makeGateway({ succeeds: true }),
+      makeQuickAuth({ passkeySupported: true, passkeyEnrolledHere: false })
+    );
+    expect(getEl(fixture, '[data-testid="btn-passkey"]')).toBeNull();
+  });
+
+  it('keeps the password form available alongside it', async () => {
+    const fixture = await createComponent(
+      makeGateway({ succeeds: true }),
+      makeQuickAuth(supported)
+    );
+    expect(getEl(fixture, '[data-testid="input-password"]')).toBeTruthy();
+    expect(getEl(fixture, '[data-testid="btn-login"]')).toBeTruthy();
+  });
+
+  it('navigates to /pos after a successful assertion', async () => {
+    const quickAuth = makeQuickAuth(supported);
+    const fixture = await createComponent(makeGateway({ succeeds: true }), quickAuth);
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+
+    await fixture.componentInstance.signInWithPasskey();
+
+    expect(quickAuth.signInWithPasskey).toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith(['/pos']);
+  });
+
+  it('shows no error when the person dismisses the OS prompt', async () => {
+    const quickAuth = makeQuickAuth(supported);
+    quickAuth.signInWithPasskey.mockRejectedValue(new PasskeyCancelledError());
+    const fixture = await createComponent(makeGateway({ succeeds: true }), quickAuth);
+
+    await fixture.componentInstance.signInWithPasskey();
+    fixture.detectChanges();
+
+    // Cancelling is not a failure — an error banner here would be wrong.
+    expect(fixture.componentInstance.authError()).toBeNull();
+    expect(getEl(fixture, '[data-testid="auth-error"]')).toBeNull();
+  });
+
+  it('reports a verification failure in the words the verifier chose', async () => {
+    const quickAuth = makeQuickAuth(supported);
+    quickAuth.signInWithPasskey.mockRejectedValue(
+      new PasskeyVerificationError('That passkey looks like a copy.')
+    );
+    const fixture = await createComponent(makeGateway({ succeeds: true }), quickAuth);
+
+    await fixture.componentInstance.signInWithPasskey();
+
+    expect(fixture.componentInstance.authError()).toBe('That passkey looks like a copy.');
+  });
+
+  it('stops offering the button once the device says it cannot after all', async () => {
+    const quickAuth = makeQuickAuth(supported);
+    quickAuth.signInWithPasskey.mockRejectedValue(new PasskeyUnavailableError());
+    const fixture = await createComponent(makeGateway({ succeeds: true }), quickAuth);
+
+    await fixture.componentInstance.signInWithPasskey();
+    fixture.detectChanges();
+
+    expect(getEl(fixture, '[data-testid="btn-passkey"]')).toBeNull();
+    expect(fixture.componentInstance.authError()).toContain('password');
+  });
+
+  it('names the deactivated account problem rather than blaming the passkey', async () => {
+    const quickAuth = makeQuickAuth(supported);
+    quickAuth.signInWithPasskey.mockRejectedValue(new OperatorInactiveError());
+    const fixture = await createComponent(makeGateway({ succeeds: true }), quickAuth);
+
+    await fixture.componentInstance.signInWithPasskey();
+
+    expect(fixture.componentInstance.authError()).toContain('no longer active');
+  });
+
+  it('clears the busy state after a failure, so a second attempt is possible', async () => {
+    const quickAuth = makeQuickAuth(supported);
+    quickAuth.signInWithPasskey.mockRejectedValue(new PasskeyVerificationError());
+    const fixture = await createComponent(makeGateway({ succeeds: true }), quickAuth);
+
+    await fixture.componentInstance.signInWithPasskey();
+
+    expect(fixture.componentInstance.passkeyBusy()).toBe(false);
+    expect(fixture.componentInstance.busy()).toBe(false);
+  });
+
+  it('ignores a second press while one ceremony is already running', async () => {
+    const quickAuth = makeQuickAuth(supported);
+    const fixture = await createComponent(makeGateway({ succeeds: true }), quickAuth);
+    vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+
+    fixture.componentInstance.passkeyBusy.set(true);
+    await fixture.componentInstance.signInWithPasskey();
+
+    expect(quickAuth.signInWithPasskey).not.toHaveBeenCalled();
+  });
+
+  it('carries on with the form when the capability probe itself fails', async () => {
+    const quickAuth = makeQuickAuth();
+    quickAuth.capabilities.mockRejectedValue(new Error('probe exploded'));
+    const fixture = await createComponent(makeGateway({ succeeds: true }), quickAuth);
+
+    // Silent: a broken probe is not something the cashier can act on.
+    expect(getEl(fixture, '[data-testid="btn-passkey"]')).toBeNull();
+    expect(getEl(fixture, '[data-testid="auth-error"]')).toBeNull();
+    expect(getEl(fixture, '[data-testid="input-email"]')).toBeTruthy();
+  });
+});
+
+describe('LoginComponent — PIN sign-in', () => {
+  const withPin = { pinAvailable: true };
+  const operators = [
+    { operatorId: 'op-ana', displayName: 'Ana' },
+    { operatorId: 'op-marco', displayName: 'Marco' },
+  ];
+
+  async function openPad() {
+    const quickAuth = makeQuickAuth(withPin, operators);
+    const fixture = await createComponent(makeGateway({ succeeds: true }), quickAuth);
+    fixture.componentInstance.openPinPad();
+    fixture.detectChanges();
+    return { fixture, quickAuth };
+  }
+
+  it('offers the PIN route only when somebody has set one', async () => {
+    const fixture = await createComponent(
+      makeGateway({ succeeds: true }),
+      makeQuickAuth(withPin, operators)
+    );
+    expect(getEl(fixture, '[data-testid="btn-use-pin"]')).toBeTruthy();
+  });
+
+  it('does not offer it when no operator has a PIN', async () => {
+    const fixture = await createComponent(makeGateway({ succeeds: true }), makeQuickAuth());
+    expect(getEl(fixture, '[data-testid="btn-use-pin"]')).toBeNull();
+  });
+
+  it('lists the operators who opted in, and preselects the first', async () => {
+    const { fixture } = await openPad();
+    expect(fixture.componentInstance.pinOperators()).toEqual(operators);
+    expect(fixture.componentInstance.selectedOperatorId()).toBe('op-ana');
+    expect(getEl(fixture, '[data-testid="pin-pad"]')).toBeTruthy();
+  });
+
+  it('builds the PIN from the keypad and shows one dot per digit', async () => {
+    const { fixture } = await openPad();
+    const component = fixture.componentInstance;
+
+    component.pressDigit('4');
+    component.pressDigit('9');
+    fixture.detectChanges();
+
+    expect(component.pin()).toBe('49');
+    // Four slots minimum, two filled — the digits themselves are never rendered.
+    expect(component.pinDots()).toEqual([true, true, false, false]);
+    expect(getEl(fixture, '[data-testid="pin-display"]').textContent).not.toContain('4');
+  });
+
+  it('will not accept more digits than the policy allows', async () => {
+    const { fixture } = await openPad();
+    for (let i = 0; i < 12; i++) {
+      fixture.componentInstance.pressDigit('7');
+    }
+    expect(fixture.componentInstance.pin().length).toBe(8);
+  });
+
+  it('deletes the last digit on backspace', async () => {
+    const { fixture } = await openPad();
+    fixture.componentInstance.pressDigit('4');
+    fixture.componentInstance.pressDigit('9');
+    fixture.componentInstance.backspace();
+    expect(fixture.componentInstance.pin()).toBe('4');
+  });
+
+  it('refuses to submit before the minimum length is reached', async () => {
+    const { fixture, quickAuth } = await openPad();
+    fixture.componentInstance.pressDigit('4');
+    fixture.componentInstance.pressDigit('9');
+
+    expect(fixture.componentInstance.pinComplete()).toBe(false);
+    await fixture.componentInstance.submitPin();
+    expect(quickAuth.signInWithPin).not.toHaveBeenCalled();
+  });
+
+  it('signs in with the selected operator and entered PIN', async () => {
+    const { fixture, quickAuth } = await openPad();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+
+    for (const digit of '4917') {
+      fixture.componentInstance.pressDigit(digit);
+    }
+    await fixture.componentInstance.submitPin();
+
+    expect(quickAuth.signInWithPin).toHaveBeenCalledWith('op-ana', '4917');
+    expect(navigate).toHaveBeenCalledWith(['/pos']);
+  });
+
+  it('clears the entered digits after a wrong PIN', async () => {
+    const { fixture, quickAuth } = await openPad();
+    quickAuth.signInWithPin.mockRejectedValue(new InvalidPinError());
+
+    for (const digit of '4917') {
+      fixture.componentInstance.pressDigit(digit);
+    }
+    await fixture.componentInstance.submitPin();
+
+    // Leaving them up would let the next person keep guessing from where this left off.
+    expect(fixture.componentInstance.pin()).toBe('');
+    expect(fixture.componentInstance.authError()).toContain('not right');
+  });
+
+  it('clears the entry when a different operator is picked', async () => {
+    const { fixture } = await openPad();
+    fixture.componentInstance.pressDigit('4');
+
+    const select = getEl<HTMLSelectElement>(fixture, '[data-testid="select-pin-operator"]');
+    select.value = 'op-marco';
+    select.dispatchEvent(new Event('change'));
+
+    expect(fixture.componentInstance.selectedOperatorId()).toBe('op-marco');
+    expect(fixture.componentInstance.pin()).toBe('');
+  });
+
+  it('forgets the entry when the pad is cancelled', async () => {
+    const { fixture } = await openPad();
+    fixture.componentInstance.pressDigit('4');
+    fixture.componentInstance.closePinPad();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.pin()).toBe('');
+    expect(getEl(fixture, '[data-testid="pin-pad"]')).toBeNull();
+  });
+
+  it('resets loading after a failed PIN so the pad stays usable', async () => {
+    const { fixture, quickAuth } = await openPad();
+    quickAuth.signInWithPin.mockRejectedValue(new InvalidPinError());
+
+    for (const digit of '4917') {
+      fixture.componentInstance.pressDigit(digit);
+    }
+    await fixture.componentInstance.submitPin();
+
+    expect(fixture.componentInstance.loading()).toBe(false);
+    expect(fixture.componentInstance.busy()).toBe(false);
   });
 });
