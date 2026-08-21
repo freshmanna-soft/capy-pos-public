@@ -580,6 +580,23 @@ test.describe('Capy Clerk reading barcodes', () => {
     await expect(clerk.cartSummary).toContainText('1 item');
   });
 
+  test('ignores a code that only crosses the frame', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+    await expect(clerk.caption).toBeVisible({ timeout: 15000 });
+    await stillCounter(page);
+
+    // A shelf label sweeping past on its way somewhere else. It decodes perfectly,
+    // which is exactly why it used to sell.
+    await show(page, STOCKED);
+    await page.waitForTimeout(150);
+    await show(page, null);
+
+    await page.waitForTimeout(1500);
+    await expect(clerk.undo).toBeHidden();
+    await expect(clerk.cartSummary).toContainText('0 items');
+  });
+
   test('says so when a code is not in the catalogue', async ({ page }) => {
     const clerk = new ClerkPage(page);
     await clerk.open();
@@ -866,7 +883,10 @@ test.describe('Capy Clerk in barcode-only mode', () => {
     // The camera is deliberately still live — a barcode needs a picture too.
     expect(await clerk.allTracksEnded()).toBe(false);
 
-    // A cashier presenting a code holds it still.
+    // A cashier presenting a code holds it still. In this mode it does not have to be
+    // held *for* anything — with no model racing the bars there is no dwell to wait
+    // out, which the facade spec pins to the frame it happens on. A wall clock in a
+    // browser is the wrong instrument for that, so this only asserts the sale.
     await page.evaluate(() =>
       (window as unknown as { __setSceneMotion: (x: boolean) => void }).__setSceneMotion(false)
     );

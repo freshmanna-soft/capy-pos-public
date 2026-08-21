@@ -86,3 +86,22 @@ export const POND_LIFE = {
   frogHead: '#5C8F58',
   frogEye: ONSEN.yuzu,
 } as const;
+
+/**
+ * One colour per mood, for the wash behind the clerk.
+ *
+ * Every value is already in `ONSEN` — a mood is a change of light in the same room,
+ * not a new palette. Yuzu for something that went in, persimmon for something wrong
+ * (the same red as out-of-stock and undo, which is the association we want), the
+ * cold deep water for an apology, and the surface green for a question.
+ *
+ * Keyed by the mood strings rather than by `ClerkMood` so the palette stays the leaf
+ * of the dependency graph: the renderer imports colours, never the other way round.
+ */
+export const MOOD_TINTS = {
+  neutral: ONSEN.kelp,
+  happy: ONSEN.yuzu,
+  unsure: ONSEN.waterSurface,
+  sorry: ONSEN.water,
+  alert: ONSEN.tsuba,
+} as const;

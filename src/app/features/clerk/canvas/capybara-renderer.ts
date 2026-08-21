@@ -1,4 +1,5 @@
 import {
+  MOOD_TINTS,
   ONSEN,
   POND_LIFE,
   SCAN_BOX,
@@ -21,6 +22,44 @@ export type ClerkVisualState =
   | 'found'
   | 'confused'
   | 'speaking';
+
+/**
+ * How the last thing that happened went.
+ *
+ * A separate axis from `ClerkVisualState`, not more values on it, because the two
+ * are genuinely independent: she can be listening while still sorry about the item
+ * she just took back, and every combination of the two is meaningful.
+ *
+ * Four outcomes and a resting state, chosen because they are the four a cashier has
+ * to respond to differently — it went in, stock refused it, I don't know what that
+ * is, something is wrong with the code or the camera. This is what the voice was
+ * carrying, and muting her is what makes it the body's job.
+ */
+export const ClerkMood = {
+  NEUTRAL: 'neutral',
+  HAPPY: 'happy',
+  UNSURE: 'unsure',
+  SORRY: 'sorry',
+  ALERT: 'alert',
+} as const;
+export type ClerkMood = (typeof ClerkMood)[keyof typeof ClerkMood];
+
+/**
+ * The one-off movement a mood arrives with.
+ *
+ * Moods hold a pose; gestures are the moment of change, and they are what make an
+ * expression register on a stage nobody is staring at. A sustained pose that simply
+ * appeared is easy to miss; a nod is not.
+ */
+type GestureKind = 'nod' | 'shake' | 'tilt' | 'perk';
+
+/** How long each gesture plays for, in seconds. */
+const GESTURE_SECONDS: Record<GestureKind, number> = {
+  nod: 0.8,
+  shake: 1,
+  tilt: 0.9,
+  perk: 0.6,
+};
 
 /** Longest frame step we will integrate. Guards against a backgrounded tab. */
 const MAX_DT_S = 0.05;
@@ -167,6 +206,11 @@ export class CapybaraRenderer {
   private height = 0;
 
   private state: ClerkVisualState = 'idle';
+  private mood: ClerkMood = ClerkMood.NEUTRAL;
+  /** 0..1. How hard the mood is played — full when she has no voice to use. */
+  private moodStrength = 0;
+  /** The gesture currently playing, and how far into it we are, in seconds. */
+  private gesture: { kind: GestureKind; t: number } | null = null;
   private reducedMotion = false;
 
   /** 0..1 from the recognizer. Drives the yuzu, nothing else. */
@@ -254,6 +298,34 @@ export class CapybaraRenderer {
   }
 
   /**
+   * How the last outcome went, and how hard to play it.
+   *
+   * Intensity is a separate argument rather than baked into the mood because the
+   * same outcome is played differently depending on whether she can also say it:
+   * muted, the body is the only channel and gets to use all of itself.
+   *
+   * A gesture fires only on a *change* of mood — being asked for the mood she is
+   * already in is the every-frame case, and re-triggering the movement on it would
+   * produce a permanent twitch.
+   */
+  setMood(mood: ClerkMood, intensity: number): void {
+    this.moodStrength = clamp01(intensity);
+    if (mood === this.mood) {
+      return;
+    }
+    this.mood = mood;
+    const gesture = MOOD_GESTURES[mood];
+    // Reduced motion keeps the pose and drops the movement: the information is in
+    // the shape she holds, and the nod is only there to draw the eye to it.
+    this.gesture = gesture === null || this.reducedMotion ? null : { kind: gesture, t: 0 };
+    if (mood === ClerkMood.HAPPY && !this.reducedMotion) {
+      // Same trick as arriving at `found`: the bounce comes from the spring, so it
+      // carries whatever the body was already doing instead of overriding it.
+      this.bob.velocity -= 16;
+    }
+  }
+
+  /**
    * Barcodes to outline this frame, and the camera size their bounds are relative
    * to. Passed together because a box without its frame size cannot be placed.
    */
@@ -312,6 +384,7 @@ export class CapybaraRenderer {
     if (reduced) {
       this.lidClosed = 0;
       this.earTwitch = 0;
+      this.gesture = null;
       this.ripples = [];
       this.shoal = null;
       this.frog = null;
@@ -361,6 +434,9 @@ export class CapybaraRenderer {
     fish: boolean;
     frog: boolean;
     ambientNext: AmbientKind;
+    mood: ClerkMood;
+    moodStrength: number;
+    gesture: GestureKind | null;
   }> {
     return {
       lean: this.lean.value,
@@ -375,6 +451,9 @@ export class CapybaraRenderer {
       fish: this.shoal !== null,
       frog: this.frog !== null,
       ambientNext: this.ambientNext,
+      mood: this.mood,
+      moodStrength: this.moodStrength,
+      gesture: this.gesture?.kind ?? null,
     };
   }
 
@@ -391,17 +470,30 @@ export class CapybaraRenderer {
       this.advanceAmbient(dt);
     }
 
-    const pose = POSES[this.state];
+    if (this.gesture !== null) {
+      this.gesture.t += dt;
+      if (this.gesture.t > GESTURE_SECONDS[this.gesture.kind]) {
+        this.gesture = null;
+      }
+    }
 
-    this.lean.step(pose.lean, dt);
-    this.headTilt.step(pose.headTilt + this.gazeX * 0.05, dt);
-    this.headTurn.step(this.gazeX, dt);
-    this.earForward.step(pose.earForward, dt);
-    this.eyeOpen.step(pose.eyeOpen, dt);
+    const pose = POSES[this.state];
+    // The mood is added to the pose rather than replacing it, and scaled, so the job
+    // she is doing still reads underneath the reaction. `neutral` is all zeroes,
+    // which is what makes an un-moody clerk behave exactly as she did before.
+    const mood = MOOD_OFFSETS[this.mood];
+    const k = this.moodStrength;
+    const swing = this.gestureSwing();
+
+    this.lean.step(pose.lean + mood.lean * k, dt);
+    this.headTilt.step(pose.headTilt + this.gazeX * 0.05 + mood.headTilt * k + swing.headTilt, dt);
+    this.headTurn.step(this.gazeX + swing.headTurn, dt);
+    this.earForward.step(pose.earForward + mood.earForward * k + swing.earForward, dt);
+    this.eyeOpen.step(pose.eyeOpen + mood.eyeOpen * k + swing.eyeOpen, dt);
     this.bob.step(0, dt);
     this.halo.step(this.state === 'listening' ? 1 : 0, dt);
     this.yuzuLift.step(this.confidence, dt);
-    this.mouth.step(this.mouthTarget(nowMs, pose.mouthBias), dt);
+    this.mouth.step(this.mouthTarget(nowMs, pose.mouthBias + mood.mouthBias * k), dt);
 
     for (const ripple of this.ripples) {
       ripple.age += dt;
@@ -431,6 +523,65 @@ export class CapybaraRenderer {
     // stable within a word.
     const variation = 0.78 + (Math.floor(this.lastBoundaryAt / 97) % 3) * 0.09;
     return Math.max(bias, envelope * variation);
+  }
+
+  /**
+   * What the gesture currently playing adds to the rig, decaying to nothing.
+   *
+   * Only partly scaled by mood strength: the sustained pose is what gets dialled
+   * back when she can speak, while the movement that announces it stays legible
+   * either way — a gesture nobody notices is not worth simulating.
+   */
+  private gestureSwing(): {
+    headTilt: number;
+    headTurn: number;
+    earForward: number;
+    eyeOpen: number;
+  } {
+    const gesture = this.gesture;
+    if (gesture === null) {
+      return { headTilt: 0, headTurn: 0, earForward: 0, eyeOpen: 0 };
+    }
+    const duration = GESTURE_SECONDS[gesture.kind];
+    const decay = Math.max(0, 1 - gesture.t / duration);
+    const phase = (gesture.t / duration) * Math.PI * 2;
+    const amount = (0.55 + 0.45 * this.moodStrength) * decay;
+
+    switch (gesture.kind) {
+      // Two dips of the head. Yes, that went in.
+      case 'nod':
+        return {
+          headTilt: Math.sin(phase * 2) * 0.14 * amount,
+          headTurn: 0,
+          earForward: 0,
+          eyeOpen: 0,
+        };
+      // One and a half turns side to side, slower than the nod, because a shake
+      // read at the same speed looks like a shiver.
+      case 'shake':
+        return {
+          headTilt: 0,
+          headTurn: Math.sin(phase * 1.5) * 0.45 * amount,
+          earForward: 0,
+          eyeOpen: 0,
+        };
+      // The universal "hm?": lean the head over and let the ears fall with it.
+      case 'tilt':
+        return {
+          headTilt: Math.sin(phase * 0.5) * 0.12 * amount,
+          headTurn: 0,
+          earForward: -0.25 * amount,
+          eyeOpen: 0,
+        };
+      // A start. Ears up, eyes wide, gone again in half a second.
+      case 'perk':
+        return {
+          headTilt: 0,
+          headTurn: 0,
+          earForward: 0.7 * amount,
+          eyeOpen: 0.3 * amount,
+        };
+    }
   }
 
   private advanceBlink(dt: number): void {
@@ -586,6 +737,7 @@ export class CapybaraRenderer {
     ctx.scale(scale, scale);
     ctx.globalAlpha = rise;
 
+    this.paintMoodWash();
     this.paintHalo();
     this.paintBody();
     this.paintHead();
@@ -700,6 +852,30 @@ export class CapybaraRenderer {
     ctx.restore();
   }
 
+  /**
+   * A wash of colour behind her, in the mood's own hue.
+   *
+   * The quietest possible version of an expression, and the one that survives being
+   * seen out of the corner of an eye: yuzu for an item that went in, persimmon for
+   * something wrong, cold water for an apology. It sits behind the figure and never
+   * gains an edge, so it reads as light in the room rather than as a badge.
+   */
+  private paintMoodWash(): void {
+    const strength = this.moodStrength;
+    if (this.mood === ClerkMood.NEUTRAL || strength < 0.05) {
+      return;
+    }
+    const ctx = this.context;
+    const colour = MOOD_TINTS[this.mood];
+    const gradient = ctx.createRadialGradient(0, -40, 40, 0, -40, 300);
+    gradient.addColorStop(0, withAlpha(colour, 0.22 * strength));
+    gradient.addColorStop(1, withAlpha(colour, 0));
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(0, -40, 300, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   /** Soft pulse behind her while she's listening — an "I'm hearing you" light. */
   private paintHalo(): void {
     const strength = this.halo.value;
@@ -736,18 +912,35 @@ export class CapybaraRenderer {
     // Shoulders and back: a broad loaf. Capybaras have almost no waist, and
     // giving her one would read as a different animal.
     //
-    // The corner radius is now close to half the width, which turns the loaf from
-    // a rounded box into something soft enough to want to lean on. That costs
-    // nothing in recognisability — the silhouette that says "capybara" is the
-    // barrel body and the blunt head, not the sharpness of either.
+    // The coat is now a flat fill rather than a three-stop gradient down the whole
+    // figure. That gradient was the single biggest reason she read as *painted* —
+    // every cartoon of this animal is drawn as one colour with at most a shadow, and
+    // a body lit from top to bottom looks like a rendering of a toy instead of a
+    // drawing of a capybara.
     const top = -20 + breath * 0.4;
-    const bodyGradient = ctx.createLinearGradient(0, -60, 0, 180);
-    bodyGradient.addColorStop(0, ONSEN.capyLight);
-    bodyGradient.addColorStop(0.4, ONSEN.capy);
-    bodyGradient.addColorStop(1, ONSEN.capyDark);
-    ctx.fillStyle = bodyGradient;
+    ctx.fillStyle = ONSEN.capy;
     roundedRect(ctx, -152, top, 304, 240, 122);
     ctx.fill();
+
+    // The one concession to depth, and it is doing two jobs: the volume turns under
+    // her chin, and everything below the waterline goes dark.
+    //
+    // That second job is why it runs all the way to the deep water colour. A flat
+    // coat is the right style above the surface and a liability below it — the water
+    // overlay is translucent, so an evenly-lit body carried on glowing through it as
+    // a pale blob the width of the stage, which is the "stain on the water" the
+    // overlay's own comment warns about. The gradient that used to do this
+    // incidentally is gone, so it is done deliberately here.
+    ctx.save();
+    roundedRect(ctx, -152, top, 304, 240, 122);
+    ctx.clip();
+    const shade = ctx.createLinearGradient(0, top + 45, 0, top + 170);
+    shade.addColorStop(0, withAlpha(ONSEN.capyDark, 0));
+    shade.addColorStop(0.35, withAlpha(ONSEN.capyDark, 0.45));
+    shade.addColorStop(1, withAlpha(ONSEN.deep, 0.8));
+    ctx.fillStyle = shade;
+    ctx.fillRect(-152, top, 304, 240);
+    ctx.restore();
 
     // A light wrap around the silhouette. Not an outline — a cartoon keyline would
     // fight the painted water — but enough of a rim to lift her off the bath and
@@ -763,15 +956,57 @@ export class CapybaraRenderer {
     // A flat ellipse at any useful opacity showed its own edge and turned into a
     // bubble stuck to her front, so this is a radial gradient that fades out
     // entirely before it gets there.
-    const chest = ctx.createRadialGradient(0, top + 92, 8, 0, top + 92, 104);
+    //
+    // It sits high, in the strip of her that is actually above the water. Centred on
+    // the body it was mostly submerged, which is a pale patch spent where nobody can
+    // see it and, worse, one more thing showing through the surface.
+    const chest = ctx.createRadialGradient(0, top + 26, 8, 0, top + 26, 92);
     chest.addColorStop(0, withAlpha(ONSEN.capyMuzzle, 0.34));
     chest.addColorStop(1, withAlpha(ONSEN.capyMuzzle, 0));
     ctx.fillStyle = chest;
     ctx.beginPath();
-    ctx.ellipse(0, top + 92, 104, 92, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, top + 26, 92, 58, 0, 0, Math.PI * 2);
     ctx.fill();
 
+    this.paintPaws();
+
     ctx.restore();
+  }
+
+  /**
+   * Two front paws resting at the waterline.
+   *
+   * The most recognisable cue in the whole figure for the least ink: a capybara in a
+   * bath is always drawn with its paws up on the rim, and without them the body is
+   * simply a loaf that happens to be in water. They sit at the surface rather than on
+   * a tub edge, because this bath is a pond and has no rim.
+   *
+   * Two toe creases, not three — three start to read as fingers.
+   */
+  private paintPaws(): void {
+    const ctx = this.context;
+    for (const side of [-1, 1] as const) {
+      ctx.save();
+      ctx.translate(side * 94, 24);
+      ctx.rotate(side * 0.1);
+      ctx.fillStyle = ONSEN.capy;
+      roundedRect(ctx, -34, -19, 68, 38, 19);
+      ctx.fill();
+      ctx.strokeStyle = withAlpha(ONSEN.capyDark, 0.22);
+      ctx.lineWidth = 3;
+      roundedRect(ctx, -34, -19, 68, 38, 19);
+      ctx.stroke();
+      ctx.strokeStyle = withAlpha(ONSEN.capyDark, 0.3);
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      for (const dx of [-9, 9]) {
+        ctx.beginPath();
+        ctx.moveTo(dx, -3);
+        ctx.lineTo(dx, 11);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
   }
 
   private paintHead(): void {
@@ -790,20 +1025,15 @@ export class CapybaraRenderer {
     //
     // A capybara's skull genuinely is blocky, and the first version leaned on
     // that: a 216×170 box with a 36 radius. Rendered, it read as a crate with a
-    // face on it — the flat sides and hard corners are what made her look severe
-    // rather than approachable, and no amount of tuning the eyes fixed it.
+    // face on it. The correction after that went too far the other way — a shape
+    // that narrowed into a chin, which is a bear cub, or a bunny, or anything but
+    // this animal.
     //
-    // What survives from the animal is the proportion (wider than tall) and the
-    // broad flat crown. What changes is everything between: full cheeks that
-    // bulge past the crown, and a jaw that comes to a round chin. That is the
-    // same silhouette a plush toy of the animal has, and it is still obviously
-    // this animal and not a bear cub — the crown is flat and the muzzle is blunt,
-    // which is what a bear's is not.
-    const headGradient = ctx.createLinearGradient(0, -154, 0, 26);
-    headGradient.addColorStop(0, ONSEN.capyLight);
-    headGradient.addColorStop(0.55, ONSEN.capy);
-    headGradient.addColorStop(1, ONSEN.capyDark);
-    ctx.fillStyle = headGradient;
+    // What it is now is what every cartoon of a capybara is: a rounded square. Wider
+    // than tall, flat across the crown, and still nearly full width at the jaw, so
+    // the silhouette is a soft block rather than an egg. Flat-filled for the same
+    // reason as the body.
+    ctx.fillStyle = ONSEN.capy;
     headPath(ctx, turn);
     ctx.fill();
 
@@ -815,7 +1045,7 @@ export class CapybaraRenderer {
 
     this.paintCheeks(turn);
     this.paintMuzzle(turn);
-    this.paintEyes(turn);
+    this.paintEyes(turn, MOOD_OFFSETS[this.mood].brow * this.moodStrength);
     this.paintTowel(tilt);
 
     ctx.restore();
@@ -828,13 +1058,17 @@ export class CapybaraRenderer {
    * persimmon already in the palette, at an alpha low enough that they read as
    * colour in the skin rather than as makeup. They sit under the eyes and outside
    * the muzzle so nothing has to move to accommodate them.
+   *
+   * They warm further when she is pleased, which is the one place a blush is worth
+   * having — and it costs a number, not a drawing.
    */
   private paintCheeks(turn: number): void {
     const ctx = this.context;
+    const pleased = this.mood === ClerkMood.HAPPY ? this.moodStrength : 0;
     for (const side of [-1, 1] as const) {
-      ctx.fillStyle = withAlpha(ONSEN.tsuba, 0.13);
+      ctx.fillStyle = withAlpha(ONSEN.tsuba, 0.13 + pleased * 0.13);
       ctx.beginPath();
-      ctx.ellipse(side * 84 + turn * 10, -50, 24, 16, side * 0.12, 0, Math.PI * 2);
+      ctx.ellipse(side * 88 + turn * 10, -46, 25, 16, side * 0.12, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -845,28 +1079,28 @@ export class CapybaraRenderer {
     const forward = this.earForward.value;
     const twitch = this.earTwitch * 0.18;
 
-    // Set high and close to the skull. A capybara's ears are almost vestigial
-    // next to a bear's, and oversizing them is the fastest way to draw the wrong
-    // animal — but the first pass under-sized them into two dark pips, which read
-    // as damage rather than as ears. These are chunky enough to be legible and
-    // still well short of bear.
+    // Set high and out on the corners of the crown, where a square head puts them.
+    // A capybara's ears are almost vestigial next to a bear's, and oversizing them is
+    // the fastest way to draw the wrong animal — but under-sizing them into two dark
+    // pips read as damage rather than as ears. These are the smallest that still say
+    // ear at counter distance.
     //
-    // They are also no longer near-black: the fill is the coat colour and the
-    // inner ear is warm, because a dark blob on the skull reads as a hole.
+    // Coat-coloured with a warm inner, never near-black: a dark blob on the skull
+    // reads as a hole.
     for (const side of [-1, 1] as const) {
       ctx.save();
-      ctx.translate(side * (94 + turn * 6), -140);
+      ctx.translate(side * (100 + turn * 6), -136);
       ctx.rotate(side * (0.3 - forward * 0.45 + (side > 0 ? twitch : -twitch * 0.6)));
       ctx.fillStyle = ONSEN.capy;
       ctx.beginPath();
-      ctx.ellipse(0, 0, 23, 20, side * 0.18, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, 21, 18, side * 0.18, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = withAlpha(ONSEN.capyDark, 0.35);
       ctx.lineWidth = 3;
       ctx.stroke();
       ctx.fillStyle = withAlpha(ONSEN.tsuba, 0.3);
       ctx.beginPath();
-      ctx.ellipse(-side * 3, 2, 12, 10, side * 0.18, 0, Math.PI * 2);
+      ctx.ellipse(-side * 3, 2, 11, 9, side * 0.18, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -875,86 +1109,67 @@ export class CapybaraRenderer {
   /**
    * Muzzle, nose and mouth.
    *
-   * The mouth is the part that had to change most. The first version drew a
-   * vertical seam down from the nose, a downward-curving line under it, and — when
-   * she spoke — a persimmon-red ellipse. Each choice was defensible on its own and
-   * together they produced a small red hole under a frown, which is what "the
-   * mouth looks freaky" meant. Three fixes, in order of effect:
+   * This is where most of the "that isn't a normal cartoon capybara" lived. The face
+   * had a nose slab, a philtrum, a wide smile spanning most of the muzzle and six
+   * whiskers reaching past the silhouette. Each was defensible as a piece of the real
+   * animal; together they were a lot of ink on a face whose whole style depends on
+   * having very little.
    *
-   * 1. **The closed mouth curves up.** Corner height above the centre dip is the
-   *    entire difference between a friendly animal and a resigned one.
-   * 2. **The open mouth is not red.** It is the same near-black ink used for the
-   *    eyes, with the tongue as a muted wash only once she is properly open. A
-   *    saturated red at small scale reads as a wound, not as speech.
-   * 3. **The jaw hinges instead of the hole growing.** The upper lip stays put and
-   *    the lower edge drops, which is how a mouth actually opens; scaling an
-   *    ellipse about its centre made the whole face appear to inflate.
+   * What is left is what the drawings of this animal actually have: one soft blunt
+   * snout, one small wide nose, and one short curve of a mouth. Nothing else.
+   *
+   * The jaw still hinges rather than the hole growing — the upper lip stays put and
+   * the lower edge drops, which is how a mouth opens; scaling an ellipse about its
+   * centre made the whole face appear to inflate.
    */
   private paintMuzzle(turn: number): void {
     const ctx = this.context;
     const mouthOpen = this.mouth.value;
     const mx = turn * 10;
 
-    // The muzzle is a soft block, not an ellipse.
-    //
-    // This is where the capybara went when the head stopped being a box, and it
-    // is the trade that makes the redesign work: the roundness moves to the skull,
-    // where it buys friendliness, and the bluntness moves to the snout, where the
-    // species actually lives. A round snout on a round head was reading as a bear
-    // cub — which is exactly what the original comment warned about, just relocated.
+    // The muzzle is a soft block, not an ellipse. This is where the species lives now
+    // that the skull is a rounded square: the roundness buys friendliness up there,
+    // the bluntness down here keeps it a capybara rather than a bear cub.
     ctx.fillStyle = ONSEN.capyMuzzle;
-    roundedRect(ctx, mx - 66, -50, 132, 62, 30);
+    roundedRect(ctx, mx - 62, -48, 124, 58, 28);
     ctx.fill();
 
-    // Nose: wide and flat, but no longer a slab. At the previous size the dark
-    // rectangle was the largest feature on the face and read as the mouth, which
-    // left the actual mouth below it looking like a second one.
+    // Nose: wide, flat and small. It is a feature of the face, not the largest thing
+    // on it — at the old size the dark rectangle read as the mouth, which left the
+    // actual mouth below it looking like a second one.
     ctx.fillStyle = ONSEN.ink;
-    roundedRect(ctx, mx - 23, -46, 46, 22, 10);
-    ctx.fill();
-    ctx.fillStyle = withAlpha(ONSEN.capyLight, 0.26);
-    roundedRect(ctx, mx - 15, -43, 30, 7, 3.5);
+    roundedRect(ctx, mx - 19, -42, 38, 17, 8);
     ctx.fill();
 
-    // The philtrum — a capybara's split upper lip. Short and soft: at the old
-    // length it divided the whole muzzle and read as a scar.
-    ctx.strokeStyle = withAlpha(ONSEN.ink, 0.5);
-    ctx.lineWidth = 3.5;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(mx, -22);
-    ctx.lineTo(mx, -14);
-    ctx.stroke();
-
-    // The upper lip: one smile, drawn once, whether or not the jaw is open. The
-    // corners sit sixteen units above the centre — that gap is the smile, and the
-    // first attempt at eight units was close enough to level to read as neither
-    // happy nor sad, which is the most unsettling of the three.
-    const lipY = -4;
-    const corner = 32;
+    // The upper lip: one short smile, drawn once, whether or not the jaw is open.
+    // Narrow and close under the nose — a mouth spanning the whole muzzle is a
+    // grin, and a grin held permanently is unsettling in a way a smile is not.
+    const lipY = -8;
+    const corner = 20;
     const drawUpperLip = (): void => {
-      ctx.moveTo(mx - corner, lipY - 16);
-      ctx.quadraticCurveTo(mx - 16, lipY + 7, mx, lipY);
-      ctx.quadraticCurveTo(mx + 16, lipY + 7, mx + corner, lipY - 16);
+      ctx.moveTo(mx - corner, lipY - 9);
+      ctx.quadraticCurveTo(mx - 10, lipY + 5, mx, lipY);
+      ctx.quadraticCurveTo(mx + 10, lipY + 5, mx + corner, lipY - 9);
     };
 
     if (mouthOpen > 0.04) {
       // Open: the upper lip is the top edge and the jaw swings down from it.
-      const drop = 4 + mouthOpen * 22;
+      const drop = 3 + mouthOpen * 17;
       ctx.fillStyle = withAlpha(ONSEN.ink, 0.88);
       ctx.beginPath();
       drawUpperLip();
       ctx.quadraticCurveTo(mx + corner * 0.5, lipY + drop, mx, lipY + drop);
-      ctx.quadraticCurveTo(mx - corner * 0.5, lipY + drop, mx - corner, lipY - 16);
+      ctx.quadraticCurveTo(mx - corner * 0.5, lipY + drop, mx - corner, lipY - 9);
       ctx.closePath();
       ctx.fill();
 
       // Tongue, only once she is open enough for it to be a tongue rather than a
-      // stripe. Muted rather than the palette's full persimmon.
-      if (mouthOpen > 0.4) {
-        ctx.fillStyle = withAlpha(ONSEN.tsuba, 0.55);
+      // stripe. Muted rather than the palette's full persimmon: a saturated red at
+      // this size reads as a wound, not as speech.
+      if (mouthOpen > 0.55) {
+        ctx.fillStyle = withAlpha(ONSEN.tsuba, 0.5);
         ctx.beginPath();
-        ctx.ellipse(mx, lipY + drop * 0.72, 13, 5 + mouthOpen * 3, 0, 0, Math.PI * 2);
+        ctx.ellipse(mx, lipY + drop * 0.72, 10, 4 + mouthOpen * 2.5, 0, 0, Math.PI * 2);
         ctx.fill();
       }
     } else {
@@ -964,40 +1179,34 @@ export class CapybaraRenderer {
       drawUpperLip();
       ctx.stroke();
     }
-
-    // Whiskers — two a side, faint, and kept short enough to stay over her cheek.
-    //
-    // Six long strokes reaching past the silhouette read as cracks in the screen,
-    // which is what the first version did at this size: crossing the edge of the
-    // head is what turns a whisker into a scratch, because past that boundary
-    // there is nothing for it to be growing out of.
-    ctx.strokeStyle = withAlpha(ONSEN.steam, 0.18);
-    ctx.lineWidth = 2;
-    for (const side of [-1, 1] as const) {
-      for (let i = 0; i < 2; i++) {
-        ctx.beginPath();
-        ctx.moveTo(mx + side * 72, -26 + i * 14);
-        ctx.quadraticCurveTo(mx + side * 96, -32 + i * 16, mx + side * 116, -32 + i * 22);
-        ctx.stroke();
-      }
-    }
   }
 
-  private paintEyes(turn: number): void {
+  /**
+   * Two dot eyes, and a brow only when the mood asks for one.
+   *
+   * Smaller and simpler than they were. The old pair carried a wide soft highlight, a
+   * hard spec and a third light on the far side, which is how you draw a wet eye —
+   * and three lights on a 15-unit dot is how you draw a glass bead. One small spec is
+   * the whole style: everything else about this face is flat, and the eyes cannot be
+   * the exception.
+   *
+   * @param brow signed mood strength: above zero raises a brow, below zero lowers
+   *   one, and zero — the resting face — draws none at all.
+   */
+  private paintEyes(turn: number, brow: number): void {
     const ctx = this.context;
     // Combine the deliberate squint with the involuntary blink.
     const open = Math.max(0, this.eyeOpen.value * (1 - this.lidClosed));
 
     for (const side of [-1, 1] as const) {
-      const ex = side * 58 + turn * 12;
-      // Lower on the head and further apart than before, and bigger. On a real
-      // capybara the eyes sit high and close, and drawing that faithfully is what
-      // made the first version look like it was appraising you: eyes above the
-      // midline of a face is an adult proportion, and we read it as such. Dropping
-      // them to just under halfway is the single largest friendliness lever in the
-      // whole figure — it is the same trick every plush version of any animal uses.
+      const ex = side * 62 + turn * 12;
+      // Set wide and just above the middle of the face. On a real capybara the eyes
+      // sit high and close together, and drawing that faithfully is what made the
+      // first version look like it was appraising you — eyes high on a face is an
+      // adult proportion and we read it as one. Wide and lowish is the same trick
+      // every plush version of every animal uses.
       const ey = -80;
-      const radius = 21;
+      const radius = 15;
 
       ctx.fillStyle = ONSEN.ink;
       ctx.beginPath();
@@ -1005,44 +1214,27 @@ export class CapybaraRenderer {
       ctx.fill();
 
       if (open > 0.35) {
-        // Two highlights: a large soft one for wetness and a hard spec. One
-        // alone looks either flat or glassy.
-        ctx.fillStyle = withAlpha(ONSEN.steam, 0.5);
-        ctx.beginPath();
-        ctx.ellipse(
-          ex - 7 + this.gazeX * 4,
-          ey - 7 + this.gazeY * 3,
-          6.5,
-          6.5 * clamp01(open),
-          0,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
+        // One spec, small, offset with the gaze so the eyes track without moving.
         ctx.fillStyle = withAlpha(ONSEN.steam, 0.9);
         ctx.beginPath();
-        ctx.arc(ex - 8.5 + this.gazeX * 4, ey - 9 + this.gazeY * 3, 2.6, 0, Math.PI * 2);
-        ctx.fill();
-        // A small low light on the far side. Two lights on the same side make a
-        // glass bead; one opposite makes a wet eye.
-        ctx.fillStyle = withAlpha(ONSEN.steam, 0.22);
-        ctx.beginPath();
-        ctx.ellipse(ex + 8, ey + 8, 4, 3 * clamp01(open), 0, 0, Math.PI * 2);
+        ctx.arc(ex - 5 + this.gazeX * 3, ey - 5 + this.gazeY * 2.5, 3.4, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      // Brow: a short stroke that lifts when she's surprised and lowers when
-      // she's squinting. Does most of the emotional work for very little ink —
-      // which is also why it is drawn lighter than the eye it sits over. At the
-      // old weight it read as a permanent frown on a face this size.
-      const brow = this.state === 'found' ? -12 : this.state === 'scanning' ? -2 : -7;
-      ctx.strokeStyle = withAlpha(ONSEN.capyDark, 0.5);
-      ctx.lineWidth = 4;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(ex - 16, ey + brow - 20);
-      ctx.quadraticCurveTo(ex, ey + brow - 27, ex + 16, ey + brow - 20);
-      ctx.stroke();
+      const lift = Math.min(1, Math.abs(brow));
+      if (lift > 0.15) {
+        // Raised for a question, lowered for an apology — and drawn lighter than the
+        // eye it sits over either way. At the old weight it read as a permanent frown
+        // on a face this size, which is exactly why it is no longer permanent.
+        const offset = brow > 0 ? -12 : 6;
+        ctx.strokeStyle = withAlpha(ONSEN.capyDark, 0.5 * lift);
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(ex - 15, ey - 26 + offset);
+        ctx.quadraticCurveTo(ex, ey - 32 + offset, ex + 15, ey - 26 + offset);
+        ctx.stroke();
+      }
     }
   }
 
@@ -1457,32 +1649,93 @@ const POSES: Record<
 };
 
 /**
+ * What each mood adds to the pose, before intensity scaling.
+ *
+ * `neutral` is exactly zero in every channel, and that row is load-bearing: it is
+ * what makes a clerk with nothing to react to behave precisely as she did before
+ * moods existed, and it is why these are added to the pose rather than blended with
+ * it. Anything non-zero at rest would be a permanent expression.
+ *
+ * `brow` is the odd one out — not a rig spring but a signed instruction to the face:
+ * above zero draws a raised brow, below zero a lowered one, and zero draws none at
+ * all. A brow over a placid face is what made her look like she was appraising the
+ * customer, so at rest she has none.
+ */
+const MOOD_OFFSETS: Record<
+  ClerkMood,
+  {
+    lean: number;
+    headTilt: number;
+    earForward: number;
+    eyeOpen: number;
+    mouthBias: number;
+    brow: number;
+  }
+> = {
+  neutral: { lean: 0, headTilt: 0, earForward: 0, eyeOpen: 0, mouthBias: 0, brow: 0 },
+  // Up and forward, ears out, mouth open a little. The whole body says yes.
+  happy: { lean: 0.14, headTilt: -0.03, earForward: 0.5, eyeOpen: 0.16, mouthBias: 0.24, brow: 0 },
+  // Head over, one brow up, ears half back — the pose you make at a question.
+  unsure: {
+    lean: -0.08,
+    headTilt: 0.11,
+    earForward: -0.3,
+    eyeOpen: -0.04,
+    mouthBias: 0.04,
+    brow: 1,
+  },
+  // Down and back, ears flat, eyes narrowed. Legible across a counter as "no".
+  sorry: { lean: -0.16, headTilt: 0.05, earForward: -0.8, eyeOpen: -0.28, mouthBias: 0, brow: -1 },
+  // Forward, ears up, eyes wide: something needs looking at right now.
+  alert: { lean: 0.22, headTilt: 0, earForward: 0.95, eyeOpen: 0.3, mouthBias: 0.1, brow: 1 },
+};
+
+/**
+ * The movement each mood arrives with, or null for one that simply settles.
+ *
+ * `sorry` shakes rather than droops because a droop is the pose it is already
+ * holding — the gesture has to be the thing the pose is not, or the change of mood
+ * passes unnoticed.
+ */
+const MOOD_GESTURES: Record<ClerkMood, GestureKind | null> = {
+  neutral: null,
+  happy: 'nod',
+  unsure: 'tilt',
+  sorry: 'shake',
+  alert: 'perk',
+};
+
+/**
  * The head outline, as a closed path ready to fill or stroke.
  *
  * Symmetric about `turn * 4`, so turning the head shifts the whole shape rather
  * than skewing it. Four cubic segments: crown, right cheek down to the jaw, chin,
- * and the mirror back up. The control points are placed so the widest part of the
- * head is at the cheeks (about a third of the way down) rather than at the crown —
- * that single relationship is most of what separates "friendly" from "blocky".
+ * and the mirror back up.
  *
- * Authored in the same local units as everything else: the head is 224 wide and
- * 180 tall, sitting from y = -154 to y = 26.
+ * The control points describe a rounded square: flat across the crown, full width
+ * from the cheek all the way down to the jaw, and only the last few units rounding
+ * into the chin. That is the shape every cartoon of this animal uses, and the reason
+ * is that a head which tapers downward is a different animal — the taper was what
+ * made the previous version read as a bear cub in a bath.
+ *
+ * Authored in the same local units as everything else: the head is 240 wide and
+ * 176 tall, sitting from y = -150 to y = 26.
  */
 function headPath(ctx: CanvasRenderingContext2D, turn: number): void {
   const x = turn * 4;
-  const hw = 112; // half width, at the cheeks
-  const top = -154;
+  const hw = 120; // half width, held from the cheeks to the jaw
+  const top = -150;
   const bottom = 26;
-  const cheek = -58; // where the head is widest
+  const cheek = -50; // where the head reaches full width
 
   ctx.beginPath();
   ctx.moveTo(x, top);
-  // Crown: nearly flat across the middle, then falling away to the cheek.
-  ctx.bezierCurveTo(x + hw * 0.62, top, x + hw, top + 26, x + hw, cheek);
-  // Cheek into the jaw, and a round chin.
-  ctx.bezierCurveTo(x + hw, bottom - 30, x + hw * 0.66, bottom, x, bottom);
-  ctx.bezierCurveTo(x - hw * 0.66, bottom, x - hw, bottom - 30, x - hw, cheek);
-  ctx.bezierCurveTo(x - hw, top + 26, x - hw * 0.62, top, x, top);
+  // Crown: flat across the middle, then turning down sharply into the corner.
+  ctx.bezierCurveTo(x + hw * 0.74, top, x + hw, top + 22, x + hw, cheek);
+  // Straight down the cheek, then a short round into the chin.
+  ctx.bezierCurveTo(x + hw, bottom - 26, x + hw * 0.8, bottom, x, bottom);
+  ctx.bezierCurveTo(x - hw * 0.8, bottom, x - hw, bottom - 26, x - hw, cheek);
+  ctx.bezierCurveTo(x - hw, top + 22, x - hw * 0.74, top, x, top);
   ctx.closePath();
 }
 

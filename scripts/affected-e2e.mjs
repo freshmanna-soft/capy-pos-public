@@ -120,6 +120,11 @@ const FEATURE_MAP = [
     specs: ['app.spec.ts', 'persona-workflows.spec.ts'],
   },
   { re: /^src\/app\/features\/reports\//, specs: [] }, // covered by the floor
+  // The clerk and the camera plumbing under it are one feature in two places, and
+  // one spec covers both. Without these entries either path falls through to
+  // "unknown" and escalates a canvas tweak into the whole e2e suite.
+  { re: /^src\/app\/features\/clerk\//, specs: ['clerk.spec.ts'] },
+  { re: /^src\/app\/core\/infrastructure\/media\//, specs: ['clerk.spec.ts'] },
   {
     re: /^src\/app\/agents\//,
     specs: ['agent-integration.spec.ts', 'pos-terminal.spec.ts'],

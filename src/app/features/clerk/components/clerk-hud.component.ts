@@ -404,6 +404,13 @@ export class ClerkHudComponent implements AfterViewInit {
     if (!this.clerk.aiEnabled()) {
       return this.clerk.barcodeSupported() ? 'Barcodes only' : 'Not looking';
     }
+    // A code is being read but has not been held long enough to count. Reported
+    // before the barcode-priority line below — which is also true right now — because
+    // this is the one the cashier can act on: keep it still. A deliberate wait nobody
+    // is told about is indistinguishable from a reader that has failed.
+    if (this.clerk.barcodeDwell() !== null) {
+      return 'Hold the code';
+    }
     // A code we stock is in frame, so the answer is already on its way for free and
     // the model has been told to stand down. Reported before the gate verdict,
     // which describes a frame nobody is going to pay for.

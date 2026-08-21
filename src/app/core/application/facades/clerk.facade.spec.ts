@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { WritableSignal, computed, signal } from '@angular/core';
-import { AUTO_ADD_CONFIDENCE, ClerkFacade, UNDO_WINDOW_MS } from './clerk.facade';
+import { AUTO_ADD_CONFIDENCE, ClerkFacade, MOOD_HOLD_MS, UNDO_WINDOW_MS } from './clerk.facade';
 import { PosFacade } from './pos.facade';
 import { VISION_RECOGNIZER } from '@core/application/ports/vision-recognizer.port';
 import { RecognitionResult } from '@core/application/dtos/recognition.dto';
@@ -15,6 +15,7 @@ import { SpeechRecognitionService } from '@core/infrastructure/voice/speech-reco
 import { SpeechSynthesisService } from '@core/infrastructure/voice/speech-synthesis.service';
 import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 import { Product } from '@core/domain/entities/product.entity';
+import { ClerkMood } from '@features/clerk/canvas/capybara-renderer';
 
 function product(id: string, name: string, stock = 10, price = 3): Product {
   return new Product(
@@ -1293,6 +1294,211 @@ describe('ClerkFacade', () => {
       clerk.scanNow();
 
       await vi.waitFor(() => expect(identify).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  describe('holding the code before it counts', () => {
+    /**
+     * Every one of these runs on fake timers. The dwell is three sampling ticks long
+     * and the thing under test is which tick the sale lands on, so a real clock would
+     * make the suite a race against the machine it happens to be running on.
+     */
+    async function restartWithFakeClock(): Promise<void> {
+      clerk.stop();
+      vi.useFakeTimers();
+      await clerk.start();
+    }
+
+    it('never rings up a code that only crosses the frame', async () => {
+      // A shelf label sweeping past the lens decodes perfectly, and used to sell.
+      await restartWithFakeClock();
+      // So a look, if one happens, cannot be what adds the item instead.
+      identify.mockResolvedValue(nothing());
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+
+      // Two ticks: read, and read again — but not held.
+      await vi.advanceTimersByTimeAsync(300);
+      detectCodes.mockResolvedValue([]);
+      await vi.advanceTimersByTimeAsync(800);
+
+      expect(tryAddToCart).not.toHaveBeenCalled();
+    });
+
+    it('reports the wait it is making the cashier sit through', async () => {
+      await restartWithFakeClock();
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+
+      await vi.advanceTimersByTimeAsync(300);
+
+      const dwell = clerk.barcodeDwell();
+      expect(dwell).toBeGreaterThan(0);
+      expect(dwell).toBeLessThan(1);
+      // And it owns the ring while it runs — the frame gate's own waits describe a
+      // look this very code is standing in the way of.
+      expect(clerk.scanProgress()).toEqual({ kind: 'settling', value: dwell });
+    });
+
+    it('rings it up, and stops reporting a wait, once it has been held', async () => {
+      await restartWithFakeClock();
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(tryAddToCart).toHaveBeenCalledTimes(1);
+      expect(identify).not.toHaveBeenCalled();
+      expect(clerk.barcodeDwell()).toBeNull();
+    });
+
+    it('drops the wait when the camera is switched off part way through', async () => {
+      await restartWithFakeClock();
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(clerk.barcodeDwell()).not.toBeNull();
+
+      await clerk.setCameraEnabled(false);
+
+      // A ring left filling over a camera that is off is a till that looks stuck.
+      expect(clerk.barcodeDwell()).toBeNull();
+    });
+  });
+
+  describe('barcode-only mode', () => {
+    async function restartWithFakeClock(): Promise<void> {
+      clerk.stop();
+      vi.useFakeTimers();
+      await clerk.start();
+      clerk.setAiEnabled(false);
+    }
+
+    it('adds the product on the frame the code is read', async () => {
+      // Nothing is racing the bars for this frame, so there is nothing to wait for.
+      await restartWithFakeClock();
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+
+      await vi.advanceTimersByTimeAsync(130);
+
+      expect(tryAddToCart).toHaveBeenCalledTimes(1);
+      expect(clerk.barcodeDwell()).toBeNull();
+    });
+
+    it('lets three identical items go through one after another', async () => {
+      // The case that made this mode worth having: a crate of the same yoghurt.
+      await restartWithFakeClock();
+
+      for (let i = 0; i < 3; i++) {
+        detectCodes.mockResolvedValue([seen('BAR-p1')]);
+        await vi.advanceTimersByTimeAsync(130);
+        detectCodes.mockResolvedValue([]);
+        await vi.advanceTimersByTimeAsync(500);
+      }
+
+      expect(tryAddToCart).toHaveBeenCalledTimes(3);
+    });
+
+    it('still refuses to charge twice when the decoder blinks', async () => {
+      // The dwell goes to zero in this mode; the absence window deliberately does
+      // not, because a one-frame dropout is not a second jar.
+      await restartWithFakeClock();
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+      await vi.advanceTimersByTimeAsync(130);
+      detectCodes.mockResolvedValue([]);
+      await vi.advanceTimersByTimeAsync(130);
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+      await vi.advanceTimersByTimeAsync(130);
+
+      expect(tryAddToCart).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('moods', () => {
+    it('starts with nothing to react to', () => {
+      expect(clerk.mood()).toBe(ClerkMood.NEUTRAL);
+    });
+
+    it('is pleased when an item goes in', async () => {
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+
+      await vi.waitFor(() => expect(tryAddToCart).toHaveBeenCalled());
+
+      expect(clerk.mood()).toBe(ClerkMood.HAPPY);
+    });
+
+    it('is sorry when stock refuses one', async () => {
+      tryAddToCart.mockReturnValue({ added: false, reason: 'out-of-stock' });
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+
+      await vi.waitFor(() => expect(clerk.caption()).toContain('out of stock'));
+
+      expect(clerk.mood()).toBe(ClerkMood.SORRY);
+    });
+
+    it('is alarmed by a code it cannot place', async () => {
+      detectCodes.mockResolvedValue([seen('NOT-STOCKED')]);
+
+      await vi.waitFor(() => expect(clerk.caption()).toContain("isn't in the catalogue"));
+
+      expect(clerk.mood()).toBe(ClerkMood.ALERT);
+    });
+
+    it('is unsure when it cannot tell what it is looking at', async () => {
+      identify.mockResolvedValue(nothing());
+
+      await vi.waitFor(() => expect(clerk.caption()).toContain("can't tell"), { timeout: 3000 });
+
+      expect(clerk.mood()).toBe(ClerkMood.UNSURE);
+    });
+
+    it('owns an undo as its own mistake', async () => {
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+      await vi.waitFor(() => expect(tryAddToCart).toHaveBeenCalled());
+
+      clerk.undoLast();
+
+      expect(clerk.mood()).toBe(ClerkMood.SORRY);
+    });
+
+    it('does not apologise for a removal the cashier asked for', async () => {
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+      await vi.waitFor(() => expect(tryAddToCart).toHaveBeenCalled());
+      expect(clerk.mood()).toBe(ClerkMood.HAPPY);
+
+      onFinalPhrase('remove the avocado');
+
+      // Taking a line off is an ordinary edit to the sale; an apology would be noise.
+      expect(clerk.mood()).toBe(ClerkMood.NEUTRAL);
+    });
+
+    it('plays the mood harder when she has no voice to use', () => {
+      expect(clerk.moodIntensity()).toBe(0.55);
+
+      clerk.setMuted(true);
+
+      // The captions are still carrying the words, but a cashier watching their own
+      // hands is not reading them.
+      expect(clerk.moodIntensity()).toBe(1);
+    });
+
+    it('settles back to neutral on its own', async () => {
+      clerk.stop();
+      vi.useFakeTimers();
+      await clerk.start();
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+      await vi.advanceTimersByTimeAsync(600);
+      expect(clerk.mood()).toBe(ClerkMood.HAPPY);
+
+      await vi.advanceTimersByTimeAsync(MOOD_HOLD_MS + 200);
+
+      // An expression that outlives what caused it has stopped describing anything.
+      expect(clerk.mood()).toBe(ClerkMood.NEUTRAL);
+    });
+
+    it('settles her face when the session ends', async () => {
+      detectCodes.mockResolvedValue([seen('BAR-p1')]);
+      await vi.waitFor(() => expect(clerk.mood()).toBe(ClerkMood.HAPPY));
+
+      clerk.stop();
+
+      expect(clerk.mood()).toBe(ClerkMood.NEUTRAL);
     });
   });
 

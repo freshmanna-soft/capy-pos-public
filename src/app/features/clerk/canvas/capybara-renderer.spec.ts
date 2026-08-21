@@ -1,4 +1,4 @@
-import { CapybaraRenderer, rampColor, withAlpha } from './capybara-renderer';
+import { CapybaraRenderer, ClerkMood, rampColor, withAlpha } from './capybara-renderer';
 import { YUZU_RAMP } from './capybara-palette';
 
 /**
@@ -157,6 +157,116 @@ describe('CapybaraRenderer', () => {
       const pose = renderer.debugPose();
       expect(Math.abs(pose.lean)).toBeLessThan(0.05);
       expect(pose.eyeOpen).toBeCloseTo(1, 1);
+    });
+  });
+
+  describe('moods', () => {
+    it('changes nothing at all when there is nothing to react to', () => {
+      // The load-bearing row of the mood table. Moods are *added* to the pose, so a
+      // neutral clerk has to be bit-for-bit the clerk that existed before them —
+      // otherwise every resting face carries a permanent expression.
+      renderer.setState('idle');
+      renderer.setMood(ClerkMood.NEUTRAL, 1);
+      settle(renderer, 3);
+      const pose = renderer.debugPose();
+      expect(Math.abs(pose.lean)).toBeLessThan(0.05);
+      expect(pose.eyeOpen).toBeCloseTo(1, 1);
+      expect(Math.abs(pose.headTilt)).toBeLessThan(0.05);
+    });
+
+    it('opens up when it is pleased', () => {
+      renderer.setMood(ClerkMood.HAPPY, 1);
+      settle(renderer, 3);
+      const pose = renderer.debugPose();
+      expect(pose.lean).toBeGreaterThan(0.1);
+      expect(pose.earForward).toBeGreaterThan(0.4);
+      expect(pose.eyeOpen).toBeGreaterThan(1.1);
+    });
+
+    it('folds down when it is sorry', () => {
+      renderer.setMood(ClerkMood.SORRY, 1);
+      settle(renderer, 3);
+      const pose = renderer.debugPose();
+      // Ears flat and eyes narrowed, legible across a counter with no audio at all.
+      expect(pose.earForward).toBeLessThan(-0.5);
+      expect(pose.eyeOpen).toBeLessThan(0.8);
+      expect(pose.lean).toBeLessThan(0);
+    });
+
+    it('tilts its head at a question', () => {
+      renderer.setMood(ClerkMood.UNSURE, 1);
+      settle(renderer, 3);
+      expect(renderer.debugPose().headTilt).toBeGreaterThan(0.08);
+    });
+
+    it('snaps to attention when something is wrong', () => {
+      renderer.setMood(ClerkMood.ALERT, 1);
+      settle(renderer, 3);
+      const pose = renderer.debugPose();
+      expect(pose.earForward).toBeGreaterThan(0.8);
+      expect(pose.eyeOpen).toBeGreaterThan(1.2);
+    });
+
+    it('plays the same mood harder at full intensity', () => {
+      // Which is what muting her does: same reaction, more of it.
+      const quiet = new CapybaraRenderer(stubCanvas().canvas);
+      quiet.resize(800, 600, 2);
+      quiet.setMood(ClerkMood.SORRY, 0.55);
+      renderer.setMood(ClerkMood.SORRY, 1);
+      settle(quiet, 3);
+      settle(renderer, 3);
+      expect(renderer.debugPose().earForward).toBeLessThan(quiet.debugPose().earForward);
+    });
+
+    it('fires a gesture on the change, and only on the change', () => {
+      renderer.setMood(ClerkMood.HAPPY, 1);
+      expect(renderer.debugPose().gesture).toBe('nod');
+      settle(renderer, 2);
+      // Gestures are the moment of change: a mood held is a pose, not a movement.
+      expect(renderer.debugPose().gesture).toBeNull();
+
+      renderer.setMood(ClerkMood.HAPPY, 1);
+      expect(renderer.debugPose().gesture).toBeNull();
+    });
+
+    it('gives each mood its own movement', () => {
+      renderer.setMood(ClerkMood.SORRY, 1);
+      expect(renderer.debugPose().gesture).toBe('shake');
+      settle(renderer, 0.25);
+      // The shake is the thing the sorry pose is not — a droop already droops, and a
+      // change nobody notices is not worth simulating.
+      expect(Math.abs(renderer.debugPose().headTurn)).toBeGreaterThan(0.02);
+    });
+
+    it('reports the mood and how hard it is being played', () => {
+      renderer.setMood(ClerkMood.ALERT, 0.55);
+      const pose = renderer.debugPose();
+      expect(pose.mood).toBe(ClerkMood.ALERT);
+      expect(pose.moodStrength).toBeCloseTo(0.55, 5);
+    });
+
+    it('clamps an out-of-range intensity rather than exaggerating without limit', () => {
+      renderer.setMood(ClerkMood.HAPPY, 9);
+      expect(renderer.debugPose().moodStrength).toBe(1);
+    });
+
+    it('keeps the pose but drops the movement under reduced motion', () => {
+      renderer.setReducedMotion(true);
+      renderer.setMood(ClerkMood.SORRY, 1);
+      // The information is in the shape she holds; the shake is only there to draw
+      // the eye to it, and that is the part reduced motion asks us not to do.
+      expect(renderer.debugPose().gesture).toBeNull();
+      settle(renderer, 3);
+      expect(renderer.debugPose().earForward).toBeLessThan(-0.5);
+    });
+
+    it('abandons a gesture in flight when reduced motion is switched on', () => {
+      renderer.setMood(ClerkMood.HAPPY, 1);
+      expect(renderer.debugPose().gesture).toBe('nod');
+
+      renderer.setReducedMotion(true);
+
+      expect(renderer.debugPose().gesture).toBeNull();
     });
   });
 

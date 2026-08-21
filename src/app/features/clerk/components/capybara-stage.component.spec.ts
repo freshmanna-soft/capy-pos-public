@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { WritableSignal, signal } from '@angular/core';
 import { CapybaraStageComponent } from './capybara-stage.component';
 import { ClerkFacade } from '@core/application/facades/clerk.facade';
-import { CapybaraRenderer } from '@features/clerk/canvas/capybara-renderer';
+import { CapybaraRenderer, ClerkMood } from '@features/clerk/canvas/capybara-renderer';
 
 /**
  * These tests exist because of a bug that no amount of DOM assertion would have
@@ -20,9 +20,12 @@ describe('CapybaraStageComponent', () => {
   let confidence: WritableSignal<number>;
   let plopToken: WritableSignal<number>;
   let speaking: WritableSignal<boolean>;
+  let mood: WritableSignal<ClerkMood>;
+  let moodIntensity: WritableSignal<number>;
 
   let setState: ReturnType<typeof vi.spyOn>;
   let setConfidence: ReturnType<typeof vi.spyOn>;
+  let setMood: ReturnType<typeof vi.spyOn>;
   let plop: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -30,6 +33,8 @@ describe('CapybaraStageComponent', () => {
     confidence = signal(0);
     plopToken = signal(0);
     speaking = signal(false);
+    mood = signal<ClerkMood>(ClerkMood.NEUTRAL);
+    moodIntensity = signal(0.55);
 
     // jsdom has no 2D context, so the renderer would throw on construction.
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
@@ -41,6 +46,7 @@ describe('CapybaraStageComponent', () => {
     setConfidence = vi
       .spyOn(CapybaraRenderer.prototype, 'setConfidence')
       .mockImplementation(() => undefined);
+    setMood = vi.spyOn(CapybaraRenderer.prototype, 'setMood').mockImplementation(() => undefined);
     plop = vi.spyOn(CapybaraRenderer.prototype, 'plop').mockImplementation(() => undefined);
 
     TestBed.configureTestingModule({
@@ -58,6 +64,8 @@ describe('CapybaraStageComponent', () => {
             codes: signal([]),
             frameSize: signal({ width: 1280, height: 720 }),
             scanProgress: signal({ kind: 'hidden' as const }),
+            mood,
+            moodIntensity,
           },
         },
       ],
@@ -129,11 +137,29 @@ describe('CapybaraStageComponent', () => {
     // The facade can be several states in by the time this component mounts.
     visualState.set('scanning');
     confidence.set(0.5);
+    mood.set(ClerkMood.SORRY);
 
     const fixture = mount();
 
     expect(setState).toHaveBeenCalledWith('scanning');
     expect(setConfidence).toHaveBeenCalledWith(0.5);
+    expect(setMood).toHaveBeenCalledWith(ClerkMood.SORRY, 0.55);
+    fixture.destroy();
+  });
+
+  it('keeps pushing the mood, and the intensity it should be played at', () => {
+    const fixture = mount();
+    setMood.mockClear();
+
+    mood.set(ClerkMood.HAPPY);
+    fixture.detectChanges();
+    expect(setMood).toHaveBeenLastCalledWith(ClerkMood.HAPPY, 0.55);
+
+    // Muting her raises the intensity without the mood itself changing, and the
+    // renderer has to hear about that on its own.
+    moodIntensity.set(1);
+    fixture.detectChanges();
+    expect(setMood).toHaveBeenLastCalledWith(ClerkMood.HAPPY, 1);
     fixture.destroy();
   });
 
