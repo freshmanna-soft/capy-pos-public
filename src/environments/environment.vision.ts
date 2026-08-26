@@ -38,6 +38,16 @@ export const environment = {
   // catalogue, transactions, the sync worker — keeps talking to the real gateway.
   visionApiUrl: 'http://localhost:8788/vision/identify',
 
+  // AI clerk agent relay, relative to apiUrl. The model API key lives behind
+  // this endpoint, never in the browser bundle, exactly as the vision proxy does.
+  clerkAgentApiPath: '/clerk/agent',
+
+  // Absolute override for the agent endpoint. Empty means "append
+  // clerkAgentApiPath to apiUrl"; the override wins when it is set, so a local
+  // relay can be pointed at without repointing `apiUrl` at a service that only
+  // answers /clerk/agent.
+  clerkAgentApiUrl: '',
+
   // Database
   databaseName: 'capy_pos_dev',
   enableOfflineMode: true,
@@ -74,6 +84,10 @@ export const environment = {
     auditLogging: true,
     offlineMode: true,
     aiVision: true,
+    // The agentic clerk tier — the phrases the keyword parser cannot name. Its own
+    // flag, not aiVision: that one governs paying the model to *look*, and the two
+    // switch on independently.
+    clerkAgent: false,
   },
 
   // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but
