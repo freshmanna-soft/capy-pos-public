@@ -433,6 +433,35 @@ describe('ProductSearchComponent', () => {
       component.onSearchInput({ target: { value: 'bulk' } } as unknown as Event);
       expect(component.searchResults().map((product) => product.id)).toEqual(['5']);
     });
+
+    it('should keep filtering when a loaded product has no name', async () => {
+      // Same story as the sku-less product: a cache rehydration or bad sync payload
+      // bypasses the entity's required-name validation, and the instant client-side
+      // filter reads `name` first — so one such product killed the whole search.
+      const nameless = new ProductBuilder()
+        .withId('6')
+        .withName('Placeholder')
+        .withPrice(7.5)
+        .withSku('NONAME-001')
+        .withCategory('Snacks')
+        .withStock(4)
+        .build();
+      (nameless as { name: string | null }).name = null;
+
+      mockProductRepository.findActive.mockResolvedValue([...mockProducts, nameless]);
+      component.ngOnInit();
+      await new Promise(process.nextTick);
+
+      // `name` is the FIRST branch of the filter, so the crash hit every query —
+      // even one that only ever intended to match another product.
+      const event = { target: { value: 'organic' } } as unknown as Event;
+      expect(() => component.onSearchInput(event)).not.toThrow();
+      expect(component.searchResults().map((product) => product.id)).toEqual(['1']);
+
+      // And the name-less product itself is still matchable by sku.
+      component.onSearchInput({ target: { value: 'noname' } } as unknown as Event);
+      expect(component.searchResults().map((product) => product.id)).toEqual(['6']);
+    });
   });
 
   describe('onCategorySelect error handling', () => {
