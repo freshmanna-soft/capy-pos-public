@@ -1,5 +1,11 @@
 import { VisionCandidate } from '@core/application/dtos/recognition.dto';
-import { AMBIGUITY_MARGIN, AUTO_ADD_CONFIDENCE, isCertain, rankCandidates, shouldScoreChoice } from './candidate-ranking';
+import {
+  AMBIGUITY_MARGIN,
+  AUTO_ADD_CONFIDENCE,
+  isCertain,
+  rankCandidates,
+  shouldScoreChoice,
+} from './candidate-ranking';
 
 function candidate(productId: string, confidence: number): VisionCandidate {
   return { productId, label: productId, confidence };
