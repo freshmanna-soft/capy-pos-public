@@ -89,6 +89,10 @@ export type ClerkAgentTool = (input: Readonly<Record<string, unknown>>) => Clerk
  *
  * A total map over `AgentToolName` so a name added to the shared tuples fails to
  * compile here rather than at a missing executor in front of a cashier.
+ *
+ * The table `createClerkAgentTools` returns has a **null prototype**, which the
+ * type cannot express and every consumer may rely on: the only thing that ever
+ * indexes it is a name a model chose.
  */
 export type ClerkAgentTools = Readonly<Record<AgentToolName, ClerkAgentTool>>;
 
@@ -105,7 +109,7 @@ export type ClerkAgentTools = Readonly<Record<AgentToolName, ClerkAgentTool>>;
  * model has to be told about beyond the `found: false` it asked for.
  */
 export function createClerkAgentTools(deps: ClerkAgentToolDeps): ClerkAgentTools {
-  return {
+  const table: Record<AgentToolName, ClerkAgentTool> = {
     look_up_product: (input) => lookUpProduct(deps, spokenWords(input)),
     read_cart: () => readCart(deps),
     check_stock: (input) => checkStock(deps, spokenWords(input)),
@@ -119,6 +123,12 @@ export function createClerkAgentTools(deps: ClerkAgentToolDeps): ClerkAgentTools
       return { output: countedFact(outcome), changedCart: outcome.removed > 0 };
     },
   };
+  // Written as a literal first and copied onto a null prototype second, so the
+  // total-map check above still runs while the table nobody may trust the keys of
+  // inherits nothing. The only string that ever indexes this came off a model, and
+  // on an ordinary literal `__proto__`, `constructor` and `toString` all answer to
+  // it — the runner guards that lookup too, and neither guard is the other's excuse.
+  return Object.assign(Object.create(null) as ClerkAgentTools, table);
 }
 
 /**
