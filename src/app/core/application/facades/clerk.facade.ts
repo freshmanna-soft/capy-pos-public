@@ -31,6 +31,10 @@ import { FrameGate, GateVerdict } from '@core/infrastructure/media/frame-gate';
 import { LookScheduler } from '@core/infrastructure/media/look-scheduler';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
+import {
+  readAgentPreference,
+  writeAgentPreference,
+} from '@core/infrastructure/settings/clerk-agent-preference';
 import { SpeechRecognitionService } from '@core/infrastructure/voice/speech-recognition.service';
 import { SpeechSynthesisService } from '@core/infrastructure/voice/speech-synthesis.service';
 import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
@@ -213,6 +217,8 @@ export class ClerkFacade {
   private readonly _phase = signal<ClerkPhase>('off');
   private readonly _visualState = signal<ClerkVisualState>('idle');
   private readonly _caption = signal('');
+  private readonly _exchanges = signal<ClerkExchange[]>([]);
+  private readonly _agentEnabled = signal(readAgentPreference());
   private readonly _candidates = signal<VisionCandidate[]>([]);
   private readonly _confidence = signal(0);
   private readonly _pendingAdd = signal<PendingAdd | null>(null);
@@ -249,6 +255,30 @@ export class ClerkFacade {
    * so the voice is an enhancement and never the only channel.
    */
   readonly caption = this._caption.asReadonly();
+  /**
+   * The last few turns of the exchange, oldest first.
+   *
+   * Additive to `caption`, which stays a single slot and stays the sr-only live
+   * region, so the announced channel does not repeat itself once per surviving
+   * line. What this adds is the cashier's own side: a phrase she misheard is only
+   * diagnosable next to the answer it produced, and `caption` has no room for it.
+   */
+  readonly exchanges = this._exchanges.asReadonly();
+  /**
+   * Whether this till is allowed to hold a conversation, as opposed to taking
+   * commands.
+   *
+   * The third of the three switches, and the same shape as the other two: the
+   * camera decides whether she may look, `aiEnabled` whether she may guess at what
+   * she sees, and this whether she may work out a phrase the keyword parser cannot
+   * name. Off, the till is a closed command set — free, offline, and incapable of
+   * being creative with a sale.
+   *
+   * Remembered across sessions, because its "on" position is the one that spends
+   * money on a model, and a shop that has chosen not to should not have to choose
+   * again after every refresh.
+   */
+  readonly agentEnabled = this._agentEnabled.asReadonly();
   readonly candidates = this._candidates.asReadonly();
   readonly confidence = this._confidence.asReadonly();
   readonly pendingAdd = this._pendingAdd.asReadonly();
@@ -434,6 +464,16 @@ export class ClerkFacade {
   private undoTimer: ReturnType<typeof setInterval> | null = null;
   private moodTimer: ReturnType<typeof setTimeout> | null = null;
   private inFlight: AbortController | null = null;
+  /**
+   * Monotonic id for exchange lines.
+   *
+   * A counter rather than the array index, because the array is trimmed from the
+   * front: an index would be reused the moment a line scrolls off and `@for`'s
+   * track would reuse the DOM node for a different utterance.
+   */
+  private exchangeSeq = 0;
+  /** The cashier line still waiting for an answer, or null when none is. */
+  private pendingLine: number | null = null;
 
   constructor() {
     this.ear.onFinalPhrase((phrase) => this.handlePhrase(phrase));
@@ -525,6 +565,11 @@ export class ClerkFacade {
     // that was holding one back, belong to a session that has ended.
     this.looks.reset();
     this._barcodePriority.set(false);
+    // The exchange is one cashier's conversation, so it does not survive the session
+    // that held it: leaving it up would show the next person on the till a dialogue
+    // they were not part of, over a stage that has just been handed to them.
+    this._exchanges.set([]);
+    this.pendingLine = null;
     this._visualState.set('idle');
     this._phase.set('off');
   }
@@ -708,6 +753,46 @@ export class ClerkFacade {
   /** Flip recognition — the `A` key and the HUD button. */
   toggleAi(): void {
     this.setAiEnabled(!this._aiEnabled());
+  }
+
+  /**
+   * Stop her working phrases out, or let her again.
+   *
+   * The operator's kill switch over the agent tier. Nothing else changes: the
+   * camera, the barcode reader, the whole keyword command set and every button on
+   * the HUD keep working, because those are the paths that cost nothing and cannot
+   * invent anything. What closes is the parser's tail — the phrases a closed
+   * keyword set was never going to name — which is exactly the traffic a model
+   * would be paid to interpret.
+   *
+   * Written through to storage rather than held for the session, for the reason the
+   * mute switch is: a shop that decided on Friday not to spend money on this has
+   * not decided it again on Monday, and a switch that silently resets is a switch
+   * that cannot be relied on.
+   *
+   * Confirmed out loud either way, following `setMuted`: a kill switch whose only
+   * feedback is that nothing happens is indistinguishable from a kill switch that
+   * did nothing.
+   *
+   * Tier seam: `agentEnabled()` is the gate the agent turn is fired behind, checked
+   * alongside `handlePhrase`'s `default:` arm once that tier is wired.
+   */
+  setAgentEnabled(on: boolean): void {
+    if (on === this._agentEnabled()) {
+      return;
+    }
+    this._agentEnabled.set(on);
+    writeAgentPreference(on);
+    this.say(
+      on
+        ? "Conversational again. Anything the commands don't cover, I'll try to work out."
+        : "Commands only from here. I'll still add, remove, total, undo and check out."
+    );
+  }
+
+  /** Flip the agent tier — the `G` key and the HUD button. */
+  toggleAgent(): void {
+    this.setAgentEnabled(!this._agentEnabled());
   }
 
   /**
@@ -1050,6 +1135,10 @@ export class ClerkFacade {
     this.inFlight?.abort();
     this.inFlight = null;
     this._busy.set(false);
+    // The look was the only thing that could still have answered a "look at this",
+    // so the line stops waiting with it rather than spinning against a request that
+    // has been abandoned.
+    this.settlePending();
     // A look still inside its debounce window is abandoned for the same reason as
     // one already on the wire: it was armed for a scene that no longer applies.
     this.looks.cancel();
@@ -1100,6 +1189,9 @@ export class ClerkFacade {
         this.inFlight = null;
       }
       this._busy.set(false);
+      // Every answering path above went through `say()`, which has already settled
+      // it; this catches the aborted return, which deliberately says nothing.
+      this.settlePending();
     }
   }
 
@@ -1492,12 +1584,33 @@ export class ClerkFacade {
   // ─── Voice ────────────────────────────────────────────────────────────────
 
   /**
-   * Handle one completed spoken phrase.
+   * Handle one completed spoken phrase, and put the cashier's side of it on screen.
+   *
+   * The phrase is recorded before it is routed, so the log reads in the order it
+   * happened rather than answer-first, and recorded whatever the outcome: a phrase
+   * that named no intent is precisely the one worth seeing, because silence from a
+   * till and a phrase it never understood look identical from the counter.
+   */
+  private handlePhrase(phrase: string): ClerkIntentOutcome {
+    this.pendingLine = this.recordExchange('cashier', phrase, true);
+    const outcome = this.routePhrase(phrase);
+    // `say()` settles the line as it answers, so anything still pending here got no
+    // answer in this tick. Only a look genuinely answers later; everything else in
+    // this facade is synchronous, so leaving the line pending would be a claim that
+    // a reply is on its way when nothing is going to send one.
+    if (!this._busy()) {
+      this.settlePending();
+    }
+    return outcome;
+  }
+
+  /**
+   * Route one phrase to the method that owns it.
    *
    * `checkout` is returned to the caller rather than acted on here: navigation
    * belongs to the component that owns the route.
    */
-  private handlePhrase(phrase: string): ClerkIntentOutcome {
+  private routePhrase(phrase: string): ClerkIntentOutcome {
     const intent = parseClerkIntent(
       phrase,
       this._candidates().map((candidate) => candidate.label)
@@ -1829,13 +1942,59 @@ export class ClerkFacade {
     return { removed: removing, wanted, name: product.name };
   }
 
-  /** Say something, and caption it at the same moment. */
+  /** Say something, caption it, and put it in the exchange, all at one moment. */
   private say(text: string): void {
     if (text.trim().length === 0) {
       return;
     }
     this._caption.set(text);
+    // Answering is what settles the question, so this happens before her line is
+    // appended: the cashier's line stops waiting at the same instant the reply
+    // lands, and no frame is ever rendered with both a pending question and its
+    // answer under it.
+    this.settlePending();
+    this.recordExchange('agent', text);
     this.voice.speak(text);
+  }
+
+  // ─── Exchange ─────────────────────────────────────────────────────────────
+
+  /**
+   * Append one line and trim the log back to `MAX_EXCHANGES`.
+   *
+   * Trims from the front so the newest line is always kept: the bound is about how
+   * much fits on screen, and dropping the newest to honour it would be the one
+   * outcome nobody wants.
+   *
+   * @returns the new line's id, so a caller that has to come back and settle it can.
+   */
+  private recordExchange(author: ChoiceActor, text: string, pending = false): number {
+    const id = ++this.exchangeSeq;
+    this._exchanges.update((lines) =>
+      [...lines, { id, author, text, pending }].slice(-MAX_EXCHANGES)
+    );
+    return id;
+  }
+
+  /**
+   * Nothing is outstanding any more.
+   *
+   * Clears by id rather than clearing every flag, so a line that has already
+   * scrolled off cannot be resurrected, and returns the array unchanged when there
+   * is nothing to do — this runs on every `say()`, and a new array each time would
+   * re-render the whole log for every utterance.
+   */
+  private settlePending(): void {
+    const id = this.pendingLine;
+    if (id === null) {
+      return;
+    }
+    this.pendingLine = null;
+    this._exchanges.update((lines) =>
+      lines.some((line) => line.id === id && line.pending)
+        ? lines.map((line) => (line.id === id ? { ...line, pending: false } : line))
+        : lines
+    );
   }
 
   /**

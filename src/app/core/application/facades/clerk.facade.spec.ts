@@ -4,12 +4,17 @@ import {
   AUTO_ADD_CONFIDENCE,
   ClerkFacade,
   HELP_TEXT,
+  MAX_EXCHANGES,
   MAX_SPEECH_WORDS,
   MOOD_HOLD_MS,
   SpokenAddOutcome,
   SpokenRemoveOutcome,
   UNDO_WINDOW_MS,
 } from './clerk.facade';
+import {
+  AGENT_PREF_KEY,
+  writeAgentPreference,
+} from '@core/infrastructure/settings/clerk-agent-preference';
 import { ChoiceActor } from '@core/application/services/candidate-ranking';
 import { MAX_SPOKEN_QUANTITY } from '@core/application/services/voice-intent.parser';
 import { PosFacade } from './pos.facade';
@@ -2956,6 +2961,213 @@ describe('ClerkFacade', () => {
     });
   });
 
+  /**
+   * The exchange is the cashier's own record of the session, so what is under test
+   * is mostly what it *refuses* to show: a line twice, a line that outlived the
+   * session, a question left spinning against an answer nothing will send.
+   */
+  describe('the exchange', () => {
+    it('captions and logs the same line, without the log replacing the caption', () => {
+      clerk.speakTotal();
+
+      expect(clerk.caption()).toBe('2 items, 7.50 dollars.');
+      expect(clerk.exchanges().at(-1)).toMatchObject({
+        author: 'agent',
+        text: '2 items, 7.50 dollars.',
+        pending: false,
+      });
+    });
+
+    it('reads oldest to newest, with the cashier ahead of the answer', () => {
+      const before = clerk.exchanges().length;
+      onFinalPhrase('what is the total');
+
+      expect(clerk.exchanges().slice(before)).toMatchObject([
+        { author: 'cashier', text: 'what is the total' },
+        { author: 'agent', text: '2 items, 7.50 dollars.' },
+      ]);
+    });
+
+    it('keeps a phrase it could not name, because silence is the thing to diagnose', () => {
+      const before = clerk.exchanges().length;
+      onFinalPhrase('do you know how to juggle');
+
+      // Recorded, and settled: nothing in the facade is going to answer this, and a
+      // line still marked pending would promise one.
+      expect(clerk.exchanges().slice(before)).toMatchObject([
+        { author: 'cashier', text: 'do you know how to juggle', pending: false },
+      ]);
+    });
+
+    it('settles a handled phrase even when the arm had nothing to say', () => {
+      // "Stop listening" into a mic already off is deliberately a no-op, so it is the
+      // one handled arm that speaks nothing — and the case a settle-on-say-only rule
+      // would leave pending for the rest of the session.
+      onFinalPhrase('stop listening');
+
+      expect(clerk.exchanges().at(-1)).toMatchObject({
+        author: 'cashier',
+        text: 'stop listening',
+        pending: false,
+      });
+    });
+
+    it('marks a question pending while she is genuinely still working on it', async () => {
+      let release: (result: RecognitionResult) => void = () => undefined;
+      identify.mockReturnValue(
+        new Promise<RecognitionResult>((resolve) => {
+          release = resolve;
+        })
+      );
+
+      onFinalPhrase('have a look');
+      await vi.waitFor(() => expect(clerk.busy()).toBe(true));
+
+      expect(clerk.exchanges().at(-1)).toMatchObject({
+        author: 'cashier',
+        text: 'have a look',
+        pending: true,
+      });
+
+      release(confident());
+      await vi.waitFor(() => expect(clerk.busy()).toBe(false));
+
+      // Her answer is what settles it, and it lands underneath rather than replacing.
+      expect(clerk.exchanges().at(-2)).toMatchObject({ text: 'have a look', pending: false });
+      expect(clerk.exchanges().at(-1)).toMatchObject({ author: 'agent', pending: false });
+    });
+
+    it('stops a pending question when the look it was waiting on is abandoned', async () => {
+      identify.mockReturnValue(new Promise<RecognitionResult>(() => undefined));
+
+      onFinalPhrase('have a look');
+      await vi.waitFor(() => expect(clerk.busy()).toBe(true));
+      expect(clerk.exchanges().at(-1)?.pending).toBe(true);
+
+      // Recognition off aborts the look, so the only thing that could still have
+      // answered is gone.
+      clerk.setAiEnabled(false);
+
+      expect(clerk.exchanges().some((line) => line.pending)).toBe(false);
+    });
+
+    it('never grows past what fits on screen, and keeps the newest when it trims', () => {
+      for (let i = 0; i < MAX_EXCHANGES + 4; i += 1) {
+        onFinalPhrase(`phrase ${i}`);
+      }
+
+      const lines = clerk.exchanges();
+      expect(lines.length).toBe(MAX_EXCHANGES);
+      expect(lines.at(-1)?.text).toBe(`phrase ${MAX_EXCHANGES + 3}`);
+    });
+
+    it('gives every line an id that a trimmed log cannot reuse', () => {
+      for (let i = 0; i < MAX_EXCHANGES + 4; i += 1) {
+        onFinalPhrase(`phrase ${i}`);
+      }
+
+      const ids = clerk.exchanges().map((line) => line.id);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('does not log a repeat, which would read as her saying it twice', () => {
+      clerk.speakTotal();
+      const before = clerk.exchanges().length;
+
+      clerk.repeatLast();
+
+      expect(clerk.exchanges().length).toBe(before);
+      expect(spokenAloud.at(-1)).toBe('2 items, 7.50 dollars.');
+    });
+
+    it('belongs to the session, not to the till', () => {
+      clerk.speakTotal();
+      expect(clerk.exchanges().length).toBeGreaterThan(0);
+
+      clerk.stop();
+
+      expect(clerk.exchanges()).toEqual([]);
+    });
+
+    it('cannot be written from outside the facade', () => {
+      const forbidden = (): void => {
+        // @ts-expect-error exchanges is a readonly Signal, by design
+        clerk.exchanges.set([]);
+      };
+
+      expect(forbidden).toBeTypeOf('function');
+    });
+  });
+
+  /**
+   * The kill switch. Its whole value is that an operator's decision about spending
+   * money on a model outlives the refresh that follows it, so the persistence is as
+   * much the subject here as the state is.
+   */
+  describe('the agent kill switch', () => {
+    afterEach(() => {
+      // A leaked 'commands' value would construct the *next* spec's facade with the
+      // switch already thrown, and nothing in that spec would mention why.
+      localStorage.removeItem(AGENT_PREF_KEY);
+    });
+
+    it('is conversational on a till that has never been asked', () => {
+      expect(clerk.agentEnabled()).toBe(true);
+    });
+
+    it('remembers being switched off, so Monday matches Friday', () => {
+      clerk.toggleAgent();
+
+      expect(clerk.agentEnabled()).toBe(false);
+      expect(localStorage.getItem(AGENT_PREF_KEY)).toBe('commands');
+    });
+
+    it('says which way it went, both ways', () => {
+      clerk.setAgentEnabled(false);
+      expect(clerk.caption()).toContain('Commands only');
+
+      clerk.setAgentEnabled(true);
+      expect(clerk.caption()).toContain('Conversational');
+    });
+
+    it('lands in the exchange like anything else she says', () => {
+      clerk.setAgentEnabled(false);
+
+      expect(clerk.exchanges().at(-1)).toMatchObject({
+        author: 'agent',
+        text: expect.stringContaining('Commands only'),
+      });
+    });
+
+    it('says nothing when set to the position it is already in', () => {
+      const before = clerk.exchanges().length;
+
+      clerk.setAgentEnabled(true);
+
+      expect(clerk.exchanges().length).toBe(before);
+      expect(localStorage.getItem(AGENT_PREF_KEY)).toBeNull();
+    });
+
+    it('leaves the camera, recognition and the command set alone', () => {
+      clerk.setAgentEnabled(false);
+
+      expect(clerk.cameraEnabled()).toBe(true);
+      expect(clerk.aiEnabled()).toBe(true);
+      // The closed command set is the whole point of the off position.
+      onFinalPhrase('what is the total');
+      expect(clerk.caption()).toBe('2 items, 7.50 dollars.');
+    });
+
+    it('cannot be driven from outside the facade', () => {
+      const forbidden = (): void => {
+        // @ts-expect-error agentEnabled is a readonly Signal, by design
+        clerk.agentEnabled.set(false);
+      };
+
+      expect(forbidden).toBeTypeOf('function');
+    });
+  });
+
   describe('the checkout gate', () => {
     it('bumps the counter exactly once per request', () => {
       const before = clerk.checkoutRequested();
@@ -3095,5 +3307,101 @@ describe('ClerkFacade where the browser cannot listen', () => {
     // The voice is an enhancement. With it gone the caption is the whole channel.
     clerk.speakTotal();
     expect(clerk.caption()).toBe('The cart is empty.');
+  });
+});
+
+/**
+ * The one thing the switch is for: outliving the session that set it.
+ *
+ * Its own module because the preference is read once, at construction, so proving
+ * it is read at all means seeding storage *before* the facade exists — which the
+ * shared `beforeEach` above cannot do for a facade it has already built.
+ */
+describe('ClerkFacade on a till told to take commands only', () => {
+  beforeEach(() => {
+    writeAgentPreference(false);
+    TestBed.configureTestingModule({
+      providers: [
+        ClerkFacade,
+        {
+          provide: VISION_RECOGNIZER,
+          useValue: { identify: vi.fn().mockResolvedValue(nothing()), kind: 'demo' },
+        },
+        {
+          provide: CameraService,
+          useValue: {
+            status: signal('live'),
+            message: signal(''),
+            start: vi.fn().mockResolvedValue(true),
+            stop: vi.fn(),
+            sampleFrame: vi.fn().mockReturnValue(null),
+            captureFrame: vi.fn().mockReturnValue(null),
+            detectionSource: vi.fn().mockReturnValue(null),
+            cameras: signal([]),
+            activeCameraId: signal<string | null>(null),
+            hasChoice: signal(false),
+            select: vi.fn().mockResolvedValue(true),
+            activeCameraLabel: () => 'Camera',
+          },
+        },
+        {
+          provide: SpeechSynthesisService,
+          useValue: {
+            supported: true,
+            speaking: signal(false),
+            lastBoundaryAt: signal(0),
+            muted: signal(false),
+            setMuted: vi.fn(),
+            speak: vi.fn(),
+            cancel: vi.fn(),
+          },
+        },
+        {
+          provide: SpeechRecognitionService,
+          useValue: {
+            supported: true,
+            interim: signal(''),
+            onFinalPhrase: vi.fn(),
+            start: vi.fn(),
+            stop: vi.fn(),
+            pause: vi.fn(),
+            resume: vi.fn(),
+          },
+        },
+        {
+          provide: PosFacade,
+          useValue: {
+            tryAddToCart: vi.fn().mockReturnValue({ added: true }),
+            decreaseQuantity: vi.fn(),
+            totalItems: signal(0),
+            total: signal(0),
+            isCartEmpty: signal(true),
+          },
+        },
+        { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
+        { provide: EventBusService, useValue: { publish: vi.fn() } },
+        { provide: TelemetryService, useValue: { recordCounter: vi.fn() } },
+        {
+          provide: BarcodeScannerService,
+          useValue: {
+            supported: signal(false),
+            prepare: vi.fn().mockResolvedValue(false),
+            detect: vi.fn().mockResolvedValue([]),
+          },
+        },
+        {
+          provide: RecognitionLogService,
+          useValue: { record: vi.fn(), amend: vi.fn(), summarise: vi.fn(), clear: vi.fn() },
+        },
+      ],
+    });
+  });
+
+  afterEach(() => {
+    localStorage.removeItem(AGENT_PREF_KEY);
+  });
+
+  it('opens with the switch still thrown, without being asked again', () => {
+    expect(TestBed.inject(ClerkFacade).agentEnabled()).toBe(false);
   });
 });

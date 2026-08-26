@@ -4,6 +4,7 @@ import {
   Component,
   ElementRef,
   ViewChild,
+  computed,
   inject,
   output,
 } from '@angular/core';
@@ -60,6 +61,12 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
              remembered, so it cannot be left to look like a broken speaker. -->
         @if (clerk.muted()) {
           <span class="text-tsuba" data-testid="clerk-muted-badge">· muted</span>
+        }
+        <!-- And again for the agent tier, which is also remembered: a till that
+             has been told to take commands only will refuse phrasings it answered
+             last week, and that has to be legible as a decision. -->
+        @if (!clerk.agentEnabled()) {
+          <span class="text-tsuba" data-testid="clerk-agent-off-badge">· commands only</span>
         }
       </p>
 
@@ -157,6 +164,49 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
     </div>
 
     <div class="mt-auto flex flex-col gap-4 px-4 pb-4 md:px-6 md:pb-6">
+      <!-- The exchange, oldest at the top. Quiet and small on purpose: this is the
+           record of how the till got here, not the thing being said now, and it sits
+           over a camera preview that still has to be aimable through it. Her newest
+           line is left out because the caption bubble below is already carrying it
+           at the size it deserves. -->
+      @if (history().length > 0) {
+        <ol
+          class="pointer-events-auto flex max-h-[38vh] max-w-xl flex-col gap-1.5 overflow-y-auto"
+          aria-label="Conversation so far"
+          data-testid="clerk-exchange"
+        >
+          @for (line of history(); track line.id) {
+            <li
+              class="flex"
+              [class]="line.author === 'cashier' ? 'justify-end' : 'justify-start'"
+              [attr.data-author]="line.author"
+              data-testid="clerk-exchange-line"
+            >
+              <span
+                class="max-w-[85%] rounded-2xl px-3 py-1.5 text-[13px] leading-snug backdrop-blur"
+                [class]="
+                  line.author === 'cashier'
+                    ? 'rounded-br-sm border border-kelp/25 bg-onsen-deep/70 text-kelp'
+                    : 'rounded-bl-sm border border-steam/10 bg-onsen-water/60 text-steam/80'
+                "
+              >
+                {{ line.text }}
+                <!-- A question with no answer yet has to look different from one that
+                     was never answered at all; without this the two are the same row. -->
+                @if (line.pending) {
+                  <span
+                    class="text-kelp/60"
+                    data-testid="clerk-exchange-pending"
+                    aria-label="waiting"
+                    >…</span
+                  >
+                }
+              </span>
+            </li>
+          }
+        </ol>
+      }
+
       @if (clerk.candidateCards().length > 0) {
         <!-- Numbered because the number IS the command: say "two", or press 2. -->
         <ul
@@ -316,6 +366,27 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
           {{ clerk.aiEnabled() ? 'Recognizing' : 'Barcodes only' }}
         </button>
 
+        <!-- The kill switch over the tier that works phrases out, next to the one
+             over the tier that works pictures out — the two things this till can
+             spend money on, switched the same way and in the same place. Reads as a
+             state rather than an action for the reason mute does: it outlives the
+             session. -->
+        <button
+          type="button"
+          (click)="clerk.toggleAgent()"
+          [attr.aria-pressed]="clerk.agentEnabled()"
+          class="flex min-h-[44px] items-center gap-2 rounded-full border px-5 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          [class]="
+            clerk.agentEnabled()
+              ? 'border-kelp/40 bg-onsen-deep/70 text-kelp hover:border-kelp'
+              : 'border-tsuba bg-tsuba/15 text-steam'
+          "
+          data-testid="clerk-agent-toggle"
+        >
+          <span aria-hidden="true">{{ clerk.agentEnabled() ? '💬' : '⌨️' }}</span>
+          {{ clerk.agentEnabled() ? 'Conversational' : 'Commands only' }}
+        </button>
+
         @if (clerk.earSupported) {
           <button
             type="button"
@@ -409,6 +480,32 @@ export class ClerkHudComponent implements AfterViewInit {
     // Same MediaStream, second element: a real live view rather than a still.
     this.camera.attachPreview(this.previewRef.nativeElement);
   }
+
+  /**
+   * The exchange minus whatever the caption bubble is already showing.
+   *
+   * Both channels read the same log, so without this her newest line appears twice —
+   * once small in the history and once large underneath it — which reads as her
+   * having said it twice. Dropping it here rather than having the facade publish two
+   * lists keeps the facade holding one exchange and leaves the split where the
+   * decision actually is: which of the two surfaces on this screen renders a line.
+   */
+  protected readonly history = computed(() => {
+    const lines = this.clerk.exchanges();
+    // The bubble loses the lower half to the candidate cards, and a line nothing is
+    // rendering has to stay in the history or it disappears from the screen
+    // entirely — so this follows the same condition the bubble itself is behind
+    // rather than assuming it is up.
+    if (this.clerk.candidateCards().length > 0) {
+      return lines;
+    }
+    const newest = lines[lines.length - 1];
+    // Only the trailing line can be the caption, and only while she is the one who
+    // spoke last: a cashier line under the bubble is a question the bubble answers.
+    return newest?.author === 'agent' && newest.text === this.clerk.caption()
+      ? lines.slice(0, -1)
+      : lines;
+  });
 
   /** Remaining undo window as a percentage, for the draining bar. */
   protected undoProgress(): number {
