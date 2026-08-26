@@ -46,8 +46,13 @@ const URL = /\b(?:https?:\/\/|www\.)\S+/gi;
  * Pictographs, including the variation selectors and joiners that hold a
  * multi-codepoint emoji together — dropping the pictographs alone would leave
  * the joiners behind for the synthesizer to puzzle over.
+ *
+ * An alternation rather than a character class, because a class listing a joiner
+ * and a variation selector reads as though it matched the composed sequence. It
+ * never did: each branch matches one code point, and the global replace sweeps a
+ * flag or a family emoji away one code point at a time.
  */
-const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{20E3}]/gu;
+const EMOJI = /\p{Extended_Pictographic}|\u{FE0F}|\u{200D}|\u{20E3}/gu;
 /** Heading hashes and list bullets, at the start of a line only. */
 const LINE_MARKER = /^[ \t]*(?:#{1,6}[ \t]*|[-*+][ \t]+|\d+\.[ \t]+)/gm;
 /** Emphasis runs, keeping the emphasized words. */
