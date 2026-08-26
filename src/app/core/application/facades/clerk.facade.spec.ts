@@ -3064,9 +3064,7 @@ describe('ClerkFacade', () => {
       onFinalPhrase('what is the total');
 
       expect(clerk.exchanges().filter((line) => line.pending).length).toBeLessThanOrEqual(1);
-      expect(clerk.exchanges().find((line) => line.text === 'have a look')?.pending).toBe(
-        false
-      );
+      expect(clerk.exchanges().find((line) => line.text === 'have a look')?.pending).toBe(false);
     });
 
     it('does not accumulate spinners when the cashier talks over a stalled look', async () => {
