@@ -354,7 +354,7 @@ export class AgentTurnRunner {
     call: AgentToolCall,
     state: TurnState
   ): { result?: AgentToolResult; declined: boolean } {
-    const executor = (this.tools as Record<string, ClerkAgentTool | undefined>)[call.name];
+    const executor = this.executorFor(call.name);
     if (!executor) {
       // The tool contract is a two-place agreement between a prompt and this table,
       // with no compiler between them. A name that does not exist is expected
@@ -372,6 +372,31 @@ export class AgentTurnRunner {
       return { result: { id: call.id, output: executor(call.input).output }, declined: false };
     }
     return this.mutate(call, executor, state);
+  }
+
+  /**
+   * The executor for a name the model chose, or nothing.
+   *
+   * `call.name` is model-controlled and the table is indexed with it directly, so
+   * the lookup has to ask whether the table **owns** the name rather than whether
+   * anything answered to it. On a plain object literal `__proto__` resolves to
+   * `Object.prototype` — truthy, and not callable — while `toString`, `valueOf` and
+   * `constructor` resolve to inherited functions that would be *invoked* with a
+   * model-supplied argument. Both outcomes leave `dispatch` throwing a `TypeError`
+   * out of a method whose whole contract is that it returns a tool result, and out
+   * of a `run()` whose whole contract is that it never rejects.
+   *
+   * `Object.hasOwn` is the guard even though `createClerkAgentTools` also hands back
+   * a null-prototype table: this class takes any `ClerkAgentTools`, and the one
+   * place a model-controlled string meets a property lookup should not depend on
+   * how its caller built the object.
+   */
+  private executorFor(name: string): ClerkAgentTool | undefined {
+    if (!Object.hasOwn(this.tools, name)) {
+      return undefined;
+    }
+    const executor = (this.tools as Record<string, unknown>)[name];
+    return typeof executor === 'function' ? (executor as ClerkAgentTool) : undefined;
   }
 
   /**
