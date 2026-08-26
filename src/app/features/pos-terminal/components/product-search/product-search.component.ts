@@ -221,7 +221,9 @@ export class ProductSearchComponent implements OnInit {
     if (this.allProducts.length > 0) {
       const lowerQuery = query.toLowerCase();
       const filtered = this.allProducts.filter(
-        (p) => p.name.toLowerCase().includes(lowerQuery) || p.sku.toLowerCase().includes(lowerQuery)
+        (p) =>
+          p.name.toLowerCase().includes(lowerQuery) ||
+          (p.sku || '').toLowerCase().includes(lowerQuery)
       );
       this.searchResults.set(filtered);
       this.hasMoreProducts.set(false);

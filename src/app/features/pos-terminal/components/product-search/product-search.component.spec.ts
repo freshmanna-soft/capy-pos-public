@@ -404,6 +404,35 @@ describe('ProductSearchComponent', () => {
       expect(component.searchResults().length).toBe(1);
       expect(component.searchResults()[0].sku).toBe('COF-001');
     });
+
+    it('should keep filtering when a loaded product has no sku', async () => {
+      // The entity requires a sku, but products reaching the UI from a cache
+      // rehydration or a bad sync payload skip that validation — and the instant
+      // client-side filter crashed the whole checkout search on the first one.
+      const skuless = new ProductBuilder()
+        .withId('5')
+        .withName('Coffee Beans Bulk')
+        .withPrice(19.99)
+        .withSku('BULK-001')
+        .withCategory('Beverages')
+        .withStock(12)
+        .build();
+      (skuless as { sku: string | null }).sku = null;
+
+      mockProductRepository.findActive.mockResolvedValue([...mockProducts, skuless]);
+      component.ngOnInit();
+      await new Promise(process.nextTick);
+
+      // 'organic' misses the sku-less product's NAME, so the filter falls through
+      // to its sku — the branch that crashed the search for every other product.
+      const event = { target: { value: 'organic' } } as unknown as Event;
+      expect(() => component.onSearchInput(event)).not.toThrow();
+      expect(component.searchResults().map((product) => product.id)).toEqual(['1']);
+
+      // And the sku-less product itself is still matchable by name.
+      component.onSearchInput({ target: { value: 'bulk' } } as unknown as Event);
+      expect(component.searchResults().map((product) => product.id)).toEqual(['5']);
+    });
   });
 
   describe('onCategorySelect error handling', () => {

@@ -292,6 +292,37 @@ describe('DexieProductRepository (real Dexie + fake-indexeddb)', () => {
       await expect(repo.search('nobar')).resolves.toHaveLength(1);
     });
 
+    it('searches past a product with no sku instead of failing the whole search', async () => {
+      // The search predicate runs on the RAW record, before mapRecords' per-record
+      // try/catch (#110) can contain a bad row — so an unguarded `record.sku`
+      // took down the cashier's entire search instead of dropping one product.
+      await db.products.bulkAdd([
+        record({ id: 'nosku', name: 'Nosku', sku: undefined as unknown as string }),
+        record({ id: 'healthy', name: 'Nosku Deluxe' }),
+      ]);
+
+      const results = await repo.search('nosku');
+
+      // The malformed row is still skipped at mapping time (SKU is required on the
+      // entity), but the healthy match reaches the till.
+      expect(results.map((product) => product.id)).toEqual(['healthy']);
+    });
+
+    it('matches a null sku against name and barcode without throwing', async () => {
+      // A null (not merely absent) sku is what a bad sync payload actually writes.
+      await db.products.add(
+        record({
+          id: 'nullsku',
+          name: 'Nullsku',
+          sku: null as unknown as string,
+          barcode: '555',
+        })
+      );
+
+      await expect(repo.search('555')).resolves.toEqual([]);
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
     it('leaves cost alone when only the price was changed', async () => {
       await db.products.add(record({ id: 'priced', price: 4.5, cost: 2 }));
 
