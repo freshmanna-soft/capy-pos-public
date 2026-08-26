@@ -240,6 +240,39 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
           </button>
         }
 
+        <!-- Nothing said yet is nothing to repeat, so the button follows the same
+             signal the caption bubble does rather than offering a no-op. -->
+        @if (clerk.caption()) {
+          <button
+            type="button"
+            (click)="clerk.repeatLast()"
+            class="flex min-h-[44px] items-center gap-2 rounded-full border border-kelp/40 bg-onsen-deep/70 px-5 text-sm font-semibold text-kelp transition-colors hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+            data-testid="clerk-repeat"
+          >
+            Say that again
+          </button>
+        }
+
+        <!-- Never mind and help are answerable at any moment, so they are always
+             here: gating them would add a branch that buys nothing. -->
+        <button
+          type="button"
+          (click)="clerk.dismiss()"
+          class="flex min-h-[44px] items-center gap-2 rounded-full border border-kelp/40 bg-onsen-deep/70 px-5 text-sm font-semibold text-kelp transition-colors hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          data-testid="clerk-dismiss"
+        >
+          Never mind
+        </button>
+
+        <button
+          type="button"
+          (click)="clerk.speakHelp()"
+          class="flex min-h-[44px] items-center gap-2 rounded-full border border-kelp/40 bg-onsen-deep/70 px-5 text-sm font-semibold text-kelp transition-colors hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          data-testid="clerk-help"
+        >
+          What can you do?
+        </button>
+
         @if (clerk.verdict() === 'duplicate' || clerk.verdict() === 'cooling') {
           <button
             type="button"

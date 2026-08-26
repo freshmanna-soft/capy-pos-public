@@ -101,6 +101,32 @@ const SAMPLE_INTERVAL_MS = 125;
  */
 export const MOOD_HOLD_MS = 4600;
 
+/**
+ * The most words the clerk may say in one turn.
+ *
+ * A ceiling rather than a note about style. Speaking pauses the ear for the whole
+ * utterance so she cannot hear herself, so the length of an answer is the length
+ * of a window in which the cashier cannot correct her — and the longer the answer,
+ * the more likely it is wrong and the more likely they want to. Forty words is
+ * about fifteen seconds of a busy counter talked over.
+ *
+ * Exported so anything that produces prose can be measured against it instead of
+ * restating the number as a sentence nothing can check.
+ */
+export const MAX_SPEECH_WORDS = 40;
+
+/**
+ * What she says when asked what she can do.
+ *
+ * A constant, not generated: the command set is closed, so the honest answer is
+ * fixed, and a fixed answer costs nothing and cannot drift from the parser behind
+ * her. Kept inside `MAX_SPEECH_WORDS` because a list of capabilities read at
+ * length is the worst possible thing to be unable to interrupt.
+ */
+export const HELP_TEXT =
+  'I can add or remove items by name, read the total, undo the last add, or take you to checkout. ' +
+  'Say it, or use the keys on screen.';
+
 /** Whether the camera is up and the clerk is working. */
 export type ClerkPhase = 'off' | 'starting' | 'ready' | 'blocked';
 
@@ -1329,7 +1355,13 @@ export class ClerkFacade {
     this.publish(EventType.CLERK_ITEM_REJECTED, { reason: 'operator-rejected' });
   }
 
-  /** Reverse the last add. Exactly one decrement, matching exactly one add. */
+  /**
+   * Reverse the last add. Exactly one decrement, matching exactly one add.
+   *
+   * Abort seam: `abortAgentTurn()` becomes this method's first statement once the
+   * agent tier exists, as it does in `dismiss()` and in `handlePhrase`'s `checkout`
+   * case — the three parser-answered verbs that mean "the cashier moved on".
+   */
   undoLast(): void {
     const pending = this._pendingAdd();
     if (!pending) {
@@ -1378,6 +1410,50 @@ export class ClerkFacade {
     }
     const total = this.pos.total().toFixed(2);
     this.say(`${items} ${items === 1 ? 'item' : 'items'}, ${total} dollars.`);
+  }
+
+  /**
+   * Say the last thing again.
+   *
+   * Deliberately not routed through `say()`: the caption is the thing being
+   * repeated, so rewriting it with its own contents would make a repeat look like
+   * a new answer on the screen reading of the session. The voice service keeps its
+   * own mute gate, so a repeat while muted is dropped there rather than here — the
+   * caption channel is the one that never goes quiet.
+   *
+   * With nothing said yet it answers anyway, following `undoLast`'s "Nothing to
+   * undo": a control that does nothing is indistinguishable from a broken one.
+   */
+  repeatLast(): void {
+    const spoken = this._caption();
+    if (spoken.length === 0) {
+      this.say('Nothing to repeat yet.');
+      return;
+    }
+    this.voice.speak(spoken);
+  }
+
+  /**
+   * Never mind. Acknowledge it and settle, and change nothing else.
+   *
+   * Touches neither the cart, the undo window, the candidates nor an in-flight
+   * look. This means "the cashier moved on", not "put that back" — `undoLast` and
+   * `reject` are the ones that take something back, and both are one word away. In
+   * particular a pending add keeps the rest of its window: guessing that "never
+   * mind" meant the last add would be the expensive reading of the cheap word.
+   *
+   * Abort seam: `abortAgentTurn()` becomes this method's first statement once the
+   * agent tier exists, alongside the same insertion in `undoLast()` and in
+   * `handlePhrase`'s `checkout` case.
+   */
+  dismiss(): void {
+    this.say('Okay.');
+    this.setMood(ClerkMood.NEUTRAL);
+  }
+
+  /** Name the small set of things she can do, from a constant. */
+  speakHelp(): void {
+    this.say(HELP_TEXT);
   }
 
   // ─── Voice ────────────────────────────────────────────────────────────────
@@ -1443,7 +1519,18 @@ export class ClerkFacade {
         }
         return 'handled';
       case 'checkout':
+        // Abort seam: story 4 aborts any in-flight agent turn here, since this is
+        // one of the three parser-answered verbs that mean "the cashier moved on".
         this.requestCheckout();
+        return 'handled';
+      case 'repeat':
+        this.repeatLast();
+        return 'handled';
+      case 'dismiss':
+        this.dismiss();
+        return 'handled';
+      case 'help':
+        this.speakHelp();
         return 'handled';
       default:
         return 'ignored';

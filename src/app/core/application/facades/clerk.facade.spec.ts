@@ -3,6 +3,8 @@ import { WritableSignal, computed, signal } from '@angular/core';
 import {
   AUTO_ADD_CONFIDENCE,
   ClerkFacade,
+  HELP_TEXT,
+  MAX_SPEECH_WORDS,
   MOOD_HOLD_MS,
   SpokenAddOutcome,
   SpokenRemoveOutcome,
@@ -650,6 +652,146 @@ describe('ClerkFacade', () => {
       expect(clerk.caption()).toBe(caption);
       expect(tryAddToCart).not.toHaveBeenCalled();
     });
+  });
+
+  describe('the free local verbs', () => {
+    /** The model tier, standing in for anything that would cost a round trip. */
+    let fetchSpy: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      fetchSpy = vi.fn();
+      vi.spyOn(globalThis, 'fetch').mockImplementation(fetchSpy as unknown as typeof fetch);
+      // The greeting has already been said by the time these run; every assertion
+      // below is about what the verb itself did.
+      identify.mockClear();
+      tryAddToCart.mockClear();
+      logRecord.mockClear();
+      publish.mockClear();
+      speak.mockClear();
+      spokenAloud.length = 0;
+    });
+
+    it('says the last thing again without rewriting it', () => {
+      onFinalPhrase('how much is it');
+      expect(clerk.caption()).toBe('2 items, 7.50 dollars.');
+      speak.mockClear();
+      spokenAloud.length = 0;
+
+      onFinalPhrase('say that again');
+
+      expect(spokenAloud).toEqual(['2 items, 7.50 dollars.']);
+      // A repeat reads the caption out; it is not a new answer, so it must not
+      // become one on the screen reading of the session.
+      expect(clerk.caption()).toBe('2 items, 7.50 dollars.');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('answers rather than doing nothing when she has not said anything yet', () => {
+      // A facade that has not started has an empty caption, which is the only way
+      // that fork is reachable — `say` never blanks it afterwards. Silence here
+      // would be indistinguishable from a dead button, which is the whole reason
+      // `undoLast` answers "Nothing to undo" instead of returning quietly.
+      const fresh = TestBed.runInInjectionContext(() => new ClerkFacade());
+      expect(fresh.caption()).toBe('');
+
+      fresh.repeatLast();
+
+      expect(fresh.caption()).toBe('Nothing to repeat yet.');
+      expect(spokenAloud).toEqual(['Nothing to repeat yet.']);
+    });
+
+    it('still hands a repeat to the voice while muted, and lets the gate drop it', () => {
+      clerk.setMuted(true);
+      const caption = clerk.caption();
+      speak.mockClear();
+      spokenAloud.length = 0;
+
+      onFinalPhrase('say that again');
+
+      // The facade does not second-guess the mute: the service owns that gate, so
+      // there is exactly one place that decides whether a line is heard.
+      expect(speak).toHaveBeenCalledTimes(1);
+      expect(speak).toHaveBeenCalledWith(caption);
+      expect(spokenAloud).toEqual([]);
+      expect(clerk.muted()).toBe(true);
+      expect(clerk.caption()).toBe(caption);
+    });
+
+    it('names what she can do from the constant, not from prose', () => {
+      onFinalPhrase('what can you do');
+
+      expect(speak).toHaveBeenCalledWith(HELP_TEXT);
+      expect(clerk.caption()).toBe(HELP_TEXT);
+      expect(tryAddToCart).not.toHaveBeenCalled();
+      expect(identify).not.toHaveBeenCalled();
+    });
+
+    it('keeps the help answer inside the spoken budget and naming every verb', () => {
+      // Asserted against the exported ceiling rather than a literal, so stories
+      // that also speak have one number to obey instead of a sentence about one.
+      expect(HELP_TEXT.trim().split(/\s+/).length).toBeLessThanOrEqual(MAX_SPEECH_WORDS);
+      expect(HELP_TEXT).toMatch(/add/i);
+      expect(HELP_TEXT).toMatch(/remove/i);
+      expect(HELP_TEXT).toMatch(/total/i);
+      expect(HELP_TEXT).toMatch(/undo/i);
+      expect(HELP_TEXT).toMatch(/checkout/i);
+    });
+
+    it('acknowledges "never mind" without touching the sale', async () => {
+      clerk.scanNow();
+      await vi.waitFor(() => expect(clerk.pendingAdd()).not.toBeNull());
+      const pending = clerk.pendingAdd();
+      const msLeft = clerk.undoMsLeft();
+      const items = cartItems();
+      tryAddToCart.mockClear();
+      decreaseQuantity.mockClear();
+      speak.mockClear();
+      spokenAloud.length = 0;
+
+      onFinalPhrase('never mind');
+
+      expect(spokenAloud).toEqual(['Okay.']);
+      expect(clerk.mood()).toBe(ClerkMood.NEUTRAL);
+      // "The cashier moved on", not "put that back": the add keeps the rest of its
+      // window, and taking it off is still one word away.
+      expect(clerk.pendingAdd()).toBe(pending);
+      expect(clerk.undoMsLeft()).toBe(msLeft);
+      expect(cartItems()).toBe(items);
+      expect(tryAddToCart).not.toHaveBeenCalled();
+      expect(decreaseQuantity).not.toHaveBeenCalled();
+    });
+
+    it('routes every verb through exactly one named method, whatever the input', () => {
+      // This is what story 4's one-line abort insertion depends on: one body per
+      // verb, and a key or a button that calls it rather than repeating it.
+      const repeatLast = vi.spyOn(clerk, 'repeatLast');
+      const dismiss = vi.spyOn(clerk, 'dismiss');
+      const speakHelp = vi.spyOn(clerk, 'speakHelp');
+
+      onFinalPhrase('say that again');
+      onFinalPhrase('never mind');
+      onFinalPhrase('what can you do');
+
+      expect(repeatLast).toHaveBeenCalledTimes(1);
+      expect(dismiss).toHaveBeenCalledTimes(1);
+      expect(speakHelp).toHaveBeenCalledTimes(1);
+      expect(spokenAloud).toHaveLength(3);
+    });
+
+    it.each(['say that again', 'never mind', 'what can you do'])(
+      'answers "%s" without the recognizer, the cart, the log or the network',
+      (phrase) => {
+        onFinalPhrase(phrase);
+
+        expect(identify).not.toHaveBeenCalled();
+        expect(tryAddToCart).not.toHaveBeenCalled();
+        expect(logRecord).not.toHaveBeenCalled();
+        expect(fetchSpy).not.toHaveBeenCalled();
+        // Nothing was recognized and nothing was sold, so there is nothing for the
+        // recognition log or the bus to measure.
+        expect(publish).not.toHaveBeenCalled();
+      }
+    );
   });
 
   describe('look again', () => {
