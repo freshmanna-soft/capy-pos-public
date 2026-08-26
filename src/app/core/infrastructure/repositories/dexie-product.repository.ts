@@ -122,7 +122,7 @@ export class DexieProductRepository
       .filter((record) => {
         if (record.deletedAt) return false;
 
-        const name = record.name.toLowerCase();
+        const name = (record.name || '').toLowerCase();
         const sku = (record.sku || '').toLowerCase();
         const barcode = (record.barcode || '').toLowerCase();
 
