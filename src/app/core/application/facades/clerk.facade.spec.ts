@@ -1,6 +1,15 @@
 import { TestBed } from '@angular/core/testing';
 import { WritableSignal, computed, signal } from '@angular/core';
-import { AUTO_ADD_CONFIDENCE, ClerkFacade, MOOD_HOLD_MS, UNDO_WINDOW_MS } from './clerk.facade';
+import {
+  AUTO_ADD_CONFIDENCE,
+  ClerkFacade,
+  MOOD_HOLD_MS,
+  SpokenAddOutcome,
+  SpokenRemoveOutcome,
+  UNDO_WINDOW_MS,
+} from './clerk.facade';
+import { ChoiceActor } from '@core/application/services/candidate-ranking';
+import { MAX_SPOKEN_QUANTITY } from '@core/application/services/voice-intent.parser';
 import { PosFacade } from './pos.facade';
 import { VISION_RECOGNIZER } from '@core/application/ports/vision-recognizer.port';
 import { RecognitionResult } from '@core/application/dtos/recognition.dto';
@@ -68,6 +77,37 @@ function seen(value: string, width = 0.3): ScannedCode {
 
 function nothing(): RecognitionResult {
   return { candidates: [], utterance: "I can't tell what that is.", empty: true };
+}
+
+/**
+ * What a spoken name resolved to, as `resolveSpokenName` reports it.
+ *
+ * Restated here rather than exported from the facade: the shape is an internal
+ * detail of the resolver, and exporting it to satisfy a test would widen the very
+ * surface this story is narrowing.
+ */
+type Resolution =
+  | { kind: 'none' }
+  | { kind: 'one'; product: Product }
+  | { kind: 'ambiguous'; products: Product[] };
+
+/**
+ * The private seam a future tool table is a closure over.
+ *
+ * Reached by cast on purpose. These methods are private precisely so nothing
+ * outside the facade can reach them, and the `'agent'` actor has to be exercised
+ * without a public door being opened for it — an optional actor argument on
+ * `chooseCandidate` would reopen the hole from outside, which is what makes the
+ * cast the honest way to test this rather than a shortcut around a missing API.
+ */
+interface ClerkSeam {
+  addByName(query: string[], quantity: number, confirmedBy?: ChoiceActor): SpokenAddOutcome;
+  removeByName(query: string[], quantity: number): SpokenRemoveOutcome;
+  resolveSpokenName(query: string[]): Resolution;
+}
+
+function seam(facade: ClerkFacade): ClerkSeam {
+  return facade as unknown as ClerkSeam;
 }
 
 describe('ClerkFacade', () => {
@@ -2415,6 +2455,367 @@ describe('ClerkFacade', () => {
       clerk.scanNow();
       expect(captureFrame).not.toHaveBeenCalled();
       expect(clerk.caption()).toContain('camera is off');
+    });
+  });
+
+  describe('who confirmed the choice', () => {
+    /** Two model candidates on screen, so `candidateOrigin` is 'model'. */
+    async function offerTwo(): Promise<void> {
+      identify.mockResolvedValue(unsure());
+      clerk.scanNow();
+      await vi.waitFor(() => expect(clerk.awaitingChoice()).toBe(true));
+      logRecord.mockClear();
+      tryAddToCart.mockClear();
+    }
+
+    it('writes the recognizer ground-truth row when the cashier names a card', async () => {
+      await offerTwo();
+
+      // Card 1 is Oat Milk, card 2 is Sourdough: naming the second one is the most
+      // valuable row the log has, a known-wrong ranking with the truth attached.
+      const outcome = seam(clerk).addByName(['sourdough'], 1);
+
+      expect(logRecord).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tier: 'model',
+          outcome: 'corrected',
+          proposedProductId: 'p2',
+          actualProductId: 'p3',
+        })
+      );
+      expect(outcome).toEqual({ added: 1, wanted: 1, name: 'Sourdough' });
+      expect(tryAddToCart).toHaveBeenCalledTimes(1);
+      expect(clerk.pendingAdd()).toMatchObject({ productId: 'p3', quantity: 1 });
+    });
+
+    it('scores the confirm control as agreement with the ranking', async () => {
+      await offerTwo();
+
+      clerk.confirmTop();
+
+      expect(logRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ outcome: 'chosen', actualProductId: 'p2' })
+      );
+    });
+
+    it('writes no row at all when an agent confirmed the same match', async () => {
+      await offerTwo();
+
+      const outcome = seam(clerk).addByName(['sourdough'], 1, 'agent');
+
+      // Not a filtered row and not a differently-tagged row: none. A 'chosen' or
+      // 'corrected' row here would claim a human agreed with the camera, and would
+      // move the accuracy figure the recognizer is judged by on evidence nobody gave.
+      expect(logRecord).not.toHaveBeenCalled();
+      // The add row is suppressed with it, so a `tier: 'model'` row cannot be left
+      // behind by the very choice that was refused a row.
+      expect(logRecord.mock.calls).toEqual([]);
+      // The sale itself is untouched: this gate is about the audit trail, not about
+      // refusing to serve the customer.
+      expect(outcome).toEqual({ added: 1, wanted: 1, name: 'Sourdough' });
+      expect(tryAddToCart).toHaveBeenCalledTimes(1);
+      expect(clerk.pendingAdd()).toMatchObject({ productId: 'p3', quantity: 1 });
+    });
+
+    it('leaves no open log row for a later undo to amend', async () => {
+      await offerTwo();
+      logAmend.mockClear();
+
+      seam(clerk).addByName(['sourdough'], 1, 'agent');
+      clerk.undoLast();
+
+      // Without this the undo would amend whichever row happened to be open — a
+      // foreign row, belonging to a different add.
+      expect(logAmend).not.toHaveBeenCalled();
+    });
+
+    it('still writes nothing for a voice-proposed choice, exactly as before', async () => {
+      clerk.stop();
+      getActiveProducts.mockResolvedValue([product('m1', 'Oat Milk'), product('m2', 'Soy Milk')]);
+      await clerk.start();
+      onFinalPhrase('add a milk');
+      await vi.waitFor(() => expect(clerk.awaitingChoice()).toBe(true));
+      logRecord.mockClear();
+
+      clerk.chooseCandidate(2);
+
+      // The cards came from the cashier naming a thing, so there is no ranking to
+      // score — unchanged by this story, and asserted so it stays that way.
+      expect(logRecord).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('structural quantity bounds', () => {
+    it('adds one unit for a misheard count instead of draining the shelf', () => {
+      tryAddToCart.mockClear();
+
+      const outcome = seam(clerk).addByName(['sourdough'], NaN);
+
+      // The old guard was `added >= wanted`, permanently false against NaN, so this
+      // loop ran until stock refused — the whole shelf, from one utterance.
+      expect(tryAddToCart).toHaveBeenCalledTimes(1);
+      expect(outcome).toEqual({ added: 1, wanted: 1, name: 'Sourdough' });
+      expect(clerk.caption()).toBe('One sourdough, added.');
+    });
+
+    it('floors a fractional count to whole units', () => {
+      tryAddToCart.mockClear();
+      seam(clerk).addByName(['sourdough'], 2.7);
+      expect(tryAddToCart).toHaveBeenCalledTimes(2);
+    });
+
+    it('caps an oversized count at the spoken maximum, reversibly', () => {
+      tryAddToCart.mockClear();
+
+      seam(clerk).addByName(['sourdough'], 40);
+
+      expect(tryAddToCart).toHaveBeenCalledTimes(MAX_SPOKEN_QUANTITY);
+      // One undo window covering all five, so the whole add comes back in one action.
+      expect(clerk.pendingAdd()).toMatchObject({ quantity: MAX_SPOKEN_QUANTITY });
+    });
+
+    it('removes one unit for a misheard count instead of silently nothing', () => {
+      onFinalPhrase('add three sourdoughs');
+      decreaseQuantity.mockClear();
+
+      seam(clerk).removeByName(['sourdough'], NaN);
+
+      // `Math.min(NaN, inCart)` was NaN, so `removing >= inCart` was false and the
+      // `for` loop body never ran — a no-op that looked like not being heard.
+      expect(decreaseQuantity).toHaveBeenCalledTimes(1);
+      expect(getQuantity('p3')).toBe(2);
+    });
+
+    it('still reports a short count after the clamp', () => {
+      let calls = 0;
+      tryAddToCart.mockImplementation(() =>
+        ++calls <= 2 ? { added: true } : { added: false, reason: 'out-of-stock' }
+      );
+
+      const outcome = seam(clerk).addByName(['sourdough'], 40);
+
+      expect(outcome).toEqual({
+        added: 2,
+        wanted: MAX_SPOKEN_QUANTITY,
+        name: 'Sourdough',
+        reason: 'out-of-stock',
+      });
+      expect(clerk.caption()).toContain('Only 2');
+    });
+  });
+
+  describe('what the write path reports', () => {
+    it('reports the whole count on a full add', () => {
+      expect(seam(clerk).addByName(['sourdough'], 3)).toEqual({
+        added: 3,
+        wanted: 3,
+        name: 'Sourdough',
+      });
+    });
+
+    it('reports both numbers and the stock reason on a short add', () => {
+      let calls = 0;
+      tryAddToCart.mockImplementation(() =>
+        ++calls <= 2 ? { added: true } : { added: false, reason: 'max-stock-reached' }
+      );
+
+      // The case a boolean cannot express, and the one a caller most needs to be
+      // honest about: neither a success nor a failure.
+      expect(seam(clerk).addByName(['sourdough'], 5)).toEqual({
+        added: 2,
+        wanted: 5,
+        name: 'Sourdough',
+        reason: 'max-stock-reached',
+      });
+    });
+
+    it('reports zero and why rather than a bare false', () => {
+      tryAddToCart.mockReturnValue({ added: false, reason: 'out-of-stock' });
+
+      expect(seam(clerk).addByName(['sourdough'], 1)).toEqual({
+        added: 0,
+        wanted: 1,
+        name: 'Sourdough',
+        reason: 'out-of-stock',
+      });
+    });
+
+    it('shows the clamp in the outcome rather than hiding it inside', () => {
+      // Asked for 40, told 5 — so a caller can see it was clamped instead of
+      // believing it was fully served.
+      expect(seam(clerk).addByName(['sourdough'], 40)).toEqual({
+        added: MAX_SPOKEN_QUANTITY,
+        wanted: MAX_SPOKEN_QUANTITY,
+        name: 'Sourdough',
+      });
+    });
+
+    it('distinguishes a name it does not stock from one that fits several', async () => {
+      expect(seam(clerk).addByName(['pineapple'], 1)).toEqual({
+        added: 0,
+        wanted: 1,
+        name: '',
+        reason: 'unknown-name',
+      });
+
+      clerk.stop();
+      getActiveProducts.mockResolvedValue([product('m1', 'Oat Milk'), product('m2', 'Soy Milk')]);
+      await clerk.start();
+      tryAddToCart.mockClear();
+
+      expect(seam(clerk).addByName(['milk'], 1)).toEqual({
+        added: 0,
+        wanted: 1,
+        name: '',
+        reason: 'ambiguous',
+      });
+      // Nothing charged for, and the tied products are on screen as a choice.
+      expect(tryAddToCart).not.toHaveBeenCalled();
+      expect(clerk.candidateCards().map((card) => card.label)).toEqual(['Oat Milk', 'Soy Milk']);
+    });
+
+    it('reports an id that no longer matches a product', async () => {
+      identify.mockResolvedValue(unsure());
+      clerk.scanNow();
+      await vi.waitFor(() => expect(clerk.awaitingChoice()).toBe(true));
+      // The catalog is reloaded without the candidate's product, which is what a
+      // mid-session catalog change looks like from here.
+      clerk.stop();
+      getActiveProducts.mockResolvedValue([AVOCADO]);
+      await clerk.start();
+
+      expect(seam(clerk).addByName(['pineapple'], 1).reason).toBe('unknown-name');
+    });
+
+    it('mirrors the outcome on removal', () => {
+      onFinalPhrase('add three sourdoughs');
+
+      expect(seam(clerk).removeByName(['sourdough'], 2)).toEqual({
+        removed: 2,
+        wanted: 2,
+        name: 'Sourdough',
+      });
+    });
+
+    it('names the product when the cart holds none of it', () => {
+      onFinalPhrase('add a sourdough');
+      // In the cart list but at zero on hand — the arm that exists because
+      // `decreaseQuantity` throws on an absent line.
+      getQuantity.mockReturnValue(0);
+      decreaseQuantity.mockClear();
+      removeFromCart.mockClear();
+
+      expect(seam(clerk).removeByName(['sourdough'], 1)).toEqual({
+        removed: 0,
+        wanted: 1,
+        name: 'Sourdough',
+        reason: 'not-in-cart',
+      });
+      expect(decreaseQuantity).not.toHaveBeenCalled();
+      expect(removeFromCart).not.toHaveBeenCalled();
+    });
+
+    it('reports an empty cart as nothing to take off', () => {
+      expect(seam(clerk).removeByName(['sourdough'], 1)).toEqual({
+        removed: 0,
+        wanted: 1,
+        name: '',
+        reason: 'not-in-cart',
+      });
+    });
+
+    it('separates a removal it does not stock from one merely not rung up', () => {
+      onFinalPhrase('add a sourdough');
+
+      // Two different failures with two different fixes.
+      expect(seam(clerk).removeByName(['pineapple'], 1).reason).toBe('unknown-name');
+      expect(seam(clerk).removeByName(['avocado'], 1).reason).toBe('not-in-cart');
+    });
+
+    it('reports an ambiguous removal without touching the cart', () => {
+      onFinalPhrase('add an avocado');
+      onFinalPhrase('add an oat milk');
+      decreaseQuantity.mockClear();
+      removeFromCart.mockClear();
+
+      // Deliberately not the candidate cards: those add when pressed, which is the
+      // opposite of what was asked.
+      const outcome = seam(clerk).removeByName(['a'], 1);
+
+      expect(outcome.reason).toBe('ambiguous');
+      expect(decreaseQuantity).not.toHaveBeenCalled();
+      expect(removeFromCart).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the single resolver', () => {
+    it('answers a name nothing ranks as none', () => {
+      expect(seam(clerk).resolveSpokenName(['pineapple'])).toEqual({ kind: 'none' });
+    });
+
+    it('answers a decisive name with the product', () => {
+      const resolved = seam(clerk).resolveSpokenName(['sourdough']);
+      expect(resolved.kind).toBe('one');
+      expect(resolved.kind === 'one' && resolved.product.id).toBe('p3');
+    });
+
+    it('hands back the ambiguity set rather than a bare verdict', async () => {
+      clerk.stop();
+      getActiveProducts.mockResolvedValue([product('m1', 'Oat Milk'), product('m2', 'Soy Milk')]);
+      await clerk.start();
+
+      const resolved = seam(clerk).resolveSpokenName(['milk']);
+
+      // The tied products, in ranked order, so a caller renders them as alternatives
+      // without ranking the catalogue a second time.
+      expect(resolved.kind).toBe('ambiguous');
+      expect(
+        resolved.kind === 'ambiguous' && resolved.products.map((entry) => entry.name)
+      ).toEqual(['Oat Milk', 'Soy Milk']);
+    });
+
+    it('keeps the unknown-name behaviour byte for byte after the extraction', () => {
+      publish.mockClear();
+      tryAddToCart.mockClear();
+
+      onFinalPhrase('add oat cream');
+
+      expect(clerk.caption()).toBe('I don\'t have "oat cream" in the catalogue.');
+      expect(publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ reason: 'unknown-spoken-name' }),
+        })
+      );
+      expect(tryAddToCart).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the checkout gate', () => {
+    it('bumps the counter exactly once per request', () => {
+      const before = clerk.checkoutRequested();
+
+      clerk.requestCheckout();
+
+      expect(clerk.checkoutRequested()).toBe(before + 1);
+    });
+
+    it('is the only thing a spoken checkout does', () => {
+      const before = clerk.checkoutRequested();
+      onFinalPhrase('checkout please');
+      expect(clerk.checkoutRequested()).toBe(before + 1);
+    });
+
+    it('cannot be driven from outside the facade', () => {
+      // A compile-time assertion, not a runtime one: the `@ts-expect-error` below
+      // fails the build if `checkoutRequested` ever becomes writable again, which is
+      // the property under test. Never invoked — `.set` does not exist at runtime
+      // either, which is the point.
+      const forbidden = (): void => {
+        // @ts-expect-error checkoutRequested is a readonly Signal, by design
+        clerk.checkoutRequested.set(99);
+      };
+
+      expect(forbidden).toBeTypeOf('function');
     });
   });
 });

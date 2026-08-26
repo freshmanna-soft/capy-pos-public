@@ -68,3 +68,45 @@ export function rankCandidates(candidates: readonly VisionCandidate[]): VisionCa
 export function isCertain(candidates: readonly VisionCandidate[]): boolean {
   return (candidates[0]?.confidence ?? 0) >= AUTO_ADD_CONFIDENCE;
 }
+
+/**
+ * Who confirmed a choice between candidates.
+ *
+ * `'agent'` rather than `'assistant'` deliberately: `assistant` is already the
+ * Anthropic message role in the agentic-clerk DTOs, so `confirmedBy: 'assistant'`
+ * would read as "the model said this" at a glance rather than "the model picked
+ * this". Every other name in that tier is already `agent`.
+ */
+export type ChoiceActor = 'cashier' | 'agent';
+
+/**
+ * Whether a confirmed choice is worth a recognition-log row.
+ *
+ * A `'chosen'` / `'corrected'` row is a claim about two parties at once: a
+ * *recognizer* proposed a ranking, and a *human* agreed with it or corrected it.
+ * Those rows are the ground truth every accuracy figure for a tier is measured
+ * against, so a row written when either half is missing does not merely add noise
+ * — it silently moves the number the recognizer is judged by.
+ *
+ * Both halves therefore have to hold. `proposedBy === 'model'` covers the
+ * proposal: a spoken "add a coffee" put the cards up itself, so there is no
+ * ranking to score. `confirmedBy === 'cashier'` covers the confirmation: an agent
+ * picking a card is agreeing with a recognizer on the customer's behalf, and one
+ * turn later it is worse than that — the agent steers the cashier onto card 2, she
+ * says "the sparkling one", and the resulting `'corrected'` row measures agreement
+ * with the *agent* rather than with the recognizer.
+ *
+ * Suppressing that row is not optional and not a policy knob. A caller that wants
+ * the row anyway is asking to forge audit evidence, which is why this is a
+ * predicate over both axes rather than a flag either side can pass.
+ *
+ * Lives here for the reason `rankCandidates` already gives: the client owns these
+ * thresholds, and a rule kept here covers every tier that produces candidates
+ * rather than only the one it was written for.
+ */
+export function shouldScoreChoice(
+  proposedBy: 'model' | 'voice',
+  confirmedBy: ChoiceActor
+): boolean {
+  return proposedBy === 'model' && confirmedBy === 'cashier';
+}

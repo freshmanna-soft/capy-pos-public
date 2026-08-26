@@ -232,4 +232,69 @@ describe('CartService', () => {
       expect(cartService.getQuantity('non-existent')).toBe(0);
     });
   });
+
+  describe('revision', () => {
+    it('should start at zero on a fresh cart', () => {
+      expect(cartService.revision()).toBe(0);
+    });
+
+    it('should move on every mutation that changes the contents', () => {
+      // Asserted per-call against the value immediately before it, rather than as a
+      // final total, so a method that forgets to bump names itself.
+      const moved = (mutate: () => void): boolean => {
+        const before = cartService.revision();
+        mutate();
+        return cartService.revision() > before;
+      };
+
+      expect(moved(() => cartService.addProduct(product1))).toBe(true);
+      expect(moved(() => cartService.increaseQuantity('prod-1'))).toBe(true);
+      expect(moved(() => cartService.decreaseQuantity('prod-1'))).toBe(true);
+      expect(moved(() => cartService.updateQuantity('prod-1', 4))).toBe(true);
+      expect(moved(() => cartService.removeItem('prod-1'))).toBe(true);
+      expect(moved(() => cartService.addProduct(product2))).toBe(true);
+      expect(moved(() => cartService.clearCart())).toBe(true);
+    });
+
+    it('should not move when only the tax rate changes', () => {
+      const before = cartService.revision();
+      cartService.setTaxRate(0.2);
+      // The rate changes what the cart costs, not what is in it.
+      expect(cartService.revision()).toBe(before);
+    });
+
+    it('should keep rising across an add and its removal', () => {
+      const before = cartService.revision();
+      cartService.addProduct(product1);
+      cartService.removeItem('prod-1');
+
+      // Back to the same contents, and the cart very much moved — which is why this
+      // is a counter and not a hash of the items.
+      expect(cartService.items()).toEqual([]);
+      expect(cartService.revision()).toBeGreaterThan(before);
+    });
+
+    it('should move when a decrement empties the line through removeItem', () => {
+      // `decreaseQuantity` delegates to `removeItem` at a quantity of one, so this is
+      // the path where a double bump or a missing bump would show up.
+      cartService.addProduct(product1);
+      const before = cartService.revision();
+      cartService.decreaseQuantity('prod-1');
+      expect(cartService.items()).toEqual([]);
+      expect(cartService.revision()).toBe(before + 1);
+    });
+
+    it('should move exactly once when updateQuantity(0) removes the line', () => {
+      cartService.addProduct(product1);
+      const before = cartService.revision();
+      cartService.updateQuantity('prod-1', 0);
+      expect(cartService.revision()).toBe(before + 1);
+    });
+
+    it('should not move when a mutation throws', () => {
+      const before = cartService.revision();
+      expect(() => cartService.increaseQuantity('non-existent')).toThrow();
+      expect(cartService.revision()).toBe(before);
+    });
+  });
 });

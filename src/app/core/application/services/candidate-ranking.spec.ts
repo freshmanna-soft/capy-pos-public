@@ -1,10 +1,5 @@
 import { VisionCandidate } from '@core/application/dtos/recognition.dto';
-import {
-  AMBIGUITY_MARGIN,
-  AUTO_ADD_CONFIDENCE,
-  isCertain,
-  rankCandidates,
-} from './candidate-ranking';
+import { AMBIGUITY_MARGIN, AUTO_ADD_CONFIDENCE, isCertain, rankCandidates, shouldScoreChoice } from './candidate-ranking';
 
 function candidate(productId: string, confidence: number): VisionCandidate {
   return { productId, label: productId, confidence };
@@ -74,6 +69,26 @@ describe('rankCandidates', () => {
     const input = [candidate('a', 0.93), candidate('b', 0.91)];
     rankCandidates(input);
     expect(input[0]!.confidence).toBe(0.93);
+  });
+});
+
+describe('shouldScoreChoice', () => {
+  // The full truth table, because the value of the rule is that *both* halves
+  // have to hold and each single-axis test would pass with the other axis ignored.
+  it('scores a recognizer proposal a human confirmed', () => {
+    expect(shouldScoreChoice('model', 'cashier')).toBe(true);
+  });
+
+  it('refuses to score a recognizer proposal an agent confirmed', () => {
+    // Otherwise the row reads "a human agreed with the camera" when nobody did,
+    // and the recognizer's measured accuracy moves on evidence it never earned.
+    expect(shouldScoreChoice('model', 'agent')).toBe(false);
+  });
+
+  it('refuses to score a spoken proposal, whoever confirmed it', () => {
+    // Nothing recognized anything: the cards came from the cashier naming a thing.
+    expect(shouldScoreChoice('voice', 'cashier')).toBe(false);
+    expect(shouldScoreChoice('voice', 'agent')).toBe(false);
   });
 });
 
