@@ -1590,8 +1590,18 @@ export class ClerkFacade {
    * happened rather than answer-first, and recorded whatever the outcome: a phrase
    * that named no intent is precisely the one worth seeing, because silence from a
    * till and a phrase it never understood look identical from the counter.
+   *
+   * Any line still waiting is settled first. The ear is only paused while she is
+   * *speaking*, so a look on the wire leaves the mic live and the cashier talks over
+   * it — and `scanNow()` refuses while busy, so those phrases are answered by nothing
+   * at all. Only one line can be waiting on the single in-flight look, so overwriting
+   * the marker without settling stranded the previous line as pending for the rest of
+   * the session, one spinner per interjection. A spinner nothing will ever clear reads
+   * as a till that has hung, which is worse than attributing the answer to the later
+   * line.
    */
   private handlePhrase(phrase: string): ClerkIntentOutcome {
+    this.settlePending();
     this.pendingLine = this.recordExchange('cashier', phrase, true);
     const outcome = this.routePhrase(phrase);
     // `say()` settles the line as it answers, so anything still pending here got no

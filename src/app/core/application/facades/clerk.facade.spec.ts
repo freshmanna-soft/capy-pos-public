@@ -3051,6 +3051,40 @@ describe('ClerkFacade', () => {
       expect(clerk.exchanges().some((line) => line.pending)).toBe(false);
     });
 
+    it('leaves nothing spinning when a second phrase interrupts a look in flight', async () => {
+      identify.mockReturnValue(new Promise<RecognitionResult>(() => undefined));
+
+      onFinalPhrase('have a look');
+      await vi.waitFor(() => expect(clerk.busy()).toBe(true));
+
+      // The ear is only paused while she is *speaking*, so a look in flight does not
+      // stop the mic: the cashier can and does talk over it. Whoever the eventual
+      // answer belongs to, the earlier line must stop claiming one is still coming —
+      // a spinner nothing will ever clear reads as a till that has hung.
+      onFinalPhrase('what is the total');
+
+      expect(clerk.exchanges().filter((line) => line.pending).length).toBeLessThanOrEqual(1);
+      expect(clerk.exchanges().find((line) => line.text === 'have a look')?.pending).toBe(
+        false
+      );
+    });
+
+    it('does not accumulate spinners when the cashier talks over a stalled look', async () => {
+      identify.mockReturnValue(new Promise<RecognitionResult>(() => undefined));
+
+      onFinalPhrase('have a look');
+      await vi.waitFor(() => expect(clerk.busy()).toBe(true));
+
+      // `scanNow()` refuses while busy, so these are the phrases that get recorded and
+      // then answered by nothing at all — the case that used to strand one line per
+      // phrase for the rest of the session.
+      onFinalPhrase('have a look');
+      onFinalPhrase('have a look');
+      onFinalPhrase('have a look');
+
+      expect(clerk.exchanges().filter((line) => line.pending).length).toBeLessThanOrEqual(1);
+    });
+
     it('never grows past what fits on screen, and keeps the newest when it trims', () => {
       for (let i = 0; i < MAX_EXCHANGES + 4; i += 1) {
         onFinalPhrase(`phrase ${i}`);
