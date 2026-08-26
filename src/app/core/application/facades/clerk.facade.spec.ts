@@ -2732,15 +2732,23 @@ describe('ClerkFacade', () => {
       expect(seam(clerk).removeByName(['avocado'], 1).reason).toBe('not-in-cart');
     });
 
-    it('reports an ambiguous removal without touching the cart', () => {
-      onFinalPhrase('add an avocado');
+    it('reports an ambiguous removal without touching the cart', async () => {
+      // A cart of two milks, because ambiguity is a property of the *cart* here and
+      // the default catalogue cannot produce one: matching is on whole words, so
+      // Avocado, Oat Milk and Sourdough share none. 'milk' appears in both of these
+      // names, so it scores each of them once and covers half of each — equal score
+      // and equal coverage, which is the tie this arm exists for.
+      clerk.stop();
+      getActiveProducts.mockResolvedValue([product('m1', 'Oat Milk'), product('m2', 'Soy Milk')]);
+      await clerk.start();
       onFinalPhrase('add an oat milk');
+      onFinalPhrase('add a soy milk');
       decreaseQuantity.mockClear();
       removeFromCart.mockClear();
 
       // Deliberately not the candidate cards: those add when pressed, which is the
       // opposite of what was asked.
-      const outcome = seam(clerk).removeByName(['a'], 1);
+      const outcome = seam(clerk).removeByName(['milk'], 1);
 
       expect(outcome.reason).toBe('ambiguous');
       expect(decreaseQuantity).not.toHaveBeenCalled();
@@ -2769,24 +2777,40 @@ describe('ClerkFacade', () => {
       // The tied products, in ranked order, so a caller renders them as alternatives
       // without ranking the catalogue a second time.
       expect(resolved.kind).toBe('ambiguous');
-      expect(
-        resolved.kind === 'ambiguous' && resolved.products.map((entry) => entry.name)
-      ).toEqual(['Oat Milk', 'Soy Milk']);
+      expect(resolved.kind === 'ambiguous' && resolved.products.map((entry) => entry.name)).toEqual(
+        ['Oat Milk', 'Soy Milk']
+      );
     });
 
     it('keeps the unknown-name behaviour byte for byte after the extraction', () => {
       publish.mockClear();
       tryAddToCart.mockClear();
 
-      onFinalPhrase('add oat cream');
+      // A name nothing in the catalogue ranks at all. Not a near-miss like "oat
+      // cream": 'oat' is a word unique to Oat Milk, so a near-miss resolves to it
+      // and would exercise the add arm rather than this one.
+      onFinalPhrase('add a pineapple');
 
-      expect(clerk.caption()).toBe('I don\'t have "oat cream" in the catalogue.');
+      expect(clerk.caption()).toBe('I don\'t have "pineapple" in the catalogue.');
       expect(publish).toHaveBeenCalledWith(
         expect.objectContaining({
           payload: expect.objectContaining({ reason: 'unknown-spoken-name' }),
         })
       );
       expect(tryAddToCart).not.toHaveBeenCalled();
+    });
+
+    it('resolves a name carrying one distinctive word rather than rejecting it', () => {
+      tryAddToCart.mockClear();
+
+      onFinalPhrase('add oat cream');
+
+      // 'oat' belongs to exactly one product, so it identifies Oat Milk on its own
+      // and the unsaid half of the name does not veto it. Pinned because it reads
+      // like a miss and is not one: scoring is per distinctive word, not per whole
+      // label, which is the same property that tells oat milk from soy milk.
+      expect(clerk.caption()).toBe('One oat milk, added.');
+      expect(tryAddToCart).toHaveBeenCalledTimes(1);
     });
   });
 
