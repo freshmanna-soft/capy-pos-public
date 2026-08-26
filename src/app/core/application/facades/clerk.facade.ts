@@ -18,6 +18,7 @@ import {
   parseClerkIntent,
   rankLabelsBySpokenWords,
 } from '@core/application/services/voice-intent.parser';
+import { CLERK_AGENT } from '@core/application/ports/clerk-agent.port';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import {
   BarcodeGate,
@@ -31,6 +32,10 @@ import { FrameGate, GateVerdict } from '@core/infrastructure/media/frame-gate';
 import { LookScheduler } from '@core/infrastructure/media/look-scheduler';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
+import {
+  readAgentPreference,
+  writeAgentPreference,
+} from '@core/infrastructure/settings/clerk-agent-preference';
 import { SpeechRecognitionService } from '@core/infrastructure/voice/speech-recognition.service';
 import { SpeechSynthesisService } from '@core/infrastructure/voice/speech-synthesis.service';
 import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
@@ -126,6 +131,39 @@ export const MAX_SPEECH_WORDS = 40;
 export const HELP_TEXT =
   'I can add or remove items by name, read the total, undo the last add, or take you to checkout. ' +
   'Say it, or use the keys on screen.';
+
+/**
+ * One line of the exchange between the cashier and the clerk.
+ *
+ * A separate channel from `caption`, not a replacement for it. `caption` is a
+ * single slot written by `say()` and overwritten by the next one: exactly the
+ * shape a one-shot recognition confirmation wants, and exactly the wrong shape
+ * for a multi-turn exchange, where the cashier has to be able to see what they
+ * asked next to what they were told. `caption` stays the source of the sr-only
+ * live region so the announced channel does not double up.
+ *
+ * `author` is `ChoiceActor` rather than a union re-declared here, so there is one
+ * vocabulary for the non-human side of this facade — the same word that lands in
+ * a recognition-log row lands in the DOM.
+ */
+export interface ClerkExchange {
+  id: number;
+  author: ChoiceActor;
+  text: string;
+  /** True while she is working on an answer that has not been spoken yet. */
+  pending: boolean;
+}
+
+/**
+ * How many lines of the exchange stay on screen.
+ *
+ * A display bound, and deliberately independent of the runner's turn-memory
+ * depth: the log is for the person, the memory is for the model. Six is about as
+ * much as fits over a camera preview without the controls fighting it, and the
+ * one line that matters most is still rendered as the caption bubble it always
+ * was.
+ */
+export const MAX_EXCHANGES = 6;
 
 /** Whether the camera is up and the clerk is working. */
 export type ClerkPhase = 'off' | 'starting' | 'ready' | 'blocked';
