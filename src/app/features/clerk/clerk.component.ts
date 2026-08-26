@@ -165,6 +165,9 @@ export class ClerkComponent implements AfterViewInit, OnDestroy {
       case 'a':
         this.clerk.toggleAi();
         break;
+      case 'g':
+        this.clerk.toggleAgent();
+        break;
       case 'r':
         this.clerk.repeatLast();
         break;
