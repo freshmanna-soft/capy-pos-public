@@ -123,7 +123,7 @@ export class DexieProductRepository
         if (record.deletedAt) return false;
 
         const name = record.name.toLowerCase();
-        const sku = record.sku.toLowerCase();
+        const sku = (record.sku || '').toLowerCase();
         const barcode = (record.barcode || '').toLowerCase();
 
         return (
