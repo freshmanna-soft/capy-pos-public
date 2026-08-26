@@ -96,7 +96,7 @@ export interface AgentBudget {
 }
 
 /** A tool result the model can recover from. Never an exception — nothing here throws. */
-type ToolError = 'unknown_tool' | 'duplicate_call' | 'one_cart_change_per_turn';
+type ToolError = 'unknown_tool' | 'malformed_input' | 'duplicate_call' | 'one_cart_change_per_turn';
 
 /** What one round of tool calls produced, and whether the turn may continue. */
 interface ToolRound {
@@ -135,10 +135,10 @@ interface TurnState {
  * `--max-warnings 0`.
  *
  * **`run()` never rejects.** Every failure — a hop that throws, an `AbortError`
- * from an adapter, a tool name that does not exist, a hop cap reached, a deadline
- * crossed — is an `AgentOutcome`. The caller is a speech callback: a rejection
- * there is swallowed by the browser and looks identical to a till that ignored the
- * cashier.
+ * from an adapter, a tool name that does not exist, arguments that are not an
+ * argument object, a hop cap reached, a deadline crossed — is an `AgentOutcome`.
+ * The caller is a speech callback: a rejection there is swallowed by the browser
+ * and looks identical to a till that ignored the cashier.
  */
 export class AgentTurnRunner {
   constructor(
@@ -362,16 +362,26 @@ export class AgentTurnRunner {
       return { result: errorResult(call.id, 'unknown_tool'), declined: false };
     }
 
-    const key = dedupKey(call);
+    const input = argumentsOf(call);
+    if (input === null) {
+      // The same refusal, for the same reason, as the name above: the other half of
+      // the call is model-controlled too, and guarding one and not the other only
+      // moves where the `TypeError` comes from.
+      return { result: errorResult(call.id, 'malformed_input'), declined: false };
+    }
+
+    // Everything below reads the narrowed `input` rather than `call.input`, so the
+    // guard is the single place that decides what an argument object is.
+    const key = dedupKey(call.name, input);
     if (state.seen.has(key)) {
       return { result: errorResult(call.id, 'duplicate_call'), declined: false };
     }
     state.seen.add(key);
 
     if (!isMutating(call.name)) {
-      return { result: { id: call.id, output: executor(call.input).output }, declined: false };
+      return { result: { id: call.id, output: executor(input).output }, declined: false };
     }
-    return this.mutate(call, executor, state);
+    return this.mutate(call, input, executor, state);
   }
 
   /**
@@ -410,6 +420,7 @@ export class AgentTurnRunner {
    */
   private mutate(
     call: AgentToolCall,
+    input: Readonly<Record<string, unknown>>,
     executor: ClerkAgentTool,
     state: TurnState
   ): { result?: AgentToolResult; declined: boolean } {
@@ -438,7 +449,7 @@ export class AgentTurnRunner {
 
     // Clamped here, before the facade sees it, and floored at 1: the same rule the
     // spoken path applies, applied to a number that came off a model.
-    const run = executor({ ...call.input, quantity: clampSpokenQuantity(quantityOf(call.input)) });
+    const run = executor({ ...input, quantity: clampSpokenQuantity(quantityOf(input)) });
     if (run.changedCart) {
       state.cartChanges += 1;
       state.expectedRevision = this.budget.cartRevision();
@@ -476,23 +487,58 @@ function isMutating(name: string): boolean {
 }
 
 /**
+ * A call's arguments, or nothing when what arrived is not an argument object.
+ *
+ * `call.input` is model-controlled in precisely the way `call.name` is, and typed
+ * `Record<string, unknown>` by a DTO that has no runtime to enforce it: a real
+ * adapter reading a `tool_use` block whose arguments did not parse the way the
+ * schema promised can hand back `null`, `undefined`, a bare string or an array. The
+ * deterministic mock never does, which is why this is a review finding rather than a
+ * failing suite.
+ *
+ * Everything downstream indexes the blob — `Object.keys` in `dedupKey`,
+ * `input['quantity']` in `quantityOf`, `input['name']` inside the executors — and
+ * the first of those throws a `TypeError` synchronously inside `dispatch`, out
+ * through `runTools` and `loop` into the awaited call in `run()`. That is a rejected
+ * promise from a method whose contract is that it never rejects, in a speech
+ * callback that swallows rejections whole. So this fails closed to a tool result,
+ * exactly as `executorFor` does for a name the table does not own.
+ *
+ * An array is refused rather than tolerated even though `Object.keys([])` would not
+ * throw: it carries no argument names, so every executor would read `undefined` off
+ * it and answer the cashier confidently about nothing.
+ */
+function argumentsOf(call: AgentToolCall): Readonly<Record<string, unknown>> | null {
+  const input: unknown = call.input;
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return null;
+  }
+  return input as Readonly<Record<string, unknown>>;
+}
+
+/**
  * The identity of a call within one turn: name plus canonicalized input.
  *
  * Keys sorted and string values folded, because a model that asks the same question
  * twice rarely spells it identically the second time — and the point of the dedup
  * is that the second ask costs nothing, not that it costs less.
+ *
+ * Takes the two halves rather than the call, so it cannot be reached with a blob
+ * `argumentsOf` has not already vouched for: `Object.keys` is the property read that
+ * made this the crash site.
  */
-function dedupKey(call: AgentToolCall): string {
-  const canonical = Object.keys(call.input)
+function dedupKey(name: string, input: Readonly<Record<string, unknown>>): string {
+  const canonical = Object.keys(input)
     .sort()
     .map((key) => {
-      const value = call.input[key];
+      const value = input[key];
       return `${key}=${typeof value === 'string' ? value.trim().toLowerCase() : JSON.stringify(value)}`;
     })
     .join('&');
-  return `${call.name}(${canonical})`;
+  return `${name}(${canonical})`;
 }
 
+/** The `quantity` argument, off an input `argumentsOf` has already vouched for. */
 function quantityOf(input: Readonly<Record<string, unknown>>): number {
   const raw = input['quantity'];
   return typeof raw === 'number' ? raw : 1;

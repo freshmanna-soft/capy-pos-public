@@ -122,6 +122,18 @@ function call(
   return { id, name, input };
 }
 
+/**
+ * A call whose arguments are whatever an adapter handed back, `Record` or not.
+ *
+ * The cast is the point: `AgentToolCall.input` is typed as an object by a DTO with
+ * no runtime behind it, so the only way to spell the shapes a real model adapter
+ * can produce — a `tool_use` block whose arguments did not parse the way the schema
+ * promised — is to lie to the compiler exactly the way the wire does.
+ */
+function malformedCall(name: string, input: unknown, id = 'call-malformed'): AgentToolCall {
+  return { id, name, input: input as Readonly<Record<string, unknown>> };
+}
+
 function toolStep(...calls: AgentToolCall[]): AgentStep {
   return { kind: 'tools', assistant: [{ type: 'tool_use' }], calls };
 }
@@ -539,6 +551,103 @@ describe('AgentTurnRunner', () => {
 
       expect(lookUp).toHaveBeenCalledTimes(1);
       expect(resultsOfHop(agent, 0)[1]!.output).toEqual({ error: 'duplicate_call' });
+    });
+  });
+
+  describe('an argument blob that is not an argument object', () => {
+    // `call.input` is model-controlled in exactly the way `call.name` is, and the
+    // deterministic mock every other test uses always sends an object — so the
+    // shapes a real adapter can hand back for arguments that did not parse the way
+    // the schema promised are only reachable from here.
+    const malformed: [string, unknown][] = [
+      ['null', null],
+      ['undefined', undefined],
+      ['a string', 'avocado'],
+      ['an array', ['avocado']],
+    ];
+
+    it.each(malformed)('refuses a read call whose input is %s', async (_label, input) => {
+      const readCart = vi.fn<ClerkAgentTool>(() => ({ output: { totalItems: 0 } }));
+      const agent = scripted([toolStep(malformedCall('read_cart', input)), answerStep()]);
+      const { runner, request } = runnerOf(agent, { tools: toolsOf({ read_cart: readCart }) });
+
+      const outcome = await runner.run('what is on the sale', request);
+
+      expect(resultsOfHop(agent, 0)).toEqual<AgentToolResult[]>([
+        { id: 'call-malformed', output: { error: 'malformed_input' }, isError: true },
+      ]);
+      // Fail closed: the executor indexes the same blob the guards do.
+      expect(readCart).not.toHaveBeenCalled();
+      expect(outcome.kind).toBe('answered');
+    });
+
+    it.each(malformed)('refuses a mutating call whose input is %s', async (_label, input) => {
+      // The mutating arm reads the blob twice more than the read arm does —
+      // `quantityOf` for the clamp and a spread onto the executor's argument — so
+      // it is refused before either, and the cart is never touched.
+      const state = till();
+      const add = vi.fn<ClerkAgentTool>(() => ({ output: { added: 1 }, changedCart: true }));
+      const agent = scripted([toolStep(malformedCall('add_by_name', input)), answerStep()]);
+      const { runner, request } = runnerOf(agent, { state, tools: toolsOf({ add_by_name: add }) });
+
+      const outcome = await runner.run('add an avocado', request);
+
+      expect(add).not.toHaveBeenCalled();
+      expect(resultsOfHop(agent, 0)[0]!.output).toEqual({ error: 'malformed_input' });
+      expect(outcome.mutated).toBe(false);
+      expect(outcome.productIds).toEqual([]);
+      expect(state.revision).toBe(1);
+    });
+
+    it.each(malformed)(
+      'still resolves rather than rejecting when input is %s',
+      async (_label, input) => {
+        // The failure this replaces was not a wrong answer but a `TypeError` thrown
+        // synchronously inside `dispatch`, out through `runTools` and `loop` into the
+        // awaited call in `run()` — a rejected promise the speech callback swallows
+        // whole, which reads to the cashier as a till that ignored her.
+        const agent = scripted([toolStep(malformedCall('look_up_product', input)), answerStep()]);
+        const { runner, request } = runnerOf(agent);
+
+        await expect(runner.run('have you got avocados', request)).resolves.toMatchObject({
+          kind: 'answered',
+        });
+      }
+    );
+
+    it('counts a refused call by name like any other refusal', async () => {
+      const agent = scripted([toolStep(malformedCall('read_cart', null)), answerStep()]);
+      const { runner, request } = runnerOf(agent);
+
+      const outcome = await runner.run('what is on the sale', request);
+
+      // A refusal nobody counted is a refusal nobody can tune.
+      expect(outcome.tools).toEqual(['read_cart']);
+    });
+
+    it('lets a real call in the same round through beside a refused one', async () => {
+      const state = till();
+      const agent = scripted([
+        toolStep(
+          malformedCall('read_cart', 'not an object'),
+          call('add_by_name', { name: 'avocado' })
+        ),
+        answerStep('One avocado, added.'),
+      ]);
+      const tools = toolsOf({
+        add_by_name: () => {
+          state.revision += 1;
+          state.pending = { productId: 'p1' };
+          return { output: { added: 1, name: 'Avocado' }, changedCart: true };
+        },
+      });
+      const { runner, request } = runnerOf(agent, { state, tools });
+
+      const outcome = await runner.run('add an avocado', request);
+
+      expect(outcome.mutated).toBe(true);
+      expect(outcome.productIds).toEqual(['p1']);
+      expect(outcome.tools).toEqual(['read_cart', 'add_by_name']);
     });
   });
 
