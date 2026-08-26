@@ -22,10 +22,26 @@ export class CartService {
   // State signals
   private readonly _items = signal<CartItem[]>([]);
   private readonly _taxRate = signal<number>(0.085); // 8.5% default tax rate
+  private readonly _revision = signal(0);
 
   // Public read-only signals
   readonly items = this._items.asReadonly();
   readonly taxRate = this._taxRate.asReadonly();
+
+  /**
+   * Bumped once per change to the cart's *contents*. Monotonic, never reset.
+   *
+   * Consumers answer "did the cart move under me?" by remembering a value and
+   * comparing it against the current one later, so the counter only has to go up
+   * — a value that could go down or repeat makes that question unanswerable, and
+   * a hash of the contents answers a different question (add-then-remove returns
+   * to the same contents, and the cart very much did move).
+   *
+   * Lives on the service rather than on `PosFacade` because `/pos` components
+   * inject `CartService` directly: a facade-only counter would be blind to
+   * exactly the foreign mutations this exists to expose.
+   */
+  readonly revision = this._revision.asReadonly();
 
   // Computed values
   readonly totalItems = computed(() => {
@@ -75,10 +91,10 @@ export class CartService {
         ...currentItems.slice(existingItemIndex + 1),
         updatedItem,
       ];
-      this._items.set(updatedItems);
+      this.commit(updatedItems);
     } else {
       // New product, add to cart
-      this._items.set([...currentItems, { product, quantity: 1 }]);
+      this.commit([...currentItems, { product, quantity: 1 }]);
     }
   }
 
@@ -101,7 +117,7 @@ export class CartService {
       ...updatedItems[itemIndex],
       quantity: updatedItems[itemIndex].quantity + 1,
     };
-    this._items.set(updatedItems);
+    this.commit(updatedItems);
   }
 
   /**
@@ -131,7 +147,7 @@ export class CartService {
         ...updatedItems[itemIndex],
         quantity: currentQuantity - 1,
       };
-      this._items.set(updatedItems);
+      this.commit(updatedItems);
     }
   }
 
@@ -165,7 +181,7 @@ export class CartService {
       ...updatedItems[itemIndex],
       quantity,
     };
-    this._items.set(updatedItems);
+    this.commit(updatedItems);
   }
 
   /**
@@ -176,14 +192,30 @@ export class CartService {
   removeItem(productId: string): void {
     const currentItems = this._items();
     const filteredItems = currentItems.filter((item) => item.product.id !== productId);
-    this._items.set(filteredItems);
+    this.commit(filteredItems);
   }
 
   /**
    * Removes all items from the cart.
    */
   clearCart(): void {
-    this._items.set([]);
+    this.commit([]);
+  }
+
+  /**
+   * The one way cart contents change, so the revision cannot be forgotten.
+   *
+   * Every mutation goes through here rather than setting `_items` itself: a
+   * future method that forgets to bump the counter would not fail, it would make
+   * one class of change invisible to every consumer watching for it, which is the
+   * kind of bug that is found long after it matters.
+   *
+   * `setTaxRate` deliberately does not come through here — the rate changes what
+   * the cart *costs*, not what is in it.
+   */
+  private commit(items: CartItem[]): void {
+    this._items.set(items);
+    this._revision.update((n) => n + 1);
   }
 
   /**

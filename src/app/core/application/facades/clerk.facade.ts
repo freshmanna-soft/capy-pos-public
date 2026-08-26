@@ -1,17 +1,20 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { CatalogHint, VisionCandidate } from '@core/application/dtos/recognition.dto';
 import { VISION_RECOGNIZER } from '@core/application/ports/vision-recognizer.port';
-import { PosFacade } from '@core/application/facades/pos.facade';
+import { AddToCartRejection, PosFacade } from '@core/application/facades/pos.facade';
 import { ProductService } from '@core/application/services/product.service';
 import {
   AUTO_ADD_CONFIDENCE,
   CONSIDER_CONFIDENCE,
+  ChoiceActor,
+  shouldScoreChoice,
 } from '@core/application/services/candidate-ranking';
 import {
   RecognitionLogService,
   RecognitionTier,
 } from '@core/application/services/recognition-log.service';
 import {
+  clampSpokenQuantity,
   parseClerkIntent,
   rankLabelsBySpokenWords,
 } from '@core/application/services/voice-intent.parser';
@@ -48,6 +51,43 @@ export { AUTO_ADD_CONFIDENCE, CONSIDER_CONFIDENCE };
 
 /** How long an auto-added item stays reversible. */
 export const UNDO_WINDOW_MS = 4000;
+
+/**
+ * Why an add put in fewer units than were asked for.
+ *
+ * The stock reasons are `AddToCartRejection`'s rather than restated, so the terminal
+ * stays the single authority on what stock refuses and this only adds the failures
+ * that are the clerk's own: a name that resolved to nothing, a name that resolved to
+ * several things, and an id that no longer matches a product.
+ */
+export type SpokenAddReason = AddToCartRejection | 'unknown-product' | 'unknown-name' | 'ambiguous';
+
+/**
+ * What an add actually did, as opposed to whether it did anything.
+ *
+ * A boolean cannot express a short count, and a short count is the case a caller
+ * most needs to report honestly: 2 in against 5 asked for is neither success nor
+ * failure. Returning both numbers means a caller reports what happened instead of
+ * re-deriving it by diffing the cart afterwards, which would be a second source of
+ * truth about a write this method just made.
+ *
+ * `wanted` is the **clamped** want, so a caller that asked for 40 is told 5 and can
+ * see the clamp rather than silently believing it was fully served.
+ */
+export interface SpokenAddOutcome {
+  added: number;
+  wanted: number;
+  name: string;
+  reason?: SpokenAddReason;
+}
+
+/** The mirror of `SpokenAddOutcome` for taking something back off the sale. */
+export interface SpokenRemoveOutcome {
+  removed: number;
+  wanted: number;
+  name: string;
+  reason?: 'unknown-name' | 'ambiguous' | 'not-in-cart';
+}
 
 /** Motion sampling cadence. 8Hz is ample for settle detection and nearly free. */
 const SAMPLE_INTERVAL_MS = 125;
@@ -239,11 +279,18 @@ export class ClerkFacade {
   readonly moodIntensity = computed(() => (this.muted() ? 1 : 0.55));
   readonly lastBoundaryAt = this.voice.lastBoundaryAt;
 
+  private readonly _checkoutRequested = signal(0);
+
   /**
-   * Bumped when the cashier asks for checkout by voice. The shell watches it and
-   * navigates — the facade has no business knowing about routes.
+   * Bumped when checkout is asked for. The shell watches it and navigates — the
+   * facade has no business knowing about routes.
+   *
+   * Read-only on purpose: a writable signal here is a live, ungated path to
+   * payment for anything holding this facade, and navigating to payment is the one
+   * action the four second undo window does not cover. `requestCheckout()` is
+   * therefore the only way in, so the path to the till is nameable and greppable.
    */
-  readonly checkoutRequested = signal(0);
+  readonly checkoutRequested = this._checkoutRequested.asReadonly();
 
   readonly undoSecondsLeft = computed(() => Math.ceil(this._undoMsLeft() / 1000));
   readonly awaitingChoice = computed(() => this._candidates().length > 0);
@@ -883,13 +930,13 @@ export class ClerkFacade {
     }
 
     this._confidence.set(1);
-    const added = this.addProduct(
+    const outcome = this.addProduct(
       product,
       `One ${product.name.toLowerCase()}, added.`,
       { confidence: 1, auto: true, barcode: value },
       { tier: 'barcode', confidence: 1, candidateCount: 1 }
     );
-    if (added) {
+    if (outcome.added > 0) {
       // The bars have already said what this is, so stop the model being asked the
       // same question about the same still scene half a second later and adding a
       // second one. Deliberately not done for an unknown code: the catalogue may
@@ -1007,31 +1054,39 @@ export class ClerkFacade {
    *   cashier telling the till, not a proposal that could have been wrong.
    * @param quantity how many to ring up. Every unit still goes through stock
    *   validation on its own.
+   * @returns what the add actually did, so a caller can report the count rather
+   *   than infer it from the cart afterwards.
    */
   private autoAdd(
     candidate: VisionCandidate,
     utterance: string,
     tier: RecognitionTier | null = 'model',
     quantity = 1
-  ): void {
+  ): SpokenAddOutcome {
     const product = this.findProduct(candidate.productId);
     if (!product) {
       this.askAgain("That isn't something I can ring up.");
-      return;
+      return {
+        added: 0,
+        wanted: clampSpokenQuantity(quantity),
+        name: '',
+        reason: 'unknown-product',
+      };
     }
 
-    const added = this.addProduct(
+    const outcome = this.addProduct(
       product,
       utterance,
       { confidence: candidate.confidence, auto: true },
       tier === null ? undefined : { tier, confidence: candidate.confidence, candidateCount: 1 },
       quantity
     );
-    if (!added) {
+    if (outcome.added === 0) {
       // Let the same scene be read again — the cashier is about to try something
       // else with the item still in hand.
       this.gate.forgetLastCapture();
     }
+    return outcome;
   }
 
   /**
@@ -1047,7 +1102,14 @@ export class ClerkFacade {
    * per unit, so "add three" against two in stock puts two in and says so,
    * instead of failing the whole command or overselling by one.
    *
-   * @returns whether anything at all went in.
+   * The quantity is clamped here rather than trusted, because the loop guard is
+   * what a bad number defeats: `added >= wanted` is permanently false for a
+   * non-finite want, so the loop would run until stock refused and put the whole
+   * shelf in the cart from one utterance — silently, and with a spoken line that
+   * claimed success.
+   *
+   * @returns what went in, how much was wanted after clamping, and why it fell
+   *   short if it did.
    */
   private addProduct(
     product: Product,
@@ -1055,8 +1117,8 @@ export class ClerkFacade {
     meta: Record<string, unknown>,
     provenance?: { tier: RecognitionTier; confidence: number; candidateCount: number },
     quantity = 1
-  ): boolean {
-    const wanted = Math.max(1, quantity);
+  ): SpokenAddOutcome {
+    const wanted = clampSpokenQuantity(quantity);
     let added = 0;
     let result = this.pos.tryAddToCart(product);
     while (result.added) {
@@ -1066,6 +1128,9 @@ export class ClerkFacade {
       }
       result = this.pos.tryAddToCart(product);
     }
+    // The loop only exits on a refusal or on having enough, so a refused last
+    // attempt is the only thing that can put a reason on the outcome.
+    const reason = result.added ? undefined : result.reason;
 
     if (added === 0 && !result.added) {
       // Stock rules are the terminal's, not the clerk's — she just reports them.
@@ -1092,7 +1157,7 @@ export class ClerkFacade {
           outcome: 'rejected',
         });
       }
-      return false;
+      return { added: 0, wanted, name: product.name, reason };
     }
 
     this._added.update((n) => n + added);
@@ -1133,7 +1198,7 @@ export class ClerkFacade {
       ...meta,
     });
     this.count('clerk.autoadds', undefined, added);
-    return true;
+    return { added, wanted, name: product.name, reason };
   }
 
   /** Unsure between a few: show them and wait. */
@@ -1170,15 +1235,28 @@ export class ClerkFacade {
 
   /** Take the top candidate. */
   confirmTop(): void {
-    this.chooseCandidate(1);
+    this.takeCandidate(1, 'cashier');
   }
 
   /** Take candidate `position` (1-based, as spoken and as labelled). */
   chooseCandidate(position: number): void {
+    this.takeCandidate(position, 'cashier');
+  }
+
+  /**
+   * Take candidate `position` on behalf of `confirmedBy`.
+   *
+   * The actor is a parameter of this *private* method and deliberately not of the
+   * public one: an optional actor argument on `chooseCandidate` would let anything
+   * holding the facade claim to be the cashier, which is the exact hole the
+   * predicate below closes. Every public caller — key, click, spoken confirm — is
+   * the cashier, so they say so once, here.
+   */
+  private takeCandidate(position: number, confirmedBy: ChoiceActor): SpokenAddOutcome {
     const offered = this._candidates();
     const candidate = offered[position - 1];
     if (!candidate) {
-      return;
+      return { added: 0, wanted: 1, name: '', reason: 'unknown-product' };
     }
     const product = this.findProduct(candidate.productId);
     const top = offered[0];
@@ -1186,14 +1264,15 @@ export class ClerkFacade {
     this._candidates.set([]);
     if (!product) {
       this.askAgain("I've lost track of that one. Show me again?");
-      return;
+      return { added: 0, wanted: 1, name: '', reason: 'unknown-product' };
     }
 
     // The most valuable row in the log: what was offered first, and what the cashier
     // actually wanted. `corrected` means the ranking was wrong and here is the truth.
-    // Skipped when the cashier named the product themselves — no recognizer
-    // proposed anything, so there is no accuracy to score.
-    if (origin === 'model') {
+    // Written only when a recognizer proposed the ranking *and* a human picked from
+    // it — see `shouldScoreChoice` for why neither half is optional.
+    const score = shouldScoreChoice(origin, confirmedBy);
+    if (score) {
       this.log.record({
         tier: 'model',
         proposedProductId: top?.productId,
@@ -1205,11 +1284,30 @@ export class ClerkFacade {
     }
     // Route through the same auto-add path: a hand-picked item still has to
     // satisfy stock, still gets an undo window, still emits the same event.
-    this.autoAdd(
+    // The tier comes off the same predicate, so a suppressed choice row cannot
+    // leave a `tier: 'model'` add row behind it either.
+    return this.autoAdd(
       { ...candidate, confidence: 1 },
       `One ${product.name.toLowerCase()}, added.`,
-      origin === 'model' ? 'model' : null
+      score ? 'model' : null
     );
+  }
+
+  /**
+   * Ask the page to take this sale to payment. The one way in.
+   *
+   * Named and public so the path to the till is greppable: every other write the
+   * clerk makes is covered by the four second undo window, and navigating to
+   * payment is not — once the customer is looking at a total, taking it back is a
+   * conversation rather than a keystroke. A writable signal gave anything holding
+   * this facade that ability without leaving a trace of who used it.
+   *
+   * This is also the hook for ending a sale: the agentic clerk clears its turn
+   * memory and aborts any in-flight turn here, so a turn cannot land against a cart
+   * that has already been paid for.
+   */
+  requestCheckout(): void {
+    this._checkoutRequested.update((n) => n + 1);
   }
 
   /** None of those. Look again. */
@@ -1345,7 +1443,7 @@ export class ClerkFacade {
         }
         return 'handled';
       case 'checkout':
-        this.checkoutRequested.set(this.checkoutRequested() + 1);
+        this.requestCheckout();
         return 'handled';
       default:
         return 'ignored';
@@ -1364,36 +1462,25 @@ export class ClerkFacade {
    * already there, so a spoken ambiguity is answered exactly the way a visual one
    * is — and neither path can charge for an item nobody named.
    */
-  private addByName(query: string[], quantity: number): void {
+  private addByName(
+    query: string[],
+    quantity: number,
+    confirmedBy: ChoiceActor = 'cashier'
+  ): SpokenAddOutcome {
     // Naming one of the products already on screen is answering the question she
     // asked, not starting a new command — and answering it through
-    // `chooseCandidate` is what writes the 'chosen' / 'corrected' row that tells
-    // us whether the recognizer's ranking was any good.
-    const offered = this._candidates();
-    if (offered.length > 0) {
-      const onScreen = rankLabelsBySpokenWords(
-        query,
-        offered.map((candidate) => candidate.label)
-      );
-      const top = onScreen[0];
-      const next = onScreen[1];
-      const decisive =
-        top !== undefined &&
-        (next === undefined || next.score !== top.score || next.coverage !== top.coverage);
-      if (decisive) {
-        this.chooseCandidate(top.index + 1);
-        return;
-      }
+    // `takeCandidate` is what writes the 'chosen' / 'corrected' row that tells
+    // us whether the recognizer's ranking was any good. The actor is carried
+    // through because that row is a claim about who confirmed the ranking.
+    const onScreen = this.matchOnScreen(query);
+    if (onScreen !== null) {
+      return this.takeCandidate(onScreen, confirmedBy);
     }
 
-    const catalog = this._catalog();
-    const ranked = rankLabelsBySpokenWords(
-      query,
-      catalog.map((product) => product.name)
-    );
-    const best = ranked[0];
+    const wanted = clampSpokenQuantity(quantity);
+    const resolved = this.resolveSpokenName(query);
 
-    if (!best) {
+    if (resolved.kind === 'none') {
       this._visualState.set('confused');
       this.setMood(ClerkMood.UNSURE);
       this.say(`I don't have ${spokenName(query)} in the catalogue.`);
@@ -1401,15 +1488,14 @@ export class ClerkFacade {
         reason: 'unknown-spoken-name',
         heard: query.join(' '),
       });
-      return;
+      return { added: 0, wanted, name: '', reason: 'unknown-name' };
     }
 
-    const tied = ranked.filter((match) => match.score === best.score);
-    if (tied.length > 1) {
+    if (resolved.kind === 'ambiguous') {
       this.offerChoice(
-        tied.slice(0, 3).map((match) => ({
-          productId: catalog[match.index]!.id,
-          label: catalog[match.index]!.name,
+        resolved.products.slice(0, 3).map((product) => ({
+          productId: product.id,
+          label: product.name,
           // Certainty about the name, which is not certainty about which one —
           // that is what the choice is for.
           confidence: 1,
@@ -1417,20 +1503,114 @@ export class ClerkFacade {
         `I have a few of those. Which one?`,
         'voice'
       );
-      return;
+      return { added: 0, wanted, name: '', reason: 'ambiguous' };
     }
 
-    const product = catalog[best.index]!;
+    const product = resolved.product;
     // Left at zero on purpose: the yuzu reports how sure she is about what she can
     // *see*, and she was told this one. A full glow would claim a reading that
     // never happened.
-    this.autoAdd(
+    return this.autoAdd(
       { productId: product.id, label: product.name, confidence: 1 },
-      `${describeQuantity(quantity, product.name)}, added.`,
+      `${describeQuantity(wanted, product.name)}, added.`,
       // Nothing recognized anything here, so nothing is scored for it.
       null,
-      quantity
+      wanted
     );
+  }
+
+  /**
+   * Which on-screen card a spoken name decisively picks, if any.
+   *
+   * "Decisive" means one card ranked strictly above the rest. A tie is left for the
+   * catalogue path rather than resolved by array order, because array order here is
+   * the recognizer's ranking and picking by it would charge for an item nobody
+   * actually named.
+   *
+   * @returns a 1-based card position, or null when nothing on screen settles it.
+   */
+  private matchOnScreen(query: string[]): number | null {
+    const offered = this._candidates();
+    if (offered.length === 0) {
+      return null;
+    }
+    const ranked = rankLabelsBySpokenWords(
+      query,
+      offered.map((candidate) => candidate.label)
+    );
+    const top = ranked[0];
+    const next = ranked[1];
+    if (top === undefined) {
+      return null;
+    }
+    const decisive =
+      next === undefined || next.score !== top.score || next.coverage !== top.coverage;
+    return decisive ? top.index + 1 : null;
+  }
+
+  /**
+   * Resolve a spoken name against the loaded catalogue.
+   *
+   * The one ranking over `_catalog()` in the codebase, on purpose. A second one
+   * would be a second answer to "what did she just name", and the two would drift
+   * — so every caller that needs the question answered comes here, including the
+   * ones that only want to know whether a product is stocked at all.
+   *
+   * The ambiguous arm carries the tied products rather than a bare flag: callers
+   * render them (as cards, or as a tool's alternatives) and would otherwise have to
+   * rank the catalogue again to find out what tied.
+   *
+   * No `ProductService` round trip — the catalogue is already loaded at `start()`.
+   */
+  private resolveSpokenName(
+    query: string[]
+  ):
+    | { kind: 'none' }
+    | { kind: 'one'; product: Product }
+    | { kind: 'ambiguous'; products: Product[] } {
+    const catalog = this._catalog();
+    const ranked = rankLabelsBySpokenWords(
+      query,
+      catalog.map((product) => product.name)
+    );
+    const best = ranked[0];
+    if (!best) {
+      return { kind: 'none' };
+    }
+
+    const tied = ranked.filter((match) => match.score === best.score);
+    if (tied.length > 1) {
+      return { kind: 'ambiguous', products: tied.map((match) => catalog[match.index]!) };
+    }
+    return { kind: 'one', product: catalog[best.index]! };
+  }
+
+  /**
+   * Answer a removal for something that is not in the cart.
+   *
+   * Two different failures with two different fixes: a product this till doesn't
+   * sell, or one it sells that simply hasn't been rung up. Saying which one saves
+   * the cashier from checking the wrong thing.
+   *
+   * Split out of `removeByName` to keep it under the complexity cap once it started
+   * returning an outcome as well as speaking one.
+   */
+  private reportUnknownRemoval(query: string[], wanted: number): SpokenRemoveOutcome {
+    // Through the one resolver, not a second ranking over the catalogue: the
+    // question "does this shop sell it" has exactly one answer.
+    const stocked = this.resolveSpokenName(query).kind !== 'none';
+    this._visualState.set('confused');
+    this.setMood(ClerkMood.UNSURE);
+    this.say(
+      stocked
+        ? `There's no ${query.join(' ')} in the cart.`
+        : `I don't have ${spokenName(query)} in the catalogue.`
+    );
+    this.publish(EventType.CLERK_ITEM_REJECTED, {
+      reason: stocked ? 'not-in-cart' : 'unknown-spoken-name',
+      heard: query.join(' '),
+    });
+    return { removed: 0, wanted, name: '', reason: stocked ? 'not-in-cart' : 'unknown-name' };
   }
 
   /**
@@ -1444,11 +1624,12 @@ export class ClerkFacade {
    * cards add when you press them, so using them here would do the opposite of
    * what was asked.
    */
-  private removeByName(query: string[], quantity: number): void {
+  private removeByName(query: string[], quantity: number): SpokenRemoveOutcome {
+    const wanted = clampSpokenQuantity(quantity);
     const items = this.pos.cartItems();
     if (items.length === 0) {
       this.say('The cart is empty.');
-      return;
+      return { removed: 0, wanted, name: '', reason: 'not-in-cart' };
     }
 
     const ranked = rankLabelsBySpokenWords(
@@ -1457,26 +1638,7 @@ export class ClerkFacade {
     );
     const best = ranked[0];
     if (!best) {
-      // Two different failures with two different fixes: a product this till
-      // doesn't sell, or one it sells that simply hasn't been rung up. Saying
-      // which one saves the cashier from checking the wrong thing.
-      const stocked =
-        rankLabelsBySpokenWords(
-          query,
-          this._catalog().map((product) => product.name)
-        ).length > 0;
-      this._visualState.set('confused');
-      this.setMood(ClerkMood.UNSURE);
-      this.say(
-        stocked
-          ? `There's no ${query.join(' ')} in the cart.`
-          : `I don't have ${spokenName(query)} in the catalogue.`
-      );
-      this.publish(EventType.CLERK_ITEM_REJECTED, {
-        reason: stocked ? 'not-in-cart' : 'unknown-spoken-name',
-        heard: query.join(' '),
-      });
-      return;
+      return this.reportUnknownRemoval(query, wanted);
     }
 
     const tied = ranked.filter((match) => match.score === best.score);
@@ -1489,7 +1651,7 @@ export class ClerkFacade {
           .map((match) => items[match.index]!.product.name.toLowerCase())
           .join(' and ')}. Which one?`
       );
-      return;
+      return { removed: 0, wanted, name: '', reason: 'ambiguous' };
     }
 
     const product = items[best.index]!.product;
@@ -1499,10 +1661,13 @@ export class ClerkFacade {
     const inCart = this.pos.getQuantity(product.id);
     if (inCart === 0) {
       this.say(`There's no ${product.name.toLowerCase()} in the cart.`);
-      return;
+      return { removed: 0, wanted, name: product.name, reason: 'not-in-cart' };
     }
 
-    const removing = Math.min(Math.max(1, quantity), inCart);
+    // Clamped before it is bounded by the cart: `Math.min(NaN, inCart)` is `NaN`,
+    // which makes `removing >= inCart` false and the `for` loop body never run — a
+    // removal that silently does nothing and looks exactly like not being heard.
+    const removing = Math.min(wanted, inCart);
     // Bounded by what is actually in the cart, never by what was asked for:
     // `decreaseQuantity` throws once the line is gone, and this runs inside a
     // speech callback where that error would be swallowed and look like silence.
@@ -1541,6 +1706,7 @@ export class ClerkFacade {
     // something from earlier in the sale. If it does happen to still be in frame,
     // releasing the barcode gate would ring it straight back and the removal would
     // look broken.
+    return { removed: removing, wanted, name: product.name };
   }
 
   /** Say something, and caption it at the same moment. */

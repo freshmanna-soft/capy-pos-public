@@ -1,4 +1,9 @@
-import { parseClerkIntent, rankLabelsBySpokenWords } from './voice-intent.parser';
+import {
+  MAX_SPOKEN_QUANTITY,
+  clampSpokenQuantity,
+  parseClerkIntent,
+  rankLabelsBySpokenWords,
+} from './voice-intent.parser';
 
 const CANDIDATES = ['Oat Milk', 'Soy Milk', 'Almond Butter'];
 
@@ -316,5 +321,49 @@ describe('rankLabelsBySpokenWords', () => {
     // what knows the cashier named one of them entirely and the other halfway.
     const ranked = rankLabelsBySpokenWords(['coffee'], ['Coffee Cake', 'Coffee']);
     expect(ranked[0]?.index).toBe(1);
+  });
+});
+
+describe('clampSpokenQuantity', () => {
+  it('reads a misheard number as one rather than as an error', () => {
+    // NaN is the dangerous one: it survives Math.max and Math.min, so an
+    // `added >= wanted` loop guard is permanently false and the loop keeps adding
+    // until stock refuses — the whole shelf, from one utterance, silently.
+    expect(clampSpokenQuantity(NaN)).toBe(1);
+  });
+
+  it('clamps the infinities like any other out-of-range number', () => {
+    expect(clampSpokenQuantity(Infinity)).toBe(MAX_SPOKEN_QUANTITY);
+    expect(clampSpokenQuantity(-Infinity)).toBe(1);
+  });
+
+  it('never returns less than one', () => {
+    expect(clampSpokenQuantity(0)).toBe(1);
+    expect(clampSpokenQuantity(-3)).toBe(1);
+  });
+
+  it('floors a fraction to a whole unit count', () => {
+    // There is no such thing as 2.7 of a thing on a till.
+    expect(clampSpokenQuantity(2.7)).toBe(2);
+  });
+
+  it('caps an oversized count at the spoken maximum', () => {
+    expect(clampSpokenQuantity(40)).toBe(MAX_SPOKEN_QUANTITY);
+  });
+
+  it('leaves a quantity that is already in range alone', () => {
+    expect(clampSpokenQuantity(1)).toBe(1);
+    expect(clampSpokenQuantity(3)).toBe(3);
+    expect(clampSpokenQuantity(MAX_SPOKEN_QUANTITY)).toBe(MAX_SPOKEN_QUANTITY);
+  });
+
+  it('does not change what the parser reads off a phrase', () => {
+    // The clamp now runs inside the counting-word path, so this is the regression
+    // guard that it is the same rule and not a stricter one.
+    expect(parseClerkIntent('add three coffees', CANDIDATES)).toEqual({
+      kind: 'add',
+      query: ['coffees'],
+      quantity: 3,
+    });
   });
 });

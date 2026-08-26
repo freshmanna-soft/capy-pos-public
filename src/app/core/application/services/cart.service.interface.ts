@@ -17,6 +17,13 @@ export interface ICartService {
   // State signals (read-only)
   readonly items: Signal<readonly CartItem[]>;
   readonly taxRate: Signal<number>;
+  /**
+   * Monotonic counter, bumped once per change to the cart's contents.
+   *
+   * Declared on the contract so an implementation cannot ship without it and
+   * leave consumers watching a counter that never moves.
+   */
+  readonly revision: Signal<number>;
 
   // Computed values
   readonly totalItems: Signal<number>;

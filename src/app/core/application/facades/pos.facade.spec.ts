@@ -15,6 +15,7 @@ describe('PosFacade', () => {
   let facade: PosFacade;
   let mockCartService: {
     items: WritableSignal<unknown[]>;
+    revision: WritableSignal<number>;
     totalItems: WritableSignal<number>;
     subtotal: WritableSignal<number>;
     tax: WritableSignal<number>;
@@ -39,6 +40,7 @@ describe('PosFacade', () => {
   beforeEach(() => {
     mockCartService = {
       items: signal([]),
+      revision: signal(0),
       totalItems: signal(0),
       subtotal: signal(0),
       tax: signal(0),
@@ -345,5 +347,68 @@ describe('PosFacade', () => {
       await facade.initializeDatabase();
       expect(mockDb.initializeWithSeedData).toHaveBeenCalled();
     });
+  });
+
+  describe('cartRevision', () => {
+    it('should expose the revision from CartService', () => {
+      expect(facade.cartRevision()).toBe(0);
+      mockCartService.revision.set(7);
+      expect(facade.cartRevision()).toBe(7);
+    });
+  });
+});
+
+/**
+ * Sourced from the real service on purpose. The point of `cartRevision` is that a
+ * mutation made *outside* this facade is still visible through it, and a mocked
+ * CartService can only ever prove the wiring, never that.
+ */
+describe('PosFacade cartRevision over the real CartService', () => {
+  let facade: PosFacade;
+  let cartService: CartService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        PosFacade,
+        CartService,
+        { provide: GenerateReceiptUseCase, useValue: { execute: vi.fn(), fromSnapshot: vi.fn() } },
+        { provide: AdjustStockOnSaleUseCase, useValue: { execute: vi.fn() } },
+        { provide: DexieDatabase, useValue: { initializeWithSeedData: vi.fn() } },
+        { provide: EventBusService, useValue: { publish: vi.fn() } },
+        { provide: AuditLogService, useValue: { log: vi.fn() } },
+        { provide: TelemetryService, useValue: { recordCounter: vi.fn() } },
+      ],
+    });
+    facade = TestBed.inject(PosFacade);
+    cartService = TestBed.inject(CartService);
+  });
+
+  function stocked(id: string): Product {
+    return new Product(id, 'Flat White', 3, `${id}-SKU`, 'Beverages', 9);
+  }
+
+  it('rises for a mutation made straight through CartService, as /pos components make', () => {
+    const remembered = facade.cartRevision();
+
+    // `shopping-cart.component.ts` and `checkout.component.ts` inject CartService
+    // directly, so this is the ordinary case rather than a contrived one.
+    cartService.addProduct(stocked('p1'));
+
+    expect(facade.cartRevision()).toBeGreaterThan(remembered);
+  });
+
+  it('rises for a mutation made through the facade', () => {
+    const remembered = facade.cartRevision();
+    facade.tryAddToCart(stocked('p1'));
+    expect(facade.cartRevision()).toBeGreaterThan(remembered);
+  });
+
+  it('does not rise for an add the facade refused', () => {
+    const remembered = facade.cartRevision();
+    // Nothing reached the cart, so nothing moved — a counter that bumped here would
+    // report a foreign mutation that never happened.
+    facade.tryAddToCart(new Product('p2', 'Sold Out', 3, 'P2-SKU', 'Beverages', 0));
+    expect(facade.cartRevision()).toBe(remembered);
   });
 });

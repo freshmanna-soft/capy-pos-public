@@ -77,6 +77,36 @@ const NUMBER_WORDS: Record<string, number> = {
  */
 export const MAX_SPOKEN_QUANTITY = 5;
 
+/**
+ * The spoken quantity rule, in one place, for every caller.
+ *
+ * The cap itself is `MAX_SPOKEN_QUANTITY`; this is what makes it *structural*
+ * rather than something each caller remembers to apply. It was enforced only
+ * inside this parser's counting-word path, which left every other route into the
+ * cart taking whatever number it was handed — and the failures there are silent
+ * rather than loud. A non-finite or fractional count defeats a `count >= wanted`
+ * loop guard outright, so the loop runs until stock refuses and the whole shelf
+ * goes into the cart from one utterance; the mirror case on removal makes the
+ * removal a no-op that looks exactly like the cashier not being heard.
+ *
+ * A tool schema is not a substitute: Anthropic structured outputs drop `minimum`
+ * and `maximum` even under `strict: true`, so a bound declared there is a
+ * suggestion and this one is not.
+ *
+ * `NaN` is treated as "one", not as an error, because the caller is a speech path:
+ * refusing the whole command over a misheard number is a worse answer than ringing
+ * up one and letting the cashier say "another". It needs the explicit guard because
+ * `NaN` survives both `Math.max` and `Math.min` — which is precisely the property
+ * that made the unguarded loop drain the shelf. The infinities need no guard: they
+ * clamp like any other out-of-range number, to 5 and to 1 respectively.
+ */
+export function clampSpokenQuantity(value: number): number {
+  if (Number.isNaN(value)) {
+    return 1;
+  }
+  return Math.min(Math.max(1, Math.floor(value)), MAX_SPOKEN_QUANTITY);
+}
+
 /** Counting words, including the articles that mean "one of them". */
 const QUANTITY_WORDS: Record<string, number> = {
   a: 1,
@@ -404,7 +434,7 @@ function matchQuantifiedFrom(
     // Only the first count is read. A second number is part of a name far more
     // often than it is a correction ("two number 7 sauces").
     if (count !== undefined && query.length === 0 && quantity === 1 && count !== 1) {
-      quantity = Math.min(count, MAX_SPOKEN_QUANTITY);
+      quantity = clampSpokenQuantity(count);
       continue;
     }
     if (count !== undefined && query.length === 0) {

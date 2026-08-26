@@ -71,6 +71,21 @@ export class PosFacade {
   /** Whether the cart is empty */
   readonly isCartEmpty = this.cartService.isEmpty;
 
+  /**
+   * Monotonic revision of the cart's contents, for callers that need to know the
+   * cart moved rather than what it now holds.
+   *
+   * Sourced straight from `CartService` and deliberately not derived from this
+   * facade's own methods: `shopping-cart.component.ts` and `checkout.component.ts`
+   * inject `CartService` directly, so a facade-level counter would miss every
+   * mutation made from `/pos` — which is precisely the "foreign" mutation a
+   * `/clerk` caller needs to see.
+   *
+   * Consumers: the agentic clerk's `context.cartChangedThisTurn`, and the
+   * foreign-mutation abort that stops a batch part-way through.
+   */
+  readonly cartRevision = this.cartService.revision;
+
   // ─── Cart Operations ──────────────────────────────────────────────────
 
   /**
