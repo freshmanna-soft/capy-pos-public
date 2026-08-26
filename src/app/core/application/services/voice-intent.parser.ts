@@ -53,6 +53,33 @@ export type ClerkIntent =
   | { kind: 'voice'; on: boolean }
   /** Stop listening. */
   | { kind: 'mic'; on: false }
+  /**
+   * Say the last thing again.
+   *
+   * Named rather than left to fall through for the same reason as
+   * `clearRequested`: a counter is loud, and "what did you say" is the most
+   * ordinary thing a cashier says to a till that just spoke. Answering it with
+   * silence is indistinguishable from a microphone that stopped working, and the
+   * text is already on hand in the caption — no model, no network, no cost.
+   */
+  | { kind: 'repeat' }
+  /**
+   * Never mind. Drop the utterance and settle.
+   *
+   * A cashier who has changed their mind mid-sentence needs a way to say so that
+   * is cheaper than undoing whatever the clerk was about to guess at. It means
+   * "I have moved on", not "put that back": the cart is deliberately untouched,
+   * because `undo` and `remove` already exist and are one word away.
+   */
+  | { kind: 'dismiss' }
+  /**
+   * Name the small set of things she can do.
+   *
+   * The command set is closed, which is only a virtue if the cashier can find out
+   * what is in it. Asking out loud is how anyone actually discovers a voice
+   * interface, and the answer is a constant — the cheapest utterance in the till.
+   */
+  | { kind: 'help' }
   | { kind: 'unknown' };
 
 const NUMBER_WORDS: Record<string, number> = {
@@ -279,6 +306,11 @@ function matchCommand(words: string[]): ClerkIntent | null {
     return { kind: 'undo' };
   }
 
+  const local = matchLocalVerb(phrase);
+  if (local !== null) {
+    return local;
+  }
+
   // An add verb with nothing nameable after it is left unresolved rather than
   // guessed at, so "add two" can still fall through to picking candidate two.
   const addition = matchQuantified(words, ADD_VERBS);
@@ -398,6 +430,70 @@ function matchDeviceCommand(phrase: string): ClerkIntent | null {
     matchesAny(phrase, ['look again', 'scan again', 'try again', 'another look', 'have a look'])
   ) {
     return { kind: 'look' };
+  }
+  return null;
+}
+
+/**
+ * The three things she answers out of her own head, for free.
+ *
+ * Checked between undo and the add verbs, and both halves of that position are
+ * load-bearing under the rule stated above `matchCommand`.
+ *
+ * Device commands stay ahead of it: "look again" and "speak again" already mean
+ * something in `matchDeviceCommand`, and a cashier asking for another look is not
+ * asking her to repeat herself. Undo stays ahead of it too, so "cancel that"
+ * remains the destructive-first reading it has always been — which is why there
+ * is no bare `cancel` needle below.
+ *
+ * The add verbs stay behind it for one phrase in particular: `one more` is an add
+ * verb, so "one more time" would otherwise be read as ringing up a product called
+ * "time".
+ *
+ * Every needle is multi-word wherever the bare word is already load-bearing.
+ * `matchesAny` matches a whole-word sequence anywhere in the phrase, so a bare
+ * `again` would swallow half the device vocabulary and a bare `help` would turn
+ * "help me add a coffee" into a request for the command list instead of a coffee.
+ */
+function matchLocalVerb(phrase: string): ClerkIntent | null {
+  if (
+    matchesAny(phrase, [
+      'say that again',
+      'say it again',
+      'repeat that',
+      'repeat',
+      'what did you say',
+      'come again',
+      'one more time',
+    ])
+  ) {
+    return { kind: 'repeat' };
+  }
+  if (
+    matchesAny(phrase, [
+      'never mind',
+      'nevermind',
+      'forget it',
+      'forget that',
+      'ignore that',
+      'skip it',
+      'my mistake',
+    ])
+  ) {
+    return { kind: 'dismiss' };
+  }
+  if (
+    matchesAny(phrase, [
+      'what can you do',
+      'what can i say',
+      'what do i say',
+      'what can you say',
+      'help me out',
+      'commands',
+      'how does this work',
+    ])
+  ) {
+    return { kind: 'help' };
   }
   return null;
 }

@@ -313,6 +313,15 @@ class ClerkPage {
   get mutedBadge() {
     return this.page.getByTestId('clerk-muted-badge');
   }
+  get repeatButton() {
+    return this.page.getByTestId('clerk-repeat');
+  }
+  get dismissButton() {
+    return this.page.getByTestId('clerk-dismiss');
+  }
+  get helpButton() {
+    return this.page.getByTestId('clerk-help');
+  }
 
   /** Everything that actually reached the synthesizer this session. */
   spokenAloud(): Promise<string[]> {
@@ -380,7 +389,9 @@ test.describe('Capy Clerk', () => {
 
     // The voice is an enhancement; the caption is the actual channel.
     await expect(clerk.caption).toContainText('Hold something up', { timeout: 15000 });
-    const spoken = await page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken);
+    const spoken = await page.evaluate(
+      () => (window as unknown as { __spoken: string[] }).__spoken
+    );
     expect(spoken.join(' ')).toContain('Hold something up');
   });
 
@@ -622,7 +633,17 @@ test.describe('Capy Clerk reading barcodes', () => {
         const ctx = target.getContext('2d')!;
         // The stub reports a box at 200,150 of a 640x480 frame — around a third
         // across and a third down, wherever that lands after the cover crop.
-        ctx.drawImage(el, el.width * 0.28, el.height * 0.28, el.width * 0.24, el.height * 0.2, 0, 0, 120, 90);
+        ctx.drawImage(
+          el,
+          el.width * 0.28,
+          el.height * 0.28,
+          el.width * 0.24,
+          el.height * 0.2,
+          0,
+          0,
+          120,
+          90
+        );
         return target.toDataURL();
       });
 
@@ -746,12 +767,13 @@ test.describe('Capy Clerk with more than one camera', () => {
     await expect(clerk.caption).toContainText('Looking through Shelf cam', { timeout: 10000 });
 
     // The old stream is released, so the camera light goes out on the one we left.
-    const liveTracks = await page.evaluate(() =>
-      Array.from(document.querySelectorAll('video'))
-        .map((video) => (video as HTMLVideoElement).srcObject as MediaStream | null)
-        .filter((stream): stream is MediaStream => stream !== null)
-        .flatMap((stream) => stream.getVideoTracks())
-        .filter((track) => track.readyState === 'live').length
+    const liveTracks = await page.evaluate(
+      () =>
+        Array.from(document.querySelectorAll('video'))
+          .map((video) => (video as HTMLVideoElement).srcObject as MediaStream | null)
+          .filter((stream): stream is MediaStream => stream !== null)
+          .flatMap((stream) => stream.getVideoTracks())
+          .filter((track) => track.readyState === 'live').length
     );
     // Both video elements share the one stream, so a single live track.
     expect(liveTracks).toBeGreaterThan(0);
@@ -854,6 +876,60 @@ test.describe('Capy Clerk with the camera switched off', () => {
     // with silence.
     await clerk.say('add a pineapple');
     await expect(clerk.caption).toContainText('pineapple');
+  });
+
+  test('answers repeat, never mind and help by button, by key and out loud', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+    await expect(clerk.caption).toBeVisible({ timeout: 15000 });
+
+    // Camera off, so nothing the recognizer says can be mistaken for one of these
+    // three answers. All of them are free and none of them needs eyes.
+    await clerk.cameraToggle.click();
+    await expect(clerk.previewOff).toBeVisible();
+    // Whatever the cart holds at this point, none of these three verbs may change it.
+    const cart = await clerk.cartSummary.textContent();
+
+    // By button.
+    await clerk.helpButton.click();
+    await expect(clerk.caption).toContainText('checkout');
+
+    await clerk.dismissButton.click();
+    await expect(clerk.caption).toHaveText('Okay.');
+
+    const beforeRepeat = (await clerk.spokenAloud()).length;
+    await clerk.repeatButton.click();
+    await expect.poll(async () => (await clerk.spokenAloud()).length).toBe(beforeRepeat + 1);
+    // Repeating says it again; it does not rewrite what was said.
+    await expect(clerk.caption).toHaveText('Okay.');
+    expect((await clerk.spokenAloud()).at(-1)).toBe('Okay.');
+
+    // By key, which reaches the same single body behind each verb.
+    await page.keyboard.press('h');
+    await expect(clerk.caption).toContainText('checkout');
+    await page.keyboard.press('x');
+    await expect(clerk.caption).toHaveText('Okay.');
+
+    const beforeKeyRepeat = (await clerk.spokenAloud()).length;
+    await page.keyboard.press('r');
+    await expect.poll(async () => (await clerk.spokenAloud()).length).toBe(beforeKeyRepeat + 1);
+
+    // And out loud, which is the route the parser change actually opened.
+    await clerk.micButton.click();
+    await clerk.say('what can you do');
+    await expect(clerk.caption).toContainText('checkout');
+    await clerk.say('never mind');
+    await expect(clerk.caption).toHaveText('Okay.');
+
+    // "one more time" is a repeat, not an add of a product called "time" — which
+    // it would be if the ladder checked the add verbs first.
+    const beforeSpokenRepeat = (await clerk.spokenAloud()).length;
+    await clerk.say('one more time');
+    await expect.poll(async () => (await clerk.spokenAloud()).length).toBe(beforeSpokenRepeat + 1);
+    expect((await clerk.spokenAloud()).at(-1)).toBe('Okay.');
+
+    // A phrase about her own words never touches the sale.
+    await expect(clerk.cartSummary).toHaveText(cart!);
   });
 });
 

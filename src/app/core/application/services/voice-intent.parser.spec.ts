@@ -290,6 +290,95 @@ describe('parseClerkIntent', () => {
       }
     );
   });
+
+  describe('the free local verbs', () => {
+    it.each([
+      'say that again',
+      'say it again',
+      'repeat that',
+      'repeat',
+      'what did you say',
+      'come again',
+      'one more time',
+    ])('reads "%s" as a repeat', (phrase) => {
+      expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'repeat' });
+    });
+
+    it.each([
+      'never mind',
+      'nevermind',
+      'forget it',
+      'forget that',
+      'ignore that',
+      'skip it',
+      'my mistake',
+    ])('reads "%s" as a dismissal', (phrase) => {
+      expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'dismiss' });
+    });
+
+    it.each([
+      'what can you do',
+      'what can I say',
+      'what do I say',
+      'what can you say',
+      'help me out',
+      'commands',
+      'how does this work',
+    ])('reads "%s" as asking what she can do', (phrase) => {
+      expect(parseClerkIntent(phrase, CANDIDATES)).toEqual({ kind: 'help' });
+    });
+
+    it.each([
+      ['look again', { kind: 'look' }],
+      ['scan again', { kind: 'look' }],
+      ['try again', { kind: 'look' }],
+      ['speak again', { kind: 'voice', on: true }],
+      ['cancel that', { kind: 'undo' }],
+      ['remove that', { kind: 'undo' }],
+      ['one more time', { kind: 'repeat' }],
+      ['never mind', { kind: 'dismiss' }],
+      ['clear the cart', { kind: 'clearRequested' }],
+    ])('does not let the new needles shadow "%s"', (phrase, intent) => {
+      // The ladder's ordering is the whole guard here: device commands stay ahead
+      // of the local verbs so "look again" keeps its eyes, undo stays ahead so
+      // "cancel that" stays destructive-first, and the add verbs stay behind so
+      // "one more time" is not an add of a product called "time".
+      expect(parseClerkIntent(phrase, CANDIDATES)).toEqual(intent);
+    });
+
+    it('still adds a coffee when the cashier says "one more coffee"', () => {
+      // `one more` is an add verb, and only the trailing "time" makes the repeat.
+      expect(parseClerkIntent('one more coffee', CANDIDATES)).toEqual({
+        kind: 'add',
+        query: ['coffee'],
+        quantity: 1,
+      });
+    });
+
+    it('still adds a coffee when the cashier says "help me add a coffee"', () => {
+      // Which is why there is no bare `help` needle: the word is far more often
+      // part of an instruction than a request for the command list.
+      expect(parseClerkIntent('help me add a coffee', CANDIDATES)).toEqual({
+        kind: 'add',
+        query: ['coffee'],
+        quantity: 1,
+      });
+    });
+
+    it('still removes a named item, which no local verb may swallow', () => {
+      expect(parseClerkIntent('remove the oat milk', CANDIDATES)).toEqual({
+        kind: 'remove',
+        query: ['oat', 'milk'],
+        quantity: 1,
+      });
+    });
+
+    it('leaves genuinely open-ended language to the tier above', () => {
+      // The point of shrinking the default arm is that what is left in it means
+      // "open-ended", not "nobody got round to adding this phrase".
+      expect(parseClerkIntent('lovely weather today', CANDIDATES)).toEqual({ kind: 'unknown' });
+    });
+  });
 });
 
 describe('rankLabelsBySpokenWords', () => {
