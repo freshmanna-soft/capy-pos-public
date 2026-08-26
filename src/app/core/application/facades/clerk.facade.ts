@@ -18,7 +18,6 @@ import {
   parseClerkIntent,
   rankLabelsBySpokenWords,
 } from '@core/application/services/voice-intent.parser';
-import { CLERK_AGENT } from '@core/application/ports/clerk-agent.port';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import {
   BarcodeGate,
@@ -32,10 +31,6 @@ import { FrameGate, GateVerdict } from '@core/infrastructure/media/frame-gate';
 import { LookScheduler } from '@core/infrastructure/media/look-scheduler';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
-import {
-  readAgentPreference,
-  writeAgentPreference,
-} from '@core/infrastructure/settings/clerk-agent-preference';
 import { SpeechRecognitionService } from '@core/infrastructure/voice/speech-recognition.service';
 import { SpeechSynthesisService } from '@core/infrastructure/voice/speech-synthesis.service';
 import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
