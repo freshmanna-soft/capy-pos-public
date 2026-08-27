@@ -2383,7 +2383,8 @@ function describeUndoLabel(lines: readonly PendingAddLine[]): string {
     return '';
   }
   if (lines.length === 1) {
-    return `Undo ${only.quantity > 1 ? `${only.quantity} × ` : ''}${only.label}`;
+    const count = only.quantity > 1 ? `${only.quantity} × ` : '';
+    return `Undo ${count}${only.label}`;
   }
   // Units rather than lines: "Undo 2 items" for three coffees would misdescribe
   // what the button is about to take off the sale.
@@ -2414,7 +2415,9 @@ function describeBatch(outcomes: readonly SpokenAddOutcome[]): string {
   if (short.length > 0) {
     parts.push(
       `Short on ${joinPhrases(
-        short.map((outcome) => `${outcome.name.toLowerCase()}, ${outcome.added} of ${outcome.wanted}`)
+        short.map(
+          (outcome) => `${outcome.name.toLowerCase()}, ${outcome.added} of ${outcome.wanted}`
+        )
       )}.`
     );
   }
