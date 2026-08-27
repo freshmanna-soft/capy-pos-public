@@ -266,7 +266,7 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
 
       <!-- Controls. Every one of these also has a key, listed in the shell. -->
       <div class="pointer-events-auto flex flex-wrap items-center gap-3">
-        @if (clerk.pendingAdd(); as pending) {
+        @if (clerk.pendingAdd()) {
           <button
             type="button"
             (click)="clerk.undoLast()"
@@ -280,10 +280,10 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
               [style.width.%]="undoProgress()"
               aria-hidden="true"
             ></span>
-            <span class="relative"
-              >Undo {{ pending.quantity > 1 ? pending.quantity + ' × ' : ''
-              }}{{ pending.label }}</span
-            >
+            <!-- The whole phrase comes from the facade: a batched window has no
+                 single label, and how a count reads belongs next to the other
+                 spoken-quantity wording rather than in here. -->
+            <span class="relative">{{ clerk.undoLabel() }}</span>
             <span class="relative font-data text-[10px] tabular-nums text-steam/70"
               >{{ clerk.undoSecondsLeft() }}s</span
             >

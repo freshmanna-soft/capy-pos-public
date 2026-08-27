@@ -1,5 +1,6 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { CatalogHint, VisionCandidate } from '@core/application/dtos/recognition.dto';
+import { joinWithinSpeechBudget } from '@core/application/services/agent-speech.sanitizer';
 import { VISION_RECOGNIZER } from '@core/application/ports/vision-recognizer.port';
 import { AddToCartRejection, PosFacade } from '@core/application/facades/pos.facade';
 import { ProductService } from '@core/application/services/product.service';
@@ -167,8 +168,8 @@ export const MAX_EXCHANGES = 6;
 /** Whether the camera is up and the clerk is working. */
 export type ClerkPhase = 'off' | 'starting' | 'ready' | 'blocked';
 
-/** An auto-added item, held for the length of the undo window. */
-export interface PendingAdd {
+/** One auto-added item inside the undo window. */
+export interface PendingAddLine {
   productId: string;
   label: string;
   /**
@@ -176,6 +177,61 @@ export interface PendingAdd {
    * Without this a spoken "add three coffees" would undo to two, silently.
    */
   quantity: number;
+}
+
+/**
+ * Everything one undo window can take back.
+ *
+ * A list rather than a single line, because a turn can act more than once: an
+ * agent asked for three coffees and a sandwich makes two adds, and a window that
+ * holds only the last of them would leave the first both unundoable and recorded
+ * as correct. One window over N lines is what makes a multi-step turn reversible
+ * as the unit the cashier experienced it as.
+ *
+ * `readonly` so no collaborator can push into a live window — lines are appended
+ * by `openUndoWindow` and by nothing else.
+ */
+export interface PendingAdd {
+  lines: readonly PendingAddLine[];
+}
+
+/**
+ * One turn's claim on the undo window.
+ *
+ * Deliberately **not exported**: an add that carries a batch token appends to the
+ * open window instead of replacing it, and the only thing allowed to hand that
+ * token out is `withUndoBatch`, for the length of the turn it scopes. Threaded down
+ * `addByName` → `autoAdd` → `addProduct` as a parameter rather than read off an
+ * ambient field, so a barcode add that lands mid-turn — which passes no token —
+ * cannot be swept into the agent's batch, and undo can never reverse a
+ * hand-scanned item.
+ *
+ * `outcomes` carries every add the turn attempted, refusals included, because the
+ * sealed summary is the only thing that survives to report a short count once
+ * per-line speech is deferred. `lines` is not restated here: the window is the
+ * single source for what can be taken back.
+ */
+interface UndoBatch {
+  outcomes: SpokenAddOutcome[];
+  /**
+   * Whether this batch owns the window that is currently open.
+   *
+   * False until its first line lands, and false again the moment anything clears the
+   * window — a barcode add, a named removal that took the last line. Either way the
+   * next line of the batch opens a fresh window rather than appending to one that is
+   * gone or one that now belongs to somebody else.
+   */
+  open: boolean;
+  /**
+   * The agent's own answer to the cashier, or `''`.
+   *
+   * Written by the turn and read once, at the seal, which speaks it after the
+   * summary. On the batch rather than passed to a seal call, because the only entry
+   * point is `withUndoBatch` and its `finally` runs where the turn's return value
+   * is no longer in reach — a turn that threw has no return value at all, and the
+   * summary of what it managed to ring up still has to be spoken.
+   */
+  answer: string;
 }
 
 /**
@@ -382,6 +438,15 @@ export class ClerkFacade {
   readonly checkoutRequested = this._checkoutRequested.asReadonly();
 
   readonly undoSecondsLeft = computed(() => Math.ceil(this._undoMsLeft() / 1000));
+  /**
+   * What the Undo control says it will take back.
+   *
+   * A computed rather than an expression in the HUD, because a batched window has
+   * no single label to interpolate and the phrasing of a count belongs beside
+   * `describeQuantity` — the one place in this feature that knows how a quantity
+   * reads. Empty with no window, which the HUD never renders.
+   */
+  readonly undoLabel = computed(() => describeUndoLabel(this._pendingAdd()?.lines ?? []));
   readonly awaitingChoice = computed(() => this._candidates().length > 0);
 
   /**
@@ -447,7 +512,15 @@ export class ClerkFacade {
    * four seconds later, when the cashier either lets it stand or takes it back. So
    * the row is written optimistically and amended when the window closes.
    */
-  private openLogEntry: { id: string; productId: string } | null = null;
+  private openLogEntries: { id: string; productId: string }[] = [];
+  /**
+   * The turn currently allowed to append to the open window, or null.
+   *
+   * Held so `sealUndoBatch()` can find the batch it is closing; never consulted to
+   * decide whether an add batches. That decision is the caller's, made by passing
+   * the token or not — see `UndoBatch`.
+   */
+  private openBatch: UndoBatch | null = null;
   /**
    * Who put the candidates on screen.
    *
@@ -783,6 +856,10 @@ export class ClerkFacade {
     }
     this._agentEnabled.set(on);
     writeAgentPreference(on);
+    // A turn killed mid-flight still changed the sale, and a batch left open would
+    // hold a window whose countdown never starts. Sealed before the confirmation, so
+    // what went in is reported before the switch is acknowledged.
+    this.sealUndoBatch();
     this.say(
       on
         ? "Conversational again. Anything the commands don't cover, I'll try to work out."
@@ -1212,7 +1289,8 @@ export class ClerkFacade {
     candidate: VisionCandidate,
     utterance: string,
     tier: RecognitionTier | null = 'model',
-    quantity = 1
+    quantity = 1,
+    batch?: UndoBatch
   ): SpokenAddOutcome {
     const product = this.findProduct(candidate.productId);
     if (!product) {
@@ -1230,7 +1308,8 @@ export class ClerkFacade {
       utterance,
       { confidence: candidate.confidence, auto: true },
       tier === null ? undefined : { tier, confidence: candidate.confidence, candidateCount: 1 },
-      quantity
+      quantity,
+      batch
     );
     if (outcome.added === 0) {
       // Let the same scene be read again — the cashier is about to try something
@@ -1267,7 +1346,8 @@ export class ClerkFacade {
     utterance: string,
     meta: Record<string, unknown>,
     provenance?: { tier: RecognitionTier; confidence: number; candidateCount: number },
-    quantity = 1
+    quantity = 1,
+    batch?: UndoBatch
   ): SpokenAddOutcome {
     const wanted = clampSpokenQuantity(quantity);
     let added = 0;
@@ -1287,8 +1367,10 @@ export class ClerkFacade {
       // Stock rules are the terminal's, not the clerk's — she just reports them.
       this._visualState.set('confused');
       this._candidates.set([]);
-      this.setMood(ClerkMood.SORRY);
-      this.say(
+      this.reportAdd(
+        batch,
+        { added: 0, wanted, name: product.name, reason },
+        ClerkMood.SORRY,
         result.reason === 'out-of-stock'
           ? `${product.name} is out of stock.`
           : `That's all the ${product.name.toLowerCase()} in stock.`
@@ -1314,23 +1396,26 @@ export class ClerkFacade {
     this._added.update((n) => n + added);
     this._candidates.set([]);
     this._visualState.set('found');
-    // A short count is not a win. She says so out loud below, and with the voice off
-    // this is the only place that survives to say it.
-    this.setMood(added < wanted ? ClerkMood.SORRY : ClerkMood.HAPPY);
     this._plopToken.update((token) => token + added);
-    // A short count is reported rather than glossed over: the cashier has to know
-    // the sale is one short before the customer is at the door.
-    this.say(
+    // A short count is not a win, and it is reported rather than glossed over: the
+    // cashier has to know the sale is one short before the customer is at the door.
+    // Inside a batch both the mood and the words are held until the seal, which then
+    // says all of it at once — see `reportAdd`.
+    this.reportAdd(
+      batch,
+      { added, wanted, name: product.name, reason },
+      added < wanted ? ClerkMood.SORRY : ClerkMood.HAPPY,
       added < wanted
         ? `Only ${added} ${product.name.toLowerCase()} in stock, so that's what I added.`
         : utterance || `${describeQuantity(added, product.name)}, added.`
     );
     // Opened first, and only then tracked: `openUndoWindow` clears the previous
     // window, and clearing a window stops tracking its log row — so assigning
-    // before this call would have the new row wiped by its own window opening.
-    this.openUndoWindow({ productId: product.id, label: product.name, quantity: added });
+    // before this call would have the new row wiped by its own window opening. The
+    // same order holds for every appended line of a batch.
+    this.openUndoWindow({ productId: product.id, label: product.name, quantity: added }, batch);
     if (provenance) {
-      this.openLogEntry = {
+      this.openLogEntries.push({
         id: this.log.record({
           tier: provenance.tier,
           proposedProductId: product.id,
@@ -1340,7 +1425,7 @@ export class ClerkFacade {
           outcome: 'auto',
         }),
         productId: product.id,
-      };
+      });
     }
     this.publish(EventType.CLERK_ITEM_RECOGNIZED, {
       productId: product.id,
@@ -1403,7 +1488,11 @@ export class ClerkFacade {
    * predicate below closes. Every public caller — key, click, spoken confirm — is
    * the cashier, so they say so once, here.
    */
-  private takeCandidate(position: number, confirmedBy: ChoiceActor): SpokenAddOutcome {
+  private takeCandidate(
+    position: number,
+    confirmedBy: ChoiceActor,
+    batch?: UndoBatch
+  ): SpokenAddOutcome {
     const offered = this._candidates();
     const candidate = offered[position - 1];
     if (!candidate) {
@@ -1440,7 +1529,9 @@ export class ClerkFacade {
     return this.autoAdd(
       { ...candidate, confidence: 1 },
       `One ${product.name.toLowerCase()}, added.`,
-      score ? 'model' : null
+      score ? 'model' : null,
+      1,
+      batch
     );
   }
 
@@ -1495,30 +1586,31 @@ export class ClerkFacade {
       this.say('Nothing to undo. Tell me which item to take off.');
       return;
     }
-    // The window can outlive the line it refers to — a spoken removal, or a
-    // checkout, may have emptied it. Decrementing then throws.
-    if (this.pos.getQuantity(pending.productId) === 0) {
+    const reversed = this.reverseLines(pending.lines);
+    if (reversed.length === 0) {
+      // The window can outlive the lines it refers to — a spoken removal, or a
+      // checkout, may have emptied them all.
       this.clearUndo();
-      this.say(`${pending.label} is already off the sale.`);
+      this.say(describeAbsent(pending.lines));
       return;
     }
-    // As many decrements as that one command caused, so "add three coffees"
-    // undoes to none rather than leaving two behind.
-    for (let i = 0; i < pending.quantity; i++) {
-      this.pos.decreaseQuantity(pending.productId);
+    // The undo window exists to make a mistake cheap; it is also the cleanest label
+    // available for "that was wrong", so every row belonging to a line this actually
+    // reversed is revised. Before `clearUndo`, which stops tracking them.
+    for (const entry of this.openLogEntries) {
+      if (reversed.some((line) => line.productId === entry.productId)) {
+        this.log.amend(entry.id, 'undone');
+      }
     }
-    // The undo window exists to make a mistake cheap; it is also the cleanest
-    // label available for "that was wrong", so it revises the optimistic row.
-    if (this.openLogEntry?.productId === pending.productId) {
-      this.log.amend(this.openLogEntry.id, 'undone');
-    }
-    this.openLogEntry = null;
     this.clearUndo();
-    this._added.update((n) => Math.max(0, n - pending.quantity));
+    // What was actually taken back, never what was recorded: a line already gone
+    // was skipped above and must not be counted off twice.
+    const taken = reversed.reduce((sum, line) => sum + line.quantity, 0);
+    this._added.update((n) => Math.max(0, n - taken));
     this.goIdle();
     // An undo is her mistake being corrected, not a routine edit.
     this.setMood(ClerkMood.SORRY);
-    this.say(`${describeQuantity(pending.quantity, pending.label)} removed.`);
+    this.say(`${describeLines(reversed)} removed.`);
     // Let the same item be recognized again — undo usually means "wrong item",
     // and the cashier is about to hold up the right one. Both gates, because the
     // item may have been identified by sight or by its barcode.
@@ -1708,7 +1800,8 @@ export class ClerkFacade {
   private addByName(
     query: string[],
     quantity: number,
-    confirmedBy: ChoiceActor = 'cashier'
+    confirmedBy: ChoiceActor = 'cashier',
+    batch?: UndoBatch
   ): SpokenAddOutcome {
     // Naming one of the products already on screen is answering the question she
     // asked, not starting a new command — and answering it through
@@ -1717,7 +1810,7 @@ export class ClerkFacade {
     // through because that row is a claim about who confirmed the ranking.
     const onScreen = this.matchOnScreen(query);
     if (onScreen !== null) {
-      return this.takeCandidate(onScreen, confirmedBy);
+      return this.takeCandidate(onScreen, confirmedBy, batch);
     }
 
     const wanted = clampSpokenQuantity(quantity);
@@ -1758,7 +1851,8 @@ export class ClerkFacade {
       `${describeQuantity(wanted, product.name)}, added.`,
       // Nothing recognized anything here, so nothing is scored for it.
       null,
-      wanted
+      wanted,
+      batch
     );
   }
 
@@ -1923,15 +2017,9 @@ export class ClerkFacade {
     }
 
     // The pending undo describes a cart that no longer looks like that. Left alone
-    // it would offer an "Undo" button that decrements a line this just emptied.
-    // Amended first: a cashier taking off the item she had just proposed is the
-    // clearest ground truth the recognizer's accuracy ever gets.
-    if (this._pendingAdd()?.productId === product.id) {
-      if (this.openLogEntry?.productId === product.id) {
-        this.log.amend(this.openLogEntry.id, 'undone');
-      }
-      this.clearUndo();
-    }
+    // it would offer an "Undo" button that decrements a line this just emptied. Only
+    // the named line goes: the rest of a batched window is still reversible.
+    this.dropFromUndoWindow(product.id);
 
     this._added.update((n) => Math.max(0, n - removing));
     this.goIdle();
@@ -2033,11 +2121,165 @@ export class ClerkFacade {
 
   // ─── Undo window ──────────────────────────────────────────────────────────
 
-  private openUndoWindow(pending: PendingAdd): void {
+  /**
+   * Run one turn with everything it rings up inside a single undo window.
+   *
+   * The only way to open a batch, and a scope rather than a `begin`/`seal` pair on
+   * purpose: a batch left open holds a window whose countdown never started, so a
+   * caller who forgot the `finally` would leave the sale with a window that cannot
+   * expire and an utterance that is never said. Here the `finally` *is* the API —
+   * a turn that throws, aborts or returns early seals exactly as one that succeeds.
+   *
+   * The token handed to `turn` is the only thing that makes an add append to the
+   * open window instead of replacing it, and it is passed down as a parameter — so
+   * an add from anywhere else, a barcode above all, still supersedes the window
+   * exactly as it does today.
+   *
+   * Not re-entrant, and it does not need to be: the admission gate admits one turn
+   * at a time, and a batch found open here belongs to a turn that ended without
+   * sealing, so it is sealed before this one starts rather than nested inside it.
+   *
+   * Turn seam: the agent tier's runner is the production caller, wired in where
+   * `handlePhrase`'s `default:` arm fires the turn — the same seam
+   * `createClerkAgentTools` closes over, and reached the same way until then.
+   *
+   * @param turn does the turn's work with the batch token, setting `batch.answer`
+   *   to whatever the agent answered.
+   * @returns whatever the turn returned, untouched.
+   */
+  private async withUndoBatch<T>(turn: (batch: UndoBatch) => T | Promise<T>): Promise<T> {
+    // Any batch still open belongs to a turn that has ended without sealing, and
+    // leaving it would let two turns append to one window.
+    this.sealUndoBatch();
+    const batch: UndoBatch = { outcomes: [], open: false, answer: '' };
+    this.openBatch = batch;
+    try {
+      return await turn(batch);
+    } finally {
+      this.sealUndoBatch(batch.answer);
+    }
+  }
+
+  /**
+   * Close the batch: one countdown, one mood, one utterance, one measurement.
+   *
+   * **The utterance is unconditional.** Per-line speech is deferred while a batch is
+   * open, so this is the only thing left that can report what went into the sale —
+   * including a short count, and including on a turn whose agent outcome is
+   * `exhausted`, `declined` or `unavailable`. Those outcomes are silent for a turn
+   * that changed *nothing*; a turn that changed the cart is never silent. A batch
+   * that committed nothing and attempted nothing says nothing, which is the same
+   * rule read the other way.
+   *
+   * Called by `withUndoBatch`'s `finally` for a turn that ended, and directly at
+   * the points that end a turn from outside it — the agent kill switch above all,
+   * where the turn's writes are already in the sale.
+   *
+   * @param answer the agent's own answer, spoken after the summary. The summary is
+   *   exempt from the speech budget: the trim consumes the answer, and an
+   *   over-budget summary is spoken alone.
+   * @returns the summary, for a caller that has to log or assert it.
+   */
+  private sealUndoBatch(answer = ''): string {
+    const batch = this.openBatch;
+    this.openBatch = null;
+    if (batch === null) {
+      return '';
+    }
+    // Started here and nowhere else, which is what stops a line expiring mid-turn:
+    // while the batch is open the window holds at full with no timer against it.
+    if (batch.open) {
+      this.measure('clerk.undo.batch.lines', this._pendingAdd()?.lines.length ?? 0);
+      this.startUndoCountdown();
+    }
+    const summary = describeBatch(batch.outcomes);
+    if (summary.length === 0) {
+      return '';
+    }
+    // One mood for the turn, set at the instant the countdown starts, so
+    // `MOOD_HOLD_MS > UNDO_WINDOW_MS` still holds per batch rather than per line.
+    this.setMood(batch.outcomes.some(cameUpShort) ? ClerkMood.SORRY : ClerkMood.HAPPY);
+    this.say(joinWithinSpeechBudget(summary, answer));
+    return summary;
+  }
+
+  /**
+   * Say one line's outcome now, or hand it to the seal to say later.
+   *
+   * One helper rather than a branch at each call site: speaking twice inside one
+   * turn pauses the ear across the whole of both utterances, which is exactly the
+   * window the cashier is most likely to want to correct her in.
+   */
+  private reportAdd(
+    batch: UndoBatch | undefined,
+    outcome: SpokenAddOutcome,
+    mood: ClerkMood,
+    utterance: string
+  ): void {
+    if (batch !== undefined) {
+      batch.outcomes.push(outcome);
+      return;
+    }
+    this.setMood(mood);
+    this.say(utterance);
+  }
+
+  /**
+   * Put one line inside the undo window.
+   *
+   * With a live batch token the line is **appended** and the window is refilled
+   * without a countdown running, so N lines come back as one unit. With no token —
+   * a barcode, a vision auto-add, a spoken single command — the previous window is
+   * cleared and this one starts ticking immediately, byte for byte as before.
+   */
+  private openUndoWindow(line: PendingAddLine, batch?: UndoBatch): void {
+    if (batch !== undefined && batch === this.openBatch && batch.open) {
+      this._pendingAdd.update((pending) => ({ lines: [...(pending?.lines ?? []), line] }));
+      this._undoMsLeft.set(UNDO_WINDOW_MS);
+      return;
+    }
     this.clearUndo();
-    this._pendingAdd.set(pending);
+    this._pendingAdd.set({ lines: [line] });
     this._undoMsLeft.set(UNDO_WINDOW_MS);
-    // 250ms ticks: fine enough for a smooth countdown, coarse enough to be free.
+    if (batch !== undefined && batch === this.openBatch) {
+      // The batch owns the window from here; the countdown waits for the seal.
+      batch.open = true;
+      return;
+    }
+    // Recorded for a single add too, so window size is comparable across tiers.
+    this.measure('clerk.undo.batch.lines', 1);
+    this.startUndoCountdown();
+  }
+
+  /**
+   * Take back every line of the window, newest first.
+   *
+   * Newest first so the decrements unwind in the order they were made. Each line is
+   * pre-checked against the cart and clamped to what is actually there:
+   * `CartService.decreaseQuantity` throws on an absent line, and this runs inside a
+   * speech callback where a throw is swallowed and reads as the till doing nothing.
+   * A line already gone is skipped rather than thrown on.
+   *
+   * @returns what was really taken back, in insertion order so the cashier hears the
+   *   lines in the order they went in.
+   */
+  private reverseLines(lines: readonly PendingAddLine[]): PendingAddLine[] {
+    const taken: PendingAddLine[] = [];
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!;
+      const taking = Math.min(line.quantity, this.pos.getQuantity(line.productId));
+      for (let unit = 0; unit < taking; unit++) {
+        this.pos.decreaseQuantity(line.productId);
+      }
+      if (taking > 0) {
+        taken.push({ ...line, quantity: taking });
+      }
+    }
+    return taken.reverse();
+  }
+
+  /** 250ms ticks: fine enough for a smooth countdown, coarse enough to be free. */
+  private startUndoCountdown(): void {
     this.undoTimer = setInterval(() => {
       const left = this._undoMsLeft() - 250;
       if (left <= 0) {
@@ -2051,10 +2293,45 @@ export class ClerkFacade {
     }, 250);
   }
 
+  /**
+   * Take one product's line out of the open window, leaving the rest reversible.
+   *
+   * Amended before it is dropped: a cashier taking off the item she had just
+   * proposed is the clearest ground truth the recognizer's accuracy ever gets. The
+   * window only closes once its last line is gone.
+   */
+  private dropFromUndoWindow(productId: string): void {
+    const pending = this._pendingAdd();
+    if (pending === null) {
+      return;
+    }
+    const remaining = pending.lines.filter((line) => line.productId !== productId);
+    if (remaining.length === pending.lines.length) {
+      return;
+    }
+    for (const entry of this.openLogEntries) {
+      if (entry.productId === productId) {
+        this.log.amend(entry.id, 'undone');
+      }
+    }
+    if (remaining.length === 0) {
+      this.clearUndo();
+      return;
+    }
+    this.openLogEntries = this.openLogEntries.filter((entry) => entry.productId !== productId);
+    this._pendingAdd.set({ lines: remaining });
+  }
+
   private clearUndo(): void {
-    // Left to stand: the optimistic 'auto' row is now known to be correct, so there
-    // is nothing to amend — just stop tracking it.
-    this.openLogEntry = null;
+    // Left to stand: the optimistic 'auto' rows are now known to be correct, so
+    // there is nothing to amend — just stop tracking them.
+    this.openLogEntries = [];
+    // A window that has gone cannot be appended to, so the turn that owned it loses
+    // its claim on one. Not its report: the lines it already committed still have to
+    // be spoken at the seal, or a deferred short count would go with the window.
+    if (this.openBatch !== null) {
+      this.openBatch.open = false;
+    }
     if (this.undoTimer !== null) {
       clearInterval(this.undoTimer);
       this.undoTimer = null;
@@ -2096,6 +2373,15 @@ export class ClerkFacade {
       console.warn(`[Clerk] Telemetry counter ${name} failed:`, error);
     }
   }
+
+  /** A distribution rather than a total — same contract, same reason for the catch. */
+  private measure(name: string, value: number, tags?: Record<string, string>): void {
+    try {
+      this.telemetry.recordHistogram(name, value, tags);
+    } catch (error) {
+      console.warn(`[Clerk] Telemetry histogram ${name} failed:`, error);
+    }
+  }
 }
 
 type ClerkIntentOutcome = 'handled' | 'ignored';
@@ -2112,6 +2398,85 @@ function describeQuantity(quantity: number, name: string): string {
     return `One ${label}`;
   }
   return `${quantity} ${label}${/(?:s|x|z|ch|sh)$/.test(label) ? 'es' : 's'}`;
+}
+
+/**
+ * "One coffee and 3 sandwiches" — several lines read as one phrase.
+ *
+ * Beside `describeQuantity` rather than in a template or a component: this is the
+ * same question that method answers, asked of a list.
+ */
+function describeLines(lines: readonly PendingAddLine[]): string {
+  return joinPhrases(lines.map((line) => describeQuantity(line.quantity, line.label)));
+}
+
+/** What the Undo control reads: today's text for one line, a unit count for many. */
+function describeUndoLabel(lines: readonly PendingAddLine[]): string {
+  const only = lines[0];
+  if (only === undefined) {
+    return '';
+  }
+  if (lines.length === 1) {
+    const count = only.quantity > 1 ? `${only.quantity} × ` : '';
+    return `Undo ${count}${only.label}`;
+  }
+  // Units rather than lines: "Undo 2 items" for three coffees would misdescribe
+  // what the button is about to take off the sale.
+  return `Undo ${lines.reduce((sum, line) => sum + line.quantity, 0)} items`;
+}
+
+/** Whether an add put in fewer units than were asked for. */
+function cameUpShort(outcome: SpokenAddOutcome): boolean {
+  return outcome.added < outcome.wanted;
+}
+
+/**
+ * One utterance for everything a turn put in the sale.
+ *
+ * Every short count is stated as `added of wanted` rather than implied, because this
+ * is the only thing left that reports it: per-line speech is deferred inside a
+ * batch, and with the voice off `_caption` carries exactly this text. Empty for a
+ * turn that attempted nothing, which is the one case the seal is allowed to be
+ * silent in.
+ */
+function describeBatch(outcomes: readonly SpokenAddOutcome[]): string {
+  const parts: string[] = [];
+  const added = outcomes.filter((outcome) => outcome.added > 0);
+  if (added.length > 0) {
+    parts.push(`${describeLines(added.map(lineOf))}, added.`);
+  }
+  const short = outcomes.filter(cameUpShort);
+  if (short.length > 0) {
+    parts.push(
+      `Short on ${joinPhrases(
+        short.map(
+          (outcome) => `${outcome.name.toLowerCase()}, ${outcome.added} of ${outcome.wanted}`
+        )
+      )}.`
+    );
+  }
+  return parts.join(' ');
+}
+
+/** An outcome as the window's phrasing sees it: a count and a name. */
+function lineOf(outcome: SpokenAddOutcome): PendingAddLine {
+  return { productId: '', label: outcome.name, quantity: outcome.added };
+}
+
+/** Nothing left to take back, said for one line or for several. */
+function describeAbsent(lines: readonly PendingAddLine[]): string {
+  const only = lines[0];
+  return lines.length === 1 && only !== undefined
+    ? `${only.label} is already off the sale.`
+    : 'Those are already off the sale.';
+}
+
+/** "a", "a and b", "a, b and c" — one list, read aloud. */
+function joinPhrases(phrases: readonly string[]): string {
+  if (phrases.length <= 1) {
+    return phrases[0] ?? '';
+  }
+  return `${phrases.slice(0, -1).join(', ')} and ${phrases[phrases.length - 1]}`;
 }
 
 /** Read back what was heard, for a name that matched nothing. */

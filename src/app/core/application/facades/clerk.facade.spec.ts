@@ -108,9 +108,27 @@ type Resolution =
  * cast the honest way to test this rather than a shortcut around a missing API.
  */
 interface ClerkSeam {
-  addByName(query: string[], quantity: number, confirmedBy?: ChoiceActor): SpokenAddOutcome;
+  addByName(
+    query: string[],
+    quantity: number,
+    confirmedBy?: ChoiceActor,
+    batch?: TurnBatch
+  ): SpokenAddOutcome;
   removeByName(query: string[], quantity: number): SpokenRemoveOutcome;
   resolveSpokenName(query: string[]): Resolution;
+  withUndoBatch<T>(turn: (batch: TurnBatch) => T | Promise<T>): Promise<T>;
+}
+
+/**
+ * The batch token, as a turn is allowed to see it.
+ *
+ * Opaque beyond `answer` on purpose: the facade's `UndoBatch` is unexported, and a
+ * test that restated its bookkeeping would be asserting the implementation of
+ * batching rather than what the cashier gets from it. A turn only ever hands the
+ * token back to `addByName` and writes the agent's answer onto it.
+ */
+interface TurnBatch {
+  answer: string;
 }
 
 function seam(facade: ClerkFacade): ClerkSeam {
@@ -151,6 +169,7 @@ describe('ClerkFacade', () => {
   let detectCodes: ReturnType<typeof vi.fn>;
   let prepareScanner: ReturnType<typeof vi.fn>;
   let recordCounter: ReturnType<typeof vi.fn>;
+  let recordHistogram: ReturnType<typeof vi.fn>;
   let logRecord: ReturnType<typeof vi.fn>;
   let logAmend: ReturnType<typeof vi.fn>;
 
@@ -228,6 +247,7 @@ describe('ClerkFacade', () => {
     detectCodes = vi.fn().mockResolvedValue([]);
     prepareScanner = vi.fn().mockResolvedValue(true);
     recordCounter = vi.fn();
+    recordHistogram = vi.fn();
     logRecord = vi.fn().mockImplementation(() => 'log-1');
     logAmend = vi.fn();
 
@@ -299,7 +319,7 @@ describe('ClerkFacade', () => {
         },
         { provide: ProductService, useValue: { getActiveProducts } },
         { provide: EventBusService, useValue: { publish } },
-        { provide: TelemetryService, useValue: { recordCounter } },
+        { provide: TelemetryService, useValue: { recordCounter, recordHistogram } },
         {
           provide: BarcodeScannerService,
           useValue: { supported: barcodeSupported, prepare: prepareScanner, detect: detectCodes },
@@ -384,7 +404,9 @@ describe('ClerkFacade', () => {
       clerk.scanNow();
       await vi.waitFor(() => expect(clerk.pendingAdd()).not.toBeNull());
 
-      expect(clerk.pendingAdd()).toEqual({ productId: 'p1', label: 'Avocado', quantity: 1 });
+      expect(clerk.pendingAdd()).toEqual({
+        lines: [{ productId: 'p1', label: 'Avocado', quantity: 1 }],
+      });
       expect(clerk.undoMsLeft()).toBe(UNDO_WINDOW_MS);
       expect(clerk.undoSecondsLeft()).toBe(UNDO_WINDOW_MS / 1000);
     });
@@ -522,7 +544,7 @@ describe('ClerkFacade', () => {
     async function addOne(id = 'p1', label = 'Avocado'): Promise<void> {
       identify.mockResolvedValue(confident(id, label));
       clerk.scanNow();
-      await vi.waitFor(() => expect(clerk.pendingAdd()?.productId).toBe(id));
+      await vi.waitFor(() => expect(clerk.pendingAdd()?.lines[0].productId).toBe(id));
     }
 
     it('reverses exactly the one add it recorded', async () => {
@@ -585,6 +607,137 @@ describe('ClerkFacade', () => {
 
       expect(clerk.undoMsLeft()).toBeLessThan(UNDO_WINDOW_MS);
       expect(clerk.undoMsLeft()).toBeGreaterThan(0);
+    });
+
+    /**
+     * A turn that acts more than once, driven through the seam the agent tier's
+     * tool table closes over — `withUndoBatch` is the only door into batching, and
+     * a turn is the only thing allowed through it.
+     */
+    describe('a turn that adds more than once', () => {
+      beforeEach(() => {
+        // The greeting has already been said; every assertion below is about what
+        // the turn itself put in the sale and reported.
+        speak.mockClear();
+        tryAddToCart.mockClear();
+        decreaseQuantity.mockClear();
+        recordHistogram.mockClear();
+      });
+
+      /** Two named adds in one turn: one avocado, two sourdoughs. */
+      async function twoLineTurn(answer = ''): Promise<void> {
+        await seam(clerk).withUndoBatch((batch) => {
+          seam(clerk).addByName(['avocado'], 1, 'agent', batch);
+          seam(clerk).addByName(['sourdough'], 2, 'agent', batch);
+          batch.answer = answer;
+        });
+      }
+
+      it('holds every line of the turn in one window', async () => {
+        await twoLineTurn();
+
+        expect(clerk.pendingAdd()?.lines).toEqual([
+          { productId: 'p1', label: 'Avocado', quantity: 1 },
+          { productId: 'p3', label: 'Sourdough', quantity: 2 },
+        ]);
+        // Units, not lines: the button is about to take three things off the sale.
+        expect(clerk.undoLabel()).toBe('Undo 3 items');
+      });
+
+      it('takes back everything the turn added, in one undo', async () => {
+        await twoLineTurn();
+
+        clerk.undoLast();
+
+        // Three units across two lines, and nothing left to undo twice.
+        expect(decreaseQuantity.mock.calls.flat()).toEqual(['p3', 'p3', 'p1']);
+        expect(clerk.pendingAdd()).toBeNull();
+        expect(clerk.addedCount()).toBe(0);
+      });
+
+      it('reports the whole turn in one utterance, with the answer last', async () => {
+        await twoLineTurn('That comes to seven fifty.');
+
+        // One utterance, not one per line: speaking twice pauses the ear across both.
+        expect(speak).toHaveBeenCalledExactlyOnceWith(
+          'One avocado and 2 sourdoughs, added. That comes to seven fifty.'
+        );
+      });
+
+      it('states a short count at the end of the turn rather than losing it', async () => {
+        const addToCart = tryAddToCart.getMockImplementation();
+        let sourdoughsAdded = 0;
+        tryAddToCart.mockImplementation((item: Product) => {
+          if (item.id === 'p3' && sourdoughsAdded++ >= 1) {
+            return { added: false, reason: 'out-of-stock' };
+          }
+          return addToCart?.(item);
+        });
+
+        await twoLineTurn();
+
+        // Per-line speech is deferred inside a turn, so the seal is the only thing
+        // left that can tell the cashier the sale is one short.
+        expect(speak).toHaveBeenCalledExactlyOnceWith(
+          'One avocado and One sourdough, added. Short on sourdough, 1 of 2.'
+        );
+      });
+
+      it('holds the countdown until the turn is over', async () => {
+        sampleFrame.mockReturnValue(null); // silence the background scan loop
+        vi.useFakeTimers();
+
+        await seam(clerk).withUndoBatch(async (batch) => {
+          seam(clerk).addByName(['avocado'], 1, 'agent', batch);
+          // Long enough to have expired twice over, if anything were ticking.
+          await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS * 2);
+          expect(clerk.undoMsLeft()).toBe(UNDO_WINDOW_MS);
+          expect(clerk.pendingAdd()?.lines).toHaveLength(1);
+        });
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(clerk.undoMsLeft()).toBeLessThan(UNDO_WINDOW_MS);
+      });
+
+      it('leaves an add made from outside the turn out of the window', async () => {
+        await seam(clerk).withUndoBatch((batch) => {
+          seam(clerk).addByName(['avocado'], 1, 'agent', batch);
+          // The cashier's own command, mid-turn: no token, so it supersedes the
+          // window exactly as a barcode does.
+          seam(clerk).addByName(['oat', 'milk'], 1);
+          seam(clerk).addByName(['sourdough'], 1, 'agent', batch);
+        });
+
+        // The turn's next line opens a fresh window rather than reclaiming the one
+        // it lost, so undo can never reach the hand-made add.
+        expect(clerk.pendingAdd()?.lines).toEqual([
+          { productId: 'p3', label: 'Sourdough', quantity: 1 },
+        ]);
+
+        clerk.undoLast();
+        expect(decreaseQuantity).toHaveBeenCalledExactlyOnceWith('p3');
+      });
+
+      it('closes the window even when the turn fails part-way through', async () => {
+        await expect(
+          seam(clerk).withUndoBatch((batch) => {
+            seam(clerk).addByName(['avocado'], 1, 'agent', batch);
+            throw new Error('the hop failed');
+          })
+        ).rejects.toThrow('the hop failed');
+
+        // A turn that threw still changed the sale, so what it managed to ring up is
+        // reported and its window is left ticking rather than held open forever.
+        expect(speak).toHaveBeenCalledExactlyOnceWith('One avocado, added.');
+        expect(clerk.pendingAdd()?.lines).toHaveLength(1);
+        expect(clerk.undoMsLeft()).toBe(UNDO_WINDOW_MS);
+      });
+
+      it('measures how many lines the window ended up holding', async () => {
+        await twoLineTurn();
+
+        expect(recordHistogram).toHaveBeenCalledWith('clerk.undo.batch.lines', 2, undefined);
+      });
     });
   });
 
@@ -1224,7 +1377,9 @@ describe('ClerkFacade', () => {
       detectCodes.mockResolvedValue([seen('BAR-p1')]);
 
       await vi.waitFor(() => expect(clerk.pendingAdd()).not.toBeNull());
-      expect(clerk.pendingAdd()).toEqual({ productId: 'p1', label: 'Avocado', quantity: 1 });
+      expect(clerk.pendingAdd()).toEqual({
+        lines: [{ productId: 'p1', label: 'Avocado', quantity: 1 }],
+      });
     });
 
     it('records that the add came from a barcode', async () => {
@@ -2031,12 +2186,12 @@ describe('ClerkFacade', () => {
         { product: OAT_MILK, quantity: 1 },
       ]);
       onFinalPhrase('add an avocado');
-      expect(clerk.pendingAdd()?.productId).toBe('p1');
+      expect(clerk.pendingAdd()?.lines[0].productId).toBe('p1');
 
       onFinalPhrase('remove the oat milk');
 
       // The window still describes a line that is still there.
-      expect(clerk.pendingAdd()?.productId).toBe('p1');
+      expect(clerk.pendingAdd()?.lines[0].productId).toBe('p1');
     });
 
     it('says the item is already gone rather than throwing on a stale undo', async () => {
@@ -2632,7 +2787,7 @@ describe('ClerkFacade', () => {
       );
       expect(outcome).toEqual({ added: 1, wanted: 1, name: 'Sourdough' });
       expect(tryAddToCart).toHaveBeenCalledTimes(1);
-      expect(clerk.pendingAdd()).toMatchObject({ productId: 'p3', quantity: 1 });
+      expect(clerk.pendingAdd()).toMatchObject({ lines: [{ productId: 'p3', quantity: 1 }] });
     });
 
     it('scores the confirm control as agreement with the ranking', async () => {
@@ -2661,7 +2816,7 @@ describe('ClerkFacade', () => {
       // refusing to serve the customer.
       expect(outcome).toEqual({ added: 1, wanted: 1, name: 'Sourdough' });
       expect(tryAddToCart).toHaveBeenCalledTimes(1);
-      expect(clerk.pendingAdd()).toMatchObject({ productId: 'p3', quantity: 1 });
+      expect(clerk.pendingAdd()).toMatchObject({ lines: [{ productId: 'p3', quantity: 1 }] });
     });
 
     it('leaves no open log row for a later undo to amend', async () => {
@@ -2718,7 +2873,7 @@ describe('ClerkFacade', () => {
 
       expect(tryAddToCart).toHaveBeenCalledTimes(MAX_SPOKEN_QUANTITY);
       // One undo window covering all five, so the whole add comes back in one action.
-      expect(clerk.pendingAdd()).toMatchObject({ quantity: MAX_SPOKEN_QUANTITY });
+      expect(clerk.pendingAdd()).toMatchObject({ lines: [{ quantity: MAX_SPOKEN_QUANTITY }] });
     });
 
     it('removes one unit for a misheard count instead of silently nothing', () => {
@@ -3301,7 +3456,10 @@ describe('ClerkFacade where the browser cannot listen', () => {
         },
         { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
         { provide: EventBusService, useValue: { publish: vi.fn() } },
-        { provide: TelemetryService, useValue: { recordCounter: vi.fn() } },
+        {
+          provide: TelemetryService,
+          useValue: { recordCounter: vi.fn(), recordHistogram: vi.fn() },
+        },
         {
           provide: BarcodeScannerService,
           useValue: {
@@ -3412,7 +3570,10 @@ describe('ClerkFacade on a till told to take commands only', () => {
         },
         { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
         { provide: EventBusService, useValue: { publish: vi.fn() } },
-        { provide: TelemetryService, useValue: { recordCounter: vi.fn() } },
+        {
+          provide: TelemetryService,
+          useValue: { recordCounter: vi.fn(), recordHistogram: vi.fn() },
+        },
         {
           provide: BarcodeScannerService,
           useValue: {
