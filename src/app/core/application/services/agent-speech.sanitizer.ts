@@ -105,6 +105,35 @@ export function sanitizeAgentSpeech(text: string, ctx: AgentSpeechContext): stri
   return trimToBudget(collapse(steered));
 }
 
+/**
+ * Put the till's own report in front of the model's answer, inside one budget.
+ *
+ * The budget is a bound on how long the microphone is deaf, so it applies to the
+ * whole utterance — but the two halves are not equally negotiable. The summary is
+ * the clerk's account of what she just did to the sale, including any short count,
+ * and it is the only account left once per-line speech is deferred into a batch; the
+ * answer is prose that can be cut without anything becoming untrue. So the trim
+ * consumes the answer, and a summary that fills the budget on its own is spoken
+ * alone.
+ *
+ * Lives here rather than beside the caller because this is the module that enforces
+ * `MAX_SPEECH_WORDS`, and a second place that trims to it is a second answer to how
+ * long she may talk.
+ */
+export function joinWithinSpeechBudget(summary: string, answer: string): string {
+  const head = collapse(summary);
+  const tail = collapse(answer);
+  if (head.length === 0) {
+    return trimToBudget(tail);
+  }
+  const spare = MAX_SPEECH_WORDS - wordCount(head);
+  if (tail.length === 0 || spare <= 0) {
+    return head;
+  }
+  const trimmed = trimToBudget(tail, spare);
+  return trimmed.length === 0 ? head : `${head} ${trimmed}`;
+}
+
 /** Markdown, URLs and emoji out; the words they decorated kept. */
 function stripMarkup(text: string): string {
   return text
@@ -162,16 +191,20 @@ function collapse(text: string): string {
  * cut when there is no sentence boundary is deliberate: an answer that is one long
  * clause still has to fit, and a whole-word cut is the least bad way to make it.
  */
-function trimToBudget(text: string): string {
+function trimToBudget(text: string, budget = MAX_SPEECH_WORDS): string {
   const words = text.split(' ').filter((word) => word.length > 0);
-  if (words.length <= MAX_SPEECH_WORDS) {
+  if (words.length <= budget) {
     return text;
   }
-  const clipped = words.slice(0, MAX_SPEECH_WORDS).join(' ');
+  const clipped = words.slice(0, budget).join(' ');
   const lastSentence = Math.max(
     clipped.lastIndexOf('.'),
     clipped.lastIndexOf('!'),
     clipped.lastIndexOf('?')
   );
   return lastSentence > 0 ? clipped.slice(0, lastSentence + 1) : clipped;
+}
+
+function wordCount(text: string): number {
+  return text.split(' ').filter((word) => word.length > 0).length;
 }
