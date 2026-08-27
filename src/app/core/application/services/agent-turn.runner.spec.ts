@@ -1,3 +1,4 @@
+import type { MockedFunction } from 'vitest';
 import {
   AgentBlock,
   AgentStep,
@@ -167,7 +168,7 @@ function runnerOf(
     budget?: Partial<AgentBudget>;
     now?: () => number;
   } = {}
-): { runner: AgentTurnRunner; request: ReturnType<typeof vi.fn> } {
+): { runner: AgentTurnRunner; request: MockedFunction<typeof requestOf> } {
   const state = options.state ?? till();
   const request = vi.fn(requestOf);
   const runner = new AgentTurnRunner(

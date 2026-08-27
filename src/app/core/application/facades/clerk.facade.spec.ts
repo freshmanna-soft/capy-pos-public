@@ -384,7 +384,9 @@ describe('ClerkFacade', () => {
       clerk.scanNow();
       await vi.waitFor(() => expect(clerk.pendingAdd()).not.toBeNull());
 
-      expect(clerk.pendingAdd()).toEqual({ productId: 'p1', label: 'Avocado', quantity: 1 });
+      expect(clerk.pendingAdd()).toEqual({
+        lines: [{ productId: 'p1', label: 'Avocado', quantity: 1 }],
+      });
       expect(clerk.undoMsLeft()).toBe(UNDO_WINDOW_MS);
       expect(clerk.undoSecondsLeft()).toBe(UNDO_WINDOW_MS / 1000);
     });
@@ -522,7 +524,7 @@ describe('ClerkFacade', () => {
     async function addOne(id = 'p1', label = 'Avocado'): Promise<void> {
       identify.mockResolvedValue(confident(id, label));
       clerk.scanNow();
-      await vi.waitFor(() => expect(clerk.pendingAdd()?.productId).toBe(id));
+      await vi.waitFor(() => expect(clerk.pendingAdd()?.lines[0].productId).toBe(id));
     }
 
     it('reverses exactly the one add it recorded', async () => {
@@ -1224,7 +1226,9 @@ describe('ClerkFacade', () => {
       detectCodes.mockResolvedValue([seen('BAR-p1')]);
 
       await vi.waitFor(() => expect(clerk.pendingAdd()).not.toBeNull());
-      expect(clerk.pendingAdd()).toEqual({ productId: 'p1', label: 'Avocado', quantity: 1 });
+      expect(clerk.pendingAdd()).toEqual({
+        lines: [{ productId: 'p1', label: 'Avocado', quantity: 1 }],
+      });
     });
 
     it('records that the add came from a barcode', async () => {
@@ -2031,12 +2035,12 @@ describe('ClerkFacade', () => {
         { product: OAT_MILK, quantity: 1 },
       ]);
       onFinalPhrase('add an avocado');
-      expect(clerk.pendingAdd()?.productId).toBe('p1');
+      expect(clerk.pendingAdd()?.lines[0].productId).toBe('p1');
 
       onFinalPhrase('remove the oat milk');
 
       // The window still describes a line that is still there.
-      expect(clerk.pendingAdd()?.productId).toBe('p1');
+      expect(clerk.pendingAdd()?.lines[0].productId).toBe('p1');
     });
 
     it('says the item is already gone rather than throwing on a stale undo', async () => {
@@ -2632,7 +2636,7 @@ describe('ClerkFacade', () => {
       );
       expect(outcome).toEqual({ added: 1, wanted: 1, name: 'Sourdough' });
       expect(tryAddToCart).toHaveBeenCalledTimes(1);
-      expect(clerk.pendingAdd()).toMatchObject({ productId: 'p3', quantity: 1 });
+      expect(clerk.pendingAdd()).toMatchObject({ lines: [{ productId: 'p3', quantity: 1 }] });
     });
 
     it('scores the confirm control as agreement with the ranking', async () => {
@@ -2661,7 +2665,7 @@ describe('ClerkFacade', () => {
       // refusing to serve the customer.
       expect(outcome).toEqual({ added: 1, wanted: 1, name: 'Sourdough' });
       expect(tryAddToCart).toHaveBeenCalledTimes(1);
-      expect(clerk.pendingAdd()).toMatchObject({ productId: 'p3', quantity: 1 });
+      expect(clerk.pendingAdd()).toMatchObject({ lines: [{ productId: 'p3', quantity: 1 }] });
     });
 
     it('leaves no open log row for a later undo to amend', async () => {
@@ -2718,7 +2722,7 @@ describe('ClerkFacade', () => {
 
       expect(tryAddToCart).toHaveBeenCalledTimes(MAX_SPOKEN_QUANTITY);
       // One undo window covering all five, so the whole add comes back in one action.
-      expect(clerk.pendingAdd()).toMatchObject({ quantity: MAX_SPOKEN_QUANTITY });
+      expect(clerk.pendingAdd()).toMatchObject({ lines: [{ quantity: MAX_SPOKEN_QUANTITY }] });
     });
 
     it('removes one unit for a misheard count instead of silently nothing', () => {
