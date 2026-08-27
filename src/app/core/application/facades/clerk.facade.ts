@@ -200,7 +200,7 @@ export interface PendingAdd {
  *
  * Deliberately **not exported**: an add that carries a batch token appends to the
  * open window instead of replacing it, and the only thing allowed to hand that
- * token out is the facade method that opened the batch. Threaded down
+ * token out is `withUndoBatch`, for the length of the turn it scopes. Threaded down
  * `addByName` → `autoAdd` → `addProduct` as a parameter rather than read off an
  * ambient field, so a barcode add that lands mid-turn — which passes no token —
  * cannot be swept into the agent's batch, and undo can never reverse a
@@ -222,6 +222,16 @@ interface UndoBatch {
    * gone or one that now belongs to somebody else.
    */
   open: boolean;
+  /**
+   * The agent's own answer to the cashier, or `''`.
+   *
+   * Written by the turn and read once, at the seal, which speaks it after the
+   * summary. On the batch rather than passed to a seal call, because the only entry
+   * point is `withUndoBatch` and its `finally` runs where the turn's return value
+   * is no longer in reach — a turn that threw has no return value at all, and the
+   * summary of what it managed to ring up still has to be spoken.
+   */
+  answer: string;
 }
 
 /**
@@ -2112,22 +2122,42 @@ export class ClerkFacade {
   // ─── Undo window ──────────────────────────────────────────────────────────
 
   /**
-   * Claim the undo window for one multi-step turn.
+   * Run one turn with everything it rings up inside a single undo window.
    *
-   * The token this returns is the only thing that makes an add append to the open
-   * window instead of replacing it, and it is handed down as a parameter — so an
-   * add from anywhere else, a barcode above all, still supersedes the window
-   * exactly as it does today. Every batch must be sealed; `sealUndoBatch()` belongs
-   * in the caller's `finally`, because a batch left open holds a window whose
-   * countdown has not started.
+   * The only way to open a batch, and a scope rather than a `begin`/`seal` pair on
+   * purpose: a batch left open holds a window whose countdown never started, so a
+   * caller who forgot the `finally` would leave the sale with a window that cannot
+   * expire and an utterance that is never said. Here the `finally` *is* the API —
+   * a turn that throws, aborts or returns early seals exactly as one that succeeds.
+   *
+   * The token handed to `turn` is the only thing that makes an add append to the
+   * open window instead of replacing it, and it is passed down as a parameter — so
+   * an add from anywhere else, a barcode above all, still supersedes the window
+   * exactly as it does today.
+   *
+   * Not re-entrant, and it does not need to be: the admission gate admits one turn
+   * at a time, and a batch found open here belongs to a turn that ended without
+   * sealing, so it is sealed before this one starts rather than nested inside it.
+   *
+   * Turn seam: the agent tier's runner is the production caller, wired in where
+   * `handlePhrase`'s `default:` arm fires the turn — the same seam
+   * `createClerkAgentTools` closes over, and reached the same way until then.
+   *
+   * @param turn does the turn's work with the batch token, setting `batch.answer`
+   *   to whatever the agent answered.
+   * @returns whatever the turn returned, untouched.
    */
-  private beginUndoBatch(): UndoBatch {
+  private async withUndoBatch<T>(turn: (batch: UndoBatch) => T | Promise<T>): Promise<T> {
     // Any batch still open belongs to a turn that has ended without sealing, and
     // leaving it would let two turns append to one window.
     this.sealUndoBatch();
-    const batch: UndoBatch = { outcomes: [], open: false };
+    const batch: UndoBatch = { outcomes: [], open: false, answer: '' };
     this.openBatch = batch;
-    return batch;
+    try {
+      return await turn(batch);
+    } finally {
+      this.sealUndoBatch(batch.answer);
+    }
   }
 
   /**
@@ -2140,6 +2170,10 @@ export class ClerkFacade {
    * that changed *nothing*; a turn that changed the cart is never silent. A batch
    * that committed nothing and attempted nothing says nothing, which is the same
    * rule read the other way.
+   *
+   * Called by `withUndoBatch`'s `finally` for a turn that ended, and directly at
+   * the points that end a turn from outside it — the agent kill switch above all,
+   * where the turn's writes are already in the sale.
    *
    * @param answer the agent's own answer, spoken after the summary. The summary is
    *   exempt from the speech budget: the trim consumes the answer, and an
