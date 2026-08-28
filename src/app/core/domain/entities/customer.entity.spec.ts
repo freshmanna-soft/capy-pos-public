@@ -3,6 +3,7 @@ import {
   Customer,
   CustomerStatus,
   CustomerTier,
+  toCustomerStatus,
   toCustomerTier,
 } from '@core/domain/entities/customer.entity';
 
@@ -477,6 +478,56 @@ describe('Customer Entity', () => {
       });
 
       expect(customer.tier).toBe(CustomerTier.GOLD);
+    });
+  });
+
+  describe('the status guard', () => {
+    // `status` arrives from the same unvalidated Dexie column as `tier`, and is
+    // read the same way: BLOCKED gates checkout, VIP changes messaging. Guarding
+    // it unevenly with tier would make the same corrupt row read as blocked on
+    // one path and active on another.
+
+    it.each(Object.values(CustomerStatus))('keeps %s, which is a real status', (status) => {
+      expect(toCustomerStatus(status)).toBe(status);
+    });
+
+    it('snaps a status no longer in the enum onto ACTIVE', () => {
+      expect(toCustomerStatus('ARCHIVED')).toBe(CustomerStatus.ACTIVE);
+    });
+
+    it('snaps a status that is not even a string onto ACTIVE', () => {
+      expect(toCustomerStatus(null)).toBe(CustomerStatus.ACTIVE);
+      expect(toCustomerStatus(undefined)).toBe(CustomerStatus.ACTIVE);
+      expect(toCustomerStatus(3)).toBe(CustomerStatus.ACTIVE);
+      expect(toCustomerStatus({ status: 'VIP' })).toBe(CustomerStatus.ACTIVE);
+    });
+
+    it('is case-sensitive, because the stored spelling is ours to control', () => {
+      expect(toCustomerStatus('vip')).toBe(CustomerStatus.ACTIVE);
+    });
+
+    it('lands a customer built from a corrupt status on ACTIVE', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        status: 'ARCHIVED' as unknown as CustomerStatus,
+      });
+
+      expect(customer.status).toBe(CustomerStatus.ACTIVE);
+    });
+
+    it('keeps a stored status that is a real value', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        status: CustomerStatus.VIP,
+      });
+
+      expect(customer.status).toBe(CustomerStatus.VIP);
     });
   });
 

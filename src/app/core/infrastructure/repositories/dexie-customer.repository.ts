@@ -4,6 +4,7 @@ import {
   Customer,
   CustomerStatus,
   CustomerTier,
+  toCustomerStatus,
   toCustomerTier,
 } from '@core/domain/entities/customer.entity';
 import { CustomerBuilder } from '@core/domain/entities/customer.builder';
@@ -45,11 +46,12 @@ export class DexieCustomerRepository
       .withName(record.name)
       .withEmail(record.email)
       .withPhone(record.phone)
-      .withStatus(record.status as CustomerStatus)
+      // `ICustomerDB.status`/`.tier` are bare strings, so these are real
+      // conversions and not casts past the type checker. The entity applies the
+      // same coercion in its constructor, so neither field can disagree with
+      // itself about which value a corrupt row lands on.
+      .withStatus(toCustomerStatus(record.status))
       .withLoyaltyPoints(record.loyaltyPoints)
-      // `ICustomerDB.tier` is a bare string, so this is a real conversion and not a
-      // cast past the type checker. The entity applies the same coercion, so the two
-      // cannot disagree about which rung a corrupt row lands on.
       .withTier(toCustomerTier(record.tier))
       .withCreatedAt(record.createdAt)
       .withUpdatedAt(record.updatedAt)

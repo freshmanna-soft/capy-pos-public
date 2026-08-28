@@ -50,6 +50,31 @@ export function toCustomerTier(value: unknown): CustomerTier {
     : CustomerTier.BRONZE;
 }
 
+/** Every status value, as plain strings, for membership tests. */
+const CUSTOMER_STATUS_VALUES: readonly string[] = Object.values(CustomerStatus);
+
+/**
+ * Snaps a stored status onto the enum, exactly as `toCustomerTier` does for tier
+ * and for the same reason: `status` arrives from the same unvalidated Dexie
+ * record, the column is declared `CustomerStatus` but nothing enforces it at
+ * rest, and a raw type-assertion cast at a reader is a claim about the record,
+ * not a guarantee — the bad value still reaches the entity's `status` field
+ * unchanged. Guarded once, here, so every construction path (the builder, the
+ * repository, `fromJSON`) may trust the declared type afterward instead of each
+ * re-guarding it.
+ *
+ * Falls back to ACTIVE, matching the constructor's pre-existing default for a
+ * missing status — a corrupt status is treated the same as no status.
+ *
+ * @param value - Whatever the stored record actually holds
+ * @returns The matching status, or ACTIVE for anything unrecognised
+ */
+export function toCustomerStatus(value: unknown): CustomerStatus {
+  return typeof value === 'string' && CUSTOMER_STATUS_VALUES.includes(value)
+    ? (value as CustomerStatus)
+    : CustomerStatus.ACTIVE;
+}
+
 /**
  * Loyalty Program Interface
  */
@@ -128,7 +153,10 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
     this.name = props.name;
     this.email = props.email;
     this.phone = props.phone;
-    this.status = props.status ?? CustomerStatus.ACTIVE;
+    // Coerced rather than defaulted, so the declared `CustomerStatus` type of this
+    // field is true for every construction path — including a Dexie record whose
+    // stored status is an arbitrary string. See `toCustomerStatus`.
+    this.status = toCustomerStatus(props.status);
     this.loyaltyPoints = props.loyaltyPoints ?? 0;
     // Coerced rather than defaulted, so the declared `CustomerTier` type of this
     // field is true for every construction path — including a Dexie record whose
