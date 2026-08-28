@@ -84,15 +84,16 @@ export interface RelayRejection {
 }
 
 /**
- * Whether the caller presented a bearer token.
+ * Whether the caller presented a bearer token. **Presence only — this verifies
+ * nothing.** `Authorization: Bearer x` satisfies it.
  *
- * Authorization proper is the gateway's job, exactly as `infra/vision-proxy`'s
- * handler says of itself. This is the belt to that braces, and it is here rather
- * than only there because the failure it guards is worse on this route: a
- * misconfigured route in front of a *tool-capable* model on the shop's key is an
- * open, metered path that can also change a cart. Presence only — checking the
- * token is the authorizer's job, and duplicating that here would be a second,
- * worse implementation of it.
+ * Used only by `lambda.ts`, the dormant AWS path. It used to be described as "the
+ * belt to the gateway authorizer's braces"; epic #195 established there was no
+ * authorizer, which left this as the entire check on a tool-capable model.
+ *
+ * The deployed path does not rely on it: `server.ts` calls `authorize` in
+ * `session-guard.ts`, which verifies the signature, the expiry and the
+ * `sale:process` permission. Prefer that for any new entry point.
  */
 export function hasBearerToken(headers: Record<string, string | undefined>): boolean {
   for (const [name, value] of Object.entries(headers)) {

@@ -13,11 +13,44 @@
  * and a caller smuggling its own `system`/`messages`/`model`, which costs one
  * ordinary hop and answers the cashier's actual phrase instead.
  *
- *   ANTHROPIC_API_KEY=... npm start        # in one terminal
- *   PORT=8789 node smoke.mjs               # in another
+ *   SESSION_JWT_SECRET=… ALLOWED_ORIGINS=… ANTHROPIC_API_KEY=… npm start   # one terminal
+ *   SESSION_JWT_SECRET=… PORT=8789 node smoke.mjs                          # another
+ *
+ * The secret is required because the relay verifies a session token on every call
+ * now (#197) — `Bearer smoke` used to be enough, because nothing checked it. This
+ * script mints a real one rather than reading the browser's, so the smoke stays
+ * runnable without a signed-in till.
  */
+import { createHmac } from 'node:crypto';
+
 const PORT = Number(process.env.PORT ?? 8789);
 const URL = `http://127.0.0.1:${PORT}/clerk/agent`;
+const SECRET = process.env.SESSION_JWT_SECRET ?? '';
+
+if (SECRET.length === 0) {
+  console.error('SESSION_JWT_SECRET is not set. It must be the secret the relay verifies with.');
+  process.exit(1);
+}
+
+/**
+ * Mint a session token the way the browser does — HS256 over base64url segments,
+ * `sub`/`tenantId` for attribution, `sale:process` because that is the permission
+ * `session-guard.ts` requires. Same shape as `infra/pos-api/smoke.mjs`.
+ */
+function mint() {
+  const claims = {
+    sub: 'smoke-operator',
+    tenantId: 'smoke-store',
+    roles: ['operator'],
+    permissions: ['sale:process'],
+    exp: Math.floor(Date.now() / 1000) + 300,
+  };
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const signingInput = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
+  return `${signingInput}.${createHmac('sha256', SECRET).update(signingInput).digest('base64url')}`;
+}
+
+const TOKEN = mint();
 
 /** The browser's client-side hop budget. The relay's own ceiling is one above it. */
 const MAX_HOPS = 3;
@@ -80,7 +113,7 @@ async function post(body) {
   const started = Date.now();
   const response = await fetch(URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer smoke' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
     body: JSON.stringify(body),
   });
   return { status: response.status, ms: Date.now() - started, body: await response.json() };

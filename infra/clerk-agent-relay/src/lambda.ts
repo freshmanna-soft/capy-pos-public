@@ -18,12 +18,20 @@ interface ProxyResult {
 /**
  * API Gateway handler for POST {apiUrl}/clerk/agent.
  *
- * Authorization proper is the gateway's job here as it is for the vision proxy —
- * attach the same authorizer the rest of the Capy-POS API uses. The 401 below is
- * belt to that braces, and it is here rather than only there because the failure it
- * guards is worse on this route: a misconfigured route in front of a *tool-capable*
- * model on the shop's key is an open, metered path that can also change a cart.
- * Presence only; see `hasBearerToken`.
+ * **The 401 below checks only that a bearer token is *present*, and there is no
+ * authorizer behind it verifying one.** Epic #195 established that no
+ * `aws_apigatewayv2_authorizer` was ever built, so the previous version of this
+ * docblock — "authorization proper is the gateway's job, this is belt to those
+ * braces" — was braces to a belt that did not exist. Presence is not verification:
+ * `Authorization: Bearer x` satisfies it.
+ *
+ * The deployed path is now the container, not this function: story #197 moved the
+ * service to IBM Cloud Code Engine, where `server.ts` verifies the token's signature,
+ * expiry and `sale:process` permission via `session-guard.ts`. This file is kept as
+ * the dormant AWS template `terraform/aws-demo` is, and must not be put in front of
+ * an API Gateway route without that same check — a misconfigured route in front of a
+ * *tool-capable* model on the shop's key is an open, metered path that can also
+ * change a cart.
  */
 export async function handler(event: ProxyEvent): Promise<ProxyResult> {
   const method = event.requestContext?.http?.method ?? event.httpMethod ?? 'POST';

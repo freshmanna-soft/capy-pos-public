@@ -73,12 +73,24 @@ jobs:
         run: npm run test:unit -- --coverage
       - name: GraphRAG tooling tests
         run: npm run test:graphrag
-      # The pos-api service has its own suite (node:test, no dependencies to install)
-      # and lives outside the Vitest project, so it needs its own step or it is never
-      # run at all — which is how a `test` script that could not resolve its own files
-      # reached review green.
+      # Each infra/ service has its own node:test suite, outside the Vitest project,
+      # so each needs its own step or it is never run at all — which is how a `test`
+      # script that could not resolve its own files reached review green.
+      #
+      # The two proxies verify the session token and pin CORS themselves now (#197),
+      # and their suites are the only thing standing behind that claim, so they are
+      # gated exactly like pos-api's. `npm ci` per proxy because both carry the model
+      # SDK as a real dependency; the suites themselves need nothing but Node.
       - name: POS API service tests
         run: npm test --prefix infra/pos-api
+      - name: Vision proxy service tests
+        run: |
+          npm ci --ignore-scripts --prefix infra/vision-proxy
+          npm test --prefix infra/vision-proxy
+      - name: Clerk agent relay service tests
+        run: |
+          npm ci --ignore-scripts --prefix infra/clerk-agent-relay
+          npm test --prefix infra/clerk-agent-relay
       - name: Upload coverage artifact
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

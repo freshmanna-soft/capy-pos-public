@@ -41,15 +41,26 @@
  *
  * ## Why a copy rather than an import
  *
- * This file is byte-identical to `infra/clerk-agent-relay/src/session-guard.ts` and
- * near-identical to `infra/pos-api/src/session-auth.ts` — `diff` the pair and expect
- * silence. Each service is a standalone container with its own `tsconfig` `rootDir`
- * and its own image, and TypeScript refuses to compile a source file from outside
- * `rootDir` (TS6059), so a shared module would mean a shared build context for
- * services that deliberately have none. The token claims and permission strings are
- * a wire contract — they travel inside a signed token — so the copy is pinned by
- * `session-guard.test.mjs` on both sides instead: a rename that is not mirrored
+ * This file exists twice. `infra/vision-proxy/src/session-guard.ts` and
+ * `infra/clerk-agent-relay/src/session-guard.ts` are byte-identical to each other,
+ * and near-identical to `infra/pos-api/src/session-auth.ts`. Each service is a
+ * standalone container with its own `tsconfig` `rootDir` and its own image, and
+ * TypeScript refuses to compile a source file from outside `rootDir` (TS6059), so a
+ * shared module would mean a shared build context for services that deliberately
+ * have none.
+ *
+ * A copy is only safe if drift is loud, so `session-guard.test.mjs` — which is
+ * itself the same file on both sides — asserts it: it reads both copies off disk and
+ * fails if they differ by a byte, and asserts the permission string against the
+ * Angular app's `permission.constants.ts`. The claims and permission strings are a
+ * wire contract, travelling inside a signed token, so a rename that is not mirrored
  * fails a test rather than silently 401-ing a till.
+ *
+ * That suite also asserts that each `server.ts` actually *calls* this module and
+ * never answers `Access-Control-Allow-Origin: *`. The first review of this story
+ * found the file written, deployed, and bound into Terraform — and imported by
+ * nothing, which is a boundary in exactly the sense this epic exists to stop
+ * accepting.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
