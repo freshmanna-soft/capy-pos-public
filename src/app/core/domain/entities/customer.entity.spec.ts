@@ -462,6 +462,53 @@ describe('Customer Entity', () => {
       ).toThrow('Invalid loyalty code');
     });
 
+    it('treats a null code as no card rather than crashing', () => {
+      // Reached through `fromJSON` in production: a row that has been through a
+      // JSON round-trip, an import or a sync payload carries `loyaltyCode: null`,
+      // the cast in `fromJSON` says `string | undefined`, and the guard used to
+      // trust it. `null.trim` is a `TypeError`, and a `TypeError` in a constructor
+      // takes down the whole customer list rather than the one bad field.
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        loyaltyCode: null as unknown as string,
+      });
+
+      expect(customer.loyaltyCode).toBeUndefined();
+    });
+
+    it('reads a stored row whose code is null', () => {
+      const customer = Customer.fromJSON({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        loyaltyCode: null,
+      });
+
+      expect(customer.loyaltyCode).toBeUndefined();
+    });
+
+    it.each([
+      [12345678, 'a number, as a spreadsheet import leaves a numeric column'],
+      [{ code: 'CAPY-B3KMNPQR' }, 'an object, as a half-mapped payload leaves it'],
+    ])('refuses %s (%s) rather than storing it', (raw) => {
+      // Refused rather than dropped, for the same reason a malformed string is: the
+      // customer is holding something, and silence is the one answer that leaves
+      // nobody able to find out what.
+      expect(() =>
+        Customer.fromJSON({
+          id: 'c1',
+          name: 'Marco Rossi',
+          email: 'marco@example.com',
+          phone: '+1234567890',
+          loyaltyCode: raw,
+        })
+      ).toThrow('Invalid loyalty code');
+    });
+
     it('carries the code through clone, toJSON and fromJSON', () => {
       const customer = new Customer({
         id: 'c1',

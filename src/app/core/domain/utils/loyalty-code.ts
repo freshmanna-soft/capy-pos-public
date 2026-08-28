@@ -42,8 +42,12 @@ export const LOYALTY_CODE_BODY_LENGTH = 8;
  * `I`, `L`, `O` and `U` are absent by design — see the module note. 32^8 is about
  * 1.1e12 codes, so a shop that issues a card a minute for a century still draws
  * with a collision probability in the millionths.
+ *
+ * The length matters beyond the code space: it is exactly 32, which divides the
+ * 256 values of a byte, and that is what lets `generateLoyaltyCode` draw uniformly
+ * with a plain modulo. Exported so the spec can hold that invariant.
  */
-const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+export const LOYALTY_CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 /**
  * The misreadings Crockford defines as equal to a digit.
@@ -54,32 +58,38 @@ const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
  */
 const CROCKFORD_FOLD: Record<string, string> = { I: '1', L: '1', O: '0' };
 
-const BODY_PATTERN = new RegExp(`^[${CROCKFORD_ALPHABET}]{${LOYALTY_CODE_BODY_LENGTH}}$`);
+const BODY_PATTERN = new RegExp(`^[${LOYALTY_CODE_ALPHABET}]{${LOYALTY_CODE_BODY_LENGTH}}$`);
 
 /**
  * Mint a code for a customer who does not have one.
  *
  * Uses `crypto.getRandomValues` rather than `Math.random`: this is a bearer token
  * for someone's points balance, and a guessable one would let anybody claim
- * anybody's card by holding up a plausible barcode. Rejection sampling keeps the
- * draw uniform — 256 is not a multiple of 32's byte-space offset, and taking a
- * modulo of the raw byte would quietly favour the front of the alphabet.
+ * anybody's card by holding up a plausible barcode.
+ *
+ * The modulo is taken over every byte with no rejection step, which is the
+ * opposite of the usual advice and is correct here for one reason: a byte holds
+ * 256 values, the alphabet is 32 characters, and 256 is an exact multiple of 32.
+ * Each character therefore claims exactly eight of the 256 byte values and the
+ * draw is already uniform.
+ *
+ * Rejection sampling is what *would* bias it. Discarding bytes above the largest
+ * multiple of 32 below 256 means discarding nothing — but rejecting above 248,
+ * the arithmetic that looks right, leaves 248 usable bytes covering residues
+ * 0–23 eight times and residues 24–31 only seven, making the last eight
+ * characters of the alphabet (`R`–`Z`) 12.5% rarer than the rest. The invariant
+ * this relies on is asserted in the spec, so changing the alphabet to a length
+ * that does not divide 256 fails a test rather than quietly skewing the draw.
  */
 export function generateLoyaltyCode(): string {
-  const body: string[] = [];
-  while (body.length < LOYALTY_CODE_BODY_LENGTH) {
-    const bytes = new Uint8Array(LOYALTY_CODE_BODY_LENGTH);
-    crypto.getRandomValues(bytes);
-    for (const byte of bytes) {
-      // 248 is the largest multiple of 32 a byte can hold. Anything above it is
-      // discarded rather than folded, which is what keeps every character equally
-      // likely.
-      if (byte < 248 && body.length < LOYALTY_CODE_BODY_LENGTH) {
-        body.push(CROCKFORD_ALPHABET[byte % 32]!);
-      }
-    }
+  const bytes = new Uint8Array(LOYALTY_CODE_BODY_LENGTH);
+  crypto.getRandomValues(bytes);
+
+  let body = '';
+  for (const byte of bytes) {
+    body += LOYALTY_CODE_ALPHABET[byte % LOYALTY_CODE_ALPHABET.length]!;
   }
-  return LOYALTY_CODE_PREFIX + body.join('');
+  return LOYALTY_CODE_PREFIX + body;
 }
 
 /**

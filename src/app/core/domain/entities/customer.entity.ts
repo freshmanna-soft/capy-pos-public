@@ -447,6 +447,9 @@ export class Customer extends AbstractCustomer {
       country: data['country'] as string | undefined,
       dateOfBirth: data['dateOfBirth'] ? new Date(data['dateOfBirth'] as string) : undefined,
       notes: data['notes'] as string | undefined,
+      // The cast is a claim about the record, not a guarantee — a stored `null`
+      // satisfies the compiler here and still arrives at runtime, which is why
+      // `normalizeCode` validates rather than trusts it.
       loyaltyCode: data['loyaltyCode'] as string | undefined,
     });
   }
@@ -458,10 +461,29 @@ export class Customer extends AbstractCustomer {
  * Thrown rather than dropped, and this is the deliberate part: a code silently
  * discarded leaves a customer holding a printed card that will never be
  * recognised, with nothing anywhere saying why. A code that is *absent* is a
- * perfectly ordinary customer, so undefined passes straight through.
+ * perfectly ordinary customer, so it passes straight through.
+ *
+ * Takes `unknown` rather than `string | undefined` because the static type is not
+ * true at the boundary. `fromJSON` reads a record Dexie handed back and casts the
+ * field on the way in, and a row that has been through a JSON round-trip, an
+ * import, or a sync payload can carry an explicit `null` where TypeScript was
+ * promised a string. Trusting the cast here meant `raw.trim()` threw
+ * `TypeError: raw.trim is not a function` and took the whole customer list down
+ * with it, which is a much worse outcome than the one bad field deserved.
+ *
+ * `null` and `undefined` both mean "no card": a customer predating #176 has no
+ * value to read either way. Anything else non-string is a malformed code and is
+ * refused like a malformed string, so a number or an object cannot become a card
+ * nobody can scan.
  */
-function normalizeCode(raw: string | undefined): string | undefined {
-  if (raw === undefined || raw.trim() === '') {
+function normalizeCode(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  if (typeof raw !== 'string') {
+    throw new Error(`Invalid loyalty code: ${String(raw)}`);
+  }
+  if (raw.trim() === '') {
     return undefined;
   }
   if (!isLoyaltyCode(raw)) {
