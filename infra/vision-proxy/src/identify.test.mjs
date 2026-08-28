@@ -13,18 +13,39 @@
  * 413 frames this function considers legal, and one wildly above it would let a
  * caller stream for a long time before anything objected.
  *
- * No key and no network: `validate` is a pure function of the body, and importing
+ * The second round found the same asymmetry *inside* `validate`: `image` and
+ * `mediaType` were checked field by field while `catalog` was checked for
+ * `Array.isArray` and then cast, so the per-entry shape `formatCatalog` reads was
+ * never anyone's job. `sanitizeCatalog` is that job, and the cases below are the
+ * ones that used to reach a metered call and throw.
+ *
+ * No key and no network: `validate` and `sanitizeCatalog` are pure functions of the
+ * body, `formatCatalog` is a pure function of the catalog, and importing
  * `identify.ts` constructs the SDK client without contacting anything.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_BODY_BYTES, MAX_CATALOG_ENTRIES, MAX_IMAGE_BYTES, validate } from './identify.ts';
+import {
+  MAX_BODY_BYTES,
+  MAX_CATALOG_ENTRIES,
+  MAX_IMAGE_BYTES,
+  sanitizeCatalog,
+  sanitizeText,
+  validate,
+} from './identify.ts';
+import { MAX_CATALOG_FIELD_CHARS, formatCatalog } from './recognition-contract.ts';
+
+/**
+ * One catalog entry the way `claude-vision.adapter.ts` sends one: every field of
+ * `CatalogHint` present, because that adapter builds it from a `Product`.
+ */
+const HINT = { id: 'p-1', name: 'Tin of beans', sku: 'DRY-BEANS-1', category: 'Ambient', emoji: '🥫' };
 
 /** A frame the way `claude-vision.adapter.ts` sends one. */
 const body = (overrides = {}) => ({
   image: 'aGVsbG8=',
   mediaType: 'image/jpeg',
-  catalog: [{ id: 'p-1', name: 'Tin of beans' }],
+  catalog: [HINT],
   ...overrides,
 });
 
@@ -43,7 +64,7 @@ describe('validate — the envelope', () => {
     assert.deepEqual(accepted(validate(body())), {
       image: 'aGVsbG8=',
       mediaType: 'image/jpeg',
-      catalog: [{ id: 'p-1', name: 'Tin of beans' }],
+      catalog: [HINT],
     });
   });
 
@@ -103,9 +124,111 @@ describe('validate — the catalog', () => {
     assert.deepEqual(accepted(validate(body({ catalog: [] }))).catalog, []);
   });
 
-  it('leaves trimming the catalog to identify(), which slices to the entry cap', () => {
+  it('trims to the entry cap here, the one place the cap is applied', () => {
     const many = Array.from({ length: MAX_CATALOG_ENTRIES + 50 }, (_, at) => ({ id: `p-${at}`, name: `Item ${at}` }));
-    assert.equal(accepted(validate(body({ catalog: many }))).catalog.length, many.length);
+    assert.equal(accepted(validate(body({ catalog: many }))).catalog.length, MAX_CATALOG_ENTRIES);
+  });
+
+  /**
+   * The regression test for this round's review finding.
+   *
+   * `validate` used to check `Array.isArray` and then cast: `catalog as
+   * CatalogHint[]`. So a catalog of entries missing `sku` and `category` — the shape
+   * this suite's own fixture carried until now, and the shape any hand-written client
+   * sends — was "valid", and the first thing to actually read those fields was
+   * `formatCatalog`, one line into a metered request. `hint.category.length` threw a
+   * `TypeError`, `http.ts` caught it beside the model errors, and the caller got a 502
+   * `unavailable` for a request the boundary should have narrowed or refused.
+   *
+   * Asserted end to end rather than on the fields alone: what makes it fixed is that
+   * the output of `validate` renders, not that it has the right keys.
+   */
+  it('fills the fields formatCatalog reads, so a thin entry is not a 502', () => {
+    const thin = accepted(validate(body({ catalog: [{ id: 'p-1', name: 'Beans' }] }))).catalog;
+    assert.deepEqual(thin, [{ id: 'p-1', name: 'Beans', sku: '', category: '' }]);
+
+    const rendered = formatCatalog(thin);
+    assert.match(rendered, /Uncategorised:/);
+    assert.match(rendered, /p-1\tBeans/);
+  });
+
+  it('drops what cannot be named, spoken or added instead of carrying it into the prompt', () => {
+    // An entry with no name cannot be read aloud and one with no id cannot be put in
+    // a cart, so both are weight in a cached prompt and nothing else.
+    const catalog = [HINT, { id: 'p-2', name: '   ' }, { id: '', name: 'Nameless' }, 'nope', null, 42];
+    assert.deepEqual(accepted(validate(body({ catalog }))).catalog, [HINT]);
+  });
+
+  it('answers a catalog of nothing but junk the way it answers an empty one', () => {
+    // Deliberately not a 400, unlike the sibling relay: `identify` short-circuits an
+    // empty catalog into "nothing to match against" and spends nothing. The relay
+    // refuses because its tools resolve spoken names against the catalog.
+    assert.deepEqual(accepted(validate(body({ catalog: [{}, { sku: 'ONLY-SKU' }] }))).catalog, []);
+  });
+});
+
+describe('sanitizeText', () => {
+  it('collapses the characters that could break out of a rendered row', () => {
+    // `formatCatalog` renders tab-separated rows under category headings, so a
+    // newline in a product name would start a row of its own and a tab a column of
+    // its own — inside a block that is then cached.
+    assert.equal(sanitizeText('Tin of\nbeans\tor\r\nnot ', 100), 'Tin of beans or not');
+    // The control characters are written as escapes, not literal bytes: a raw NUL in
+    // the source makes git treat this suite as binary, so it stops showing up in a
+    // review diff. Same string at runtime.
+    assert.equal(sanitizeText('Tin\u0000of\u009fbeans', 100), 'Tin of beans');
+    assert.equal(sanitizeText('  padded  ', 100), 'padded');
+  });
+
+  it('caps what survives', () => {
+    assert.equal(sanitizeText('x'.repeat(500), 10), 'x'.repeat(10));
+  });
+});
+
+describe('sanitizeCatalog', () => {
+  it('strips every field that is rendered, not just the name', () => {
+    const [hint] = sanitizeCatalog([
+      { id: 'p\t1', name: 'Tin of\nbeans', sku: 'DRY\tBEANS', category: 'Ambient\nGoods', emoji: '🥫' },
+    ]);
+    assert.deepEqual(hint, {
+      id: 'p 1',
+      name: 'Tin of beans',
+      sku: 'DRY BEANS',
+      category: 'Ambient Goods',
+      emoji: '🥫',
+    });
+  });
+
+  it('coerces a non-string field rather than trusting or throwing on it', () => {
+    // `{ category: 42 }` is the case that used to reach `formatCatalog` and throw:
+    // the type says string, the caller is not bound by the type.
+    const [hint] = sanitizeCatalog([{ id: 'p-1', name: 'Beans', sku: 42, category: { nested: true } }]);
+    assert.deepEqual(hint, { id: 'p-1', name: 'Beans', sku: '', category: '' });
+  });
+
+  it('omits emoji rather than carrying an empty one', () => {
+    const [hint] = sanitizeCatalog([{ ...HINT, emoji: '  ' }]);
+    assert.equal('emoji' in hint, false);
+  });
+
+  it('caps every field, including the id the model has to echo back', () => {
+    const [hint] = sanitizeCatalog([
+      { id: 'i'.repeat(500), name: 'n'.repeat(500), sku: 's'.repeat(500), category: 'c'.repeat(500) },
+    ]);
+    for (const value of Object.values(hint)) {
+      assert.equal(value.length, MAX_CATALOG_FIELD_CHARS);
+    }
+  });
+
+  it('renders everything it returns', () => {
+    // The invariant `formatCatalog` documents, asserted over the awkward inputs
+    // above rather than over the happy path: nothing that survives sanitizing can
+    // make the render throw.
+    const rendered = formatCatalog(
+      sanitizeCatalog([HINT, { id: 'p-2', name: 'Rice' }, { id: 'p-3', name: 'Oats', category: 42 }])
+    );
+    assert.match(rendered, /Ambient:/);
+    assert.match(rendered, /Uncategorised:/);
   });
 });
 

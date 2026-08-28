@@ -10,7 +10,12 @@ import type {
   RecognitionResult,
   VisionCandidate,
 } from './recognition-contract.ts';
-import { RECOGNITION_SCHEMA, SYSTEM_PROMPT, formatCatalog } from './recognition-contract.ts';
+import {
+  MAX_CATALOG_FIELD_CHARS,
+  RECOGNITION_SCHEMA,
+  SYSTEM_PROMPT,
+  formatCatalog,
+} from './recognition-contract.ts';
 
 /**
  * Claude Opus 5. Do not downgrade this to save money without measuring first —
@@ -59,7 +64,14 @@ export const MAX_IMAGE_BYTES = 3_000_000;
  */
 export const MAX_BODY_BYTES = MAX_IMAGE_BYTES + 512 * 1024;
 
-/** A shop with more than this many active products needs a retrieval step first. */
+/**
+ * A shop with more than this many active products needs a retrieval step first.
+ *
+ * Applied in `sanitizeCatalog` and nowhere else. `identify` used to slice to it a
+ * second time, which is the same two-definitions-of-one-cap shape review caught on
+ * `MAX_BODY_BYTES`: the copy that is not the one callers reach is the copy that
+ * drifts.
+ */
 export const MAX_CATALOG_ENTRIES = 400;
 
 const client = new Anthropic();
@@ -74,7 +86,10 @@ const client = new Anthropic();
  * ordering backwards and every request pays full price for the catalog.
  */
 export async function identify(request: IdentifyRequest): Promise<RecognitionResult> {
-  const catalog = request.catalog.slice(0, MAX_CATALOG_ENTRIES);
+  // No slicing and no sanitizing here: `validate` is the only way to build an
+  // `IdentifyRequest`, and both entry points — `server.ts` via `http.ts`, and the
+  // dormant `lambda.ts` — run it before reaching this line.
+  const { catalog } = request;
   if (catalog.length === 0) {
     return { candidates: [], utterance: 'There is nothing in the catalog to match against.', empty: true };
   }
@@ -205,6 +220,72 @@ function logUsage(usage: Anthropic.Usage): void {
   );
 }
 
+/**
+ * Strip anything that could break out of the row it is rendered in, then cap it.
+ *
+ * Control characters, newlines and tabs all go: `formatCatalog` renders the catalog
+ * as tab-separated rows under category headings, so a product name containing a
+ * newline can otherwise start a row of its own — and one containing a tab can start
+ * a column of its own — inside a *cached* block. That is the cheapest prompt
+ * injection there is, and the shop's own inventory form is where the text comes
+ * from, so it is not trusted text just because it is not a stranger's.
+ *
+ * Byte-identical to `sanitizeText` in the relay's `validate.ts` on purpose, but not
+ * shared: each service is a standalone container with its own `rootDir`, and the
+ * drift check in `session-guard.test.mjs` only covers files that exist twice by
+ * necessity. Two small copies are cheaper than adding a third to that list.
+ */
+export function sanitizeText(value: string, maxChars: number): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxChars);
+}
+
+/**
+ * Turn a caller's array into the `CatalogHint[]` `formatCatalog` renders.
+ *
+ * This is the function whose absence review caught. `validate` used to check
+ * `Array.isArray(catalog)` and then cast the array through — `catalog as
+ * CatalogHint[]` — so every per-entry guarantee in the type was a claim nobody
+ * checked. A single entry missing `category` (`{ id: 'p-1', name: 'Beans' }`, the
+ * shape a hand-written client sends) reached `hint.category.length` in
+ * `formatCatalog` and threw a `TypeError`, which `http.ts` caught with the model
+ * errors and reported as a 502 `unavailable`: a bad request, blamed on the service,
+ * arriving as "she didn't catch it" at the till.
+ *
+ * Entries without a usable id and name are dropped rather than repaired, matching
+ * `sanitizeCatalog` in the relay: a product with no name cannot be spoken and one
+ * with no id cannot be added to a cart, so carrying it into the prompt only costs
+ * tokens. Unlike the relay, an id here is also rendered and expected back — the
+ * model returns one and `parse` looks it up — so it is capped to the same width as
+ * everything else that is rendered, and an id longer than that is not an id.
+ */
+export function sanitizeCatalog(raw: unknown[]): CatalogHint[] {
+  const hints: CatalogHint[] = [];
+  for (const entry of raw.slice(0, MAX_CATALOG_ENTRIES)) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const id = sanitizeText(asString(record['id']), MAX_CATALOG_FIELD_CHARS);
+    const name = sanitizeText(asString(record['name']), MAX_CATALOG_FIELD_CHARS);
+    if (id.length === 0 || name.length === 0) {
+      continue;
+    }
+    const emoji = sanitizeText(asString(record['emoji']), MAX_CATALOG_FIELD_CHARS);
+    hints.push({
+      id,
+      name,
+      sku: sanitizeText(asString(record['sku']), MAX_CATALOG_FIELD_CHARS),
+      category: sanitizeText(asString(record['category']), MAX_CATALOG_FIELD_CHARS),
+      ...(emoji.length > 0 ? { emoji } : {}),
+    });
+  }
+  return hints;
+}
+
 /** Validate the client payload before spending anything on it. */
 export function validate(body: unknown): IdentifyRequest | { error: string } {
   if (typeof body !== 'object' || body === null) {
@@ -228,5 +309,17 @@ export function validate(body: unknown): IdentifyRequest | { error: string } {
     return { error: 'catalog must be an array.' };
   }
 
-  return { image, mediaType, catalog: catalog as CatalogHint[] };
+  // No cast. Every field of every hint is now something this function produced.
+  //
+  // A catalog that sanitizes to nothing is not a rejection, which is where this
+  // deliberately differs from the relay's 400: `identify` answers an empty catalog
+  // with "there is nothing in the catalog to match against" and spends nothing, and
+  // the till has one honest thing to say either way. The relay refuses instead
+  // because its tools resolve spoken names *against* the catalog, so a hop with an
+  // empty one has no work it could do.
+  return { image, mediaType, catalog: sanitizeCatalog(catalog) };
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }

@@ -106,8 +106,26 @@ The utterance is spoken out loud, so write it the way a person would say it:
 - Nothing: "I can't tell what that is. Turn the label towards me?"
 Keep it under about twelve words, plain and active. Never apologise, never explain yourself, and never mention confidence, photos, models, or catalogs.`;
 
+/** Longest a rendered catalog field may be. Past this it is not a product name. */
+export const MAX_CATALOG_FIELD_CHARS = 120;
+
 /**
  * Render the catalog as its own cacheable block, grouped by category.
+ *
+ * **Every field read here is assumed to be a string already stripped of control
+ * characters, newlines and tabs.** `hint.category.length` below is not a defensive
+ * read — it is this function trusting `sanitizeCatalog` in `identify.ts`, which is
+ * the only code that turns a caller's JSON into a `CatalogHint`. That split is
+ * deliberate and mirrors the relay: stripping belongs with validation, because the
+ * browser cannot be trusted to have done it, and the rendering belongs here,
+ * because this is the only place the block is built. It is also load-bearing —
+ * before `sanitizeCatalog` existed, `validate` cast the array through unchecked and
+ * a catalog entry without a `category` reached this line and threw, which the
+ * boundary reported as a 502 `unavailable` rather than the 400 it was.
+ *
+ * The rows are tab-separated and the categories are headings, so an unstripped
+ * newline or tab in any field would start a row or a column of its own inside a
+ * cached block — the cheapest prompt injection there is.
  *
  * Grouping is not cosmetic. Products that are easy to confuse are almost always in
  * the same category, and a flat alphabetical list scatters them — so the two oat
