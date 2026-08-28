@@ -79,6 +79,20 @@ export function toLoyaltyTier(tier: string): LoyaltyTier {
 }
 
 /**
+ * Snaps a stored customer tier back onto the `CustomerTier` ladder.
+ *
+ * The same BRONZE fallback as `toLoyaltyTier`, applied to the other half of the
+ * bridge. Both guards are needed and for the same reason: a Dexie tier is an
+ * unvalidated string, and `LoyaltyAwardResult` declares `CustomerTier`. Guarding
+ * only the multiplier lookup would let a raw value reach the caller, where
+ * `PosFacade` reports a promotion by comparing the tier before with the tier
+ * after — so a corrupt row would announce a promotion nobody earned.
+ */
+export function toCustomerTier(tier: string): CustomerTier {
+  return tier in LOYALTY_TIER_BY_CUSTOMER_TIER ? (tier as CustomerTier) : CustomerTier.BRONZE;
+}
+
+/**
  * AwardLoyaltyPointsUseCase
  *
  * Awards loyalty points for a completed sale and lets the customer's tier be
@@ -145,13 +159,17 @@ export class AwardLoyaltyPointsUseCase {
       if (!customer) {
         return this.nothing('customer-not-found');
       }
+      // Normalised once, ahead of every use: the multiplier lookup and the
+      // before/after pair in the result must agree on what rung this customer was
+      // on, and only one of them can be allowed to see a corrupt Dexie value.
+      const previousTier = toCustomerTier(customer.tier);
+
       if (customer.status === CustomerStatus.BLOCKED) {
         // Checked here rather than left to `addPoints` to throw, so a blocked card
         // reads as a decision in the result instead of an error in the log.
-        return { ...this.nothing('customer-blocked'), previousTier: customer.tier };
+        return { ...this.nothing('customer-blocked'), previousTier };
       }
 
-      const previousTier = customer.tier;
       const { totalPoints } = this.loyalty.calculatePoints(wholeUnits, toLoyaltyTier(previousTier));
 
       if (totalPoints <= 0) {
@@ -172,7 +190,7 @@ export class AwardLoyaltyPointsUseCase {
         points: totalPoints,
         balance: updated.loyaltyPoints,
         previousTier,
-        tier: updated.tier,
+        tier: toCustomerTier(updated.tier),
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to award loyalty points';

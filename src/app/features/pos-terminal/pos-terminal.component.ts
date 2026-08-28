@@ -8,6 +8,7 @@ import {
   PaymentResult,
 } from '@features/pos-terminal/components/checkout/checkout.component';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
+import { CustomerLoyaltyComponent } from '@features/pos-terminal/components/customer-loyalty/customer-loyalty.component';
 import { ProductGridComponent } from '@shared/ui/organisms/product-grid/product-grid.component';
 import { Product } from '@core/domain/entities/product.entity';
 import { PosFacade } from '@core/application/facades';
@@ -41,6 +42,7 @@ import { ToastService } from '@shared/ui/toast/toast.service';
     ShoppingCartComponent,
     CheckoutComponent,
     ReceiptComponent,
+    CustomerLoyaltyComponent,
   ],
   templateUrl: './pos-terminal.component.html',
   styleUrl: './pos-terminal.component.scss',
@@ -179,6 +181,18 @@ export class PosTerminalComponent implements OnInit {
     ) {
       this.posFacade.clearCart();
     }
+  }
+
+  /**
+   * Voids the sale the cashier just confirmed clearing from the cart panel.
+   *
+   * Routed through the facade rather than `CartService` because voiding also
+   * releases the attached loyalty card — leaving it on would award the next
+   * shopper's points to whoever walked away. The cart panel has already asked for
+   * confirmation, so this does not ask again.
+   */
+  voidSale(): void {
+    this.posFacade.clearCart();
   }
 
   /**

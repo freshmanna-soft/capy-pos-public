@@ -1,6 +1,10 @@
 import { TestBed } from '@angular/core/testing';
 import { vi, type MockedObject } from 'vitest';
-import { AwardLoyaltyPointsUseCase, toLoyaltyTier } from './award-loyalty-points.use-case';
+import {
+  AwardLoyaltyPointsUseCase,
+  toCustomerTier,
+  toLoyaltyTier,
+} from './award-loyalty-points.use-case';
 import { CUSTOMER_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 import { ICustomerRepository } from '@core/domain/interfaces/customer.repository.interface';
 import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
@@ -258,6 +262,65 @@ describe('AwardLoyaltyPointsUseCase', () => {
 
       expect(result.awarded).toBe(true);
       expect(result.points).toBe(100);
+    });
+  });
+
+  describe('toCustomerTier', () => {
+    it.each(Object.values(CustomerTier))('maps %s onto itself', (tier) => {
+      expect(toCustomerTier(tier)).toBe(tier);
+    });
+
+    it('falls back to BRONZE for a tier no longer in the ladder', () => {
+      expect(toCustomerTier('PALLADIUM')).toBe(CustomerTier.BRONZE);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // A corrupt stored tier must be snapped onto the ladder on BOTH sides of the
+  // result, not just where the multiplier is looked up. `PosFacade` reports a
+  // promotion by comparing `previousTier` with `tier`, so leaking a raw Dexie
+  // value out of one side turns a corrupt row into a phantom promotion.
+  // -------------------------------------------------------------------------
+
+  describe('a corrupt stored tier', () => {
+    it('is reported as BRONZE on both sides of an award, not raw', async () => {
+      mockRepository.findById.mockResolvedValue(
+        customer({ tier: 'PALLADIUM' as unknown as CustomerTier })
+      );
+      mockRepository.updateLoyaltyPoints.mockResolvedValue(
+        afterAward(100, customer({ tier: 'PALLADIUM' as unknown as CustomerTier }))
+      );
+
+      const result = await useCase.execute({ customerId: 'customer-1', purchaseAmount: 10 });
+
+      expect(result.previousTier).toBe(CustomerTier.BRONZE);
+      expect(Object.values(CustomerTier)).toContain(result.tier);
+    });
+
+    it('does not read as a promotion when the balance never crossed a threshold', async () => {
+      mockRepository.findById.mockResolvedValue(
+        customer({ tier: 'PALLADIUM' as unknown as CustomerTier })
+      );
+      // 100 points is still BRONZE, so nothing was actually earned but the rung.
+      mockRepository.updateLoyaltyPoints.mockResolvedValue(afterAward(100));
+
+      const result = await useCase.execute({ customerId: 'customer-1', purchaseAmount: 10 });
+
+      expect(result.previousTier).toBe(result.tier);
+    });
+
+    it('is reported as BRONZE for a blocked customer too', async () => {
+      mockRepository.findById.mockResolvedValue(
+        customer({
+          status: CustomerStatus.BLOCKED,
+          tier: 'PALLADIUM' as unknown as CustomerTier,
+        })
+      );
+
+      const result = await useCase.execute({ customerId: 'customer-1', purchaseAmount: 20 });
+
+      expect(result.reason).toBe('customer-blocked');
+      expect(result.previousTier).toBe(CustomerTier.BRONZE);
     });
   });
 });

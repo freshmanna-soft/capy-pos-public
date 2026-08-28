@@ -442,6 +442,18 @@ describe('PosFacade', () => {
       expect(facade.attachedCustomer()).toBeNull();
     });
 
+    it('releases the card when the cart is cleared', async () => {
+      mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(card());
+      await facade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+
+      facade.clearCart();
+
+      // Clearing the cart voids the sale. Leaving the card attached would bill the
+      // next shopper's points to whoever walked away.
+      expect(mockCartService.clearCart).toHaveBeenCalled();
+      expect(facade.attachedCustomer()).toBeNull();
+    });
+
     it('replaces the attached customer when a second card is scanned', async () => {
       mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(card());
       await facade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');

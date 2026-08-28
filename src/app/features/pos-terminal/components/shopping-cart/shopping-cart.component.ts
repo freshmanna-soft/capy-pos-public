@@ -291,6 +291,16 @@ export class ShoppingCartComponent {
   /** Emitted when user clicks checkout with items in cart */
   readonly checkoutRequested = output<void>();
 
+  /**
+   * Emitted when the cashier confirms they want to void the sale.
+   *
+   * This component does not clear the cart itself: voiding also releases the
+   * loyalty card attached to the sale, and `PosFacade.clearCart()` is the one
+   * place that does both. Emitting keeps this component presentational instead of
+   * giving it a second, card-blind way to empty the cart.
+   */
+  readonly clearCartRequested = output<void>();
+
   /** Whether auto-scroll is enabled (disabled when user manually scrolls) */
   private autoScrollEnabled = true;
 
@@ -374,11 +384,11 @@ export class ShoppingCartComponent {
   }
 
   /**
-   * Clears all items from the cart
+   * Asks the page to void the sale, once the cashier has confirmed.
    */
   clearCart(): void {
     if (confirm('Are you sure you want to clear the cart?')) {
-      this.cartService.clearCart();
+      this.clearCartRequested.emit();
     }
   }
 

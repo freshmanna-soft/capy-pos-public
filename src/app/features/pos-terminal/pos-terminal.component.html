@@ -84,6 +84,13 @@
     </div>
   </header>
 
+  <!-- Loyalty card strip: attach a shopper's card to the sale in progress (#177).
+       One instance, spanning the page, so it is reachable on every breakpoint
+       without the cart panel's desktop/mobile duplication. -->
+  <div class="flex-shrink-0 px-3 pt-3 md:px-4 lg:px-6" data-testid="loyalty-strip">
+    <app-customer-loyalty />
+  </div>
+
   <!-- Main Content: stacked on mobile, side-by-side on desktop -->
   <main class="flex-1 flex flex-col lg:flex-row lg:gap-4 p-3 md:p-4 lg:p-6 overflow-hidden">
     <!-- Product Search / Browse Section -->
@@ -149,7 +156,12 @@
       class="hidden lg:flex lg:w-[380px] xl:w-[420px] lg:flex-shrink-0"
       data-testid="cart-section"
     >
-      <app-shopping-cart (checkoutRequested)="openCheckout()" class="w-full"> </app-shopping-cart>
+      <app-shopping-cart
+        (checkoutRequested)="openCheckout()"
+        (clearCartRequested)="voidSale()"
+        class="w-full"
+      >
+      </app-shopping-cart>
     </aside>
   </main>
 
@@ -204,7 +216,8 @@
         </button>
         <!-- Cart content -->
         <div class="flex-1 overflow-auto px-4 pb-4">
-          <app-shopping-cart (checkoutRequested)="openCheckout()"> </app-shopping-cart>
+          <app-shopping-cart (checkoutRequested)="openCheckout()" (clearCartRequested)="voidSale()">
+          </app-shopping-cart>
         </div>
       </div>
     </dialog>

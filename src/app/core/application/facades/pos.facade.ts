@@ -174,9 +174,16 @@ export class PosFacade {
     );
   }
 
-  /** Clear all items from cart */
+  /**
+   * Voids the sale in progress: empties the cart and releases the loyalty card.
+   *
+   * The two belong together. Clearing the cart is how a cashier abandons a sale,
+   * and a card left attached across that boundary silently awards the walked-away
+   * shopper's points to whoever steps up next.
+   */
   clearCart(): void {
     this.cartService.clearCart();
+    this.detachCustomer();
   }
 
   /** Get current quantity of a product in cart */
