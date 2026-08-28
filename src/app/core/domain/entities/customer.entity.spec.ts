@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
+import {
+  Customer,
+  CustomerStatus,
+  CustomerTier,
+  toCustomerTier,
+} from '@core/domain/entities/customer.entity';
 
 describe('Customer Entity', () => {
   let customer: Customer;
@@ -406,6 +411,72 @@ describe('Customer Entity', () => {
       expect(restored.updatedAt.toISOString()).toBe('2026-02-01T00:00:00.000Z');
       expect(restored.deletedAt?.toISOString()).toBe('2026-03-01T00:00:00.000Z');
       expect(restored.dateOfBirth?.toISOString()).toBe('1990-05-04T00:00:00.000Z');
+    });
+  });
+
+  describe('the tier ladder', () => {
+    // `tier` is the one customer field read by both the till (to price the sale) and
+    // the screen (to show the badge), and it arrives from an unvalidated Dexie
+    // column. Coercing it in the constructor is what lets every reader downstream
+    // trust the declared `CustomerTier` type instead of guarding it again — and it
+    // is guarding it *unevenly* that would make the same customer read as two
+    // different tiers depending on who asked.
+
+    it.each(Object.values(CustomerTier))('keeps %s, which is a real rung', (tier) => {
+      expect(toCustomerTier(tier)).toBe(tier);
+    });
+
+    it('snaps a tier no longer in the ladder onto BRONZE', () => {
+      expect(toCustomerTier('PALLADIUM')).toBe(CustomerTier.BRONZE);
+    });
+
+    it('snaps a tier that is not even a string onto BRONZE', () => {
+      // A corrupt row can hold anything at all, not just the wrong word.
+      expect(toCustomerTier(null)).toBe(CustomerTier.BRONZE);
+      expect(toCustomerTier(undefined)).toBe(CustomerTier.BRONZE);
+      expect(toCustomerTier(3)).toBe(CustomerTier.BRONZE);
+      expect(toCustomerTier({ tier: 'GOLD' })).toBe(CustomerTier.BRONZE);
+    });
+
+    it('is case-sensitive, because the stored spelling is ours to control', () => {
+      // Folding case here would quietly bless a writer that does not round-trip
+      // through this entity. A wrong case is a corrupt row, and reads as BRONZE.
+      expect(toCustomerTier('gold')).toBe(CustomerTier.BRONZE);
+    });
+
+    it('lands a customer built from a corrupt tier on BRONZE', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        tier: 'PALLADIUM' as unknown as CustomerTier,
+      });
+
+      expect(customer.tier).toBe(CustomerTier.BRONZE);
+    });
+
+    it('defaults a customer with no stored tier to BRONZE', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+      });
+
+      expect(customer.tier).toBe(CustomerTier.BRONZE);
+    });
+
+    it('keeps a stored tier that is a real rung', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        tier: CustomerTier.GOLD,
+      });
+
+      expect(customer.tier).toBe(CustomerTier.GOLD);
     });
   });
 

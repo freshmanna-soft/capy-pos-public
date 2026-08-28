@@ -21,6 +21,35 @@ export enum CustomerTier {
   PLATINUM = 'PLATINUM',
 }
 
+/** The rungs of the ladder as plain strings, for membership tests. */
+const CUSTOMER_TIER_VALUES: readonly string[] = Object.values(CustomerTier);
+
+/**
+ * Snaps a stored tier onto the ladder.
+ *
+ * This is *the* guard for the tier field, and it belongs here rather than at each
+ * reader because `tier` arrives from an unvalidated Dexie record: the column is
+ * declared `CustomerTier` but nothing enforces it, so a bad sync or the
+ * capy-pos-demo failure-injection mode can leave any string — or no string — in
+ * it. Guarding at some readers and not others is worse than not guarding at all,
+ * because the same customer then reads as two different tiers depending on who is
+ * asking: the till would price a sale at one rung while the badge on screen shows
+ * another. So the coercion happens once, in the constructor below, which every
+ * construction path runs through — and every reader downstream may then trust the
+ * declared type instead of re-guarding it.
+ *
+ * Falls back to BRONZE — the no-bonus rung — rather than throwing, because a
+ * corrupt tier should cost the customer their multiplier, not their sale.
+ *
+ * @param value - Whatever the stored record actually holds
+ * @returns The matching rung, or BRONZE for anything unrecognised
+ */
+export function toCustomerTier(value: unknown): CustomerTier {
+  return typeof value === 'string' && CUSTOMER_TIER_VALUES.includes(value)
+    ? (value as CustomerTier)
+    : CustomerTier.BRONZE;
+}
+
 /**
  * Loyalty Program Interface
  */
@@ -101,7 +130,10 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
     this.phone = props.phone;
     this.status = props.status ?? CustomerStatus.ACTIVE;
     this.loyaltyPoints = props.loyaltyPoints ?? 0;
-    this.tier = props.tier ?? CustomerTier.BRONZE;
+    // Coerced rather than defaulted, so the declared `CustomerTier` type of this
+    // field is true for every construction path — including a Dexie record whose
+    // stored tier is an arbitrary string. See `toCustomerTier`.
+    this.tier = toCustomerTier(props.tier);
   }
 
   /**

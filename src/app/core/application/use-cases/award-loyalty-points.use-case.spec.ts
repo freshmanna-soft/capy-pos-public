@@ -1,10 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { vi, type MockedObject } from 'vitest';
-import {
-  AwardLoyaltyPointsUseCase,
-  toCustomerTier,
-  toLoyaltyTier,
-} from './award-loyalty-points.use-case';
+import { AwardLoyaltyPointsUseCase, toLoyaltyTier } from './award-loyalty-points.use-case';
 import { CUSTOMER_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 import { ICustomerRepository } from '@core/domain/interfaces/customer.repository.interface';
 import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
@@ -239,20 +235,28 @@ describe('AwardLoyaltyPointsUseCase', () => {
   // -------------------------------------------------------------------------
 
   describe('toLoyaltyTier', () => {
+    // No fallback rung is asserted here, because the bridge no longer has one: it is
+    // keyed by `CustomerTier`, and a value only becomes a `CustomerTier` by passing
+    // `toCustomerTier` in the Customer constructor. A second fallback would be an
+    // untestable branch pretending to guard something already guarded.
     it.each(Object.values(CustomerTier))('maps %s onto a loyalty tier', (tier) => {
       // Asserted over the enum rather than a hand-written list, so adding a rung to
       // CustomerTier fails here instead of silently earning BRONZE rates.
       expect(Object.values(LoyaltyTier)).toContain(toLoyaltyTier(tier));
       expect(toLoyaltyTier(tier)).toBe(tier as unknown as LoyaltyTier);
     });
+  });
 
-    it('falls back to BRONZE for a tier no longer in the ladder', () => {
-      // Dexie records are unvalidated; a corrupt tier must cost the multiplier, not
-      // the sale.
-      expect(toLoyaltyTier('PALLADIUM')).toBe(LoyaltyTier.BRONZE);
-    });
+  // -------------------------------------------------------------------------
+  // A corrupt stored tier must never reach the result on either side. `PosFacade`
+  // reports a promotion by comparing `previousTier` with `tier`, so a raw Dexie
+  // value out of one side turns a corrupt row into a phantom promotion. The
+  // coercion itself lives in `toCustomerTier` (entity) and runs in the Customer
+  // constructor; these cases hold the end-to-end consequence of it.
+  // -------------------------------------------------------------------------
 
-    it('prices a sale at BRONZE for a customer whose stored tier is corrupt', async () => {
+  describe('a corrupt stored tier', () => {
+    it('still earns points, priced at the BRONZE rate', async () => {
       mockRepository.findById.mockResolvedValue(
         customer({ tier: 'PALLADIUM' as unknown as CustomerTier })
       );
@@ -263,26 +267,7 @@ describe('AwardLoyaltyPointsUseCase', () => {
       expect(result.awarded).toBe(true);
       expect(result.points).toBe(100);
     });
-  });
 
-  describe('toCustomerTier', () => {
-    it.each(Object.values(CustomerTier))('maps %s onto itself', (tier) => {
-      expect(toCustomerTier(tier)).toBe(tier);
-    });
-
-    it('falls back to BRONZE for a tier no longer in the ladder', () => {
-      expect(toCustomerTier('PALLADIUM')).toBe(CustomerTier.BRONZE);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // A corrupt stored tier must be snapped onto the ladder on BOTH sides of the
-  // result, not just where the multiplier is looked up. `PosFacade` reports a
-  // promotion by comparing `previousTier` with `tier`, so leaking a raw Dexie
-  // value out of one side turns a corrupt row into a phantom promotion.
-  // -------------------------------------------------------------------------
-
-  describe('a corrupt stored tier', () => {
     it('is reported as BRONZE on both sides of an award, not raw', async () => {
       mockRepository.findById.mockResolvedValue(
         customer({ tier: 'PALLADIUM' as unknown as CustomerTier })

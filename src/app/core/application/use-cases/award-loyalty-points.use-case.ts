@@ -56,40 +56,25 @@ export interface LoyaltyAwardResult {
 /**
  * `CustomerTier` (entity) and `LoyaltyTier` (domain rules) are the same four-rung
  * ladder spelled twice, at the same thresholds. They are bridged explicitly rather
- * than cast across, because a cast would silently pass whatever a Dexie record
- * happens to hold — and those records are unvalidated — into a service that throws
- * on an unknown tier, turning a bad row into a lost sale.
+ * than cast across, so that adding a rung to either enum breaks the build here
+ * instead of silently earning BRONZE rates.
+ *
+ * The map is total over `CustomerTier`, and deliberately not widened to `string`:
+ * an unvalidated stored tier is snapped onto the ladder once, in the `Customer`
+ * constructor (`toCustomerTier`), so nothing reaching this bridge needs guarding a
+ * second time. Widening it would re-open the asymmetry this used to have, where the
+ * multiplier lookup was guarded but the tier shown on screen was not.
  */
-const LOYALTY_TIER_BY_CUSTOMER_TIER: Readonly<Record<string, LoyaltyTier>> = {
+const LOYALTY_TIER_BY_CUSTOMER_TIER: Readonly<Record<CustomerTier, LoyaltyTier>> = {
   [CustomerTier.BRONZE]: LoyaltyTier.BRONZE,
   [CustomerTier.SILVER]: LoyaltyTier.SILVER,
   [CustomerTier.GOLD]: LoyaltyTier.GOLD,
   [CustomerTier.PLATINUM]: LoyaltyTier.PLATINUM,
 };
 
-/**
- * Maps a stored customer tier onto the loyalty rules' tier.
- *
- * Falls back to BRONZE — the no-bonus rung — for anything unrecognised, so a
- * corrupt tier costs the customer their multiplier rather than costing them the
- * points entirely.
- */
-export function toLoyaltyTier(tier: string): LoyaltyTier {
-  return LOYALTY_TIER_BY_CUSTOMER_TIER[tier] ?? LoyaltyTier.BRONZE;
-}
-
-/**
- * Snaps a stored customer tier back onto the `CustomerTier` ladder.
- *
- * The same BRONZE fallback as `toLoyaltyTier`, applied to the other half of the
- * bridge. Both guards are needed and for the same reason: a Dexie tier is an
- * unvalidated string, and `LoyaltyAwardResult` declares `CustomerTier`. Guarding
- * only the multiplier lookup would let a raw value reach the caller, where
- * `PosFacade` reports a promotion by comparing the tier before with the tier
- * after — so a corrupt row would announce a promotion nobody earned.
- */
-export function toCustomerTier(tier: string): CustomerTier {
-  return tier in LOYALTY_TIER_BY_CUSTOMER_TIER ? (tier as CustomerTier) : CustomerTier.BRONZE;
+/** Maps a customer's tier onto the loyalty rules' spelling of the same rung. */
+export function toLoyaltyTier(tier: CustomerTier): LoyaltyTier {
+  return LOYALTY_TIER_BY_CUSTOMER_TIER[tier];
 }
 
 /**
@@ -159,10 +144,10 @@ export class AwardLoyaltyPointsUseCase {
       if (!customer) {
         return this.nothing('customer-not-found');
       }
-      // Normalised once, ahead of every use: the multiplier lookup and the
-      // before/after pair in the result must agree on what rung this customer was
-      // on, and only one of them can be allowed to see a corrupt Dexie value.
-      const previousTier = toCustomerTier(customer.tier);
+      // Already on the ladder: `Customer` snaps a corrupt stored tier onto BRONZE at
+      // construction, so the multiplier picked below and the before/after pair
+      // reported back cannot disagree about what rung this customer was on.
+      const previousTier = customer.tier;
 
       if (customer.status === CustomerStatus.BLOCKED) {
         // Checked here rather than left to `addPoints` to throw, so a blocked card
@@ -190,7 +175,7 @@ export class AwardLoyaltyPointsUseCase {
         points: totalPoints,
         balance: updated.loyaltyPoints,
         previousTier,
-        tier: toCustomerTier(updated.tier),
+        tier: updated.tier,
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to award loyalty points';

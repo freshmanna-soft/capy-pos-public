@@ -1,6 +1,11 @@
 import { Injectable, inject } from '@angular/core';
 import { BaseDexieRepository } from '@core/infrastructure/repositories/base-dexie.repository';
-import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
+import {
+  Customer,
+  CustomerStatus,
+  CustomerTier,
+  toCustomerTier,
+} from '@core/domain/entities/customer.entity';
 import { CustomerBuilder } from '@core/domain/entities/customer.builder';
 import { ICustomerRepository } from '@core/domain/interfaces/customer.repository.interface';
 import { DexieDatabase, ICustomerDB } from '@core/infrastructure/database/dexie-database.service';
@@ -29,7 +34,10 @@ export class DexieCustomerRepository
   }
 
   /**
-   * Map database record to Customer entity
+   * Map database record to Customer entity.
+   *
+   * Where the stored record's bare strings become domain values, so no reader
+   * downstream has to guard them again.
    */
   protected mapToEntity(record: ICustomerDB): Customer {
     const builder = new CustomerBuilder()
@@ -39,7 +47,10 @@ export class DexieCustomerRepository
       .withPhone(record.phone)
       .withStatus(record.status as CustomerStatus)
       .withLoyaltyPoints(record.loyaltyPoints)
-      .withTier(record.tier as CustomerTier)
+      // `ICustomerDB.tier` is a bare string, so this is a real conversion and not a
+      // cast past the type checker. The entity applies the same coercion, so the two
+      // cannot disagree about which rung a corrupt row lands on.
+      .withTier(toCustomerTier(record.tier))
       .withCreatedAt(record.createdAt)
       .withUpdatedAt(record.updatedAt)
       .withCountry(record.country ?? 'USA');
