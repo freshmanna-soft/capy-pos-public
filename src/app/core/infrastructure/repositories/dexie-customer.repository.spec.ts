@@ -367,15 +367,16 @@ describe('DexieCustomerRepository (real Dexie + fake-indexeddb)', () => {
       expect(mapper().mapToDatabase(corrupt).tier).toBe(CustomerTier.BRONZE);
     });
 
-    it('mapToEntity snaps a corrupt stored status onto ACTIVE rather than passing it on', () => {
-      // Same unvalidated column, same risk, as the tier guard above: `status`
-      // gates checkout (BLOCKED) and changes messaging (VIP), so a corrupt value
-      // must not silently become a real status via an unchecked cast.
+    it('mapToEntity coerces a corrupt stored status rather than passing it on', () => {
+      // Same shape of hazard as the tier above: `ICustomerDB.status` is a bare string
+      // and the mapper used to cast it straight onto the enum. A mis-cased or unknown
+      // standing would then sail past the BLOCKED check that gates awarding points.
       const corrupt = mapper().mapToEntity(
-        record({ id: 'bad-status', status: 'ARCHIVED' as unknown as CustomerStatus })
+        record({ id: 'bad-status', status: 'blocked' as unknown as CustomerStatus })
       );
 
-      expect(corrupt.status).toBe(CustomerStatus.ACTIVE);
+      expect(corrupt.status).toBe(CustomerStatus.INACTIVE);
+      expect(mapper().mapToDatabase(corrupt).status).toBe(CustomerStatus.INACTIVE);
     });
 
     it('mapToEntity maps soft-delete metadata and defaults a missing country to USA', () => {

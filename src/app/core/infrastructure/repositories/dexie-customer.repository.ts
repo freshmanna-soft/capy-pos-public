@@ -46,10 +46,10 @@ export class DexieCustomerRepository
       .withName(record.name)
       .withEmail(record.email)
       .withPhone(record.phone)
-      // `ICustomerDB.status`/`.tier` are bare strings, so these are real
-      // conversions and not casts past the type checker. The entity applies the
-      // same coercion in its constructor, so neither field can disagree with
-      // itself about which value a corrupt row lands on.
+      // `ICustomerDB.status` and `ICustomerDB.tier` are both bare strings, so these
+      // two are real conversions and not casts past the type checker. The builder
+      // demands the enum types; the entity applies the same coercions on the way in,
+      // so the two cannot disagree about where a corrupt row lands.
       .withStatus(toCustomerStatus(record.status))
       .withLoyaltyPoints(record.loyaltyPoints)
       .withTier(toCustomerTier(record.tier))
