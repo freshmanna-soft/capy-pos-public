@@ -48,17 +48,23 @@ locals {
   guarded_services   = { for name, service in var.services : name => service if service.guards_browser_calls }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
-  # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses, and empty
-  # when unset — which makes the app refuse to start rather than serve an origin
-  # nobody chose. See the two-pass apply note in README.md.
+  # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses. Empty until
+  # the operator supplies it, which the precondition on `ibm_code_engine_app.apps`
+  # turns into a failed plan — see "Two-pass apply" in README.md.
   allowed_origins = join(",", var.frontend_origins)
 
   # Literal (non-secret) env per app. `NODE_ENV` for every app, `ALLOWED_ORIGINS`
   # only where it means something, and `env` last so a service can override either.
+  #
+  # A guarded service gets `ALLOWED_ORIGINS` unconditionally, not only when it is
+  # non-empty: the binding states what the container needs, and whether the value
+  # exists is the precondition's job. Omitting the variable when the list is empty —
+  # which is the stock default — is what deployed two apps whose `requireConfig()`
+  # calls `process.exit(1)` before they ever listen.
   service_env = {
     for name, service in var.services : name => merge(
       { NODE_ENV = "production" },
-      service.guards_browser_calls && local.allowed_origins != "" ? { ALLOWED_ORIGINS = local.allowed_origins } : {},
+      service.guards_browser_calls ? { ALLOWED_ORIGINS = local.allowed_origins } : {},
       service.env,
     )
   }
@@ -163,6 +169,34 @@ resource "ibm_code_engine_app" "apps" {
       name      = "SESSION_JWT_SECRET"
       key       = "SESSION_JWT_SECRET"
       reference = ibm_code_engine_secret.session_jwt[0].name
+    }
+  }
+
+  # `guards_browser_calls` needs three values, and until now only two of them failed
+  # the plan when missing: `anthropic_api_key` and `session_jwt_secret` each have a
+  # precondition on their secret, while `frontend_origins` — required by the same
+  # flag, and defaulting to `[]` — had none. So a stock `terraform apply` planned
+  # clean and then deployed two revisions that exit(1) on the missing variable, which
+  # surfaces as a scaling failure rather than as the configuration mistake it is.
+  #
+  # Here rather than on a secret because origins are a literal env var, so there is no
+  # secret resource of their own to hang it from. The condition short-circuits for the
+  # frontend, which is unguarded and needs no origins list.
+  lifecycle {
+    precondition {
+      condition     = !each.value.guards_browser_calls || local.allowed_origins != ""
+      error_message = <<-EOT
+        ${each.key} sets guards_browser_calls, so it needs TF_VAR_frontend_origins:
+        without it the container refuses to start rather than answer every origin.
+        The frontend's URL is an output of this same apply, so on a first deploy:
+          1. apply the frontend alone, with
+             terraform apply -var 'services={"capy-pos-app"={image_port=8080}}'
+          2. read its URL, with: terraform output -raw app_url
+          3. set TF_VAR_frontend_origins to that URL as a one-element JSON list
+          4. terraform apply
+        Already know the origin (redeploy, or a custom domain)? Set it and apply once.
+        See "Two-pass apply" in terraform/README.md.
+      EOT
     }
   }
 }
