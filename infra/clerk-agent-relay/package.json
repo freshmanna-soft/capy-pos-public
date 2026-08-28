@@ -1,0 +1,21 @@
+{
+  "name": "capy-clerk-agent-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-side relay for the Capy-POS agentic clerk. Holds the model API key, owns the tool schemas and the system prompt, and takes one hop per call.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --experimental-strip-types src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --test src",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "~5.9.2"
+  }
+}
