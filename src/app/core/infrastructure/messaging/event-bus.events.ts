@@ -33,6 +33,16 @@ export const EventType = {
    * spoken removal would be the one clerk action that left no trace on the bus.
    */
   CLERK_ITEM_REMOVED: 'clerk.item.removed',
+  // Loyalty
+  /**
+   * A customer's card was attached to the sale in progress.
+   *
+   * Carries the customer id and tier only. The name and the code itself stay off
+   * the bus: this feeds the agent-monitor panel, which is not a place to publish
+   * who is standing at the till.
+   */
+  CUSTOMER_ATTACHED: 'customer.attached',
+  LOYALTY_POINTS_AWARDED: 'loyalty.points.awarded',
   // Sync lifecycle
   SYNC_COMPLETED: 'sync.completed',
   SYNC_PUSH_COMPLETED: 'sync.push.completed',
