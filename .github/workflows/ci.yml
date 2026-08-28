@@ -73,6 +73,12 @@ jobs:
         run: npm run test:unit -- --coverage
       - name: GraphRAG tooling tests
         run: npm run test:graphrag
+      # The pos-api service has its own suite (node:test, no dependencies to install)
+      # and lives outside the Vitest project, so it needs its own step or it is never
+      # run at all — which is how a `test` script that could not resolve its own files
+      # reached review green.
+      - name: POS API service tests
+        run: npm test --prefix infra/pos-api
       - name: Upload coverage artifact
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
