@@ -11,8 +11,11 @@ import type {
   AgentToolCall,
   RelayRequest,
 } from './agent-contract.ts';
-import { SYSTEM_PROMPT, TOOL_SCHEMAS, formatCatalog } from './agent-contract.ts';
+import { CLERK_AGENT_TOOL_NAMES, SYSTEM_PROMPT, TOOL_SCHEMAS, formatCatalog } from './agent-contract.ts';
 import { MAX_ASSISTANT_BLOCKS, MAX_TOOL_RESULTS } from './validate.ts';
+
+/** The tuple as a set, for the outbound name check in `toStep`. */
+const TOOL_NAMES = new Set<string>(CLERK_AGENT_TOOL_NAMES);
 
 /**
  * Claude Opus 5, the same model the vision path uses, and for a sharper version of
@@ -124,11 +127,14 @@ export async function relay(request: RelayRequest): Promise<AgentStep> {
  * Exported for the suite: this is where every failure mode that is not a network
  * failure gets decided, and it needs no key to exercise.
  *
- * The two ceilings are not defensive noise. They are `validate.ts`'s own caps,
- * checked on the way *out*: a hop this relay hands back is a hop the browser will
- * hand straight in again on the next call, so returning more blocks or more calls
- * than the validator accepts would turn this hop into the next hop's bounded 400.
- * Refusing it here costs one turn instead of two and says so in the log.
+ * The checks here are not defensive noise. Each one is a rule `validate.ts`
+ * enforces on the way *in*, checked on the way *out*: a hop this relay hands back
+ * is a hop the browser will hand straight in again on the next call, so anything
+ * the validator would refuse turns this hop into the next hop's bounded 400.
+ * Refusing it here costs one turn instead of two and says so in the log. That is
+ * why the set is exactly the validator's — the two block caps, the call cap, one
+ * id per call, and a name inside the tuple — and why adding a rule there means
+ * adding it here.
  */
 export function toStep(blocks: AgentBlock[]): AgentStep {
   if (blocks.length > MAX_ASSISTANT_BLOCKS) {
@@ -137,6 +143,7 @@ export function toStep(blocks: AgentBlock[]): AgentStep {
   }
 
   const calls: AgentToolCall[] = [];
+  const ids = new Set<string>();
   for (const block of blocks) {
     if (block['type'] !== 'tool_use') {
       continue;
@@ -148,6 +155,23 @@ export function toStep(blocks: AgentBlock[]): AgentStep {
       console.warn('[clerk-agent] dropped a malformed tool call');
       return { kind: 'unavailable' };
     }
+    if (ids.has(id)) {
+      // The validator matches results to calls by id, so a repeated id makes the
+      // replay unanswerable — there is no result the browser could send that
+      // answers one of the two and not the other.
+      console.warn('[clerk-agent] hop reused a tool call id');
+      return { kind: 'unavailable' };
+    }
+    if (!TOOL_NAMES.has(name)) {
+      // Off-tuple names should be impossible: the model is only ever handed
+      // `TOOL_SCHEMAS`. But the validator reads one as a forged turn and refuses
+      // the whole next hop, so an impossible name must not be the thing that
+      // costs the cashier her turn — and the log names it, because a name that
+      // shows up here means the tool list and this set have drifted apart.
+      console.warn(`[clerk-agent] hop asked for an unknown tool: ${name}`);
+      return { kind: 'unavailable' };
+    }
+    ids.add(id);
     calls.push({
       id,
       name,
@@ -186,8 +210,13 @@ export function toStep(blocks: AgentBlock[]): AgentStep {
  * carrying all of its tool results. All of a hop's results going back together is
  * not cosmetic: splitting them across turns degrades parallel tool use, which is
  * why `AgentExchange` pairs them in the first place.
+ *
+ * Exported for the suite, like `toStep`: everything this function decides is
+ * load-bearing and invisible in a type — what goes behind the breakpoint, the
+ * order of state and phrase, one user turn per hop — and none of it needs a key
+ * to check.
  */
-function buildMessages(request: RelayRequest): Anthropic.MessageParam[] {
+export function buildMessages(request: RelayRequest): Anthropic.MessageParam[] {
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: [{ type: 'text', text: openingTurn(request) }] },
   ];
