@@ -1,5 +1,5 @@
 /**
- * The HTTP adapter and the process entry point.
+ * The process entry point: environment, sockets, and nothing that decides anything.
  *
  * The same file serves local development and IBM Cloud Code Engine. That is the
  * whole point of this story: there is no gateway in front of the container to
@@ -8,9 +8,11 @@
  *
  * The boundary matters more on this route than on the vision proxy's: this endpoint
  * holds tools that change a cart, so anything that can reach this port can spend the
- * shop's model key *and* drive the till. Every decision lives in `session-guard.ts`,
- * `validate.ts` and `relay.ts`; this file is sockets, environment, and the order the
- * checks run in.
+ * shop's model key *and* drive the till. The order the checks run in lives in
+ * `http.ts`, which is where the suite can start a real server and issue real requests
+ * at it; the decisions live in `session-guard.ts`, `validate.ts` and `relay.ts`. What
+ * is left here is the two things a test cannot have: a bound port and a
+ * `process.exit`.
  *
  *   SESSION_JWT_SECRET=… ALLOWED_ORIGINS=http://localhost:4200 \
  *   ANTHROPIC_API_KEY=… npm start                              # laptop, port 8789
@@ -21,9 +23,12 @@
 import { createServer } from 'node:http';
 import { relay } from './relay.ts';
 import { validate, MAX_TRANSCRIPT_CHARS } from './validate.ts';
-import { Permission, authorize, corsHeaders, originAllowed, readAllowedOrigins } from './session-guard.ts';
+import { createRequestListener } from './http.ts';
+import { readAllowedOrigins } from './session-guard.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8789);
+
+const ROUTE = '/clerk/agent';
 
 /**
  * The largest body accepted, in bytes.
@@ -32,14 +37,8 @@ const PORT = Number(process.env['PORT'] ?? 8789);
  * two cannot drift: a transport cap below the transcript cap would reject transcripts
  * `validate.ts` considers legal. The slack covers the catalog, the cart and the JSON
  * envelope around them.
- *
- * A cap is needed even though `authorize` runs first: an *authenticated* caller can
- * still stream without bound, and the field caps inside `validate` are only consulted
- * once the whole body is in memory.
  */
 const MAX_BODY_BYTES = MAX_TRANSCRIPT_CHARS + 64 * 1024;
-
-const ALLOWED_METHODS = 'POST, OPTIONS';
 
 /**
  * Fail before listening, not on the first request.
@@ -78,93 +77,19 @@ function requireConfig(): { secret: string; origins: readonly string[] } {
 
 const { secret, origins } = requireConfig();
 
-createServer((req, res) => {
-  const origin = req.headers.origin;
-  const cors = corsHeaders(origin, origins, ALLOWED_METHODS);
-
-  const send = (status: number, body: unknown): void => {
-    res.writeHead(status, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(body));
-  };
-
-  // Preflight, before any auth: a browser never sends `Authorization` on an OPTIONS
-  // probe, so requiring a token here would refuse the very request that tells the
-  // browser it may send one. `corsHeaders` has already omitted `Allow-Origin` for an
-  // unlisted origin, which is what makes the browser refuse the real call.
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, cors).end();
-    return;
-  }
-
-  // A present-but-unlisted `Origin` is refused outright rather than merely left
-  // without an allow header: omitting the header stops a compliant browser from
-  // reading the reply, but by then the hop has been taken and the model billed.
-  if (!originAllowed(origin, origins)) {
-    send(403, { error: 'Origin is not allowed.' });
-    return;
-  }
-
-  if (req.method !== 'POST' || !req.url?.split('?')[0]?.endsWith('/clerk/agent')) {
-    send(404, { error: 'POST /clerk/agent' });
-    return;
-  }
-
-  // Auth on headers, before a single body byte is read. The token is in a header, so
-  // there is nothing to wait for — and an unauthenticated caller that cannot make
-  // this process buffer a 200 KB transcript is a cheaper thing to be pointed at.
-  const outcome = authorize(req.headers.authorization, Permission.PROCESS_SALE, secret, Math.floor(Date.now() / 1000));
-  if (!outcome.ok) {
-    send(outcome.status, { error: outcome.error });
-    return;
-  }
-
-  const chunks: Buffer[] = [];
-  let received = 0;
-  let aborted = false;
-
-  req.on('data', (chunk: Buffer) => {
-    if (aborted) {
-      return;
-    }
-    received += chunk.length;
-    if (received > MAX_BODY_BYTES) {
-      aborted = true;
-      send(413, { error: 'Request body too large.' });
-      req.destroy();
-      return;
-    }
-    chunks.push(chunk);
-  });
-
-  req.on('end', () => {
-    if (aborted) {
-      return;
-    }
-    void (async () => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      } catch {
-        send(400, { error: 'Body must be JSON.' });
-        return;
-      }
-
-      const request = validate(parsed);
-      if ('error' in request) {
-        send(400, { error: request.error });
-        return;
-      }
-
-      try {
-        send(200, await relay(request));
-      } catch (error) {
-        console.error('[clerk-agent] hop failed', { operatorId: outcome.claims.operatorId, error });
-        send(502, { error: 'The clerk is unavailable.' });
-      }
-    })();
-  });
-}).listen(PORT, () => {
-  console.log(`[clerk-agent] listening on http://localhost:${PORT}/clerk/agent`);
+createServer(
+  createRequestListener({
+    logPrefix: '[clerk-agent]',
+    route: ROUTE,
+    secret,
+    origins,
+    maxBodyBytes: MAX_BODY_BYTES,
+    validate,
+    handle: relay,
+    unavailable: 'The clerk is unavailable.',
+  })
+).listen(PORT, () => {
+  console.log(`[clerk-agent] listening on http://localhost:${PORT}${ROUTE}`);
 });
 
 // Made with Bob

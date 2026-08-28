@@ -69,6 +69,19 @@ export const MAX_TOOL_RESULTS = 12;
 /** Whole-transcript byte ceiling, so many small blocks cost no less than a few large ones. */
 export const MAX_TRANSCRIPT_CHARS = 200_000;
 
+/**
+ * The largest request body the HTTP boundary accepts, in bytes.
+ *
+ * Here, derived from `MAX_TRANSCRIPT_CHARS`, rather than written as its own number in
+ * `server.ts`: a transport cap at or below the transcript cap would 413 transcripts
+ * this module considers legal, and that failure looks like a network fault rather
+ * than the configuration mistake it is. Co-located so the relationship is impossible
+ * to break by editing one file, and asserted in `validate.test.mjs` so the slack is a
+ * decision rather than an accident. The slack covers the catalog, the cart and the
+ * JSON envelope.
+ */
+export const MAX_BODY_BYTES = MAX_TRANSCRIPT_CHARS + 64 * 1024;
+
 /** One tool result's summarized output. Tool results are counted facts, not records. */
 export const MAX_TOOL_OUTPUT_CHARS = 4_000;
 

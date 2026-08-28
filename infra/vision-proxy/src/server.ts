@@ -1,13 +1,15 @@
 /**
- * The HTTP adapter and the process entry point.
+ * The process entry point: environment, sockets, and nothing that decides anything.
  *
  * The same file serves local development and IBM Cloud Code Engine. That is the
  * whole point of this story: there is no gateway in front of the container to
  * delegate authorization to, so the check has to run here, and a dev-only shortcut
  * would be a second code path that can drift from the deployed one.
  *
- * Every decision lives in `session-guard.ts` and `identify.ts`; this file is sockets,
- * environment, and the order the checks run in.
+ * The order the checks run in lives in `http.ts`, which is where the suite can start
+ * a real server and issue real requests at it; the decisions live in
+ * `session-guard.ts` and `identify.ts`. What is left here is the two things a test
+ * cannot have: a bound port and a `process.exit`.
  *
  *   SESSION_JWT_SECRET=… ALLOWED_ORIGINS=http://localhost:4200 \
  *   ANTHROPIC_API_KEY=… npm start                              # laptop, port 8787
@@ -18,9 +20,12 @@
  */
 import { createServer } from 'node:http';
 import { identify, validate, MAX_IMAGE_BYTES } from './identify.ts';
-import { Permission, authorize, corsHeaders, originAllowed, readAllowedOrigins } from './session-guard.ts';
+import { createRequestListener } from './http.ts';
+import { readAllowedOrigins } from './session-guard.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8787);
+
+const ROUTE = '/vision/identify';
 
 /**
  * The largest body accepted, in bytes.
@@ -28,14 +33,8 @@ const PORT = Number(process.env['PORT'] ?? 8787);
  * Derived from `MAX_IMAGE_BYTES` rather than written as its own number so the two
  * cannot drift: a transport cap below the frame cap would reject frames `identify.ts`
  * considers legal. The slack covers the catalog and the JSON envelope around it.
- *
- * A cap is needed even though `authorize` runs first: an *authenticated* caller can
- * still stream without bound, and the frame cap inside `validate` is only consulted
- * once the whole body is in memory.
  */
 const MAX_BODY_BYTES = MAX_IMAGE_BYTES + 512 * 1024;
-
-const ALLOWED_METHODS = 'POST, OPTIONS';
 
 /**
  * Fail before listening, not on the first request.
@@ -74,93 +73,19 @@ function requireConfig(): { secret: string; origins: readonly string[] } {
 
 const { secret, origins } = requireConfig();
 
-createServer((req, res) => {
-  const origin = req.headers.origin;
-  const cors = corsHeaders(origin, origins, ALLOWED_METHODS);
-
-  const send = (status: number, body: unknown): void => {
-    res.writeHead(status, { ...cors, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(body));
-  };
-
-  // Preflight, before any auth: a browser never sends `Authorization` on an OPTIONS
-  // probe, so requiring a token here would refuse the very request that tells the
-  // browser it may send one. `corsHeaders` has already omitted `Allow-Origin` for an
-  // unlisted origin, which is what makes the browser refuse the real call.
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, cors).end();
-    return;
-  }
-
-  // A present-but-unlisted `Origin` is refused outright rather than merely left
-  // without an allow header: omitting the header stops a compliant browser from
-  // reading the reply, but by then the request has been served and the model billed.
-  if (!originAllowed(origin, origins)) {
-    send(403, { error: 'Origin is not allowed.' });
-    return;
-  }
-
-  if (req.method !== 'POST' || !req.url?.split('?')[0]?.endsWith('/vision/identify')) {
-    send(404, { error: 'POST /vision/identify' });
-    return;
-  }
-
-  // Auth on headers, before a single body byte is read. The token is in a header, so
-  // there is nothing to wait for — and an unauthenticated caller that cannot make
-  // this process buffer a 3 MB frame is a cheaper thing to be pointed at.
-  const outcome = authorize(req.headers.authorization, Permission.PROCESS_SALE, secret, Math.floor(Date.now() / 1000));
-  if (!outcome.ok) {
-    send(outcome.status, { error: outcome.error });
-    return;
-  }
-
-  const chunks: Buffer[] = [];
-  let received = 0;
-  let aborted = false;
-
-  req.on('data', (chunk: Buffer) => {
-    if (aborted) {
-      return;
-    }
-    received += chunk.length;
-    if (received > MAX_BODY_BYTES) {
-      aborted = true;
-      send(413, { error: 'Request body too large.' });
-      req.destroy();
-      return;
-    }
-    chunks.push(chunk);
-  });
-
-  req.on('end', () => {
-    if (aborted) {
-      return;
-    }
-    void (async () => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      } catch {
-        send(400, { error: 'Body must be JSON.' });
-        return;
-      }
-
-      const request = validate(parsed);
-      if ('error' in request) {
-        send(400, { error: request.error });
-        return;
-      }
-
-      try {
-        send(200, await identify(request));
-      } catch (error) {
-        console.error('[vision] recognition failed', { operatorId: outcome.claims.operatorId, error });
-        send(502, { error: 'Recognition is unavailable.' });
-      }
-    })();
-  });
-}).listen(PORT, () => {
-  console.log(`[vision] listening on http://localhost:${PORT}/vision/identify`);
+createServer(
+  createRequestListener({
+    logPrefix: '[vision]',
+    route: ROUTE,
+    secret,
+    origins,
+    maxBodyBytes: MAX_BODY_BYTES,
+    validate,
+    handle: identify,
+    unavailable: 'Recognition is unavailable.',
+  })
+).listen(PORT, () => {
+  console.log(`[vision] listening on http://localhost:${PORT}${ROUTE}`);
 });
 
 // Made with Bob

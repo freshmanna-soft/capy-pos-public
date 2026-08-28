@@ -38,6 +38,18 @@ const MAX_TOKENS = 1024;
 
 /** Guard against a pathological payload; 3 MB of base64 is a huge frame already. */
 export const MAX_IMAGE_BYTES = 3_000_000;
+
+/**
+ * The largest request body the HTTP boundary accepts, in bytes.
+ *
+ * Here, derived from `MAX_IMAGE_BYTES`, rather than written as its own number in
+ * `server.ts`: a transport cap at or below the frame cap would 413 frames this module
+ * considers legal, and that failure looks like a network fault rather than the
+ * configuration mistake it is. Co-located so the relationship is impossible to break
+ * by editing one file, and asserted in `identify.test.mjs` so the slack is a decision
+ * rather than an accident. The slack covers the catalog and the JSON envelope.
+ */
+export const MAX_BODY_BYTES = MAX_IMAGE_BYTES + 512 * 1024;
 /** A shop with more than this many active products needs a retrieval step first. */
 export const MAX_CATALOG_ENTRIES = 400;
 

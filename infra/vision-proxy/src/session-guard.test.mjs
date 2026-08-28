@@ -13,12 +13,15 @@
  * nothing:
  *
  * 1. `Permission` still matches the Angular app's `permission.constants.ts`.
- * 2. The two copies of this module are still byte-identical to each other.
- * 3. `server.ts` still *calls* it, and still does not answer
- *    `Access-Control-Allow-Origin: *`.
+ * 2. Every file that exists twice is still byte-identical to its twin.
+ * 3. `server.ts` — the file the container runs — still builds its listener from
+ *    `http.ts` rather than rolling a second boundary, and no wildcard origin has
+ *    reappeared.
  *
- * (3) is the one that would have caught the defect. A unit test of `authorize` passes
- * perfectly well while nothing calls `authorize`.
+ * What this file does *not* do is prove that a request is refused. Greps cannot:
+ * inverting `if (!outcome.ok)` satisfied every one of them in the round of review
+ * that produced `http.test.mjs`, which starts a real server and sends real requests.
+ * The two suites are complements — behaviour there, wiring and drift here.
  *
  * No network and no clock: every function here is pure in its arguments.
  */
@@ -27,6 +30,7 @@ import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   Permission,
   authorize,
@@ -60,16 +64,33 @@ function mint(payload = {}, { secret = SECRET, header = { alg: 'HS256', typ: 'JW
 
 const bearer = (token) => `Bearer ${token}`;
 
-/** This service's own `src/`, whichever of the two copies is running. */
-const HERE = dirname(new URL(import.meta.url).pathname);
+/**
+ * This service's own `src/`, whichever of the two copies is running.
+ *
+ * `fileURLToPath` rather than `new URL(import.meta.url).pathname`: a URL path is
+ * percent-encoded, so a checkout under a directory with a space (or any other
+ * escaped character) in it yields `.../POS%20197/src` — a path that does not exist,
+ * failing every assertion below for a reason that has nothing to do with the code
+ * under test. `fileURLToPath` decodes it, and is also the one that gets a Windows
+ * drive letter right.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+/** `infra/`, so the paths below do not depend on which copy is running. */
+const INFRA = resolve(HERE, '..', '..');
+
+/** The same filename in both services, located from `infra/` rather than "my sibling". */
+const copiesOf = (file) => ['vision-proxy', 'clerk-agent-relay'].map((service) => join(INFRA, service, 'src', file));
 
 /**
- * The two copies, located from `infra/` rather than from "my sibling", so this file
- * stays byte-identical on both sides — which is the property it exists to assert.
+ * Every file that exists twice.
+ *
+ * The two boundary modules, and both their suites. The suites are in the list because
+ * review found the coverage asymmetric — one service pinned its transport cap and its
+ * sibling did not — and a suite that is only present on one side is exactly how that
+ * happens again.
  */
-const COPIES = ['vision-proxy', 'clerk-agent-relay'].map((service) =>
-  join(resolve(HERE, '..', '..'), service, 'src', 'session-guard.ts')
-);
+const DUPLICATED = ['session-guard.ts', 'session-guard.test.mjs', 'http.ts', 'http.test.mjs'];
 
 describe('Permission', () => {
   /**
@@ -95,66 +116,88 @@ describe('Permission', () => {
   });
 });
 
-describe('the copy in the sibling service', () => {
+describe('the copies in the sibling service', () => {
   /**
-   * The module is duplicated because each service is a standalone container with its
-   * own `tsconfig` `rootDir`, and TypeScript refuses to compile a source file from
-   * outside it (TS6059). A copy is only safe if drift is loud, so: byte-for-byte.
+   * These modules are duplicated because each service is a standalone container with
+   * its own `tsconfig` `rootDir`, and TypeScript refuses to compile a source file
+   * from outside it (TS6059). A copy is only safe if drift is loud, so: byte-for-byte,
+   * suites included.
    */
-  it('is byte-identical to this one', () => {
-    const [vision, relay] = COPIES.map((path) => readFileSync(path, 'utf8'));
-    assert.equal(
-      vision,
-      relay,
-      'infra/vision-proxy and infra/clerk-agent-relay copies of session-guard.ts have drifted — ' +
-        'apply the change to both.'
-    );
-  });
-
-  it('has an identical suite on both sides, so neither copy is checked less', () => {
-    const suites = COPIES.map((path) => readFileSync(path.replace(/\.ts$/, '.test.mjs'), 'utf8'));
-    assert.equal(suites[0], suites[1], 'the two session-guard.test.mjs files have drifted — apply the change to both.');
-  });
+  for (const file of DUPLICATED) {
+    it(`${file} is byte-identical on both sides`, () => {
+      const [vision, relay] = copiesOf(file).map((path) => readFileSync(path, 'utf8'));
+      assert.equal(
+        vision,
+        relay,
+        `infra/vision-proxy and infra/clerk-agent-relay copies of ${file} have drifted — ` +
+          'apply the change to both.'
+      );
+    });
+  }
 });
 
-describe('the boundary is wired into server.ts', () => {
+describe('the boundary is wired into the process that spends the key', () => {
+  const boundary = readFileSync(join(HERE, 'http.ts'), 'utf8');
   const server = readFileSync(join(HERE, 'server.ts'), 'utf8');
 
   /**
    * The regression test for this story's first review: the guard existed, Terraform
    * bound `SESSION_JWT_SECRET` and `ALLOWED_ORIGINS` into both apps, and no line of
-   * either service imported any of it. Dead code cannot be a boundary.
+   * either service imported any of it. Dead code cannot be a boundary — and
+   * `http.test.mjs` exercising `createRequestListener` proves nothing about the
+   * boundary if the deployed entry point does not use it.
    */
-  it('imports the guard', () => {
-    assert.match(server, /from '\.\/session-guard\.ts'/, 'server.ts does not import session-guard.ts');
+  it('is the module server.ts runs, not a second copy of the checks', () => {
+    assert.match(server, /from '\.\/http\.ts'/, 'server.ts does not import http.ts');
+    assert.match(
+      server,
+      /createServer\(\s*createRequestListener\(/,
+      'server.ts does not build its listener from http.ts'
+    );
+    for (const field of ['route:', 'secret,', 'origins,', 'maxBodyBytes:', 'validate,', 'handle:']) {
+      assert.ok(server.includes(field), `server.ts does not pass ${field} to createRequestListener`);
+    }
+    // A second boundary in the entry point is one `http.test.mjs` never sees.
+    assert.doesNotMatch(server, /authorize\(\s*req\.headers/, 'server.ts authorizes on its own');
+    assert.doesNotMatch(server, /req\.on\('data'/, 'server.ts reads bodies on its own');
   });
 
-  it('calls authorize on the request', () => {
-    assert.match(server, /authorize\(\s*req\.headers\.authorization/, 'server.ts does not call authorize()');
-  });
+  it('authorizes on headers before reading a body, and requires the sell permission', () => {
+    assert.match(boundary, /from '\.\/session-guard\.ts'/, 'http.ts does not import session-guard.ts');
+    assert.match(boundary, /Permission\.PROCESS_SALE/, 'http.ts authenticates without requiring a permission');
 
-  it('requires the permission rather than merely authenticating', () => {
-    assert.match(server, /Permission\.PROCESS_SALE/);
+    // Ordering, on the source. The socket suite proves each status; this proves the
+    // cheap check still comes first, so an unauthenticated caller cannot make the
+    // process buffer megabytes before being turned away.
+    const authorizeAt = boundary.search(/authorize\(\s*req\.headers\.authorization/);
+    const bodyAt = boundary.search(/req\.on\('data'/);
+    assert.ok(authorizeAt > 0, 'http.ts does not call authorize() on the request headers');
+    assert.ok(bodyAt > authorizeAt, 'http.ts reads the body before authorizing the caller');
   });
 
   it('never answers Access-Control-Allow-Origin: *', () => {
     // The literal this story exists to remove. `corsHeaders` echoes one allow-listed
     // origin instead, so a wildcard reappearing means the allow-list was bypassed.
-    assert.doesNotMatch(server, /'Access-Control-Allow-Origin':\s*'\*'/);
-    assert.doesNotMatch(server, /Access-Control-Allow-Origin["']?\s*:\s*["']\*/);
+    for (const [name, source] of [
+      ['http.ts', boundary],
+      ['server.ts', server],
+    ]) {
+      assert.doesNotMatch(source, /'Access-Control-Allow-Origin':\s*'\*'/, name);
+      assert.doesNotMatch(source, /Access-Control-Allow-Origin["']?\s*:\s*["']\*/, name);
+    }
   });
 
   it('derives its CORS headers and its origin list from the guard', () => {
-    assert.match(server, /corsHeaders\(/);
-    assert.match(server, /originAllowed\(/);
+    assert.match(boundary, /corsHeaders\(/);
+    assert.match(boundary, /originAllowed\(/);
     assert.match(server, /readAllowedOrigins\(process\.env\['ALLOWED_ORIGINS'\]\)/);
   });
 
   it('refuses to start without a secret or an origin list, rather than 503-ing every call', () => {
     // The docblock in session-guard.ts claims this. The claim being false in review
-    // is why this test exists.
+    // is why this test exists. `http.test.mjs` covers the other half — that a secret
+    // vanishing under a *running* process is a 503 and not a 401.
     assert.match(server, /SESSION_JWT_SECRET/);
-    assert.match(server, /process\.exit\(1\)/);
     const exits = server.match(/process\.exit\(1\)/g) ?? [];
     assert.equal(exits.length, 2, 'expected both the missing-secret and missing-origins paths to exit');
   });
