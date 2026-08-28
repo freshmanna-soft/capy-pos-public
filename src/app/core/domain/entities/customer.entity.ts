@@ -21,6 +21,84 @@ export enum CustomerTier {
   PLATINUM = 'PLATINUM',
 }
 
+/*
+ * ---------------------------------------------------------------------------
+ * Guards for the two enum-typed fields that arrive unvalidated
+ * ---------------------------------------------------------------------------
+ *
+ * `status` and `tier` are the same hazard twice. Both are declared as enums on
+ * this entity and stored as bare strings (`ICustomerDB.status`, `ICustomerDB.tier`
+ * are `string`), so nothing between the database and here enforces the declared
+ * type: a bad sync or the capy-pos-demo failure-injection mode can leave any
+ * string — or no string — in either column.
+ *
+ * Both are therefore coerced in one place, the constructor below, which every
+ * construction path runs through (`fromJSON`, `CustomerBuilder`, the Dexie mapper,
+ * `clone`). Guarding at some readers and not others is worse than not guarding at
+ * all, because the same customer then reads two different ways depending on who is
+ * asking — the till pricing a sale at one rung while the screen badges another.
+ * Guarded once here, every reader downstream may trust the declared type instead
+ * of re-guarding it.
+ *
+ * Neither throws. A corrupt field should cost the customer their standing or their
+ * multiplier, not their sale.
+ */
+
+/** The standings as plain strings, for membership tests. */
+const CUSTOMER_STATUS_VALUES: readonly string[] = Object.values(CustomerStatus);
+
+/** The rungs of the ladder as plain strings, for membership tests. */
+const CUSTOMER_TIER_VALUES: readonly string[] = Object.values(CustomerTier);
+
+/**
+ * Snaps a stored status onto one of ours.
+ *
+ * Absent and corrupt are answered differently, because they are different facts.
+ * `undefined` and `null` both mean no standing was ever stored — an ordinary
+ * customer, ACTIVE, as this field has always defaulted (it is optional on the
+ * props, and most call sites omit it). This mirrors `normalizeCode` at the foot of
+ * this file, which reads both as "no card".
+ *
+ * Anything else is a value we cannot read, and falls back to INACTIVE
+ * rather than ACTIVE: a standing we do not recognise must not hand out the one
+ * that carries privileges. The customer still earns points and still completes
+ * their sale — INACTIVE gates neither — they simply do not read as active or VIP
+ * off the back of a corrupt byte.
+ *
+ * The direction that matters is a mis-cased or unknown BLOCKED. Cast straight onto
+ * the enum it would slip past the BLOCKED check in `AwardLoyaltyPointsUseCase` and
+ * award points on a blocked account; coerced, it lands somewhere that grants
+ * nothing.
+ *
+ * @param value - Whatever the stored record actually holds
+ * @returns The matching standing, ACTIVE when none was stored, INACTIVE otherwise
+ */
+export function toCustomerStatus(value: unknown): CustomerStatus {
+  if (value === undefined || value === null) {
+    return CustomerStatus.ACTIVE;
+  }
+  return typeof value === 'string' && CUSTOMER_STATUS_VALUES.includes(value)
+    ? (value as CustomerStatus)
+    : CustomerStatus.INACTIVE;
+}
+
+/**
+ * Snaps a stored tier onto the ladder.
+ *
+ * Falls back to BRONZE for both absent and unrecognised, which collapses the two
+ * cases `toCustomerStatus` has to separate: BRONZE is at once the documented
+ * default for a customer with no tier and the rung that carries no bonus, so a
+ * corrupt tier costs the customer their multiplier and nothing else.
+ *
+ * @param value - Whatever the stored record actually holds
+ * @returns The matching rung, or BRONZE for anything unrecognised
+ */
+export function toCustomerTier(value: unknown): CustomerTier {
+  return typeof value === 'string' && CUSTOMER_TIER_VALUES.includes(value)
+    ? (value as CustomerTier)
+    : CustomerTier.BRONZE;
+}
+
 /**
  * Loyalty Program Interface
  */
@@ -99,9 +177,12 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
     this.name = props.name;
     this.email = props.email;
     this.phone = props.phone;
-    this.status = props.status ?? CustomerStatus.ACTIVE;
+    // Both coerced rather than defaulted, so the declared enum types of these two
+    // fields are true for every construction path — including a Dexie record whose
+    // stored status or tier is an arbitrary string. See the guards above.
+    this.status = toCustomerStatus(props.status);
     this.loyaltyPoints = props.loyaltyPoints ?? 0;
-    this.tier = props.tier ?? CustomerTier.BRONZE;
+    this.tier = toCustomerTier(props.tier);
   }
 
   /**
@@ -431,6 +512,8 @@ export class Customer extends AbstractCustomer {
       name: data['name'] as string,
       email: data['email'] as string,
       phone: data['phone'] as string,
+      // Both casts are claims about the record rather than guarantees — a synced or
+      // round-tripped row can hold any string here. The constructor coerces both.
       status: data['status'] as CustomerStatus | undefined,
       loyaltyPoints: data['loyaltyPoints'] as number | undefined,
       tier: data['tier'] as CustomerTier | undefined,

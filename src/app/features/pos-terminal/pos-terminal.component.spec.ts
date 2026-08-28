@@ -12,10 +12,14 @@ import { CartService } from '@core/application/services/cart.service';
 import { Product } from '@core/domain/entities/product.entity';
 import { ProductBuilder } from '@core/domain/entities/product.builder';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
-import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import {
+  PRODUCT_REPOSITORY,
+  CUSTOMER_REPOSITORY,
+} from '@core/infrastructure/factories/repository.factory';
 import { PosFacade } from '@core/application/facades';
 import { GenerateReceiptUseCase } from '@core/application/use-cases/generate-receipt.use-case';
 import { AdjustStockOnSaleUseCase } from '@core/application/use-cases/adjust-stock-on-sale.use-case';
+import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
 
 /**
  * Unit Tests for PosTerminalComponent - S1-4: Add to Cart Interaction
@@ -107,6 +111,15 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     adjustStock: vi.fn().mockResolvedValue({ id: '1', stock: 49 }),
   };
 
+  const mockCustomerRepository = {
+    // Stubbed rather than left absent: PosFacade only touches these when a loyalty
+    // card is attached, which no test here does, but a missing method would reject
+    // asynchronously and leak a console.error across spec boundaries.
+    findByLoyaltyCode: vi.fn().mockResolvedValue(null),
+    findById: vi.fn().mockResolvedValue(null),
+    updateLoyaltyPoints: vi.fn().mockResolvedValue(null),
+  };
+
   const mockTransactionRepository = {
     save: vi.fn().mockResolvedValue(undefined),
     findAll: vi.fn().mockResolvedValue([]),
@@ -136,6 +149,9 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
         AdjustStockOnSaleUseCase,
         PosFacade,
         { provide: DexieDatabase, useValue: mockDexieDatabase },
+        // PosFacade reaches customers through CustomerService for the loyalty award
+        // (#177). No test here attaches a card, so an empty stub is enough.
+        { provide: CUSTOMER_REPOSITORY, useValue: mockCustomerRepository },
         { provide: PRODUCT_REPOSITORY, useValue: mockProductRepository },
         { provide: 'ITransactionRepository', useValue: mockTransactionRepository },
       ],
@@ -380,6 +396,83 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
 
       expect(confirmSpy).not.toHaveBeenCalled();
       expect(cartService.isEmpty()).toBe(true);
+      confirmSpy.mockRestore();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Loyalty at the till (#177): the facade could attach a card and award points,
+  // but no clerk could reach any of it until this page wired it up.
+  // ---------------------------------------------------------------------------
+
+  describe('loyalty card at the till', () => {
+    let posFacade: PosFacade;
+
+    beforeEach(() => {
+      posFacade = TestBed.inject(PosFacade);
+      mockCustomerRepository.findByLoyaltyCode.mockResolvedValue(
+        new Customer({
+          id: 'customer-1',
+          name: 'Marco Rossi',
+          email: 'marco@example.com',
+          phone: '+1234567890',
+          status: CustomerStatus.ACTIVE,
+          loyaltyPoints: 250,
+          tier: CustomerTier.BRONZE,
+          loyaltyCode: 'CAPY-B3KMNPQR',
+        })
+      );
+    });
+
+    it('puts a loyalty control on the page', () => {
+      expect(fixture.nativeElement.querySelector('[data-testid="customer-loyalty"]')).toBeTruthy();
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="loyalty-code-input"]')
+      ).toBeTruthy();
+    });
+
+    it('attaches a scanned card to the sale', async () => {
+      await posFacade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+      fixture.detectChanges();
+
+      expect(posFacade.attachedCustomer()?.name).toBe('Marco Rossi');
+      expect(fixture.nativeElement.textContent).toContain('Marco Rossi');
+    });
+
+    it('releases the card when the cashier voids the sale from the cart', async () => {
+      addProduct(mockProducts.coffee);
+      await posFacade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+      expect(posFacade.attachedCustomer()).not.toBeNull();
+
+      component.voidSale();
+
+      // Both, together: an emptied cart with a card still on it bills the next
+      // shopper's points to whoever walked away.
+      expect(cartService.isEmpty()).toBe(true);
+      expect(posFacade.attachedCustomer()).toBeNull();
+    });
+
+    it('releases the card when a new transaction is started', async () => {
+      addProduct(mockProducts.coffee);
+      await posFacade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+      const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
+
+      component.startNewTransaction();
+
+      expect(cartService.isEmpty()).toBe(true);
+      expect(posFacade.attachedCustomer()).toBeNull();
+      confirmSpy.mockRestore();
+    });
+
+    it('keeps the card when the cashier cancels the clear', async () => {
+      addProduct(mockProducts.coffee);
+      await posFacade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+      const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
+
+      component.startNewTransaction();
+
+      expect(cartService.isEmpty()).toBe(false);
+      expect(posFacade.attachedCustomer()).not.toBeNull();
       confirmSpy.mockRestore();
     });
   });

@@ -152,25 +152,32 @@ describe('ShoppingCartComponent', () => {
   });
 
   describe('AC5: Clear Cart', () => {
-    it('should clear all items from cart when user confirms', () => {
+    /**
+     * Clearing is delegated upward rather than done here. Voiding a sale resets
+     * more than the cart — the attached loyalty card goes with it — and only
+     * `PosFacade` knows about both, so this component asks and the page acts.
+     */
+    it('should ask the page to void the sale when the user confirms', () => {
       component.addProduct(mockProduct);
       component.addProduct(mockProduct2);
-      expect(cartService.items().length).toBe(2);
+      const requested = vi.fn();
+      component.clearCartRequested.subscribe(requested);
 
-      // Mock confirm to return true
       vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
       component.clearCart();
-      expect(cartService.items().length).toBe(0);
-      expect(cartService.isEmpty()).toBe(true);
+
+      expect(requested).toHaveBeenCalledTimes(1);
     });
 
-    it('should NOT clear cart when user cancels confirm dialog', () => {
+    it('should NOT ask the page to void the sale when the user cancels', () => {
       component.addProduct(mockProduct);
-      expect(cartService.items().length).toBe(1);
+      const requested = vi.fn();
+      component.clearCartRequested.subscribe(requested);
 
-      // Mock confirm to return false
       vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
       component.clearCart();
+
+      expect(requested).not.toHaveBeenCalled();
       expect(cartService.items().length).toBe(1);
     });
   });

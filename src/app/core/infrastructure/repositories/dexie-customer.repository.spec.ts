@@ -355,6 +355,30 @@ describe('DexieCustomerRepository (real Dexie + fake-indexeddb)', () => {
       expect(mapper().mapToDatabase(entity).loyaltyCode).toBe('CAPY-B3KMNPQR');
     });
 
+    it('mapToEntity snaps a corrupt stored tier onto BRONZE rather than passing it on', () => {
+      // `ICustomerDB.tier` is a bare string and nothing enforces the ladder, so a bad
+      // sync or the demo's failure-injection mode can leave anything here. Passing it
+      // through would price the sale at one rung and badge the customer at another.
+      const corrupt = mapper().mapToEntity(
+        record({ id: 'bad-tier', tier: 'PALLADIUM' as unknown as CustomerTier })
+      );
+
+      expect(corrupt.tier).toBe(CustomerTier.BRONZE);
+      expect(mapper().mapToDatabase(corrupt).tier).toBe(CustomerTier.BRONZE);
+    });
+
+    it('mapToEntity coerces a corrupt stored status rather than passing it on', () => {
+      // Same shape of hazard as the tier above: `ICustomerDB.status` is a bare string
+      // and the mapper used to cast it straight onto the enum. A mis-cased or unknown
+      // standing would then sail past the BLOCKED check that gates awarding points.
+      const corrupt = mapper().mapToEntity(
+        record({ id: 'bad-status', status: 'blocked' as unknown as CustomerStatus })
+      );
+
+      expect(corrupt.status).toBe(CustomerStatus.INACTIVE);
+      expect(mapper().mapToDatabase(corrupt).status).toBe(CustomerStatus.INACTIVE);
+    });
+
     it('mapToEntity maps soft-delete metadata and defaults a missing country to USA', () => {
       const now = new Date();
       const deleted = mapper().mapToEntity(

@@ -63,6 +63,16 @@ export class CustomerService
   }
 
   /**
+   * Get customer by the code on their loyalty card
+   *
+   * The lookup normalises the code, so a card read by camera, typed by hand or
+   * spelled with Crockford's ambiguous characters all resolve to the same customer.
+   */
+  async getCustomerByLoyaltyCode(code: string): Promise<Customer | null> {
+    return this.repository.findByLoyaltyCode(code);
+  }
+
+  /**
    * Search customers
    */
   async searchCustomers(query: string, limit?: number): Promise<Customer[]> {

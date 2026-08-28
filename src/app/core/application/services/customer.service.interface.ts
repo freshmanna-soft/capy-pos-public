@@ -13,6 +13,7 @@ export interface ICustomerService extends IBaseApplicationService<Customer> {
   getCustomersByTier(tier: CustomerTier): Promise<Customer[]>;
   getCustomerByEmail(email: string): Promise<Customer | null>;
   getCustomerByPhone(phone: string): Promise<Customer | null>;
+  getCustomerByLoyaltyCode(code: string): Promise<Customer | null>;
   searchCustomers(query: string, limit?: number): Promise<Customer[]>;
   getVIPCustomers(): Promise<Customer[]>;
   getCustomersByMinPoints(minPoints: number): Promise<Customer[]>;

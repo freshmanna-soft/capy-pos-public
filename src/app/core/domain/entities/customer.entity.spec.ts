@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
+import {
+  Customer,
+  CustomerStatus,
+  CustomerTier,
+  toCustomerStatus,
+  toCustomerTier,
+} from '@core/domain/entities/customer.entity';
 
 describe('Customer Entity', () => {
   let customer: Customer;
@@ -406,6 +412,153 @@ describe('Customer Entity', () => {
       expect(restored.updatedAt.toISOString()).toBe('2026-02-01T00:00:00.000Z');
       expect(restored.deletedAt?.toISOString()).toBe('2026-03-01T00:00:00.000Z');
       expect(restored.dateOfBirth?.toISOString()).toBe('1990-05-04T00:00:00.000Z');
+    });
+  });
+
+  describe('the tier ladder', () => {
+    // `tier` is the one customer field read by both the till (to price the sale) and
+    // the screen (to show the badge), and it arrives from an unvalidated Dexie
+    // column. Coercing it in the constructor is what lets every reader downstream
+    // trust the declared `CustomerTier` type instead of guarding it again — and it
+    // is guarding it *unevenly* that would make the same customer read as two
+    // different tiers depending on who asked.
+
+    it.each(Object.values(CustomerTier))('keeps %s, which is a real rung', (tier) => {
+      expect(toCustomerTier(tier)).toBe(tier);
+    });
+
+    it('snaps a tier no longer in the ladder onto BRONZE', () => {
+      expect(toCustomerTier('PALLADIUM')).toBe(CustomerTier.BRONZE);
+    });
+
+    it('snaps a tier that is not even a string onto BRONZE', () => {
+      // A corrupt row can hold anything at all, not just the wrong word.
+      expect(toCustomerTier(null)).toBe(CustomerTier.BRONZE);
+      expect(toCustomerTier(undefined)).toBe(CustomerTier.BRONZE);
+      expect(toCustomerTier(3)).toBe(CustomerTier.BRONZE);
+      expect(toCustomerTier({ tier: 'GOLD' })).toBe(CustomerTier.BRONZE);
+    });
+
+    it('is case-sensitive, because the stored spelling is ours to control', () => {
+      // Folding case here would quietly bless a writer that does not round-trip
+      // through this entity. A wrong case is a corrupt row, and reads as BRONZE.
+      expect(toCustomerTier('gold')).toBe(CustomerTier.BRONZE);
+    });
+
+    it('lands a customer built from a corrupt tier on BRONZE', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        tier: 'PALLADIUM' as unknown as CustomerTier,
+      });
+
+      expect(customer.tier).toBe(CustomerTier.BRONZE);
+    });
+
+    it('defaults a customer with no stored tier to BRONZE', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+      });
+
+      expect(customer.tier).toBe(CustomerTier.BRONZE);
+    });
+
+    it('keeps a stored tier that is a real rung', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        tier: CustomerTier.GOLD,
+      });
+
+      expect(customer.tier).toBe(CustomerTier.GOLD);
+    });
+  });
+
+  describe('the standing guard', () => {
+    // `status` arrives from the same unvalidated Dexie column shape as `tier` — a
+    // bare string the schema never enforces — and it gates real decisions: the
+    // BLOCKED check in AwardLoyaltyPointsUseCase, `isActive`, and the VIP badge.
+    // It is coerced in the same constructor and for the same reason: a field
+    // guarded by some readers and not others makes the same customer read two
+    // different ways depending on who asked.
+
+    it.each(Object.values(CustomerStatus))('keeps %s, which is a real standing', (status) => {
+      expect(toCustomerStatus(status)).toBe(status);
+    });
+
+    it('reads a customer with no stored standing as ACTIVE', () => {
+      // Absent is not corrupt: `status` is optional on the props, and an ordinary
+      // customer created without one has always been ACTIVE. `null` means the same
+      // thing as `undefined` here, matching how a missing loyalty code is read.
+      expect(toCustomerStatus(undefined)).toBe(CustomerStatus.ACTIVE);
+      expect(toCustomerStatus(null)).toBe(CustomerStatus.ACTIVE);
+    });
+
+    it('reads a standing that is not one of ours as INACTIVE', () => {
+      // INACTIVE rather than ACTIVE: a value we cannot read must not hand out the
+      // standing that carries privileges. It still earns points at the till, so a
+      // corrupt row costs the customer their standing, not their sale.
+      expect(toCustomerStatus('SUSPENDED')).toBe(CustomerStatus.INACTIVE);
+    });
+
+    it('reads a standing that is not even a string as INACTIVE', () => {
+      // A corrupt row can hold anything at all, not just the wrong word.
+      expect(toCustomerStatus(3)).toBe(CustomerStatus.INACTIVE);
+      expect(toCustomerStatus({ status: 'VIP' })).toBe(CustomerStatus.INACTIVE);
+    });
+
+    it('is case-sensitive, so a mis-cased BLOCKED does not read as unblocked', () => {
+      // The dangerous direction: `'blocked'` is not `CustomerStatus.BLOCKED`, so
+      // without this guard the till's BLOCKED check would pass it and award points
+      // on a blocked account. Coerced, it lands on a standing that grants nothing.
+      expect(toCustomerStatus('blocked')).toBe(CustomerStatus.INACTIVE);
+      expect(toCustomerStatus('vip')).toBe(CustomerStatus.INACTIVE);
+    });
+
+    it('lands a customer built from a corrupt standing on INACTIVE', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        status: 'SUSPENDED' as unknown as CustomerStatus,
+      });
+
+      expect(customer.status).toBe(CustomerStatus.INACTIVE);
+      expect(customer.isActive()).toBe(false);
+      expect(customer.isVIP()).toBe(false);
+      expect(customer.isBlocked()).toBe(false);
+    });
+
+    it('still lets a customer built from a corrupt standing earn points', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        status: 'SUSPENDED' as unknown as CustomerStatus,
+      });
+
+      expect(() => customer.addPoints(10)).not.toThrow();
+      expect(customer.loyaltyPoints).toBe(10);
+    });
+
+    it('defaults a customer with no stored standing to ACTIVE', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+      });
+
+      expect(customer.status).toBe(CustomerStatus.ACTIVE);
     });
   });
 
