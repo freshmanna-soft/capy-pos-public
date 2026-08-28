@@ -1,4 +1,5 @@
 import { SoftDeletableEntity } from '@core/domain/entities/base.entity';
+import { isLoyaltyCode, normalizeLoyaltyCode } from '@core/domain/utils/loyalty-code';
 
 /**
  * Customer Status Enum
@@ -61,6 +62,15 @@ export interface CustomerProps extends AbstractCustomerProps {
   country?: string;
   dateOfBirth?: Date;
   notes?: string;
+  /**
+   * The code on this customer's loyalty card, or undefined for a customer who has
+   * never been issued one.
+   *
+   * Optional rather than required because the shop existed before the cards did:
+   * every pre-#176 customer has no code, and demanding one would make the whole
+   * table unreadable. A card is issued on request — see `generateLoyaltyCode`.
+   */
+  loyaltyCode?: string;
 }
 
 /**
@@ -242,6 +252,22 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
   }
 
   /**
+   * The part of the name the clerk is allowed to say out loud.
+   *
+   * On the entity rather than in the greeting, because it is a rule about the data
+   * and not about one screen: a queue within earshot of the till hears everything
+   * she says, and "Marco" identifies a customer to themselves while "Marco Rossi,
+   * four thousand points" identifies them to the six people behind them. Anything
+   * that needs the whole name still has `name` — the captions do.
+   *
+   * Falls back to the whole name for a single-word name, and to the empty string
+   * only if validation has been bypassed.
+   */
+  getFirstName(): string {
+    return this.name.trim().split(/\s+/)[0] ?? '';
+  }
+
+  /**
    * Converts customer to JSON
    */
   override toJSON(): Record<string, unknown> {
@@ -272,6 +298,8 @@ export class Customer extends AbstractCustomer {
   public country: string;
   public dateOfBirth?: Date;
   public notes?: string;
+  /** Normalized on the way in, so the stored form is the form lookups compare. */
+  public loyaltyCode?: string;
 
   constructor(props: CustomerProps) {
     super(props);
@@ -282,6 +310,7 @@ export class Customer extends AbstractCustomer {
     this.country = props.country ?? 'USA';
     this.dateOfBirth = props.dateOfBirth;
     this.notes = props.notes;
+    this.loyaltyCode = normalizeCode(props.loyaltyCode);
     this.validate();
   }
 
@@ -370,6 +399,7 @@ export class Customer extends AbstractCustomer {
       country: this.country,
       dateOfBirth: this.dateOfBirth,
       notes: this.notes,
+      loyaltyCode: this.loyaltyCode,
     });
   }
 
@@ -388,6 +418,7 @@ export class Customer extends AbstractCustomer {
       dateOfBirth: this.dateOfBirth?.toISOString(),
       age: this.getCustomerAge(),
       notes: this.notes,
+      loyaltyCode: this.loyaltyCode,
     };
   }
 
@@ -416,8 +447,49 @@ export class Customer extends AbstractCustomer {
       country: data['country'] as string | undefined,
       dateOfBirth: data['dateOfBirth'] ? new Date(data['dateOfBirth'] as string) : undefined,
       notes: data['notes'] as string | undefined,
+      // The cast is a claim about the record, not a guarantee — a stored `null`
+      // satisfies the compiler here and still arrives at runtime, which is why
+      // `normalizeCode` validates rather than trusts it.
+      loyaltyCode: data['loyaltyCode'] as string | undefined,
     });
   }
+}
+
+/**
+ * Normalize a code on the way onto the entity, refusing a malformed one.
+ *
+ * Thrown rather than dropped, and this is the deliberate part: a code silently
+ * discarded leaves a customer holding a printed card that will never be
+ * recognised, with nothing anywhere saying why. A code that is *absent* is a
+ * perfectly ordinary customer, so it passes straight through.
+ *
+ * Takes `unknown` rather than `string | undefined` because the static type is not
+ * true at the boundary. `fromJSON` reads a record Dexie handed back and casts the
+ * field on the way in, and a row that has been through a JSON round-trip, an
+ * import, or a sync payload can carry an explicit `null` where TypeScript was
+ * promised a string. Trusting the cast here meant `raw.trim()` threw
+ * `TypeError: raw.trim is not a function` and took the whole customer list down
+ * with it, which is a much worse outcome than the one bad field deserved.
+ *
+ * `null` and `undefined` both mean "no card": a customer predating #176 has no
+ * value to read either way. Anything else non-string is a malformed code and is
+ * refused like a malformed string, so a number or an object cannot become a card
+ * nobody can scan.
+ */
+function normalizeCode(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  if (typeof raw !== 'string') {
+    throw new Error(`Invalid loyalty code: ${String(raw)}`);
+  }
+  if (raw.trim() === '') {
+    return undefined;
+  }
+  if (!isLoyaltyCode(raw)) {
+    throw new Error(`Invalid loyalty code: ${raw}`);
+  }
+  return normalizeLoyaltyCode(raw);
 }
 
 // Made with Bob

@@ -5,6 +5,7 @@ import { CustomerBuilder } from '@core/domain/entities/customer.builder';
 import { ICustomerRepository } from '@core/domain/interfaces/customer.repository.interface';
 import { DexieDatabase, ICustomerDB } from '@core/infrastructure/database/dexie-database.service';
 import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
+import { normalizeLoyaltyCode } from '@core/domain/utils/loyalty-code';
 
 /**
  * Dexie Customer Repository
@@ -53,6 +54,7 @@ export class DexieCustomerRepository
     if (record.zipCode) builder.withZipCode(record.zipCode);
     if (record.dateOfBirth) builder.withDateOfBirth(record.dateOfBirth);
     if (record.notes) builder.withNotes(record.notes);
+    if (record.loyaltyCode) builder.withLoyaltyCode(record.loyaltyCode);
 
     return builder.build();
   }
@@ -76,6 +78,7 @@ export class DexieCustomerRepository
       country: entity.country,
       dateOfBirth: entity.dateOfBirth,
       notes: entity.notes,
+      loyaltyCode: entity.loyaltyCode,
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
       createdBy: entity.createdBy,
@@ -118,6 +121,26 @@ export class DexieCustomerRepository
    */
   async findByPhone(phone: string): Promise<Customer | null> {
     return this.findOneByIndexedField('phone', phone);
+  }
+
+  /**
+   * Find the customer holding a loyalty code.
+   *
+   * Normalizes before looking up, so a code typed with the wrong case or with an
+   * `O` where the card prints a `0` still finds its owner — the stored value is
+   * always canonical (`Customer` normalizes on construction), so one comparison
+   * against the index is enough and no scan is needed.
+   *
+   * A code that is not a code at all returns null rather than querying: Dexie
+   * would happily search for the empty string, and matching a customer whose code
+   * failed to persist is worse than finding nobody.
+   */
+  async findByLoyaltyCode(code: string): Promise<Customer | null> {
+    const normalized = normalizeLoyaltyCode(code);
+    if (normalized.length === 0) {
+      return null;
+    }
+    return this.findOneByIndexedField('loyaltyCode', normalized);
   }
 
   /**

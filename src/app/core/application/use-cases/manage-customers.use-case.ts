@@ -3,6 +3,7 @@ import { ICustomerRepository } from '@core/domain/interfaces/customer.repository
 import { CUSTOMER_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 import { Customer, CustomerStatus } from '@core/domain/entities/customer.entity';
 import { generateUUID } from '@core/domain/utils/uuid';
+import { generateLoyaltyCode } from '@core/domain/utils/loyalty-code';
 import { EntityNotFoundException, DuplicateEntityException } from '@core/domain/exceptions';
 
 /**
@@ -47,6 +48,8 @@ export interface CustomerSummaryDTO {
   status: CustomerStatus;
   loyaltyPoints: number;
   tier: string;
+  /** The code on their card, or undefined for a customer who has none. */
+  loyaltyCode?: string;
   totalPurchases: number;
   createdAt: Date;
 }
@@ -146,6 +149,13 @@ export class ManageCustomersUseCase {
         zipCode: request.zipCode,
         country: request.country ?? 'US',
         notes: request.notes,
+        // Every new customer gets a card. The alternative — issuing on request —
+        // means the clerk cannot recognise anybody until somebody remembers to
+        // press a second button, and a loyalty programme nobody is enrolled in is
+        // the state this story started from. Existing customers are covered by
+        // `issueLoyaltyCode`, because minting for them retroactively is a decision
+        // about their data and not a side effect of loading a list.
+        loyaltyCode: generateLoyaltyCode(),
       });
 
       const created = await this.customerRepository.create(customer);
@@ -200,6 +210,41 @@ export class ManageCustomersUseCase {
       const message = error instanceof Error ? error.message : 'Failed to update customer';
       this._error.set(message);
       this._loading.set(false);
+      return null;
+    }
+  }
+
+  /**
+   * Issue a card to a customer who does not have one, and return the code.
+   *
+   * Idempotent: a customer who already has a code gets the same one back rather
+   * than a fresh one. Re-minting would invalidate a card already in somebody's
+   * wallet, and the button that calls this is next to the one that prints it —
+   * a double tap must not silently orphan the printout.
+   */
+  async issueLoyaltyCode(customerId: string): Promise<string | null> {
+    this._error.set(null);
+
+    try {
+      const existing = await this.customerRepository.findById(customerId);
+      if (!existing) {
+        throw new EntityNotFoundException('Customer', customerId);
+      }
+      if (existing.loyaltyCode) {
+        return existing.loyaltyCode;
+      }
+
+      existing.loyaltyCode = generateLoyaltyCode();
+      existing.updatedAt = new Date();
+      const updated = await this.customerRepository.update(customerId, existing);
+
+      const summary = this.mapToSummary(updated);
+      this._customers.update((current) => current.map((c) => (c.id === summary.id ? summary : c)));
+
+      return updated.loyaltyCode ?? null;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to issue a loyalty code';
+      this._error.set(message);
       return null;
     }
   }
@@ -308,6 +353,7 @@ export class ManageCustomersUseCase {
       status: customer.status,
       loyaltyPoints: customer.loyaltyPoints,
       tier: customer.tier,
+      loyaltyCode: customer.loyaltyCode,
       totalPurchases: 0,
       createdAt: customer.createdAt,
     };

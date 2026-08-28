@@ -186,6 +186,28 @@ describe('ManageCustomersUseCase', () => {
       expect(useCase.error()).toBe('Create failed');
     });
 
+    it('mints a loyalty card for every new customer', async () => {
+      // The alternative — issuing on request — means the clerk cannot recognise
+      // anybody until somebody remembers to press a second button, which is the
+      // state this story started from.
+      mockRepository.findByEmail.mockResolvedValue(null);
+      mockRepository.create.mockImplementation(async (customer: Customer) => customer);
+
+      const result = await useCase.createCustomer(validRequest);
+
+      expect(result!.loyaltyCode).toMatch(/^CAPY-[0-9A-Z]{8}$/);
+    });
+
+    it('mints a different card for each customer', async () => {
+      mockRepository.findByEmail.mockResolvedValue(null);
+      mockRepository.create.mockImplementation(async (customer: Customer) => customer);
+
+      const first = await useCase.createCustomer(validRequest);
+      const second = await useCase.createCustomer({ ...validRequest, email: 'other@test.com' });
+
+      expect(first!.loyaltyCode).not.toBe(second!.loyaltyCode);
+    });
+
     it('should add created customer to the list', async () => {
       mockRepository.findByEmail.mockResolvedValue(null);
       mockRepository.create.mockImplementation(async (customer: Customer) => customer);
@@ -266,6 +288,134 @@ describe('ManageCustomersUseCase', () => {
 
       const updated = useCase.customers().find((c) => c.id === 'cust-1');
       expect(updated!.name).toBe('Updated');
+    });
+  });
+
+  describe('issueLoyaltyCode', () => {
+    const withoutCard = (): Customer => createMockCustomer();
+
+    const withCard = (): Customer =>
+      new Customer({
+        id: 'customer-1',
+        name: 'John Doe',
+        email: 'john@example.com',
+        phone: '+1234567890',
+        status: CustomerStatus.ACTIVE,
+        loyaltyPoints: 100,
+        tier: CustomerTier.BRONZE,
+        loyaltyCode: 'CAPY-B3KMNPQR',
+      });
+
+    it('mints and persists a card for a customer who has none', async () => {
+      // The retrofit path: every customer created before #176 has no code, and
+      // minting on a list load would be a silent write, so it happens here behind a
+      // button instead.
+      mockRepository.findById.mockResolvedValue(withoutCard());
+      mockRepository.update.mockImplementation(async (_id: string, customer: Customer) => customer);
+
+      const code = await useCase.issueLoyaltyCode('customer-1');
+
+      expect(code).toMatch(/^CAPY-[0-9A-Z]{8}$/);
+      expect(mockRepository.update).toHaveBeenCalledTimes(1);
+      const [, persisted] = mockRepository.update.mock.calls[0]!;
+      expect((persisted as Customer).loyaltyCode).toBe(code);
+    });
+
+    it('returns the existing card rather than minting a second one', async () => {
+      // The button that prints the card is next to this one. Re-minting on a double
+      // tap would invalidate a card already in somebody's wallet and orphan the
+      // printout the first tap produced.
+      mockRepository.findById.mockResolvedValue(withCard());
+
+      const code = await useCase.issueLoyaltyCode('customer-1');
+
+      expect(code).toBe('CAPY-B3KMNPQR');
+      expect(mockRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent across repeated calls', async () => {
+      const stored = withCard();
+      mockRepository.findById.mockResolvedValue(stored);
+
+      const first = await useCase.issueLoyaltyCode('customer-1');
+      const second = await useCase.issueLoyaltyCode('customer-1');
+
+      expect(second).toBe(first);
+      expect(mockRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('refreshes the row already on screen', async () => {
+      mockRepository.findAll.mockResolvedValue([withoutCard()]);
+      await useCase.loadCustomers();
+      expect(useCase.customers()[0]!.loyaltyCode).toBeUndefined();
+
+      mockRepository.findById.mockResolvedValue(withoutCard());
+      mockRepository.update.mockImplementation(async (_id: string, customer: Customer) => customer);
+
+      const code = await useCase.issueLoyaltyCode('customer-1');
+
+      expect(useCase.customers()[0]!.loyaltyCode).toBe(code);
+    });
+
+    it('leaves other rows untouched', async () => {
+      mockRepository.findAll.mockResolvedValue([
+        withoutCard(),
+        createMockCustomer({ id: 'other' }),
+      ]);
+      await useCase.loadCustomers();
+
+      mockRepository.findById.mockResolvedValue(withoutCard());
+      mockRepository.update.mockImplementation(async (_id: string, customer: Customer) => customer);
+
+      await useCase.issueLoyaltyCode('customer-1');
+
+      expect(useCase.customers()[1]!.id).toBe('other');
+      expect(useCase.customers()[1]!.loyaltyCode).toBeUndefined();
+    });
+
+    it('reports a customer who is not there', async () => {
+      mockRepository.findById.mockResolvedValue(null);
+
+      await expect(useCase.issueLoyaltyCode('ghost')).resolves.toBeNull();
+      expect(useCase.error()).toBe("Customer with id 'ghost' not found");
+      expect(mockRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('clears a previous error on a successful issue', async () => {
+      mockRepository.findById.mockResolvedValueOnce(null);
+      await useCase.issueLoyaltyCode('ghost');
+      expect(useCase.error()).not.toBeNull();
+
+      mockRepository.findById.mockResolvedValue(withoutCard());
+      mockRepository.update.mockImplementation(async (_id: string, customer: Customer) => customer);
+      await useCase.issueLoyaltyCode('customer-1');
+
+      expect(useCase.error()).toBeNull();
+    });
+
+    it('reports a write that fails', async () => {
+      mockRepository.findById.mockResolvedValue(withoutCard());
+      mockRepository.update.mockRejectedValue(new Error('db closed'));
+
+      await expect(useCase.issueLoyaltyCode('customer-1')).resolves.toBeNull();
+      expect(useCase.error()).toBe('db closed');
+    });
+
+    it('still says something readable when a write fails oddly', async () => {
+      mockRepository.findById.mockResolvedValue(withoutCard());
+      mockRepository.update.mockRejectedValue('gone');
+
+      await expect(useCase.issueLoyaltyCode('customer-1')).resolves.toBeNull();
+      expect(useCase.error()).toBe('Failed to issue a loyalty code');
+    });
+
+    it('answers null when the write comes back without a code', async () => {
+      // A repository that drops the field is a bug, but the caller prints whatever
+      // it is handed — so it must not be handed a card the database does not have.
+      mockRepository.findById.mockResolvedValue(withoutCard());
+      mockRepository.update.mockResolvedValue(withoutCard());
+
+      await expect(useCase.issueLoyaltyCode('customer-1')).resolves.toBeNull();
     });
   });
 
