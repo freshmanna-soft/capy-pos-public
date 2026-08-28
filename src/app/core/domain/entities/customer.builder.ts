@@ -38,6 +38,7 @@ export class CustomerBuilder
   private _country = 'USA';
   private _dateOfBirth?: Date;
   private _notes?: string;
+  private _loyaltyCode?: string;
 
   withName(name: string): this {
     this._name = name;
@@ -104,6 +105,11 @@ export class CustomerBuilder
     return this;
   }
 
+  withLoyaltyCode(loyaltyCode: string): this {
+    this._loyaltyCode = loyaltyCode;
+    return this;
+  }
+
   /**
    * Builds and returns the Customer entity.
    * Delegates validation to the Customer constructor.
@@ -130,6 +136,7 @@ export class CustomerBuilder
       country: this._country,
       dateOfBirth: this._dateOfBirth,
       notes: this._notes,
+      loyaltyCode: this._loyaltyCode,
     });
   }
 }

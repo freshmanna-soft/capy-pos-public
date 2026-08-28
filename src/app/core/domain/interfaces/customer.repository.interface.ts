@@ -35,6 +35,13 @@ export interface ICustomerRepository extends IBaseRepository<Customer> {
   findByPhone(phone: string): Promise<Customer | null>;
 
   /**
+   * Find the customer holding a loyalty code
+   * @param code - The loyalty code, in any spelling `normalizeLoyaltyCode` accepts
+   * @returns Promise resolving to customer or null
+   */
+  findByLoyaltyCode(code: string): Promise<Customer | null>;
+
+  /**
    * Search customers by name, email, or phone
    * @param query - Search query
    * @param limit - Maximum number of results (default: 50)

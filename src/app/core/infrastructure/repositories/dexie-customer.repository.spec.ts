@@ -26,7 +26,7 @@ function freshDb(): Dexie & { customers: Table<ICustomerDB, string> } {
     customers: Table<ICustomerDB, string>;
   };
   db.version(1).stores({
-    customers: 'id, email, phone, status, tier, [status+tier], deletedAt',
+    customers: 'id, email, phone, status, tier, loyaltyCode, [status+tier], deletedAt',
   });
   return db;
 }
@@ -349,6 +349,12 @@ describe('DexieCustomerRepository (real Dexie + fake-indexeddb)', () => {
       expect(back?.notes).toBe('First programmer');
     });
 
+    it('round-trips the loyalty code', () => {
+      const entity = mapper().mapToEntity(record({ id: 'lc-1', loyaltyCode: 'CAPY-B3KMNPQR' }));
+      expect(entity.loyaltyCode).toBe('CAPY-B3KMNPQR');
+      expect(mapper().mapToDatabase(entity).loyaltyCode).toBe('CAPY-B3KMNPQR');
+    });
+
     it('mapToEntity maps soft-delete metadata and defaults a missing country to USA', () => {
       const now = new Date();
       const deleted = mapper().mapToEntity(
@@ -357,6 +363,41 @@ describe('DexieCustomerRepository (real Dexie + fake-indexeddb)', () => {
       expect(deleted.country).toBe('USA'); // record.country ?? 'USA' fallback
       expect(deleted.deletedAt).toEqual(now);
       expect(deleted.deletedBy).toBe('admin');
+    });
+  });
+  describe('findByLoyaltyCode', () => {
+    it('finds the holder of a code', async () => {
+      await db.customers.bulkAdd([
+        record({ id: 'lc-holder', loyaltyCode: 'CAPY-B3KMNPQR' }),
+        record({ id: 'lc-other', loyaltyCode: 'CAPY-Z9XWVTSR' }),
+      ]);
+
+      const found = await repo.findByLoyaltyCode('CAPY-B3KMNPQR');
+
+      expect(found?.id).toBe('lc-holder');
+    });
+
+    it('finds the holder from a code typed in the wrong case', async () => {
+      await db.customers.add(record({ id: 'lc-holder', loyaltyCode: 'CAPY-B3KMNPQR' }));
+
+      const found = await repo.findByLoyaltyCode('capy b3km npqr');
+
+      expect(found?.id).toBe('lc-holder');
+    });
+
+    it('returns null for a code nobody holds', async () => {
+      await db.customers.add(record({ id: 'lc-holder', loyaltyCode: 'CAPY-B3KMNPQR' }));
+
+      expect(await repo.findByLoyaltyCode('CAPY-Z9XWVTSR')).toBeNull();
+    });
+
+    it('returns null without querying for something that is not a code', async () => {
+      // A product barcode reaching here must find nobody. Querying for the empty
+      // string could match a customer whose code failed to persist.
+      await db.customers.add(record({ id: 'lc-holder', loyaltyCode: 'CAPY-B3KMNPQR' }));
+
+      expect(await repo.findByLoyaltyCode('4006381333931')).toBeNull();
+      expect(await repo.findByLoyaltyCode('')).toBeNull();
     });
   });
 });

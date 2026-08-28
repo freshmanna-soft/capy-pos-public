@@ -33,4 +33,5 @@ export interface ICustomerBuilder extends IBuilder<Customer> {
   withCountry(country: string): ICustomerBuilder;
   withDateOfBirth(dateOfBirth: Date): ICustomerBuilder;
   withNotes(notes: string): ICustomerBuilder;
+  withLoyaltyCode(loyaltyCode: string): ICustomerBuilder;
 }

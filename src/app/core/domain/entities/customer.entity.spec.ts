@@ -408,6 +408,92 @@ describe('Customer Entity', () => {
       expect(restored.dateOfBirth?.toISOString()).toBe('1990-05-04T00:00:00.000Z');
     });
   });
+
+  describe('loyalty code', () => {
+    it('normalizes a code on the way in', () => {
+      // Stored canonical so the clerk's per-frame lookup is one index hit and not a
+      // scan across every spelling of the same card.
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        loyaltyCode: 'capy b3km npqr',
+      });
+
+      expect(customer.loyaltyCode).toBe('CAPY-B3KMNPQR');
+    });
+
+    it('is undefined for a customer who was never issued a card', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+      });
+
+      expect(customer.loyaltyCode).toBeUndefined();
+    });
+
+    it('treats a blank code as no card rather than a bad one', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        loyaltyCode: '   ',
+      });
+
+      expect(customer.loyaltyCode).toBeUndefined();
+    });
+
+    it('refuses a malformed code rather than dropping it', () => {
+      // Dropped silently, the customer walks out holding a printed card that will
+      // never be recognised and nothing anywhere says why.
+      expect(
+        () =>
+          new Customer({
+            id: 'c1',
+            name: 'Marco Rossi',
+            email: 'marco@example.com',
+            phone: '+1234567890',
+            loyaltyCode: '4006381333931',
+          })
+      ).toThrow('Invalid loyalty code');
+    });
+
+    it('carries the code through clone, toJSON and fromJSON', () => {
+      const customer = new Customer({
+        id: 'c1',
+        name: 'Marco Rossi',
+        email: 'marco@example.com',
+        phone: '+1234567890',
+        loyaltyCode: 'CAPY-B3KMNPQR',
+      });
+
+      expect(customer.clone().loyaltyCode).toBe('CAPY-B3KMNPQR');
+      expect(customer.toJSON()['loyaltyCode']).toBe('CAPY-B3KMNPQR');
+      expect(Customer.fromJSON(customer.toJSON()).loyaltyCode).toBe('CAPY-B3KMNPQR');
+    });
+  });
+
+  describe('getFirstName', () => {
+    it.each([
+      ['Marco Rossi', 'Marco'],
+      ['Marco', 'Marco'],
+      ['  Marco   Rossi  ', 'Marco'],
+      ['Ada Byron King', 'Ada'],
+    ])('reduces %s to %s', (name, expected) => {
+      const customer = new Customer({
+        id: 'c1',
+        name,
+        email: 'marco@example.com',
+        phone: '+1234567890',
+      });
+
+      expect(customer.getFirstName()).toBe(expected);
+    });
+  });
 });
 
 // Made with Bob

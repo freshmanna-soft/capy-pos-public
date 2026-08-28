@@ -99,6 +99,8 @@ export interface ICustomerDB {
   country: string;
   dateOfBirth?: Date;
   notes?: string;
+  /** `CAPY-<8 Crockford base32>`, indexed from v7. Absent for a customer with no card. */
+  loyaltyCode?: string;
   createdAt: Date;
   updatedAt: Date;
   createdBy?: string;
@@ -672,6 +674,22 @@ export class DexieDatabase extends Dexie {
       operatorCredentials: 'credentialId, operatorId, tenantId, createdAt, [operatorId+tenantId]',
     });
 
+    // Version 7: loyalty codes on customers — do NOT edit v1..v6 above.
+    //
+    // Additive only, so there is no `.upgrade()` hook: `loyaltyCode` is a new
+    // *index* over an existing table, and every pre-v7 customer simply has no
+    // value for it. Dexie builds the index over the rows that do, and a customer
+    // with no card is not a broken record — it is a customer who never asked for
+    // one. Backfilling codes here would mint a card for every historical customer,
+    // which is a business decision and not a migration.
+    //
+    // The index is what makes the clerk's lookup cheap: a code in frame is resolved
+    // to a customer on the frame it is read, and a full-table scan per frame would
+    // put latency between holding a card up and being greeted.
+    this.version(7).stores({
+      customers: 'id, email, phone, status, tier, tenantId, loyaltyCode, [status+tier], deletedAt',
+    });
+
     // Map tables to classes (optional, for better type safety)
     this.products.mapToClass(ProductDBRecord);
     this.customers.mapToClass(CustomerDBRecord);
@@ -1160,6 +1178,7 @@ class CustomerDBRecord implements ICustomerDB {
   country!: string;
   dateOfBirth?: Date;
   notes?: string;
+  loyaltyCode?: string;
   createdAt!: Date;
   updatedAt!: Date;
   createdBy?: string;

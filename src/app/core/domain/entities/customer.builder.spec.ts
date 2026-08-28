@@ -269,6 +269,29 @@ describe('CustomerBuilder', () => {
     });
   });
 
+  describe('withLoyaltyCode', () => {
+    it('builds a customer holding the code', () => {
+      const customer = builder
+        .withName('Marco Rossi')
+        .withEmail('marco@test.com')
+        .withPhone('+1444555666')
+        .withLoyaltyCode('CAPY-B3KMNPQR')
+        .build();
+
+      expect(customer.loyaltyCode).toBe('CAPY-B3KMNPQR');
+    });
+
+    it('leaves the code unset when never called', () => {
+      const customer = builder
+        .withName('Marco Rossi')
+        .withEmail('marco@test.com')
+        .withPhone('+1444555666')
+        .build();
+
+      expect(customer.loyaltyCode).toBeUndefined();
+    });
+  });
+
   describe('Multiple builds (builder reuse)', () => {
     it('should produce independent instances on successive builds', () => {
       const baseBuilder = new CustomerBuilder()
