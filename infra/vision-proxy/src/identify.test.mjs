@@ -18,7 +18,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_CATALOG_ENTRIES, MAX_IMAGE_BYTES, validate } from './identify.ts';
+import { MAX_BODY_BYTES, MAX_CATALOG_ENTRIES, MAX_IMAGE_BYTES, validate } from './identify.ts';
 
 /** A frame the way `claude-vision.adapter.ts` sends one. */
 const body = (overrides = {}) => ({
@@ -129,13 +129,48 @@ describe('validate — what it refuses to carry', () => {
   });
 });
 
-describe('the transport cap in server.ts', () => {
-  it('sits above the frame cap, so no legal frame is 413d before validate sees it', () => {
-    // `server.ts` derives `MAX_BODY_BYTES` from `MAX_IMAGE_BYTES` rather than writing
-    // its own number. This pins the relationship: raising the frame cap without the
-    // transport cap following would silently start rejecting legal frames at the
-    // socket, which looks like a network fault rather than a configuration one.
-    assert.ok(MAX_IMAGE_BYTES + 512 * 1024 > MAX_IMAGE_BYTES);
-    assert.equal(MAX_IMAGE_BYTES, 3_000_000, 'MAX_IMAGE_BYTES changed — check server.ts MAX_BODY_BYTES with it');
+describe('MAX_BODY_BYTES — the transport cap server.ts hands to the boundary', () => {
+  /**
+   * A catalog at the entry cap, entries shaped like the ones `body()` above carries —
+   * which is the shape `claude-vision.adapter.ts` sends. Grounding the fixture in the
+   * real payload rather than an invented field width is the point: the assertion below
+   * is only worth having if the bytes it measures are bytes a till actually sends.
+   */
+  const fullCatalog = () =>
+    Array.from({ length: MAX_CATALOG_ENTRIES }, (_, at) => ({
+      id: `p-${at}`,
+      name: `Tin of beans ${at}`,
+      sku: `DRY-BEANS-${at}`,
+      category: 'Ambient',
+      emoji: '🥫',
+    }));
+
+  it('fits the largest frame validate accepts, catalog and envelope included', () => {
+    const maximal = body({ image: 'A'.repeat(MAX_IMAGE_BYTES), catalog: fullCatalog() });
+
+    // The fixture has to be one `validate` accepts, or the size below is measured on a
+    // body the service would have refused anyway and the assertion proves nothing.
+    accepted(validate(maximal));
+
+    // `Buffer.byteLength`, not `.length`: the cap is counted in bytes off the socket
+    // (`received += chunk.length` in http.ts) and an emoji in a product name is four
+    // of them, so measuring in UTF-16 units would under-report a real payload.
+    const bytes = Buffer.byteLength(JSON.stringify(maximal));
+    assert.ok(
+      bytes <= MAX_BODY_BYTES,
+      `a legal maximal frame serializes to ${bytes} bytes, above the ${MAX_BODY_BYTES}-byte ` +
+        'transport cap: it would be 413d at the socket before validate ever saw it, which ' +
+        'reads as a network fault rather than the configuration mistake it is'
+    );
+  });
+
+  it('is not so far above the frame cap that an unbounded stream is cheap', () => {
+    // The other side of the same bound. A cap wildly above the frame cap lets an
+    // authenticated caller make this process buffer for a long time before anything
+    // objects; the slack should cover the envelope, not an order of magnitude.
+    assert.ok(
+      MAX_BODY_BYTES > MAX_IMAGE_BYTES && MAX_BODY_BYTES <= MAX_IMAGE_BYTES * 2,
+      `transport cap ${MAX_BODY_BYTES} is not within one frame cap (${MAX_IMAGE_BYTES}) of it`
+    );
   });
 });

@@ -72,13 +72,20 @@ export const MAX_TRANSCRIPT_CHARS = 200_000;
 /**
  * The largest request body the HTTP boundary accepts, in bytes.
  *
- * Here, derived from `MAX_TRANSCRIPT_CHARS`, rather than written as its own number in
- * `server.ts`: a transport cap at or below the transcript cap would 413 transcripts
- * this module considers legal, and that failure looks like a network fault rather
- * than the configuration mistake it is. Co-located so the relationship is impossible
- * to break by editing one file, and asserted in `validate.test.mjs` so the slack is a
- * decision rather than an accident. The slack covers the catalog, the cart and the
- * JSON envelope.
+ * `server.ts` imports this and hands it to `createRequestListener`; it is the only
+ * definition of the cap in the service. That matters because a transport cap at or
+ * below the transcript cap would 413 transcripts this module considers legal, and
+ * that failure looks like a network fault rather than the configuration mistake it
+ * is. Derived here, next to `MAX_TRANSCRIPT_CHARS`, so raising the transcript cap
+ * carries the transport cap with it.
+ *
+ * Two suites hold that up, because the first round of this story had the derivation
+ * written twice — once here and once in `server.ts` — which is the drift the comment
+ * claimed to prevent: `validate.test.mjs` serializes a hop with every field at its own
+ * cap and asserts it plus a full transcript fits under this number and is not dwarfed
+ * by it, and `session-guard.test.mjs` asserts `server.ts` imports the cap rather than
+ * computing a second one. The slack covers the catalog, the cart and the JSON
+ * envelope.
  */
 export const MAX_BODY_BYTES = MAX_TRANSCRIPT_CHARS + 64 * 1024;
 

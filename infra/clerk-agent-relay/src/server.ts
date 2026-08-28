@@ -22,23 +22,13 @@
  */
 import { createServer } from 'node:http';
 import { relay } from './relay.ts';
-import { validate, MAX_TRANSCRIPT_CHARS } from './validate.ts';
+import { validate, MAX_BODY_BYTES } from './validate.ts';
 import { createRequestListener } from './http.ts';
 import { readAllowedOrigins } from './session-guard.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8789);
 
 const ROUTE = '/clerk/agent';
-
-/**
- * The largest body accepted, in bytes.
- *
- * Derived from `MAX_TRANSCRIPT_CHARS` rather than written as its own number so the
- * two cannot drift: a transport cap below the transcript cap would reject transcripts
- * `validate.ts` considers legal. The slack covers the catalog, the cart and the JSON
- * envelope around them.
- */
-const MAX_BODY_BYTES = MAX_TRANSCRIPT_CHARS + 64 * 1024;
 
 /**
  * Fail before listening, not on the first request.

@@ -17,6 +17,10 @@
  * 3. `server.ts` — the file the container runs — still builds its listener from
  *    `http.ts` rather than rolling a second boundary, and no wildcard origin has
  *    reappeared.
+ * 4. `server.ts` still takes its body cap from the module that derives it, rather
+ *    than writing the same expression a second time. The review after that one found
+ *    exactly that: an exported cap nobody imported, next to a docblock claiming it
+ *    could not drift.
  *
  * What this file does *not* do is prove that a request is refused. Greps cannot:
  * inverting `if (!outcome.ok)` satisfied every one of them in the round of review
@@ -160,6 +164,38 @@ describe('the boundary is wired into the process that spends the key', () => {
     // A second boundary in the entry point is one `http.test.mjs` never sees.
     assert.doesNotMatch(server, /authorize\(\s*req\.headers/, 'server.ts authorizes on its own');
     assert.doesNotMatch(server, /req\.on\('data'/, 'server.ts reads bodies on its own');
+  });
+
+  /**
+   * The regression test for this story's second review: both services exported a
+   * `MAX_BODY_BYTES` derived from their own field cap, with a docblock claiming the
+   * derivation was impossible to break by editing one file — and `server.ts` ignored
+   * the export and wrote the identical expression again. Two definitions of one cap,
+   * so changing the field cap moved one of them.
+   *
+   * Which number reaches the socket is the thing no other suite can see: `server.ts`
+   * binds a port and `process.exit`s, so it is the one file here that cannot be
+   * imported and called. `http.test.mjs` proves the 413 fires at whatever cap it is
+   * handed; only this assertion says the deployed process hands it the derived one.
+   * Module-agnostic because this file is byte-identical in both services: the vision
+   * proxy derives its cap in `identify.ts`, the relay in `validate.ts`.
+   */
+  it('takes its body cap from the module that owns the field caps', () => {
+    assert.match(
+      server,
+      /import \{[^}]*\bMAX_BODY_BYTES\b[^}]*\} from '\.\/(identify|validate)\.ts';/,
+      'server.ts does not import MAX_BODY_BYTES from the module that derives it'
+    );
+    assert.match(
+      server,
+      /maxBodyBytes:\s*MAX_BODY_BYTES,/,
+      'server.ts passes something other than the derived MAX_BODY_BYTES to the boundary'
+    );
+    assert.doesNotMatch(
+      server,
+      /(?:const|let|var)\s+MAX_BODY_BYTES\s*=/,
+      'server.ts declares a second MAX_BODY_BYTES instead of using the imported one'
+    );
   });
 
   it('authorizes on headers before reading a body, and requires the sell permission', () => {

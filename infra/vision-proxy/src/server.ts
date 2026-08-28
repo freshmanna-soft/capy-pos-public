@@ -19,22 +19,13 @@
  * `src/environments/environment.ts`.
  */
 import { createServer } from 'node:http';
-import { identify, validate, MAX_IMAGE_BYTES } from './identify.ts';
+import { identify, validate, MAX_BODY_BYTES } from './identify.ts';
 import { createRequestListener } from './http.ts';
 import { readAllowedOrigins } from './session-guard.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8787);
 
 const ROUTE = '/vision/identify';
-
-/**
- * The largest body accepted, in bytes.
- *
- * Derived from `MAX_IMAGE_BYTES` rather than written as its own number so the two
- * cannot drift: a transport cap below the frame cap would reject frames `identify.ts`
- * considers legal. The slack covers the catalog and the JSON envelope around it.
- */
-const MAX_BODY_BYTES = MAX_IMAGE_BYTES + 512 * 1024;
 
 /**
  * Fail before listening, not on the first request.

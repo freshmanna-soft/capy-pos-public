@@ -42,14 +42,23 @@ export const MAX_IMAGE_BYTES = 3_000_000;
 /**
  * The largest request body the HTTP boundary accepts, in bytes.
  *
- * Here, derived from `MAX_IMAGE_BYTES`, rather than written as its own number in
- * `server.ts`: a transport cap at or below the frame cap would 413 frames this module
- * considers legal, and that failure looks like a network fault rather than the
- * configuration mistake it is. Co-located so the relationship is impossible to break
- * by editing one file, and asserted in `identify.test.mjs` so the slack is a decision
- * rather than an accident. The slack covers the catalog and the JSON envelope.
+ * `server.ts` imports this and hands it to `createRequestListener`; it is the only
+ * definition of the cap in the service. That matters because a transport cap at or
+ * below the frame cap would 413 frames this module considers legal, and that failure
+ * looks like a network fault rather than the configuration mistake it is. Derived
+ * here, next to `MAX_IMAGE_BYTES`, so raising the frame cap carries the transport cap
+ * with it.
+ *
+ * Two suites hold that up, because the first round of this story had the derivation
+ * written twice — once here and once in `server.ts` — which is the drift the comment
+ * claimed to prevent: `identify.test.mjs` serializes the largest frame `validate`
+ * accepts — full catalog included — and asserts it fits under this number and is not
+ * dwarfed by it, and `session-guard.test.mjs` asserts `server.ts` imports the cap
+ * rather than computing a second one. The slack covers the catalog and the JSON
+ * envelope.
  */
 export const MAX_BODY_BYTES = MAX_IMAGE_BYTES + 512 * 1024;
+
 /** A shop with more than this many active products needs a retrieval step first. */
 export const MAX_CATALOG_ENTRIES = 400;
 
