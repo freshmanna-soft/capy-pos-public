@@ -614,7 +614,9 @@ describe('CognitoAuthAdapter', () => {
 
       expect(session).not.toBeNull();
       expect(session!.roles).toEqual(['admin', 'operator']);
-      expect(session!.memberships[0]).toEqual(expect.objectContaining({ role: 'admin', level: 3 }));
+      expect(session!.memberships![0]).toEqual(
+        expect.objectContaining({ role: 'admin', level: 3 })
+      );
     });
   });
 });

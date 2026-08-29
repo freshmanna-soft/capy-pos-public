@@ -641,8 +641,11 @@ describe('InventoryManagementComponent', () => {
       // An absent code must never key the index, or every product without a barcode
       // would own the same empty key and collide with all the others.
       productsSignal.set([
-        { ...mockProducts[0], id: 'p1', barcode: undefined },
-        { ...mockProducts[1], id: 'p2', barcode: undefined },
+        // '', not undefined: ProductSummaryDTO.barcode is a required string —
+        // manage-inventory.use-case.ts maps an absent domain barcode to '' (see
+        // its `product.barcode ?? ''`), so that's the real shape of "no barcode".
+        { ...mockProducts[0], id: 'p1', barcode: '' },
+        { ...mockProducts[1], id: 'p2', barcode: '' },
       ]);
 
       component.openCreateForm();
@@ -772,7 +775,7 @@ describe('InventoryManagementComponent', () => {
     it('says it is a permission problem when that is what it is', async () => {
       // "Failed, try again" invites the operator to keep pressing a button that is
       // never going to work for them.
-      const toast = vi.spyOn(TestBed.inject(ToastService), 'error').mockImplementation(() => '');
+      const toast = vi.spyOn(TestBed.inject(ToastService), 'error').mockImplementation(() => 0);
       (mockFacade.adjustStock as ReturnType<typeof vi.fn>).mockRejectedValue(
         new AuthorizationError('inventory:adjust_stock' as never)
       );
@@ -783,7 +786,7 @@ describe('InventoryManagementComponent', () => {
     });
 
     it('asks for a retry when the failure is not about permission', async () => {
-      const toast = vi.spyOn(TestBed.inject(ToastService), 'error').mockImplementation(() => '');
+      const toast = vi.spyOn(TestBed.inject(ToastService), 'error').mockImplementation(() => 0);
       (mockFacade.adjustStock as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('db down'));
 
       await component.adjustStock('p1', 1);

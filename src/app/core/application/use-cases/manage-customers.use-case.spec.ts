@@ -311,7 +311,9 @@ describe('ManageCustomersUseCase', () => {
       // minting on a list load would be a silent write, so it happens here behind a
       // button instead.
       mockRepository.findById.mockResolvedValue(withoutCard());
-      mockRepository.update.mockImplementation(async (_id: string, customer: Customer) => customer);
+      mockRepository.update.mockImplementation(
+        async (_id: string, customer: Partial<Customer>) => customer as Customer
+      );
 
       const code = await useCase.issueLoyaltyCode('customer-1');
 
@@ -350,7 +352,9 @@ describe('ManageCustomersUseCase', () => {
       expect(useCase.customers()[0]!.loyaltyCode).toBeUndefined();
 
       mockRepository.findById.mockResolvedValue(withoutCard());
-      mockRepository.update.mockImplementation(async (_id: string, customer: Customer) => customer);
+      mockRepository.update.mockImplementation(
+        async (_id: string, customer: Partial<Customer>) => customer as Customer
+      );
 
       const code = await useCase.issueLoyaltyCode('customer-1');
 
@@ -365,7 +369,9 @@ describe('ManageCustomersUseCase', () => {
       await useCase.loadCustomers();
 
       mockRepository.findById.mockResolvedValue(withoutCard());
-      mockRepository.update.mockImplementation(async (_id: string, customer: Customer) => customer);
+      mockRepository.update.mockImplementation(
+        async (_id: string, customer: Partial<Customer>) => customer as Customer
+      );
 
       await useCase.issueLoyaltyCode('customer-1');
 
@@ -387,7 +393,9 @@ describe('ManageCustomersUseCase', () => {
       expect(useCase.error()).not.toBeNull();
 
       mockRepository.findById.mockResolvedValue(withoutCard());
-      mockRepository.update.mockImplementation(async (_id: string, customer: Customer) => customer);
+      mockRepository.update.mockImplementation(
+        async (_id: string, customer: Partial<Customer>) => customer as Customer
+      );
       await useCase.issueLoyaltyCode('customer-1');
 
       expect(useCase.error()).toBeNull();

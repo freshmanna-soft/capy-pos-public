@@ -15,6 +15,7 @@ const summaries: OperatorSummaryDto[] = [
     id: 'op-1',
     email: 'a@capy.local',
     displayName: 'Alice',
+    roleId: 'role-admin',
     roleName: 'admin',
     isActive: true,
     tenantId: 'store-a',

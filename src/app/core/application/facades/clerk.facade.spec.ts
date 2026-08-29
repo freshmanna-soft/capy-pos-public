@@ -17,7 +17,8 @@ import {
 } from '@core/infrastructure/settings/clerk-agent-preference';
 import { ChoiceActor } from '@core/application/services/candidate-ranking';
 import { MAX_SPOKEN_QUANTITY } from '@core/application/services/voice-intent.parser';
-import { PosFacade } from './pos.facade';
+import { AddToCartResult, PosFacade } from './pos.facade';
+import { CLERK_AGENT } from '@core/application/ports/clerk-agent.port';
 import { VISION_RECOGNIZER } from '@core/application/ports/vision-recognizer.port';
 import { RecognitionResult } from '@core/application/dtos/recognition.dto';
 import { ProductService } from '@core/application/services/product.service';
@@ -151,10 +152,10 @@ describe('ClerkFacade', () => {
   let earStart: ReturnType<typeof vi.fn>;
   let earStop: ReturnType<typeof vi.fn>;
   let onFinalPhrase: (phrase: string) => void;
-  let tryAddToCart: ReturnType<typeof vi.fn>;
+  let tryAddToCart: ReturnType<typeof vi.fn<(product: Product) => AddToCartResult>>;
   let decreaseQuantity: ReturnType<typeof vi.fn>;
   let removeFromCart: ReturnType<typeof vi.fn>;
-  let getQuantity: ReturnType<typeof vi.fn>;
+  let getQuantity: ReturnType<typeof vi.fn<(productId: string) => number>>;
   let cartItems: WritableSignal<{ product: Product; quantity: number }[]>;
   let cameraPause: ReturnType<typeof vi.fn>;
   let barcodeSupported: WritableSignal<boolean>;
@@ -256,6 +257,12 @@ describe('ClerkFacade', () => {
         ClerkFacade,
         { provide: VISION_RECOGNIZER, useValue: { identify, kind: 'demo' } },
         {
+          provide: CLERK_AGENT,
+          // Declined by default: silent, same as the phrase never having matched
+          // anything, so a test that isn't about the agent tier sees no change.
+          useValue: { next: vi.fn().mockResolvedValue({ kind: 'declined' }), kind: 'demo' },
+        },
+        {
           provide: CameraService,
           useValue: {
             status: signal('live'),
@@ -315,6 +322,7 @@ describe('ClerkFacade', () => {
             totalItems: signal(2),
             total: signal(7.5),
             isCartEmpty: signal(false),
+            cartRevision: signal(0),
           },
         },
         { provide: ProductService, useValue: { getActiveProducts } },
@@ -671,7 +679,9 @@ describe('ClerkFacade', () => {
           if (item.id === 'p3' && sourdoughsAdded++ >= 1) {
             return { added: false, reason: 'out-of-stock' };
           }
-          return addToCart?.(item);
+          // beforeEach always sets a real implementation before this test replaces
+          // it, so the capture above is never actually undefined here.
+          return addToCart!(item);
         });
 
         await twoLineTurn();
@@ -716,6 +726,19 @@ describe('ClerkFacade', () => {
 
         clerk.undoLast();
         expect(decreaseQuantity).toHaveBeenCalledExactlyOnceWith('p3');
+      });
+
+      it('speaks the answer alone when the turn changed nothing — a pure question, no add or remove', async () => {
+        // Regression: sealUndoBatch used to treat an empty outcomes summary as
+        // "nothing to say" and return before ever looking at `answer`, so an
+        // agent turn that only answered a question ("what is your name") and
+        // called no mutating tool was answered with total silence.
+        speak.mockClear();
+        await seam(clerk).withUndoBatch((batch) => {
+          batch.answer = "I'm the till's helper here.";
+        });
+
+        expect(speak).toHaveBeenCalledExactlyOnceWith("I'm the till's helper here.");
       });
 
       it('closes the window even when the turn fails part-way through', async () => {
@@ -3143,15 +3166,18 @@ describe('ClerkFacade', () => {
       ]);
     });
 
-    it('keeps a phrase it could not name, because silence is the thing to diagnose', () => {
+    it('keeps a phrase it could not name, because silence is the thing to diagnose', async () => {
       const before = clerk.exchanges().length;
       onFinalPhrase('do you know how to juggle');
 
-      // Recorded, and settled: nothing in the facade is going to answer this, and a
-      // line still marked pending would promise one.
-      expect(clerk.exchanges().slice(before)).toMatchObject([
-        { author: 'cashier', text: 'do you know how to juggle', pending: false },
-      ]);
+      // Recorded, and — once the agent tier's turn resolves (declined, by this
+      // suite's default mock) — settled: nothing answered it, and a line left
+      // pending forever would promise an answer that isn't coming.
+      await vi.waitFor(() =>
+        expect(clerk.exchanges().slice(before)).toMatchObject([
+          { author: 'cashier', text: 'do you know how to juggle', pending: false },
+        ])
+      );
     });
 
     it('settles a handled phrase even when the arm had nothing to say', () => {
@@ -3404,6 +3430,10 @@ describe('ClerkFacade where the browser cannot listen', () => {
           useValue: { identify: vi.fn().mockResolvedValue(nothing()), kind: 'demo' },
         },
         {
+          provide: CLERK_AGENT,
+          useValue: { next: vi.fn().mockResolvedValue({ kind: 'declined' }), kind: 'demo' },
+        },
+        {
           provide: CameraService,
           useValue: {
             status: signal('live'),
@@ -3452,6 +3482,7 @@ describe('ClerkFacade where the browser cannot listen', () => {
             totalItems: signal(0),
             total: signal(0),
             isCartEmpty: signal(true),
+            cartRevision: signal(0),
           },
         },
         { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
@@ -3518,6 +3549,10 @@ describe('ClerkFacade on a till told to take commands only', () => {
           useValue: { identify: vi.fn().mockResolvedValue(nothing()), kind: 'demo' },
         },
         {
+          provide: CLERK_AGENT,
+          useValue: { next: vi.fn().mockResolvedValue({ kind: 'declined' }), kind: 'demo' },
+        },
+        {
           provide: CameraService,
           useValue: {
             status: signal('live'),
@@ -3566,6 +3601,7 @@ describe('ClerkFacade on a till told to take commands only', () => {
             totalItems: signal(0),
             total: signal(0),
             isCartEmpty: signal(true),
+            cartRevision: signal(0),
           },
         },
         { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },

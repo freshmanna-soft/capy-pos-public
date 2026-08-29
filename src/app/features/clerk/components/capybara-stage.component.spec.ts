@@ -2,7 +2,11 @@ import { TestBed } from '@angular/core/testing';
 import { WritableSignal, signal } from '@angular/core';
 import { CapybaraStageComponent } from './capybara-stage.component';
 import { ClerkFacade } from '@core/application/facades/clerk.facade';
-import { CapybaraRenderer, ClerkMood } from '@features/clerk/canvas/capybara-renderer';
+import {
+  CapybaraRenderer,
+  ClerkMood,
+  ClerkVisualState,
+} from '@features/clerk/canvas/capybara-renderer';
 
 /**
  * These tests exist because of a bug that no amount of DOM assertion would have
@@ -124,7 +128,7 @@ describe('CapybaraStageComponent', () => {
       fixture.detectChanges();
     }
 
-    expect(setState.mock.calls.map((call) => call[0])).toEqual([
+    expect(setState.mock.calls.map((call: [ClerkVisualState]) => call[0])).toEqual([
       'scanning',
       'found',
       'confused',
@@ -230,7 +234,13 @@ describe('CapybaraStageComponent', () => {
     const fixture = mount();
     expect(setReducedMotion).toHaveBeenCalledWith(false);
 
-    onChange?.({ matches: true } as MediaQueryListEvent);
+    // TS narrows `onChange` to its initial `null` across the closure boundary
+    // above (assigned only inside `addEventListener`'s handler, which `mount()`
+    // triggers synchronously) — the cast reflects what's actually true at
+    // runtime by the time this line runs, not a behavior change.
+    (onChange as ((event: MediaQueryListEvent) => void) | null)?.({
+      matches: true,
+    } as MediaQueryListEvent);
 
     expect(setReducedMotion).toHaveBeenLastCalledWith(true);
     fixture.destroy();

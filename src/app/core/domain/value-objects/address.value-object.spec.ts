@@ -67,17 +67,21 @@ describe('Address Value Object', () => {
     });
 
     it('should throw error for null or undefined components', () => {
-      expect(() => new Address(null as unknown)).toThrow('Address components must be an object');
-      expect(() => new Address(undefined as unknown)).toThrow(
+      expect(() => new Address(null as unknown as AddressComponents)).toThrow(
+        'Address components must be an object'
+      );
+      expect(() => new Address(undefined as unknown as AddressComponents)).toThrow(
         'Address components must be an object'
       );
     });
 
     it('should throw error for non-object components', () => {
-      expect(() => new Address('invalid' as unknown)).toThrow(
+      expect(() => new Address('invalid' as unknown as AddressComponents)).toThrow(
         'Address components must be an object'
       );
-      expect(() => new Address(123 as unknown)).toThrow('Address components must be an object');
+      expect(() => new Address(123 as unknown as AddressComponents)).toThrow(
+        'Address components must be an object'
+      );
     });
 
     describe('Street Validation', () => {
@@ -88,7 +92,7 @@ describe('Address Value Object', () => {
         expect(() => new Address({ ...validUSAddress, street: '   ' })).toThrow(
           'Street address is required'
         );
-        expect(() => new Address({ ...validUSAddress, street: null as unknown })).toThrow(
+        expect(() => new Address({ ...validUSAddress, street: null as unknown as string })).toThrow(
           'Street address is required'
         );
       });
@@ -110,7 +114,7 @@ describe('Address Value Object', () => {
       it('should throw error for missing city', () => {
         expect(() => new Address({ ...validUSAddress, city: '' })).toThrow('City is required');
         expect(() => new Address({ ...validUSAddress, city: '   ' })).toThrow('City is required');
-        expect(() => new Address({ ...validUSAddress, city: null as unknown })).toThrow(
+        expect(() => new Address({ ...validUSAddress, city: null as unknown as string })).toThrow(
           'City is required'
         );
       });
@@ -136,7 +140,7 @@ describe('Address Value Object', () => {
         expect(() => new Address({ ...validUSAddress, state: '   ' })).toThrow(
           'State/Province is required'
         );
-        expect(() => new Address({ ...validUSAddress, state: null as unknown })).toThrow(
+        expect(() => new Address({ ...validUSAddress, state: null as unknown as string })).toThrow(
           'State/Province is required'
         );
       });
@@ -162,9 +166,9 @@ describe('Address Value Object', () => {
         expect(() => new Address({ ...validUSAddress, postalCode: '   ' })).toThrow(
           'Postal code is required'
         );
-        expect(() => new Address({ ...validUSAddress, postalCode: null as unknown })).toThrow(
-          'Postal code is required'
-        );
+        expect(
+          () => new Address({ ...validUSAddress, postalCode: null as unknown as string })
+        ).toThrow('Postal code is required');
       });
 
       it('should throw error for postal code exceeding 20 characters', () => {
@@ -188,9 +192,9 @@ describe('Address Value Object', () => {
         expect(() => new Address({ ...validUSAddress, country: '   ' })).toThrow(
           'Country is required'
         );
-        expect(() => new Address({ ...validUSAddress, country: null as unknown })).toThrow(
-          'Country is required'
-        );
+        expect(
+          () => new Address({ ...validUSAddress, country: null as unknown as string })
+        ).toThrow('Country is required');
       });
 
       it('should throw error for country exceeding 100 characters', () => {
@@ -420,9 +424,9 @@ describe('Address Value Object', () => {
 
     it('should return false for non-Address objects', () => {
       const address = new Address(validUSAddress);
-      expect(address.equals('123 Main St' as unknown)).toBe(false);
-      expect(address.equals(null as unknown)).toBe(false);
-      expect(address.equals(undefined as unknown)).toBe(false);
+      expect(address.equals('123 Main St' as unknown as Address)).toBe(false);
+      expect(address.equals(null as unknown as Address)).toBe(false);
+      expect(address.equals(undefined as unknown as Address)).toBe(false);
     });
   });
 
@@ -515,35 +519,35 @@ describe('Address Value Object', () => {
     it('should not allow modification of street property', () => {
       const address = new Address(validUSAddress);
       expect(() => {
-        (address as unknown)._street = '456 Hacker St';
+        (address as unknown as { _street: string })._street = '456 Hacker St';
       }).toThrow();
     });
 
     it('should not allow modification of city property', () => {
       const address = new Address(validUSAddress);
       expect(() => {
-        (address as unknown)._city = 'Hacker City';
+        (address as unknown as { _city: string })._city = 'Hacker City';
       }).toThrow();
     });
 
     it('should not allow modification of state property', () => {
       const address = new Address(validUSAddress);
       expect(() => {
-        (address as unknown)._state = 'XX';
+        (address as unknown as { _state: string })._state = 'XX';
       }).toThrow();
     });
 
     it('should not allow modification of postalCode property', () => {
       const address = new Address(validUSAddress);
       expect(() => {
-        (address as unknown)._postalCode = '00000';
+        (address as unknown as { _postalCode: string })._postalCode = '00000';
       }).toThrow();
     });
 
     it('should not allow modification of country property', () => {
       const address = new Address(validUSAddress);
       expect(() => {
-        (address as unknown)._country = 'HACKERLAND';
+        (address as unknown as { _country: string })._country = 'HACKERLAND';
       }).toThrow();
     });
   });
