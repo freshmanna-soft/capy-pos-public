@@ -45,26 +45,6 @@ const MAX_TOKENS = 1024;
 export const MAX_IMAGE_BYTES = 3_000_000;
 
 /**
- * The largest request body the HTTP boundary accepts, in bytes.
- *
- * `server.ts` imports this and hands it to `createRequestListener`; it is the only
- * definition of the cap in the service. That matters because a transport cap at or
- * below the frame cap would 413 frames this module considers legal, and that failure
- * looks like a network fault rather than the configuration mistake it is. Derived
- * here, next to `MAX_IMAGE_BYTES`, so raising the frame cap carries the transport cap
- * with it.
- *
- * Two suites hold that up, because the first round of this story had the derivation
- * written twice — once here and once in `server.ts` — which is the drift the comment
- * claimed to prevent: `identify.test.mjs` serializes the largest frame `validate`
- * accepts — full catalog included — and asserts it fits under this number and is not
- * dwarfed by it, and `session-guard.test.mjs` asserts `server.ts` imports the cap
- * rather than computing a second one. The slack covers the catalog and the JSON
- * envelope.
- */
-export const MAX_BODY_BYTES = MAX_IMAGE_BYTES + 512 * 1024;
-
-/**
  * A shop with more than this many active products needs a retrieval step first.
  *
  * Applied in `sanitizeCatalog` and nowhere else. `identify` used to slice to it a
@@ -73,6 +53,58 @@ export const MAX_BODY_BYTES = MAX_IMAGE_BYTES + 512 * 1024;
  * drifts.
  */
 export const MAX_CATALOG_ENTRIES = 400;
+
+/**
+ * The most UTF-8 bytes one unit of a `*_CHARS` cap can weigh.
+ *
+ * `MAX_CATALOG_FIELD_CHARS` counts JavaScript string units — `sanitizeText` slices
+ * with `.slice` — while `http.ts` counts bytes off the socket. The worst ratio between
+ * the two is three: a char in U+0800..U+FFFF is one unit and three bytes, while an
+ * emoji is two units and four, so it is cheaper per unit. A cap of N units therefore
+ * admits up to 3N bytes. The relay derives its cap with the same factor.
+ */
+const BYTES_PER_CAPPED_CHAR = 3;
+
+/** `id`, `name`, `sku`, `category`, `emoji` — every one capped at `MAX_CATALOG_FIELD_CHARS`. */
+const CATALOG_FIELDS_PER_ENTRY = 5;
+
+/**
+ * Slack for the JSON around one catalog entry: its quoted keys, quotes, commas and
+ * braces. Generous, because it is bounded per entry and the suite measures the real
+ * serialization rather than trusting this number.
+ */
+const CATALOG_ENTRY_ENVELOPE_BYTES = 96;
+
+/** Slack for the top-level object: three keys, the brackets, and the media type. */
+const BODY_ENVELOPE_BYTES = 1_024;
+
+/**
+ * The largest request body the HTTP boundary accepts, in bytes.
+ *
+ * `server.ts` imports this and hands it to `createRequestListener`; it is the only
+ * definition of the cap in the service. That matters because a transport cap below
+ * what `validate` accepts 413s legal bodies at the socket, and that failure looks
+ * like a network fault rather than the configuration mistake it is.
+ *
+ * So it is summed from the caps that bound the body — the frame and the catalog —
+ * rather than guessed as the frame cap plus round slack. Review caught that guess on
+ * the relay, and the same arithmetic applies here: a full catalog of three-byte
+ * characters is 724 KiB, against the 512 KiB of slack that stood in for it.
+ *
+ * Two suites hold this up, because the first round of this story also had the
+ * derivation written twice — once here and once in `server.ts`:
+ * `identify.test.mjs` builds the largest body `validate` accepts, catalog at the
+ * entry cap and every capped field full, and asserts it fits under this number and is
+ * not dwarfed by it; `session-guard.test.mjs` asserts `server.ts` imports the cap
+ * rather than computing a second one. The measurement is the proof — these terms are
+ * the claim.
+ */
+export const MAX_BODY_BYTES =
+  MAX_IMAGE_BYTES +
+  MAX_CATALOG_ENTRIES *
+    (CATALOG_FIELDS_PER_ENTRY * MAX_CATALOG_FIELD_CHARS * BYTES_PER_CAPPED_CHAR +
+      CATALOG_ENTRY_ENVELOPE_BYTES) +
+  BODY_ENVELOPE_BYTES;
 
 const client = new Anthropic();
 
@@ -301,7 +333,13 @@ export function validate(body: unknown): IdentifyRequest | { error: string } {
   if (typeof image !== 'string' || image.length === 0) {
     return { error: 'image must be a base64 string.' };
   }
-  if (image.length > MAX_IMAGE_BYTES) {
+  // `Buffer.byteLength`, not `.length`. The cap is named in bytes, `MAX_BODY_BYTES` is
+  // derived from it in bytes, and `http.ts` counts bytes off the socket — but
+  // `.length` counts UTF-16 units, so a frame of multi-byte characters passed this
+  // check at up to three times the cap and was then 413d at the transport, reported as
+  // a network fault. Base64 is ASCII, so this changes nothing for a real frame; it
+  // changes what a crafted one can claim.
+  if (Buffer.byteLength(image) > MAX_IMAGE_BYTES) {
     return { error: 'image is too large.' };
   }
   if (mediaType !== 'image/jpeg' && mediaType !== 'image/png' && mediaType !== 'image/webp') {

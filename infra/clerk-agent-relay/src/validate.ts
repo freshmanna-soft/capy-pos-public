@@ -66,28 +66,14 @@ export const MAX_ASSISTANT_BLOCKS = 24;
 /** Tool calls the model may make in one hop, and therefore results per hop. */
 export const MAX_TOOL_RESULTS = 12;
 
-/** Whole-transcript byte ceiling, so many small blocks cost no less than a few large ones. */
-export const MAX_TRANSCRIPT_CHARS = 200_000;
-
 /**
- * The largest request body the HTTP boundary accepts, in bytes.
+ * Whole-transcript ceiling, so many small blocks cost no less than a few large ones.
  *
- * `server.ts` imports this and hands it to `createRequestListener`; it is the only
- * definition of the cap in the service. That matters because a transport cap at or
- * below the transcript cap would 413 transcripts this module considers legal, and
- * that failure looks like a network fault rather than the configuration mistake it
- * is. Derived here, next to `MAX_TRANSCRIPT_CHARS`, so raising the transcript cap
- * carries the transport cap with it.
- *
- * Two suites hold that up, because the first round of this story had the derivation
- * written twice — once here and once in `server.ts` — which is the drift the comment
- * claimed to prevent: `validate.test.mjs` serializes a hop with every field at its own
- * cap and asserts it plus a full transcript fits under this number and is not dwarfed
- * by it, and `session-guard.test.mjs` asserts `server.ts` imports the cap rather than
- * computing a second one. The slack covers the catalog, the cart and the JSON
- * envelope.
+ * Units, not bytes: the check is `JSON.stringify(raw).length`, like every other
+ * `*_CHARS` cap here. `MAX_BODY_BYTES` below converts it at `BYTES_PER_CAPPED_CHAR`,
+ * which is the conversion the transport cap was first derived without.
  */
-export const MAX_BODY_BYTES = MAX_TRANSCRIPT_CHARS + 64 * 1024;
+export const MAX_TRANSCRIPT_CHARS = 200_000;
 
 /** One tool result's summarized output. Tool results are counted facts, not records. */
 export const MAX_TOOL_OUTPUT_CHARS = 4_000;
@@ -95,6 +81,70 @@ export const MAX_TOOL_OUTPUT_CHARS = 4_000;
 /** Cart lines and on-screen choices the client may describe. */
 export const MAX_CART_LINES = 200;
 export const MAX_OFFER_LINES = 8;
+
+/**
+ * The most UTF-8 bytes one unit of a `*_CHARS` cap can weigh.
+ *
+ * Every char cap above counts JavaScript string units: `sanitizeText` slices with
+ * `.slice`, and the transcript cap measures `JSON.stringify(...).length`. `http.ts`
+ * counts bytes off the socket. The worst ratio between the two is three — a char in
+ * U+0800..U+FFFF is one unit and three bytes, while an emoji is two units and four,
+ * so it is cheaper per unit. A cap of N units therefore admits up to 3N bytes, and a
+ * transport cap derived without this factor 413s bodies `validate` accepts.
+ */
+const BYTES_PER_CAPPED_CHAR = 3;
+
+/** `id`, `name`, `sku`, `category`, `emoji` — every one capped at `MAX_CATALOG_FIELD_CHARS`. */
+const CATALOG_FIELDS_PER_ENTRY = 5;
+
+/**
+ * Slack for the JSON around one record: its quoted keys, quotes, commas, braces and
+ * numeric fields. Generous, because it is bounded per record and the suite measures
+ * the real serialization rather than trusting this number.
+ */
+const RECORD_ENVELOPE_BYTES = 96;
+
+/** Slack for the top-level object: five keys, the brackets, and the scalar context fields. */
+const BODY_ENVELOPE_BYTES = 1_024;
+
+/**
+ * The largest request body the HTTP boundary accepts, in bytes.
+ *
+ * `server.ts` imports this and hands it to `createRequestListener`; it is the only
+ * definition of the cap in the service. That matters because a transport cap below
+ * what `validate` accepts 413s legal bodies at the socket, and that failure looks
+ * like a network fault rather than the configuration mistake it is.
+ *
+ * So it is summed from the caps that bound the body, rather than guessed as one cap
+ * plus round slack. The guess is what review caught: `MAX_TRANSCRIPT_CHARS + 64 KiB`
+ * was 265,536, while a hop with a full catalog — 400 entries, every field at
+ * `MAX_CATALOG_FIELD_CHARS` — plus a full transcript is 499,123 bytes of ASCII and
+ * `validate` accepts every byte. Only the transcript was in the derivation; the
+ * catalog, which is the largest of the terms below, was in the prose as "slack".
+ *
+ * Two suites hold this up, because the first round of this story also had the
+ * derivation written twice — once here and once in `server.ts`:
+ * `validate.test.mjs` builds the largest body `validate` accepts, every count at its
+ * cap and every capped field filled with a three-byte character, and asserts it fits
+ * under this number and is not dwarfed by it; `session-guard.test.mjs` asserts
+ * `server.ts` imports the cap rather than computing a second one. The measurement is
+ * the proof — these terms are the claim.
+ */
+export const MAX_BODY_BYTES =
+  // The transcript, whose own cap is the only one checked across a whole subtree.
+  MAX_TRANSCRIPT_CHARS * BYTES_PER_CAPPED_CHAR +
+  // The catalog, the largest term: five capped fields on every entry it admits.
+  MAX_CATALOG_ENTRIES *
+    (CATALOG_FIELDS_PER_ENTRY * MAX_CATALOG_FIELD_CHARS * BYTES_PER_CAPPED_CHAR +
+      RECORD_ENVELOPE_BYTES) +
+  // The till state the client describes: one capped name or label per line.
+  (MAX_CART_LINES + MAX_OFFER_LINES) *
+    (MAX_CATALOG_FIELD_CHARS * BYTES_PER_CAPPED_CHAR + RECORD_ENVELOPE_BYTES) +
+  // Remembered turns: a phrase each, plus the tool names kept with it.
+  MAX_MEMORY_TURNS * (MAX_UTTERANCE_CHARS * BYTES_PER_CAPPED_CHAR + RECORD_ENVELOPE_BYTES) +
+  // The utterance itself, and the object holding all of the above.
+  MAX_UTTERANCE_CHARS * BYTES_PER_CAPPED_CHAR +
+  BODY_ENVELOPE_BYTES;
 
 const TOOL_NAMES = new Set<string>(CLERK_AGENT_TOOL_NAMES);
 

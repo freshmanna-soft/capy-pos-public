@@ -438,56 +438,106 @@ describe('hasBearerToken', () => {
 
 describe('MAX_BODY_BYTES — the transport cap server.ts hands to the boundary', () => {
   /**
-   * The envelope a hop carries around its transcript, every field of it at its own
-   * cap: a full catalog, a full cart, every on-screen offer, the longest utterance
-   * and the longest memory the browser may send. Entry shapes are `HINT`, `CONTEXT`
-   * and `hop()` above — the shapes the client actually sends — rather than invented
-   * field widths, because the assertion is only worth having if the bytes it measures
-   * are bytes a till really puts on the wire.
+   * One character that is a single JavaScript string unit and three UTF-8 bytes.
+   *
+   * The caps in `validate.ts` count units; `http.ts` counts bytes off the socket. This
+   * is the worst ratio between the two, so a body filled with it is the heaviest one
+   * `validate` accepts. An earlier version of this suite filled the fixture with the
+   * short ASCII `HINT` instead: 50,219 bytes, where the body below is 1,440,177. That
+   * is why it "proved" a cap the smallest all-ASCII full catalog already exceeded by
+   * 228 KiB. A fixture that is not maximal proves nothing about a maximum.
    */
-  function fullEnvelope() {
+  const WIDE = '啊';
+  const fill = (chars) => WIDE.repeat(chars);
+
+  /** A catalog at the entry cap with every field at `MAX_CATALOG_FIELD_CHARS`. */
+  const fullCatalog = () =>
+    Array.from({ length: MAX_CATALOG_ENTRIES }, () => ({
+      id: fill(MAX_CATALOG_FIELD_CHARS),
+      name: fill(MAX_CATALOG_FIELD_CHARS),
+      sku: fill(MAX_CATALOG_FIELD_CHARS),
+      category: fill(MAX_CATALOG_FIELD_CHARS),
+      emoji: fill(MAX_CATALOG_FIELD_CHARS),
+    }));
+
+  /**
+   * A transcript at `MAX_TRANSCRIPT_CHARS` exactly, padded inside a `thinking` block.
+   *
+   * The whole-transcript cap is the binding one — block and result counts are checked
+   * per hop but nothing bounds a single block — so padding one block to the cap is the
+   * heaviest legal transcript, and it stays self-consistent because `hop()` still
+   * answers its own tool call.
+   */
+  function fullTranscript() {
+    const hops = Array.from({ length: MAX_TRANSCRIPT_HOPS }, (_, at) => hop(`call-${at}`));
+    hops[0].assistant[0].thinking += fill(MAX_TRANSCRIPT_CHARS - JSON.stringify(hops).length);
+    return hops;
+  }
+
+  /** The largest body `validate` accepts: every count at its cap, every capped field full. */
+  function maximalBody() {
     return {
-      utterance: 'a'.repeat(MAX_UTTERANCE_CHARS),
-      catalog: Array.from({ length: MAX_CATALOG_ENTRIES }, (_, at) => ({ ...HINT, id: `${HINT.id}-${at}` })),
+      utterance: fill(MAX_UTTERANCE_CHARS),
+      catalog: fullCatalog(),
       context: {
-        ...CONTEXT,
-        cartLines: Array.from({ length: MAX_CART_LINES }, (_, at) => ({ name: `Banana ${at}`, quantity: 2 })),
-        offer: Array.from({ length: MAX_OFFER_LINES }, (_, at) => ({ position: at + 1, label: `Oat Milk ${at}` })),
+        cartLines: Array.from({ length: MAX_CART_LINES }, () => ({
+          name: fill(MAX_CATALOG_FIELD_CHARS),
+          quantity: 99,
+        })),
+        totalItems: 9_999,
+        total: 99_999.99,
+        offer: Array.from({ length: MAX_OFFER_LINES }, (_, at) => ({
+          position: at + 1,
+          label: fill(MAX_CATALOG_FIELD_CHARS),
+        })),
+        cartChangedThisTurn: true,
       },
       memory: Array.from({ length: MAX_MEMORY_TURNS }, () => ({
-        phrase: 'a'.repeat(MAX_UTTERANCE_CHARS),
+        phrase: fill(MAX_UTTERANCE_CHARS),
         tools: ['look_up_product'],
       })),
-      transcript: [],
+      transcript: fullTranscript(),
     };
   }
 
-  it('leaves room above the transcript cap for the catalog, the cart and the envelope', () => {
-    const envelope = fullEnvelope();
+  /**
+   * The bytes the socket would count for the largest body `validate` accepts.
+   *
+   * `Buffer.byteLength`, not `.length`: the cap is counted in bytes off the socket
+   * (`received += chunk.length` in http.ts), so measuring in UTF-16 units would
+   * under-report a real payload by up to a factor of three. And the fixture has to be
+   * one `validate` accepts, or the size is measured on a body the service would have
+   * refused anyway and the assertion proves nothing.
+   */
+  function maximalBytes() {
+    const body = maximalBody();
+    accepted(validate(body));
+    return Buffer.byteLength(JSON.stringify(body));
+  }
 
-    // The fixture has to be one `validate` accepts, or the size below is measured on a
-    // body the service would have refused anyway and the assertion proves nothing.
-    accepted(validate(envelope));
+  it('fits the largest body validate accepts, catalog and transcript included', () => {
+    const bytes = maximalBytes();
 
-    // `Buffer.byteLength`, not `.length`: the cap is counted in bytes off the socket
-    // (`received += chunk.length` in http.ts) and an emoji in a product name is four
-    // of them, so measuring in UTF-16 units would under-report a real payload.
-    const bytes = Buffer.byteLength(JSON.stringify(envelope)) + MAX_TRANSCRIPT_CHARS;
     assert.ok(
       bytes <= MAX_BODY_BYTES,
-      `a hop at every field cap serializes to ${bytes} bytes, above the ${MAX_BODY_BYTES}-byte ` +
-        'transport cap: it would be 413d at the socket before validate ever saw it, which ' +
-        'reads as a network fault rather than the configuration mistake it is'
+      `the largest body validate accepts serializes to ${bytes} bytes, above the ` +
+        `${MAX_BODY_BYTES}-byte transport cap: it would be 413d at the socket before ` +
+        'validate ever saw it, which reads as a network fault rather than the ' +
+        'configuration mistake it is'
     );
   });
 
-  it('is not so far above the transcript cap that an unbounded stream is cheap', () => {
-    // The other side of the same bound. A cap wildly above the transcript cap lets an
-    // authenticated caller make this process buffer for a long time before anything
-    // objects; the slack should cover the envelope, not an order of magnitude.
+  it('is not so far above that body that an unbounded stream is cheap', () => {
+    // The other side of the same bound, and the reason the cap is summed from the caps
+    // rather than rounded up to a comfortable number: a cap wildly above the largest
+    // legal body lets an authenticated caller make this process buffer for a long time
+    // before anything objects. The slack should cover the JSON envelope, not an order
+    // of magnitude.
+    const bytes = maximalBytes();
+
     assert.ok(
-      MAX_BODY_BYTES > MAX_TRANSCRIPT_CHARS && MAX_BODY_BYTES <= MAX_TRANSCRIPT_CHARS * 2,
-      `transport cap ${MAX_BODY_BYTES} is not within one transcript cap (${MAX_TRANSCRIPT_CHARS}) of it`
+      MAX_BODY_BYTES <= bytes * 2,
+      `transport cap ${MAX_BODY_BYTES} is more than twice the ${bytes}-byte largest legal body`
     );
   });
 });
