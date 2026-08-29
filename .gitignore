@@ -110,3 +110,12 @@ cucumber-report.*
 # Terraform secrets
 *.auto.tfvars
 secret.auto.tfvars
+
+# =============================================================================
+# Talk / presentation collateral (#208)
+# =============================================================================
+# Slide decks are binary talk material, not source: they cannot be diffed or
+# reviewed, and every re-export lands as a fresh ~120KB blob in the history of a
+# repo nothing here reads. Keep them in the deck tool / shared drive instead.
+*.pptx
+*.key

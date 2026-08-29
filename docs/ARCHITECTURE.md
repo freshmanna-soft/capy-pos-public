@@ -1,9 +1,46 @@
 # Capy-POS Architecture Plan
 
+> ## ⚠️ Status: this is a **plan**, not a description of the running system
+>
+> This document is the original target architecture, kept for the design intent behind it. Most of
+> what follows has **not** been built, and several sections describe a system meaningfully different
+> from the one in this repo. Do not use it to reason about what exists today.
+>
+> Where it and the code disagree, **the code and the docs below are authoritative:**
+>
+> | For            | Read                                                                                  |
+> | -------------- | ------------------------------------------------------------------------------------- |
+> | Persistence    | [`DEXIE_MIGRATION.md`](DEXIE_MIGRATION.md) — the store is Dexie (IndexedDB).          |
+> | Infrastructure | [`../terraform/README.md`](../terraform/README.md) — what Terraform actually creates. |
+> | Current state  | [`PROJECT_STATUS.md`](PROJECT_STATUS.md)                                              |
+>
+> The largest gaps, so nobody has to rediscover them:
+>
+> - **No backend microservices.** The six "agents" below are described with `/api/*` HTTP endpoints
+>   and a database each. In the repo they are in-browser TypeScript classes under `src/app/agents/`
+>   that talk to local Dexie tables — there is no service per agent, and no `/api/inventory/*`-style
+>   API. The only real deployable services are `infra/{pos-api,vision-proxy,clerk-agent-relay}`,
+>   which do not map onto this list.
+> - **Not SQLite, and no PostgreSQL/Redis.** Every "Database: SQLite (local) / PostgreSQL (cloud)"
+>   line below is obsolete: the app migrated off sql.js / `better-sqlite3` to Dexie, and no managed
+>   database, cache or object store is provisioned by any Terraform in this repo.
+> - **Deployment.** The frontend is published to **GitHub Pages** by
+>   `.github/workflows/deploy-pages.yml` on every push to `main` — that is the deployment path in
+>   daily use. `terraform/` is a real, maintained IBM Cloud Code Engine root module (three apps:
+>   frontend, vision proxy, clerk relay), but whether any given state file has been applied is not
+>   something this repo records. The AWS estate under `terraform/aws-demo/` is torn down (see issue
+>   #206).
+> - **The IBM services in "Infrastructure Components"** (Databases for PostgreSQL, Object Storage,
+>   Internet Services/CDN, Log Analysis, Monitoring, Sysdig) are aspirational. None are declared in
+>   `terraform/`.
+
 ## 🎯 Project Overview
 
-Enterprise-grade Point of Sale (POS) system built with Angular 21+, microservices architecture, and
-deployed to IBM Cloud Code Engine using Terraform.
+Enterprise-grade Point of Sale (POS) system built with Angular 21+, a clean-architecture frontend,
+and offline-first local persistence.
+
+**Planned:** a microservices backend deployed to IBM Cloud Code Engine using Terraform. See the
+status note above for what of that exists.
 
 ## 🏗️ Architecture Principles
 
@@ -238,6 +275,10 @@ Templates (Page layouts)
 
 ## 🗄️ Data Layer Architecture
 
+> **Partly obsolete.** The repository pattern below is real and in use; the SQLite strategy is not.
+> `SQLiteProductRepository` and the `'sqlite' | 'api'` factory were deleted when the app moved to
+> Dexie — see [`DEXIE_MIGRATION.md`](DEXIE_MIGRATION.md) for the interfaces that actually exist.
+
 ### Repository Pattern with Strategy
 
 ```typescript
@@ -269,6 +310,12 @@ class RepositoryFactory {
 ```
 
 ## ☁️ IBM Cloud Code Engine Deployment
+
+> **Planned, not provisioned.** Nothing in this section is created by any Terraform in this repo.
+> `terraform/` stands up a Code Engine project, a Container Registry namespace, secrets and three
+> apps — no managed PostgreSQL, Redis, Object Storage, CDN or Sysdig, and no per-agent backend
+> service. The Terraform snippet below is illustrative and does not match `terraform/main.tf`; read
+> [`../terraform/README.md`](../terraform/README.md) for what is real.
 
 ### Infrastructure Components
 
@@ -500,18 +547,32 @@ jobs:
 
 ## 📝 Next Steps
 
+This checklist tracked the original plan. Its state below is as of the #208 hygiene pass — several
+items had shipped while still marked pending, and two were superseded rather than completed.
+
 1. ✅ Initialize Git repository
 2. ✅ Set up Angular 21+ project
-3. ⏳ Install dependencies (Playwright, Cucumber, Storybook)
-4. ⏳ Configure UI frameworks (Angular Material, Tailwind)
-5. ⏳ Implement clean architecture structure
-6. ⏳ Build microservices agents
-7. ⏳ Create micro UI components
-8. ⏳ Set up SQLite with repository pattern
-9. ⏳ Configure Terraform for IBM Cloud
-10. ⏳ Create Docker containers
-11. ⏳ Set up CI/CD pipeline
-12. ⏳ Deploy to IBM Cloud Code Engine
+3. ✅ Install dependencies (Playwright, Cucumber, Storybook) — all declared in `package.json`;
+   `npm install` is the only step.
+4. ✅ Configure UI frameworks (Angular Material, Tailwind)
+5. ✅ Implement clean architecture structure — `core/{domain,application,infrastructure}` plus
+   `features/`.
+6. ❌ Build microservices agents — **not as designed.** `src/app/agents/` are in-browser classes,
+   not deployed services. The real services are `infra/{pos-api,vision-proxy,clerk-agent-relay}`.
+7. 🚧 Create micro UI components — the atomic-design tree exists under `src/app/shared/ui/`, but
+   only part of it is wired into live screens.
+8. ➖ Set up SQLite with repository pattern — **superseded.** The repository pattern shipped; the
+   store is Dexie, not SQLite (see [`DEXIE_MIGRATION.md`](DEXIE_MIGRATION.md)).
+9. ✅ Configure Terraform for IBM Cloud — `terraform/` is a Code Engine root module covering three
+   apps (see [`../terraform/README.md`](../terraform/README.md)).
+10. 🚧 Create Docker containers — root `Dockerfile` (frontend, also used by `docker-compose.yml`)
+    plus `infra/vision-proxy` and `infra/clerk-agent-relay`; `infra/pos-api` has none yet.
+11. ✅ Set up CI/CD pipeline — `.github/workflows/ci.yml` and `deploy-pages.yml`.
+12. 🚧 Deploy to IBM Cloud Code Engine — the Terraform is written and maintained; the deployment in
+    daily use is **GitHub Pages** via `deploy-pages.yml`. Whether a Code Engine state file has been
+    applied is not recorded in this repo.
+
+Legend: ✅ done · 🚧 partial · ❌ not built as designed · ➖ superseded.
 
 ---
 
