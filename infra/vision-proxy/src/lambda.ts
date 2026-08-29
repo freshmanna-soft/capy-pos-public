@@ -1,69 +1,59 @@
-import { identify, validate } from './identify.ts';
+/**
+ * The AWS entry point: environment, one exported function, and nothing that decides
+ * anything.
+ *
+ * This is `server.ts` for a gateway instead of a socket. Every check — the allow-list,
+ * the session token, the `sale:process` permission, the body cap, the ordering between
+ * them — lives in `proxy-handler.ts`, which is byte-identical in both proxies and
+ * exercised by `proxy-handler.test.mjs`. What is left here is the two things that file
+ * cannot have: the real environment, and the symbol the runtime imports.
+ *
+ * ## What changed, and why this file used to carry a warning
+ *
+ * Until story #207 this file *was* the boundary, and it had no authorization at all:
+ * its docblock said so, and told the reader not to point an API Gateway route at it.
+ * That warning was true and useless — #207's whole purpose is to point a route at it.
+ * So the route now has the same boundary the container has, verified rather than
+ * documented, and `terraform/aws-demo/ai-proxies.tf` binds the two variables it needs.
+ *
+ * ## What this does not make safe
+ *
+ * The signing secret is shared with a public browser bundle, so this bounds
+ * *reachability*, not *identity* — the same limit `session-guard.ts` states at length,
+ * and the reason issue #206's gateway authorizer is still worth having in front of
+ * this. It stops unauthenticated callers, scanners and cross-origin pages from
+ * spending the shop's model budget; it does not stop someone who has read the bundle.
+ *
+ *   SESSION_JWT_SECRET   must match getJwtSecret() in session-issuer.ts
+ *   ALLOWED_ORIGINS      comma-separated browser origins; there is no wildcard
+ *   ANTHROPIC_API_KEY    read by identify.ts, from Secrets Manager, never a literal
+ *
+ * Handler: `dist/lambda.handler`, runtime nodejs22.x.
+ */
+import { MAX_BODY_BYTES, identify, validate } from './identify.ts';
+import { createProxyHandler, readProxyEnvironment } from './proxy-handler.ts';
 
-/** Minimal API Gateway proxy shapes — avoids a dependency on @types/aws-lambda. */
-interface ProxyEvent {
-  body?: string | null;
-  isBase64Encoded?: boolean;
-  httpMethod?: string;
-  requestContext?: { http?: { method?: string } };
-}
-interface ProxyResult {
-  statusCode: number;
-  headers: Record<string, string>;
-  body: string;
-}
+const LOG_PREFIX = '[vision]';
+
+const ROUTE = '/vision/identify';
 
 /**
- * API Gateway handler for POST {apiUrl}/vision/identify.
- *
- * **This handler has no authorization of any kind, and there is no authorizer to
- * delegate it to.** Epic #195 established that: `terraform/aws-demo/main.tf` has no
- * `aws_apigatewayv2_authorizer` resource, so the previous version of this docblock —
- * "authorization is the gateway's job, attach the same authorizer the rest of the API
- * uses" — described a component nobody ever built.
- *
- * The deployed path is now the container, not this function: story #197 moved the
- * service to IBM Cloud Code Engine, where `server.ts` verifies the session token and
- * pins CORS itself via `session-guard.ts`. This file is kept as the dormant AWS
- * template `terraform/aws-demo` is, and must not be put in front of an API Gateway
- * route without a real authorizer or the same `authorize` call `server.ts` makes —
- * an unauthenticated recognition endpoint is an open, metered path to a paid model.
+ * Read at module scope, so a missing variable fails the function's *init* rather than
+ * every request. Same reasoning as `server.ts` refusing to `listen`: a service that
+ * 503s every call looks like an outage to page someone about, where an init error
+ * names the variable in the log and in the console's own error message.
  */
-export async function handler(event: ProxyEvent): Promise<ProxyResult> {
-  const method = event.requestContext?.http?.method ?? event.httpMethod ?? 'POST';
-  if (method !== 'POST') {
-    return reply(405, { error: 'Use POST.' });
-  }
+const { secret, origins } = readProxyEnvironment(process.env, LOG_PREFIX);
 
-  let parsed: unknown;
-  try {
-    const raw = event.isBase64Encoded && event.body
-      ? Buffer.from(event.body, 'base64').toString('utf8')
-      : (event.body ?? '');
-    parsed = JSON.parse(raw);
-  } catch {
-    return reply(400, { error: 'Body must be JSON.' });
-  }
+export const handler = createProxyHandler({
+  logPrefix: LOG_PREFIX,
+  route: ROUTE,
+  secret,
+  origins,
+  maxBodyBytes: MAX_BODY_BYTES,
+  validate,
+  handle: identify,
+  unavailable: 'Recognition is unavailable.',
+});
 
-  const request = validate(parsed);
-  if ('error' in request) {
-    return reply(400, { error: request.error });
-  }
-
-  try {
-    return reply(200, await identify(request));
-  } catch (error) {
-    // Never leak a model error, a key, or a stack to the till. The client treats
-    // any non-200 as "she didn't catch it" and the cashier tries again.
-    console.error('[vision] recognition failed', error);
-    return reply(502, { error: 'Recognition is unavailable.' });
-  }
-}
-
-function reply(statusCode: number, body: unknown): ProxyResult {
-  return {
-    statusCode,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-    body: JSON.stringify(body),
-  };
-}
+// Made with Bob
