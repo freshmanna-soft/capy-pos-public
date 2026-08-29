@@ -17,21 +17,16 @@
 git clone git@github.ibm.com:your-org/capy-pos.git
 cd capy-pos
 
-# Install dependencies
+# Install dependencies — this is the only step you need.
+# Playwright, Cucumber, Storybook, Angular Material/CDK and Tailwind are all
+# already declared in package.json; installing them again by hand just risks
+# pulling a different version than the lockfile pins.
 npm install
-
-# Install testing tools
-npm install -D @playwright/test @cucumber/cucumber playwright
-npm install -D @storybook/angular @storybook/addon-essentials
-
-# Install UI frameworks
-npm install @angular/material @angular/cdk
-npm install -D tailwindcss postcss autoprefixer
-npx tailwindcss init
-
-# Install SQLite
-npm install better-sqlite3 @types/better-sqlite3
 ```
+
+Persistence is **Dexie (IndexedDB)**, which `npm install` already brings in. There is no SQLite
+step: the app migrated off sql.js/`better-sqlite3` to Dexie (see
+[`DEXIE_MIGRATION.md`](DEXIE_MIGRATION.md)), and those packages are no longer dependencies.
 
 ### Development
 
