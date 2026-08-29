@@ -88,18 +88,47 @@ import survives the strip and fails at load. `tsc` accepts both and rewrites the
 extensions on the way into `dist/`, and `verbatimModuleSyntax` turns a mistake here
 into a build error rather than a crash on startup.
 
-**Deployed**, as a Lambda behind the existing API Gateway:
+**Deployed**, as a container on IBM Cloud Code Engine (story #197):
 
 ```sh
-npm run build                                # → dist/
-# handler: dist/lambda.handler
-# runtime: nodejs22.x   memory: 512MB   timeout: 15s
-# env:     ANTHROPIC_API_KEY  (from your secrets manager, not a plaintext var)
+ibmcloud cr login
+docker build -t us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1 .
+docker push  us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1
+# then: cd ../../terraform && terraform apply
 ```
 
-Put it behind **the same authorizer as the rest of the Capy-POS API**. The client
-already sends its bearer token on every call; an unauthenticated recognition
-endpoint is an open, metered path to a paid model.
+Terraform references the image, it does not build it — the tag pushed here and
+`var.image_tag` have to agree. Three variables the app will not start without:
+
+| Env | From | Why |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | per-app Code Engine secret | the model key this service exists to hold |
+| `SESSION_JWT_SECRET` | project `session-jwt` secret | verifies the session token; must match `getJwtSecret()` in `session-issuer.ts` |
+| `ALLOWED_ORIGINS` | `var.frontend_origins` | the only origins answered — there is no wildcard |
+
+### The boundary, precisely
+
+`server.ts` verifies the browser's session token itself, via `session-guard.ts`:
+HS256 signature, expiry, and the `sale:process` permission. It is **not** delegated
+to a gateway. Earlier versions of this file said to "put it behind the same
+authorizer as the rest of the Capy-POS API" — epic #195 established that no such
+authorizer was ever built (`terraform/aws-demo/main.tf` has no
+`aws_apigatewayv2_authorizer`, and `environment.ts` ships `cognito.enabled: false`),
+and on Code Engine there is no gateway in front of the container to delegate to at
+all. So the check runs in the process that spends the key.
+
+What that buys: an unauthenticated caller, a scanner, an expired token, a forged
+token, or a cross-origin page cannot spend the shop's model budget.
+
+What it does not buy: the signing secret is shared with a **public browser bundle**,
+so anyone who loads the SPA can read it and mint whatever claims they like. This
+bounds *reachability*, not *identity*. Closing that needs a server-side issuer,
+which needs the operator store to live server-side — issue #140's remit. Stated
+here because the bug epic #195 is fixing *was* a README that overstated a boundary.
+
+`dist/lambda.handler` is still in the tree as the dormant AWS path, alongside
+`terraform/aws-demo`. It has **no** authorization; see its docblock before pointing
+an API Gateway route at it.
 
 ## What it costs, and the three dials that change it
 

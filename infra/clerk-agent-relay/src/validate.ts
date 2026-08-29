@@ -66,7 +66,13 @@ export const MAX_ASSISTANT_BLOCKS = 24;
 /** Tool calls the model may make in one hop, and therefore results per hop. */
 export const MAX_TOOL_RESULTS = 12;
 
-/** Whole-transcript byte ceiling, so many small blocks cost no less than a few large ones. */
+/**
+ * Whole-transcript ceiling, so many small blocks cost no less than a few large ones.
+ *
+ * Units, not bytes: the check is `JSON.stringify(raw).length`, like every other
+ * `*_CHARS` cap here. `MAX_BODY_BYTES` below converts it at `BYTES_PER_CAPPED_CHAR`,
+ * which is the conversion the transport cap was first derived without.
+ */
 export const MAX_TRANSCRIPT_CHARS = 200_000;
 
 /** One tool result's summarized output. Tool results are counted facts, not records. */
@@ -76,6 +82,70 @@ export const MAX_TOOL_OUTPUT_CHARS = 4_000;
 export const MAX_CART_LINES = 200;
 export const MAX_OFFER_LINES = 8;
 
+/**
+ * The most UTF-8 bytes one unit of a `*_CHARS` cap can weigh.
+ *
+ * Every char cap above counts JavaScript string units: `sanitizeText` slices with
+ * `.slice`, and the transcript cap measures `JSON.stringify(...).length`. `http.ts`
+ * counts bytes off the socket. The worst ratio between the two is three — a char in
+ * U+0800..U+FFFF is one unit and three bytes, while an emoji is two units and four,
+ * so it is cheaper per unit. A cap of N units therefore admits up to 3N bytes, and a
+ * transport cap derived without this factor 413s bodies `validate` accepts.
+ */
+const BYTES_PER_CAPPED_CHAR = 3;
+
+/** `id`, `name`, `sku`, `category`, `emoji` — every one capped at `MAX_CATALOG_FIELD_CHARS`. */
+const CATALOG_FIELDS_PER_ENTRY = 5;
+
+/**
+ * Slack for the JSON around one record: its quoted keys, quotes, commas, braces and
+ * numeric fields. Generous, because it is bounded per record and the suite measures
+ * the real serialization rather than trusting this number.
+ */
+const RECORD_ENVELOPE_BYTES = 96;
+
+/** Slack for the top-level object: five keys, the brackets, and the scalar context fields. */
+const BODY_ENVELOPE_BYTES = 1_024;
+
+/**
+ * The largest request body the HTTP boundary accepts, in bytes.
+ *
+ * `server.ts` imports this and hands it to `createRequestListener`; it is the only
+ * definition of the cap in the service. That matters because a transport cap below
+ * what `validate` accepts 413s legal bodies at the socket, and that failure looks
+ * like a network fault rather than the configuration mistake it is.
+ *
+ * So it is summed from the caps that bound the body, rather than guessed as one cap
+ * plus round slack. The guess is what review caught: `MAX_TRANSCRIPT_CHARS + 64 KiB`
+ * was 265,536, while a hop with a full catalog — 400 entries, every field at
+ * `MAX_CATALOG_FIELD_CHARS` — plus a full transcript is 499,123 bytes of ASCII and
+ * `validate` accepts every byte. Only the transcript was in the derivation; the
+ * catalog, which is the largest of the terms below, was in the prose as "slack".
+ *
+ * Two suites hold this up, because the first round of this story also had the
+ * derivation written twice — once here and once in `server.ts`:
+ * `validate.test.mjs` builds the largest body `validate` accepts, every count at its
+ * cap and every capped field filled with a three-byte character, and asserts it fits
+ * under this number and is not dwarfed by it; `session-guard.test.mjs` asserts
+ * `server.ts` imports the cap rather than computing a second one. The measurement is
+ * the proof — these terms are the claim.
+ */
+export const MAX_BODY_BYTES =
+  // The transcript, whose own cap is the only one checked across a whole subtree.
+  MAX_TRANSCRIPT_CHARS * BYTES_PER_CAPPED_CHAR +
+  // The catalog, the largest term: five capped fields on every entry it admits.
+  MAX_CATALOG_ENTRIES *
+    (CATALOG_FIELDS_PER_ENTRY * MAX_CATALOG_FIELD_CHARS * BYTES_PER_CAPPED_CHAR +
+      RECORD_ENVELOPE_BYTES) +
+  // The till state the client describes: one capped name or label per line.
+  (MAX_CART_LINES + MAX_OFFER_LINES) *
+    (MAX_CATALOG_FIELD_CHARS * BYTES_PER_CAPPED_CHAR + RECORD_ENVELOPE_BYTES) +
+  // Remembered turns: a phrase each, plus the tool names kept with it.
+  MAX_MEMORY_TURNS * (MAX_UTTERANCE_CHARS * BYTES_PER_CAPPED_CHAR + RECORD_ENVELOPE_BYTES) +
+  // The utterance itself, and the object holding all of the above.
+  MAX_UTTERANCE_CHARS * BYTES_PER_CAPPED_CHAR +
+  BODY_ENVELOPE_BYTES;
+
 const TOOL_NAMES = new Set<string>(CLERK_AGENT_TOOL_NAMES);
 
 /** A validation refusal. Bounded prose, never a model error and never a stack. */
@@ -84,15 +154,16 @@ export interface RelayRejection {
 }
 
 /**
- * Whether the caller presented a bearer token.
+ * Whether the caller presented a bearer token. **Presence only — this verifies
+ * nothing.** `Authorization: Bearer x` satisfies it.
  *
- * Authorization proper is the gateway's job, exactly as `infra/vision-proxy`'s
- * handler says of itself. This is the belt to that braces, and it is here rather
- * than only there because the failure it guards is worse on this route: a
- * misconfigured route in front of a *tool-capable* model on the shop's key is an
- * open, metered path that can also change a cart. Presence only — checking the
- * token is the authorizer's job, and duplicating that here would be a second,
- * worse implementation of it.
+ * Used only by `lambda.ts`, the dormant AWS path. It used to be described as "the
+ * belt to the gateway authorizer's braces"; epic #195 established there was no
+ * authorizer, which left this as the entire check on a tool-capable model.
+ *
+ * The deployed path does not rely on it: `server.ts` calls `authorize` in
+ * `session-guard.ts`, which verifies the signature, the expiry and the
+ * `sale:process` permission. Prefer that for any new entry point.
  */
 export function hasBearerToken(headers: Record<string, string | undefined>): boolean {
   for (const [name, value] of Object.entries(headers)) {
@@ -130,6 +201,14 @@ export function sanitizeText(value: string, maxChars: number): string {
  * prompt only costs tokens. The id survives validation because the browser needs
  * it in the request it already has — it is `formatCatalog` that refuses to render
  * it.
+ *
+ * Every field goes through `sanitizeText`, the id included, even though the id is
+ * the one field this service never renders. A cap without a strip would make the
+ * guarantee here conditional on the current renderer instead of on this function:
+ * the day an id is rendered, echoed into a tool result or logged as its own line, a
+ * newline inside it starts a line of its own, and nothing in this file would have
+ * changed to say so. This is the same guarantee `sanitizeCatalog` in the vision
+ * proxy makes, where the id *is* rendered and expected back.
  */
 export function sanitizeCatalog(raw: unknown[]): CatalogHint[] {
   const hints: CatalogHint[] = [];
@@ -138,14 +217,14 @@ export function sanitizeCatalog(raw: unknown[]): CatalogHint[] {
       continue;
     }
     const record = entry as Record<string, unknown>;
-    const id = asString(record['id']);
+    const id = sanitizeText(asString(record['id']), MAX_CATALOG_FIELD_CHARS);
     const name = sanitizeText(asString(record['name']), MAX_CATALOG_FIELD_CHARS);
     if (id.length === 0 || name.length === 0) {
       continue;
     }
     const emoji = sanitizeText(asString(record['emoji']), MAX_CATALOG_FIELD_CHARS);
     hints.push({
-      id: id.slice(0, MAX_CATALOG_FIELD_CHARS),
+      id,
       name,
       sku: sanitizeText(asString(record['sku']), MAX_CATALOG_FIELD_CHARS),
       category: sanitizeText(asString(record['category']), MAX_CATALOG_FIELD_CHARS),

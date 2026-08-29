@@ -16,9 +16,18 @@ interface ProxyResult {
 /**
  * API Gateway handler for POST {apiUrl}/vision/identify.
  *
- * Authorization is the gateway's job, not this function's — attach the same
- * authorizer the rest of the Capy-POS API uses. The client sends its bearer token
- * on every call for exactly that reason.
+ * **This handler has no authorization of any kind, and there is no authorizer to
+ * delegate it to.** Epic #195 established that: `terraform/aws-demo/main.tf` has no
+ * `aws_apigatewayv2_authorizer` resource, so the previous version of this docblock —
+ * "authorization is the gateway's job, attach the same authorizer the rest of the API
+ * uses" — described a component nobody ever built.
+ *
+ * The deployed path is now the container, not this function: story #197 moved the
+ * service to IBM Cloud Code Engine, where `server.ts` verifies the session token and
+ * pins CORS itself via `session-guard.ts`. This file is kept as the dormant AWS
+ * template `terraform/aws-demo` is, and must not be put in front of an API Gateway
+ * route without a real authorizer or the same `authorize` call `server.ts` makes —
+ * an unauthenticated recognition endpoint is an open, metered path to a paid model.
  */
 export async function handler(event: ProxyEvent): Promise<ProxyResult> {
   const method = event.requestContext?.http?.method ?? event.httpMethod ?? 'POST';
