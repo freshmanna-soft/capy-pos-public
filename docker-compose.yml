@@ -1,0 +1,19 @@
+# Local stand-in for what IBM Code Engine actually runs — same image, same
+# Dockerfile, no IBM Cloud account or credentials needed. Code Engine's
+# ibm_code_engine_app resource (terraform/main.tf) just runs this container;
+# testing it here is testing the real deploy artifact, not an approximation.
+#
+#   docker compose up --build     # build + serve on http://localhost:8080
+#   docker compose down           # stop
+#
+# Add backend services (infra/pos-api, infra/vision-proxy,
+# infra/clerk-agent-relay) here once each has its own Dockerfile — none does
+# yet (tracked in #197). Until then, the frontend's apiUrl still points at
+# whatever environment.*.ts says (currently AWS's API Gateway — see #206).
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
