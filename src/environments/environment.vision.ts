@@ -1,23 +1,29 @@
 /**
- * Local Development Environment — with real recognition switched on.
+ * Local Development Environment — with real recognition AND the agentic
+ * clerk switched on.
  *
- * A copy of `environment.ts` with exactly two values changed:
+ * A copy of `environment.ts` with these values changed:
  *
- *   features.aiVision  false → true                              (use Claude, not the mock)
- *   visionApiUrl       ''    → http://localhost:8788/vision/…    (the local proxy)
+ *   features.aiVision   false → true                             (use Claude, not the mock)
+ *   features.clerkAgent false → true                             (talk to the clerk, not just show it items)
+ *   visionApiUrl        ''    → http://localhost:8788/vision/…   (the local vision proxy)
+ *   clerkAgentApiUrl     ''    → http://localhost:8789/clerk/…    (the local agent relay)
  *
  * It is a separate build target rather than a flag flipped in `environment.ts`
- * because turning live vision on has costs the default dev build should not
- * carry: every settled frame is a paid model call, the clerk asks for camera
- * consent before it will start, and the e2e suite runs against `ng serve` with no
- * proxy listening. Opting in per run keeps all three out of the way until asked
- * for.
+ * because turning live vision/agent on has costs the default dev build should
+ * not carry: every settled frame and every turn is a paid model call, the clerk
+ * asks for camera/mic consent before it will start, and the e2e suite runs
+ * against `ng serve` with no proxy listening. Opting in per run keeps all of
+ * that out of the way until asked for.
  *
- *   npm run vision:proxy    # terminal one — holds the model key
- *   npm run start:vision    # terminal two — serves this configuration
+ *   npm run vision:proxy                        # terminal one — holds the vision model key
+ *   (cd infra/clerk-agent-relay && npm start)   # terminal two — holds the agent model key, PORT 8789
+ *   npm run start:vision                        # terminal three — serves this configuration
  *
- * Port 8788 rather than the proxy's own 8787 default: on this machine 8787 is
- * already taken by another local service, and the proxy reads PORT.
+ * Port 8788 rather than the vision proxy's own 8787 default: on this machine
+ * 8787 is already taken by another local service, and the proxy reads PORT.
+ * The clerk-agent-relay's own default (8789) is used as-is — nothing else on
+ * this machine claims it.
  *
  * Keep the rest in step with `environment.ts` by hand, as the prod, staging and
  * test targets already are.
@@ -46,7 +52,7 @@ export const environment = {
   // clerkAgentApiPath to apiUrl"; the override wins when it is set, so a local
   // relay can be pointed at without repointing `apiUrl` at a service that only
   // answers /clerk/agent.
-  clerkAgentApiUrl: '',
+  clerkAgentApiUrl: 'http://localhost:8789/clerk/agent',
 
   // Database
   databaseName: 'capy_pos_dev',
@@ -87,7 +93,7 @@ export const environment = {
     // The agentic clerk tier — the phrases the keyword parser cannot name. Its own
     // flag, not aiVision: that one governs paying the model to *look*, and the two
     // switch on independently.
-    clerkAgent: false,
+    clerkAgent: true,
   },
 
   // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but

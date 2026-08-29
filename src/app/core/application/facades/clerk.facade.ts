@@ -1,6 +1,20 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { AgentMemory, AgentTurnRequest } from '@core/application/dtos/agent.dto';
 import { CatalogHint, VisionCandidate } from '@core/application/dtos/recognition.dto';
-import { joinWithinSpeechBudget } from '@core/application/services/agent-speech.sanitizer';
+import { CLERK_AGENT } from '@core/application/ports/clerk-agent.port';
+import {
+  joinWithinSpeechBudget,
+  sanitizeAgentSpeech,
+} from '@core/application/services/agent-speech.sanitizer';
+import {
+  AgentBudget,
+  AgentOutcome,
+  AgentTurnRunner,
+} from '@core/application/services/agent-turn.runner';
+import {
+  ClerkAgentToolDeps,
+  createClerkAgentTools,
+} from '@core/application/services/clerk-agent-tools';
 import { VISION_RECOGNIZER } from '@core/application/ports/vision-recognizer.port';
 import { AddToCartRejection, PosFacade } from '@core/application/facades/pos.facade';
 import { ProductService } from '@core/application/services/product.service';
@@ -165,6 +179,15 @@ export interface ClerkExchange {
  */
 export const MAX_EXCHANGES = 6;
 
+/**
+ * How many completed agent turns this session keeps for `AgentMemory`.
+ *
+ * Client-side slack in front of the relay's own independent
+ * `MAX_MEMORY_TURNS` (12) — this is what actually gets sent, sized to what a
+ * turn realistically needs to recall, not to the server-side security bound.
+ */
+export const AGENT_MEMORY_LIMIT = 6;
+
 /** Whether the camera is up and the clerk is working. */
 export type ClerkPhase = 'off' | 'starting' | 'ready' | 'blocked';
 
@@ -260,6 +283,7 @@ export class ClerkFacade {
   private readonly camera = inject(CameraService);
   private readonly barcodes = inject(BarcodeScannerService);
   private readonly recognizer = inject(VISION_RECOGNIZER);
+  private readonly agent = inject(CLERK_AGENT);
   private readonly voice = inject(SpeechSynthesisService);
   private readonly ear = inject(SpeechRecognitionService);
   private readonly pos = inject(PosFacade);
@@ -522,6 +546,53 @@ export class ClerkFacade {
    */
   private openBatch: UndoBatch | null = null;
   /**
+   * The tier's own answer to the phrases the keyword parser could not name.
+   *
+   * Built once over this facade's privates — `AgentTurnRunner` is deliberately
+   * not `@Injectable` (see its own header for why), so this is the one place
+   * that constructs it by hand. `addByName` is called with `confirmedBy: 'agent'`
+   * (`ChoiceActor`'s other member, alongside `'cashier'`): an agent-driven add is
+   * never scored as agreement with the recognizer's own ranking, the same
+   * reasoning `takeCandidate`'s actor param already carries for a voice choice.
+   *
+   * `this.openBatch` is read at call time, not captured — `withUndoBatch` sets it
+   * before the turn callback runs, so an add mid-turn defers into the same batch
+   * `sealUndoBatch` closes when the turn ends, exactly like a spoken multi-add.
+   */
+  private readonly agentTools = createClerkAgentTools({
+    resolveSpokenName: (query) => this.resolveSpokenName(query),
+    cartLines: () =>
+      this.pos.cartItems().map((item) => ({ name: item.product.name, quantity: item.quantity })),
+    totalItems: () => this.pos.totalItems(),
+    formattedTotal: () => this.pos.total().toFixed(2),
+    inCart: (productId) => this.pos.getQuantity(productId),
+    offer: () =>
+      this._candidates().map((candidate, index) => ({
+        position: index + 1,
+        label: candidate.label,
+      })),
+    addByName: (query, quantity) =>
+      this.addByName(query, quantity, 'agent', this.openBatch ?? undefined),
+    removeByName: (query, quantity) => this.removeByName(query, quantity),
+  } satisfies ClerkAgentToolDeps);
+  /**
+   * The two live readings `AgentTurnRunner`'s caps are measured against.
+   *
+   * Functions, not values, for the reason the interface itself gives: both are
+   * volatile inside a 3.5s turn, and a snapshot taken once would describe a till
+   * that has since moved on.
+   */
+  private readonly agentBudget: AgentBudget = {
+    cartRevision: () => this.pos.cartRevision(),
+    pendingAdd: () => {
+      const first = this._pendingAdd()?.lines[0];
+      return first ? { productId: first.productId } : null;
+    },
+  };
+  private readonly agentRunner = new AgentTurnRunner(this.agent, this.agentTools, this.agentBudget);
+  /** This session's completed agent turns, oldest first, capped for the same reason the relay caps its own copy. */
+  private agentMemory: AgentMemory[] = [];
+  /**
    * Who put the candidates on screen.
    *
    * The recognition log measures how good the *recognizer* is, so a choice
@@ -537,6 +608,7 @@ export class ClerkFacade {
   private undoTimer: ReturnType<typeof setInterval> | null = null;
   private moodTimer: ReturnType<typeof setTimeout> | null = null;
   private inFlight: AbortController | null = null;
+  private agentInFlight: AbortController | null = null;
   /**
    * Monotonic id for exchange lines.
    *
@@ -1579,6 +1651,9 @@ export class ClerkFacade {
    * case — the three parser-answered verbs that mean "the cashier moved on".
    */
   undoLast(): void {
+    // Abort seam: an agent turn still in flight is answering a question the
+    // cashier has just overtaken by asking to take something back.
+    this.abortAgentTurn();
     const pending = this._pendingAdd();
     if (!pending) {
       // Silence here is the same bug as an unheard command: the cashier pressed
@@ -1659,11 +1734,12 @@ export class ClerkFacade {
    * particular a pending add keeps the rest of its window: guessing that "never
    * mind" meant the last add would be the expensive reading of the cheap word.
    *
-   * Abort seam: `abortAgentTurn()` becomes this method's first statement once the
-   * agent tier exists, alongside the same insertion in `undoLast()` and in
+   * Abort seam: the agent tier exists now — `abortAgentTurn()` is this method's
+   * first statement, alongside the same insertion in `undoLast()` and in
    * `handlePhrase`'s `checkout` case.
    */
   dismiss(): void {
+    this.abortAgentTurn();
     this.say('Okay.');
     this.setMood(ClerkMood.NEUTRAL);
   }
@@ -1767,8 +1843,10 @@ export class ClerkFacade {
         }
         return 'handled';
       case 'checkout':
-        // Abort seam: story 4 aborts any in-flight agent turn here, since this is
-        // one of the three parser-answered verbs that mean "the cashier moved on".
+        // Abort seam: one of the three parser-answered verbs that mean "the
+        // cashier moved on" — an in-flight agent turn is answering a question
+        // that no longer applies once she asks to check out.
+        this.abortAgentTurn();
         this.requestCheckout();
         return 'handled';
       case 'repeat':
@@ -1781,8 +1859,116 @@ export class ClerkFacade {
         this.speakHelp();
         return 'handled';
       default:
-        return 'ignored';
+        // Tier seam: the phrases a closed keyword set was never going to name.
+        // Silent, same as any other unrecognized phrase, when the operator's
+        // kill switch is off or a turn is already in flight — `setAgentEnabled`'s
+        // own message already sets that expectation ("commands only from here").
+        if (!this._agentEnabled() || this._busy()) {
+          return 'ignored';
+        }
+        this.startAgentTurn(phrase);
+        return 'handled';
     }
+  }
+
+  /**
+   * Fire one agent turn for a phrase the keyword parser could not name.
+   *
+   * Mirrors `identify()`'s own lifecycle — `_busy` set before the async work
+   * starts, an `AbortController` held so `checkout`/`undo`/a second admitted
+   * phrase can cancel a turn already in flight, and the pending line settled in
+   * a `finally` so a turn that resolves to silence does not leave the caption
+   * spinning forever.
+   */
+  private startAgentTurn(phrase: string): void {
+    this._busy.set(true);
+    const controller = new AbortController();
+    this.agentInFlight = controller;
+    void this.runAgentTurn(phrase, controller);
+  }
+
+  /**
+   * Cancel an agent turn already on the wire.
+   *
+   * Its answer describes a till from before whatever just happened — a barcode,
+   * a second admitted phrase, checkout — and speaking it after would be exactly
+   * the "acted on stale state" bug `abortLook` exists to prevent on the vision
+   * path.
+   */
+  private abortAgentTurn(): void {
+    this.agentInFlight?.abort();
+    this.agentInFlight = null;
+    this._busy.set(false);
+    this.settlePending();
+  }
+
+  private async runAgentTurn(phrase: string, controller: AbortController): Promise<void> {
+    let outcome: AgentOutcome | undefined;
+    try {
+      outcome = await this.withUndoBatch(async (batch) => {
+        const result = await this.agentRunner.run(
+          phrase,
+          () => this.buildAgentTurnRequest(phrase),
+          controller.signal
+        );
+        // Only a real answer gets spoken — `declined`/`unavailable`/`exhausted`
+        // are the port's own "say nothing" outcomes, same as `abortedStep()`.
+        if (result.kind === 'answered') {
+          batch.answer = sanitizeAgentSpeech(result.speech, {
+            namesByCode: this.catalogNamesByCode(),
+            offerOnScreen: this._candidates().length > 0,
+          });
+        }
+        return result;
+      });
+    } finally {
+      if (this.agentInFlight === controller) {
+        this.agentInFlight = null;
+      }
+      this._busy.set(false);
+      this.settlePending();
+    }
+    if (controller.signal.aborted || outcome === undefined) {
+      return;
+    }
+    this.agentMemory = [
+      ...this.agentMemory,
+      { phrase, tools: outcome.tools, productIds: outcome.productIds },
+    ].slice(-AGENT_MEMORY_LIMIT);
+    this.measure('clerk.agent.turn.ms', outcome.ms);
+    this.count('clerk.agent.hops', undefined, outcome.hops);
+  }
+
+  /** What this hop's request carries — everything except `utterance`/`transcript`, which `AgentTurnRunner` overwrites per hop. */
+  private buildAgentTurnRequest(phrase: string): AgentTurnRequest {
+    return {
+      utterance: phrase,
+      catalog: this.hints,
+      context: {
+        cartLines: this.pos
+          .cartItems()
+          .map((item) => ({ name: item.product.name, quantity: item.quantity })),
+        totalItems: this.pos.totalItems(),
+        total: this.pos.total(),
+        offer: this._candidates().map((candidate, index) => ({
+          position: index + 1,
+          label: candidate.label,
+        })),
+        cartChangedThisTurn: false,
+      },
+      memory: this.agentMemory,
+      transcript: [],
+    };
+  }
+
+  /** SKU and product id, lowercased, so a model that quotes either is read by name. */
+  private catalogNamesByCode(): ReadonlyMap<string, string> {
+    const map = new Map<string, string>();
+    for (const hint of this.hints) {
+      map.set(hint.id.toLowerCase(), hint.name);
+      map.set(hint.sku.toLowerCase(), hint.name);
+    }
+    return map;
   }
 
   /**
@@ -2193,11 +2379,17 @@ export class ClerkFacade {
       this.startUndoCountdown();
     }
     const summary = describeBatch(batch.outcomes);
-    if (summary.length === 0) {
+    // Empty summary no longer means "nothing to say" on its own — the agent
+    // tier can close a batch with zero cart outcomes (a pure question, no
+    // add/remove) and a real answer that still deserves to be spoken. Silent
+    // only when BOTH are empty: nothing committed and nothing to answer.
+    if (summary.length === 0 && answer.length === 0) {
       return '';
     }
     // One mood for the turn, set at the instant the countdown starts, so
     // `MOOD_HOLD_MS > UNDO_WINDOW_MS` still holds per batch rather than per line.
+    // `.some()` on an empty outcomes list is false, so a pure-answer turn with
+    // no mutations lands on the same neutral default as "nothing came up short".
     this.setMood(batch.outcomes.some(cameUpShort) ? ClerkMood.SORRY : ClerkMood.HAPPY);
     this.say(joinWithinSpeechBudget(summary, answer));
     return summary;
