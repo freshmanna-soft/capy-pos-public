@@ -23,7 +23,15 @@
     "declaration": false,
     "sourceMap": true,
     "outDir": "dist",
-    "rootDir": "src",
+    // `..`, not `src`: `api.ts` and `server.ts` import the DocumentStore port from
+    // `infra/shared/` (story #204), and `rootDir` has to contain every input file or
+    // tsc refuses the program with TS6059. The cost is that emit mirrors the tree
+    // from `infra/` down — `dist/pos-api/src/server.js`, `dist/shared/src/…` — so a
+    // Dockerfile for this service builds from the `infra/` context and starts
+    // `dist/pos-api/src/server.js`, unlike the two sibling services' flat
+    // `dist/server.js`. `infra/shared/README.md` spells that out; there is no
+    // Dockerfile here yet to break.
+    "rootDir": "..",
     "skipLibCheck": true,
     "types": ["node"]
   },

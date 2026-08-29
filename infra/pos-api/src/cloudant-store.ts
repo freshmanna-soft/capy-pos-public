@@ -1,5 +1,5 @@
 /**
- * The persistence port, and the two things behind it.
+ * The Cloudant implementation of `DocumentStore`.
  *
  * The story left the data store as an explicit open decision between Cloudant and
  * Databases for PostgreSQL. Cloudant is chosen: both AWS tables are id-keyed with
@@ -8,120 +8,21 @@
  * directly, and it needs no schema migration story to stand up. Postgres would have
  * bought joins and transactions that nothing here asks for.
  *
- * ## Why a port at all, rather than calling Cloudant from `api.ts`
- *
- * Two reasons, both concrete:
- *
- * 1. `api.test.mjs` runs the whole route table — every status code, every
- *    permission refusal, the oversell guard — with no network and no IBM account.
- *    That is only possible if the routes depend on this interface rather than on
- *    HTTP.
- * 2. `npm start` is runnable on a laptop with `POS_API_STORE=memory`, so `smoke.mjs`
- *    exercises the real server over a real socket without provisioning anything.
- *
- * ## Why revisions are in the interface
- *
- * The AWS `sell-product` Lambda reads stock, compares it to the quantity, then
- * issues an unconditional `SET stock = stock - :qty`
- * (`terraform/aws-demo/lambda/sell-product/index.js`). Two tills selling the last
- * item at the same time both pass the check and both decrement: stock goes
- * negative and the shop has sold something it does not have. DynamoDB's atomic
- * counter hid half the problem and the missing condition expression exposed it
- * again.
- *
- * Cloudant has no atomic decrement, so pretending the write is a fire-and-forget
- * would reproduce that bug rather than inherit it. What Cloudant does have is
- * `_rev` optimistic concurrency: a `PUT` carrying a stale revision is refused with
- * a 409. Surfacing `rev` here lets `api.ts` do read-check-write as a
- * compare-and-swap with a bounded retry, which is the correction, and
- * `api.test.mjs` asserts it by racing two sells at the last unit.
+ * The port itself — and `MemoryStore`, which every route test in this package runs
+ * on — moved to `infra/shared/src/document-store.ts` (story #204), because a
+ * Firestore or DynamoDB build wants the same interface and the same in-memory
+ * double. This file is the part that could not go with it: it is Cloudant, and
+ * nothing else can use it.
+ * Read `infra/shared/README.md` for what the port requires of an implementation; the
+ * `rev` handling below is this file honouring it.
  */
-
-/** Everything stored here is addressed by a caller-visible `id`. */
-export interface StoredDocument {
-  readonly id: string;
-}
-
-/** A document together with the token required to overwrite or delete it. */
-export interface Revision<T> {
-  readonly document: T;
-  readonly rev: string;
-}
-
-/** `conflict` means "someone else wrote first" — never "the write was invalid". */
-export type WriteOutcome = 'written' | 'conflict';
-export type CreateOutcome = 'created' | 'conflict';
-
-export interface DocumentStore<T extends StoredDocument> {
-  /** Every document. Both collections are small and unfiltered, exactly as the AWS scans were. */
-  list(): Promise<readonly T[]>;
-  read(id: string): Promise<Revision<T> | null>;
-  /** Refuses to overwrite: a duplicate id is a `conflict`, which the API turns into 409. */
-  create(document: T): Promise<CreateOutcome>;
-  write(document: T, rev: string): Promise<WriteOutcome>;
-  remove(id: string, rev: string): Promise<WriteOutcome>;
-}
-
-// ─── In-memory ────────────────────────────────────────────────────────────────
-
-/**
- * The store `api.test.mjs` and local `npm start` use.
- *
- * Revisions are a monotonic counter rather than a hash: the contract this has to
- * honour is "a stale token is refused", and a counter honours it identically while
- * making a failing test readable (`2` tells you how many writes landed; a digest
- * does not).
- *
- * Documents are cloned on the way in and out. Without that, a caller mutating a
- * returned object would silently edit the store, and the oversell test would pass
- * for the wrong reason.
- */
-export class MemoryStore<T extends StoredDocument> implements DocumentStore<T> {
-  private readonly documents = new Map<string, { document: T; rev: number }>();
-
-  constructor(seed: readonly T[] = []) {
-    for (const document of seed) {
-      this.documents.set(document.id, { document: structuredClone(document) as T, rev: 1 });
-    }
-  }
-
-  async list(): Promise<readonly T[]> {
-    return [...this.documents.values()].map((entry) => structuredClone(entry.document) as T);
-  }
-
-  async read(id: string): Promise<Revision<T> | null> {
-    const entry = this.documents.get(id);
-    return entry ? { document: structuredClone(entry.document) as T, rev: String(entry.rev) } : null;
-  }
-
-  async create(document: T): Promise<CreateOutcome> {
-    if (this.documents.has(document.id)) {
-      return 'conflict';
-    }
-    this.documents.set(document.id, { document: structuredClone(document) as T, rev: 1 });
-    return 'created';
-  }
-
-  async write(document: T, rev: string): Promise<WriteOutcome> {
-    const entry = this.documents.get(document.id);
-    if (entry === undefined || String(entry.rev) !== rev) {
-      return 'conflict';
-    }
-    this.documents.set(document.id, { document: structuredClone(document) as T, rev: entry.rev + 1 });
-    return 'written';
-  }
-
-  async remove(id: string, rev: string): Promise<WriteOutcome> {
-    const entry = this.documents.get(id);
-    if (entry === undefined || String(entry.rev) !== rev) {
-      return 'conflict';
-    }
-    this.documents.delete(id);
-    return 'written';
-  }
-}
-
-// ─── Cloudant ─────────────────────────────────────────────────────────────────
+import type {
+  CreateOutcome,
+  DocumentStore,
+  Revision,
+  StoredDocument,
+  WriteOutcome,
+} from '../../shared/src/document-store.ts';
 
 export interface CloudantConfig {
   /** Service instance URL, no trailing slash, e.g. `https://…-bluemix.cloudantnosqldb.appdomain.cloud`. */
@@ -155,7 +56,7 @@ export class CloudantStore<T extends StoredDocument> implements DocumentStore<T>
 
   constructor(
     config: CloudantConfig,
-    /** Injected so `store.test.mjs` can drive every branch without a Cloudant instance. */
+    /** Injected so `cloudant-store.test.mjs` can drive every branch without a Cloudant instance. */
     fetchImpl: typeof fetch = fetch,
     nowMs: () => number = Date.now
   ) {
