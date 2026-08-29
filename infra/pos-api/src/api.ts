@@ -28,7 +28,7 @@
  * deliberately, field for field.
  */
 import { Permission, authorize } from './session-auth.ts';
-import type { DocumentStore, StoredDocument } from './store.ts';
+import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
 
 /** The catalogue document. Field-for-field what `create-product/index.js` writes. */
 export interface ProductDocument extends StoredDocument {

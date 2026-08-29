@@ -18,8 +18,9 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { handle } from './api.ts';
 import type { ApiDeps, ProductDocument, TransactionDocument } from './api.ts';
-import { CloudantStore, MemoryStore } from './store.ts';
-import type { DocumentStore } from './store.ts';
+import { CloudantStore } from './cloudant-store.ts';
+import { MemoryStore } from '../../shared/src/document-store.ts';
+import type { DocumentStore } from '../../shared/src/document-store.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8790);
 

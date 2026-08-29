@@ -15,7 +15,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { handle, matchRoute } from './api.ts';
-import { MemoryStore } from './store.ts';
+import { MemoryStore } from '../../shared/src/document-store.ts';
 import { Permission } from './session-auth.ts';
 
 const SECRET = 'test-secret';
