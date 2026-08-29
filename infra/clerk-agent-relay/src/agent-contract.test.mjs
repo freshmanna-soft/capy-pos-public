@@ -79,11 +79,14 @@ describe('TOOL_SCHEMAS', () => {
 
   it('leaves the model no room in any input', () => {
     for (const schema of TOOL_SCHEMAS) {
-      assert.equal(schema.strict, true, `${schema.name} is not strict`);
+      // No top-level `strict: true` — see objectSchema's own comment: the
+      // gateway this deployment routes through rejects that field on a tool
+      // definition. additionalProperties:false + every key required below is
+      // what's actually doing strict mode's job here.
+      assert.equal(schema.strict, undefined, `${schema.name} re-added strict — check the gateway supports it before restoring this`);
       const input = schema.input_schema;
       assert.equal(input.type, 'object');
       assert.equal(input.additionalProperties, false, `${schema.name} accepts extra keys`);
-      // `strict` requires every declared property be required.
       assert.deepEqual(input.required, Object.keys(input.properties));
       assert.ok(String(schema.description).length > 0, `${schema.name} has no description`);
     }

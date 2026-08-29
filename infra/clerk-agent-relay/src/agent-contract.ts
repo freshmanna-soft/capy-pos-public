@@ -139,7 +139,18 @@ export const CLERK_AGENT_TOOL_NAMES = [
 
 export type AgentToolName = (typeof CLERK_AGENT_TOOL_NAMES)[number];
 
-/** An object schema with no room in it — `strict` requires every key be required. */
+/**
+ * An object schema with no room in it: every key required, nothing extra
+ * admitted. Originally paired with a top-level `strict: true` on each tool
+ * (Anthropic's strict tool-use mode), which was removed after the model
+ * gateway this deployment routes through (an IBM-hosted litellm proxy —
+ * see local-dev-services notes) rejected every call with
+ * `tools.0.custom.strict: Extra inputs are not permitted`: it doesn't yet
+ * recognize that field on a tool definition. `additionalProperties: false`
+ * + `required` on every key already does most of strict mode's real work
+ * (rejecting a malformed call) without needing the gateway to support the
+ * flag — re-add `strict: true` if/when the gateway catches up.
+ */
 function objectSchema(properties: Record<string, unknown>): Record<string, unknown> {
   return {
     type: 'object',
@@ -183,40 +194,34 @@ export const TOOL_SCHEMAS: readonly Record<string, unknown>[] = [
     description:
       'Find which catalog products match a spoken name. Use this before adding anything you are not sure the shop sells. Returns matches by name, never ids.',
     input_schema: objectSchema({ name: NAME_PROPERTY }),
-    strict: true,
   },
   {
     name: 'read_cart',
     description:
       'Read the lines currently in the cart, the item count and the total. The till has already told you these below; call this only when you need them again after changing the cart.',
     input_schema: objectSchema({}),
-    strict: true,
   },
   {
     name: 'check_stock',
     description: 'How many of a product the shop has on hand, and how many are already in the cart.',
     input_schema: objectSchema({ name: NAME_PROPERTY }),
-    strict: true,
   },
   {
     name: 'read_offer',
     description:
       'Read the choices currently on screen in front of the cashier, by the position she can say out loud. Use this when she says "the first one" or "that one".',
     input_schema: objectSchema({}),
-    strict: true,
   },
   {
     name: 'add_by_name',
     description:
       'Add a product to the cart by spoken name. The till resolves the name, checks stock and opens an undo window. If the name fits more than one product the till asks the cashier instead of guessing — that is not an error.',
     input_schema: objectSchema({ name: NAME_PROPERTY, quantity: QUANTITY_PROPERTY }),
-    strict: true,
   },
   {
     name: 'remove_by_name',
     description: 'Remove a product from the cart by spoken name, or reduce how many of it are in.',
     input_schema: objectSchema({ name: NAME_PROPERTY, quantity: QUANTITY_PROPERTY }),
-    strict: true,
   },
 ];
 
