@@ -319,6 +319,7 @@ describe('DexieCustomerRepository (real Dexie + fake-indexeddb)', () => {
     const mapper = () =>
       repo as unknown as {
         mapToEntity(r: ICustomerDB): Customer;
+        mapToDatabase(e: Customer): ICustomerDB;
       };
 
     it('create maps a fully-populated entity to the DB and reads it back intact', async () => {

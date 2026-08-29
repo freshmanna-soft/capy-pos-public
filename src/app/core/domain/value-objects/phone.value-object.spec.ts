@@ -25,8 +25,10 @@ describe('Phone Value Object', () => {
     });
 
     it('should throw error for null or undefined', () => {
-      expect(() => new Phone(null as unknown)).toThrow('Phone number must be a non-empty string');
-      expect(() => new Phone(undefined as unknown)).toThrow(
+      expect(() => new Phone(null as unknown as string)).toThrow(
+        'Phone number must be a non-empty string'
+      );
+      expect(() => new Phone(undefined as unknown as string)).toThrow(
         'Phone number must be a non-empty string'
       );
     });
@@ -37,8 +39,12 @@ describe('Phone Value Object', () => {
     });
 
     it('should throw error for non-string values', () => {
-      expect(() => new Phone(123 as unknown)).toThrow('Phone number must be a non-empty string');
-      expect(() => new Phone({} as unknown)).toThrow('Phone number must be a non-empty string');
+      expect(() => new Phone(123 as unknown as string)).toThrow(
+        'Phone number must be a non-empty string'
+      );
+      expect(() => new Phone({} as unknown as string)).toThrow(
+        'Phone number must be a non-empty string'
+      );
     });
 
     it('should throw error for phone number with less than 10 digits', () => {
@@ -227,9 +233,9 @@ describe('Phone Value Object', () => {
 
     it('should return false for non-Phone objects', () => {
       const phone = new Phone('+1-555-123-4567');
-      expect(phone.equals('+1-555-123-4567' as unknown)).toBe(false);
-      expect(phone.equals(null as unknown)).toBe(false);
-      expect(phone.equals(undefined as unknown)).toBe(false);
+      expect(phone.equals('+1-555-123-4567' as unknown as Phone)).toBe(false);
+      expect(phone.equals(null as unknown as Phone)).toBe(false);
+      expect(phone.equals(undefined as unknown as Phone)).toBe(false);
     });
   });
 
@@ -311,21 +317,21 @@ describe('Phone Value Object', () => {
     it('should not allow modification of value property', () => {
       const phone = new Phone('+1-555-123-4567');
       expect(() => {
-        (phone as unknown)._value = '+1-999-999-9999';
+        (phone as unknown as { _value: string })._value = '+1-999-999-9999';
       }).toThrow();
     });
 
     it('should not allow modification of countryCode property', () => {
       const phone = new Phone('+1-555-123-4567');
       expect(() => {
-        (phone as unknown)._countryCode = '+44';
+        (phone as unknown as { _countryCode: string })._countryCode = '+44';
       }).toThrow();
     });
 
     it('should not allow modification of number property', () => {
       const phone = new Phone('+1-555-123-4567');
       expect(() => {
-        (phone as unknown)._number = '9999999999';
+        (phone as unknown as { _number: string })._number = '9999999999';
       }).toThrow();
     });
   });

@@ -647,7 +647,7 @@ describe('Customer Entity', () => {
     it.each([
       [12345678, 'a number, as a spreadsheet import leaves a numeric column'],
       [{ code: 'CAPY-B3KMNPQR' }, 'an object, as a half-mapped payload leaves it'],
-    ])('refuses %s (%s) rather than storing it', (raw) => {
+    ])('refuses %s (%s) rather than storing it', (raw, _label) => {
       // Refused rather than dropped, for the same reason a malformed string is: the
       // customer is holding something, and silence is the one answer that leaves
       // nobody able to find out what.

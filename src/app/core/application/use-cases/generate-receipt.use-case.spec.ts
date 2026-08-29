@@ -201,8 +201,8 @@ describe('GenerateReceiptUseCase', () => {
   describe('fromSnapshot() - Reconstruct from persisted data', () => {
     it('should reconstruct receipt from explicit values', () => {
       const items = [
-        { product: mockProducts.coffee as unknown, quantity: 2 },
-        { product: mockProducts.muffin as unknown, quantity: 1 },
+        { product: mockProducts.coffee, quantity: 2 },
+        { product: mockProducts.muffin, quantity: 1 },
       ];
 
       const receipt = useCase.fromSnapshot(mockPayment, items, 30.48, 2.59, 0.085, 33.07);
@@ -218,7 +218,7 @@ describe('GenerateReceiptUseCase', () => {
     it('should not depend on cart service state', () => {
       cartService.addProduct(mockProducts.juice);
 
-      const items = [{ product: mockProducts.coffee as unknown, quantity: 1 }];
+      const items = [{ product: mockProducts.coffee, quantity: 1 }];
 
       const receipt = useCase.fromSnapshot(mockPayment, items, 12.99, 1.1, 0.085, 14.09);
 

@@ -19,8 +19,12 @@ describe('Email Value Object', () => {
     });
 
     it('should throw error for null or undefined', () => {
-      expect(() => new Email(null as unknown)).toThrow('Email must be a non-empty string');
-      expect(() => new Email(undefined as unknown)).toThrow('Email must be a non-empty string');
+      expect(() => new Email(null as unknown as string)).toThrow(
+        'Email must be a non-empty string'
+      );
+      expect(() => new Email(undefined as unknown as string)).toThrow(
+        'Email must be a non-empty string'
+      );
     });
 
     it('should throw error for empty string', () => {
@@ -29,8 +33,8 @@ describe('Email Value Object', () => {
     });
 
     it('should throw error for non-string values', () => {
-      expect(() => new Email(123 as unknown)).toThrow('Email must be a non-empty string');
-      expect(() => new Email({} as unknown)).toThrow('Email must be a non-empty string');
+      expect(() => new Email(123 as unknown as string)).toThrow('Email must be a non-empty string');
+      expect(() => new Email({} as unknown as string)).toThrow('Email must be a non-empty string');
     });
 
     it('should throw error for email exceeding 254 characters', () => {
@@ -159,9 +163,9 @@ describe('Email Value Object', () => {
 
     it('should return false for non-Email objects', () => {
       const email = new Email('user@example.com');
-      expect(email.equals('user@example.com' as unknown)).toBe(false);
-      expect(email.equals(null as unknown)).toBe(false);
-      expect(email.equals(undefined as unknown)).toBe(false);
+      expect(email.equals('user@example.com' as unknown as Email)).toBe(false);
+      expect(email.equals(null as unknown as Email)).toBe(false);
+      expect(email.equals(undefined as unknown as Email)).toBe(false);
     });
   });
 
@@ -224,7 +228,7 @@ describe('Email Value Object', () => {
     it('should not allow modification of value property', () => {
       const email = new Email('user@example.com');
       expect(() => {
-        (email as unknown)._value = 'hacker@evil.com';
+        (email as unknown as { _value: string })._value = 'hacker@evil.com';
       }).toThrow();
     });
   });

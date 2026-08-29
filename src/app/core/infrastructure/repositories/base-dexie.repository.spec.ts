@@ -1,5 +1,6 @@
 import Dexie, { type Table, type IndexableType } from 'dexie';
 import { BaseDexieRepository } from './base-dexie.repository';
+import { BaseEntity } from '@core/domain/entities/base.entity';
 import {
   TelemetryService,
   REPOSITORY_RECORDS_SKIPPED_METRIC,
@@ -23,17 +24,27 @@ interface FakeRecord {
   deletedAt?: Date;
 }
 
-class FakeEntity {
+class FakeEntity extends BaseEntity {
   constructor(
-    public readonly id: string,
+    id: string,
     public readonly name: string,
     public readonly group: string,
     public readonly rank: string
   ) {
+    super(id);
     // Mirrors the real Product entity: empty name is invalid and throws.
     if (!name || name.trim() === '') {
       throw new Error('name is required');
     }
+  }
+
+  protected validate(): void {
+    // Nothing beyond the constructor's own name check — this fake exists to
+    // exercise BaseDexieRepository's list mapping, not entity validation.
+  }
+
+  clone(): FakeEntity {
+    return new FakeEntity(this.id, this.name, this.group, this.rank);
   }
 }
 
