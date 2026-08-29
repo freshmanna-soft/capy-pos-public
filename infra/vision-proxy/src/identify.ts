@@ -10,7 +10,12 @@ import type {
   RecognitionResult,
   VisionCandidate,
 } from './recognition-contract.ts';
-import { RECOGNITION_SCHEMA, SYSTEM_PROMPT, formatCatalog } from './recognition-contract.ts';
+import {
+  MAX_CATALOG_FIELD_CHARS,
+  RECOGNITION_SCHEMA,
+  SYSTEM_PROMPT,
+  formatCatalog,
+} from './recognition-contract.ts';
 
 /**
  * Claude Opus 5. Do not downgrade this to save money without measuring first —
@@ -38,8 +43,68 @@ const MAX_TOKENS = 1024;
 
 /** Guard against a pathological payload; 3 MB of base64 is a huge frame already. */
 export const MAX_IMAGE_BYTES = 3_000_000;
-/** A shop with more than this many active products needs a retrieval step first. */
+
+/**
+ * A shop with more than this many active products needs a retrieval step first.
+ *
+ * Applied in `sanitizeCatalog` and nowhere else. `identify` used to slice to it a
+ * second time, which is the same two-definitions-of-one-cap shape review caught on
+ * `MAX_BODY_BYTES`: the copy that is not the one callers reach is the copy that
+ * drifts.
+ */
 export const MAX_CATALOG_ENTRIES = 400;
+
+/**
+ * The most UTF-8 bytes one unit of a `*_CHARS` cap can weigh.
+ *
+ * `MAX_CATALOG_FIELD_CHARS` counts JavaScript string units — `sanitizeText` slices
+ * with `.slice` — while `http.ts` counts bytes off the socket. The worst ratio between
+ * the two is three: a char in U+0800..U+FFFF is one unit and three bytes, while an
+ * emoji is two units and four, so it is cheaper per unit. A cap of N units therefore
+ * admits up to 3N bytes. The relay derives its cap with the same factor.
+ */
+const BYTES_PER_CAPPED_CHAR = 3;
+
+/** `id`, `name`, `sku`, `category`, `emoji` — every one capped at `MAX_CATALOG_FIELD_CHARS`. */
+const CATALOG_FIELDS_PER_ENTRY = 5;
+
+/**
+ * Slack for the JSON around one catalog entry: its quoted keys, quotes, commas and
+ * braces. Generous, because it is bounded per entry and the suite measures the real
+ * serialization rather than trusting this number.
+ */
+const CATALOG_ENTRY_ENVELOPE_BYTES = 96;
+
+/** Slack for the top-level object: three keys, the brackets, and the media type. */
+const BODY_ENVELOPE_BYTES = 1_024;
+
+/**
+ * The largest request body the HTTP boundary accepts, in bytes.
+ *
+ * `server.ts` imports this and hands it to `createRequestListener`; it is the only
+ * definition of the cap in the service. That matters because a transport cap below
+ * what `validate` accepts 413s legal bodies at the socket, and that failure looks
+ * like a network fault rather than the configuration mistake it is.
+ *
+ * So it is summed from the caps that bound the body — the frame and the catalog —
+ * rather than guessed as the frame cap plus round slack. Review caught that guess on
+ * the relay, and the same arithmetic applies here: a full catalog of three-byte
+ * characters is 724 KiB, against the 512 KiB of slack that stood in for it.
+ *
+ * Two suites hold this up, because the first round of this story also had the
+ * derivation written twice — once here and once in `server.ts`:
+ * `identify.test.mjs` builds the largest body `validate` accepts, catalog at the
+ * entry cap and every capped field full, and asserts it fits under this number and is
+ * not dwarfed by it; `session-guard.test.mjs` asserts `server.ts` imports the cap
+ * rather than computing a second one. The measurement is the proof — these terms are
+ * the claim.
+ */
+export const MAX_BODY_BYTES =
+  MAX_IMAGE_BYTES +
+  MAX_CATALOG_ENTRIES *
+    (CATALOG_FIELDS_PER_ENTRY * MAX_CATALOG_FIELD_CHARS * BYTES_PER_CAPPED_CHAR +
+      CATALOG_ENTRY_ENVELOPE_BYTES) +
+  BODY_ENVELOPE_BYTES;
 
 const client = new Anthropic();
 
@@ -53,7 +118,10 @@ const client = new Anthropic();
  * ordering backwards and every request pays full price for the catalog.
  */
 export async function identify(request: IdentifyRequest): Promise<RecognitionResult> {
-  const catalog = request.catalog.slice(0, MAX_CATALOG_ENTRIES);
+  // No slicing and no sanitizing here: `validate` is the only way to build an
+  // `IdentifyRequest`, and both entry points — `server.ts` via `http.ts`, and the
+  // dormant `lambda.ts` — run it before reaching this line.
+  const { catalog } = request;
   if (catalog.length === 0) {
     return { candidates: [], utterance: 'There is nothing in the catalog to match against.', empty: true };
   }
@@ -184,6 +252,74 @@ function logUsage(usage: Anthropic.Usage): void {
   );
 }
 
+/**
+ * Strip anything that could break out of the row it is rendered in, then cap it.
+ *
+ * Control characters, newlines and tabs all go: `formatCatalog` renders the catalog
+ * as tab-separated rows under category headings, so a product name containing a
+ * newline can otherwise start a row of its own — and one containing a tab can start
+ * a column of its own — inside a *cached* block. That is the cheapest prompt
+ * injection there is, and the shop's own inventory form is where the text comes
+ * from, so it is not trusted text just because it is not a stranger's.
+ *
+ * Byte-identical to `sanitizeText` in the relay's `validate.ts` on purpose, but not
+ * shared: each service is a standalone container with its own `rootDir`, and the
+ * drift check in `session-guard.test.mjs` only covers files that exist twice by
+ * necessity. Two small copies are cheaper than adding a third to that list.
+ */
+export function sanitizeText(value: string, maxChars: number): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxChars);
+}
+
+/**
+ * Turn a caller's array into the `CatalogHint[]` `formatCatalog` renders.
+ *
+ * This is the function whose absence review caught. `validate` used to check
+ * `Array.isArray(catalog)` and then cast the array through — `catalog as
+ * CatalogHint[]` — so every per-entry guarantee in the type was a claim nobody
+ * checked. A single entry missing `category` (`{ id: 'p-1', name: 'Beans' }`, the
+ * shape a hand-written client sends) reached `hint.category.length` in
+ * `formatCatalog` and threw a `TypeError`, which `http.ts` caught with the model
+ * errors and reported as a 502 `unavailable`: a bad request, blamed on the service,
+ * arriving as "she didn't catch it" at the till.
+ *
+ * Entries without a usable id and name are dropped rather than repaired, matching
+ * `sanitizeCatalog` in the relay: a product with no name cannot be spoken and one
+ * with no id cannot be added to a cart, so carrying it into the prompt only costs
+ * tokens. Every field is stripped and capped the same way in both services, the id
+ * included, so the guarantee does not depend on which fields each one happens to
+ * render. What differs is only what is done with the id afterwards: here it is
+ * rendered and expected back — the model returns one and `parse` looks it up — and
+ * an id wider than a rendered field is not an id.
+ */
+export function sanitizeCatalog(raw: unknown[]): CatalogHint[] {
+  const hints: CatalogHint[] = [];
+  for (const entry of raw.slice(0, MAX_CATALOG_ENTRIES)) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const id = sanitizeText(asString(record['id']), MAX_CATALOG_FIELD_CHARS);
+    const name = sanitizeText(asString(record['name']), MAX_CATALOG_FIELD_CHARS);
+    if (id.length === 0 || name.length === 0) {
+      continue;
+    }
+    const emoji = sanitizeText(asString(record['emoji']), MAX_CATALOG_FIELD_CHARS);
+    hints.push({
+      id,
+      name,
+      sku: sanitizeText(asString(record['sku']), MAX_CATALOG_FIELD_CHARS),
+      category: sanitizeText(asString(record['category']), MAX_CATALOG_FIELD_CHARS),
+      ...(emoji.length > 0 ? { emoji } : {}),
+    });
+  }
+  return hints;
+}
+
 /** Validate the client payload before spending anything on it. */
 export function validate(body: unknown): IdentifyRequest | { error: string } {
   if (typeof body !== 'object' || body === null) {
@@ -197,7 +333,13 @@ export function validate(body: unknown): IdentifyRequest | { error: string } {
   if (typeof image !== 'string' || image.length === 0) {
     return { error: 'image must be a base64 string.' };
   }
-  if (image.length > MAX_IMAGE_BYTES) {
+  // `Buffer.byteLength`, not `.length`. The cap is named in bytes, `MAX_BODY_BYTES` is
+  // derived from it in bytes, and `http.ts` counts bytes off the socket — but
+  // `.length` counts UTF-16 units, so a frame of multi-byte characters passed this
+  // check at up to three times the cap and was then 413d at the transport, reported as
+  // a network fault. Base64 is ASCII, so this changes nothing for a real frame; it
+  // changes what a crafted one can claim.
+  if (Buffer.byteLength(image) > MAX_IMAGE_BYTES) {
     return { error: 'image is too large.' };
   }
   if (mediaType !== 'image/jpeg' && mediaType !== 'image/png' && mediaType !== 'image/webp') {
@@ -207,5 +349,17 @@ export function validate(body: unknown): IdentifyRequest | { error: string } {
     return { error: 'catalog must be an array.' };
   }
 
-  return { image, mediaType, catalog: catalog as CatalogHint[] };
+  // No cast. Every field of every hint is now something this function produced.
+  //
+  // A catalog that sanitizes to nothing is not a rejection, which is where this
+  // deliberately differs from the relay's 400: `identify` answers an empty catalog
+  // with "there is nothing in the catalog to match against" and spends nothing, and
+  // the till has one honest thing to say either way. The relay refuses instead
+  // because its tools resolve spoken names *against* the catalog, so a hop with an
+  // empty one has no work it could do.
+  return { image, mediaType, catalog: sanitizeCatalog(catalog) };
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }

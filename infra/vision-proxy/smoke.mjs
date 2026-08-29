@@ -7,11 +7,44 @@
  * way to see whether the prompt cache is actually being read, which is the one
  * failure mode that costs money without changing any behaviour.
  *
- *   PORT=8788 node smoke.mjs
+ *   SESSION_JWT_SECRET=… ALLOWED_ORIGINS=… ANTHROPIC_API_KEY=… npm start   # one terminal
+ *   SESSION_JWT_SECRET=… PORT=8787 node smoke.mjs                          # another
+ *
+ * The secret is required because the proxy verifies a session token on every call
+ * now (#197). This script mints one rather than reading the browser's, so the smoke
+ * stays runnable without a signed-in till — and if it drifts from `session-issuer.ts`
+ * the smoke fails with 401, which is the failure worth catching.
  */
 import { deflateSync } from 'node:zlib';
+import { createHmac } from 'node:crypto';
 
 const PORT = Number(process.env.PORT ?? 8788);
+const SECRET = process.env.SESSION_JWT_SECRET ?? '';
+
+if (SECRET.length === 0) {
+  console.error('SESSION_JWT_SECRET is not set. It must be the secret the proxy verifies with.');
+  process.exit(1);
+}
+
+/**
+ * Mint a session token the way the browser does — HS256 over base64url segments,
+ * `sub`/`tenantId` for attribution, `sale:process` because that is the permission
+ * `session-guard.ts` requires. Same shape as `infra/pos-api/smoke.mjs`.
+ */
+function mint() {
+  const claims = {
+    sub: 'smoke-operator',
+    tenantId: 'smoke-store',
+    roles: ['operator'],
+    permissions: ['sale:process'],
+    exp: Math.floor(Date.now() / 1000) + 300,
+  };
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const signingInput = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
+  return `${signingInput}.${createHmac('sha256', SECRET).update(signingInput).digest('base64url')}`;
+}
+
+const TOKEN = mint();
 const W = 384;
 const H = 384;
 
@@ -97,7 +130,7 @@ for (const attempt of [1, 2]) {
   const started = Date.now();
   const response = await fetch(`http://127.0.0.1:${PORT}/vision/identify`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
     body: JSON.stringify({ image, mediaType: 'image/png', catalog: CATALOG }),
   });
   const body = await response.text();
