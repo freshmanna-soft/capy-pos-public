@@ -151,6 +151,14 @@ export function sanitizeText(value: string, maxChars: number): string {
  * prompt only costs tokens. The id survives validation because the browser needs
  * it in the request it already has — it is `formatCatalog` that refuses to render
  * it.
+ *
+ * Every field goes through `sanitizeText`, the id included, even though the id is
+ * the one field this service never renders. A cap without a strip would make the
+ * guarantee here conditional on the current renderer instead of on this function:
+ * the day an id is rendered, echoed into a tool result or logged as its own line, a
+ * newline inside it starts a line of its own, and nothing in this file would have
+ * changed to say so. This is the same guarantee `sanitizeCatalog` in the vision
+ * proxy makes, where the id *is* rendered and expected back.
  */
 export function sanitizeCatalog(raw: unknown[]): CatalogHint[] {
   const hints: CatalogHint[] = [];
@@ -159,14 +167,14 @@ export function sanitizeCatalog(raw: unknown[]): CatalogHint[] {
       continue;
     }
     const record = entry as Record<string, unknown>;
-    const id = asString(record['id']);
+    const id = sanitizeText(asString(record['id']), MAX_CATALOG_FIELD_CHARS);
     const name = sanitizeText(asString(record['name']), MAX_CATALOG_FIELD_CHARS);
     if (id.length === 0 || name.length === 0) {
       continue;
     }
     const emoji = sanitizeText(asString(record['emoji']), MAX_CATALOG_FIELD_CHARS);
     hints.push({
-      id: id.slice(0, MAX_CATALOG_FIELD_CHARS),
+      id,
       name,
       sku: sanitizeText(asString(record['sku']), MAX_CATALOG_FIELD_CHARS),
       category: sanitizeText(asString(record['category']), MAX_CATALOG_FIELD_CHARS),

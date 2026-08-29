@@ -258,9 +258,11 @@ export function sanitizeText(value: string, maxChars: number): string {
  * Entries without a usable id and name are dropped rather than repaired, matching
  * `sanitizeCatalog` in the relay: a product with no name cannot be spoken and one
  * with no id cannot be added to a cart, so carrying it into the prompt only costs
- * tokens. Unlike the relay, an id here is also rendered and expected back — the
- * model returns one and `parse` looks it up — so it is capped to the same width as
- * everything else that is rendered, and an id longer than that is not an id.
+ * tokens. Every field is stripped and capped the same way in both services, the id
+ * included, so the guarantee does not depend on which fields each one happens to
+ * render. What differs is only what is done with the id afterwards: here it is
+ * rendered and expected back — the model returns one and `parse` looks it up — and
+ * an id wider than a rendered field is not an id.
  */
 export function sanitizeCatalog(raw: unknown[]): CatalogHint[] {
   const hints: CatalogHint[] = [];
