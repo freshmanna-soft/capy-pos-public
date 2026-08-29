@@ -41,11 +41,12 @@ resource "ibm_code_engine_secret" "cr_secret" {
 }
 
 locals {
-  # The apps that hold the model key, and the apps that verify a session token.
-  # Derived once so the secret resources and the env bindings below cannot drift
-  # apart from each other.
-  model_key_services = { for name, service in var.services : name => service if service.needs_model_key }
-  guarded_services   = { for name, service in var.services : name => service if service.guards_browser_calls }
+  # The apps that hold the model key, the apps that verify a session token, and the
+  # apps that talk to Cloudant. Derived once so the secret resources and the env
+  # bindings below cannot drift apart from each other.
+  model_key_services       = { for name, service in var.services : name => service if service.needs_model_key }
+  session_guarded_services = { for name, service in var.services : name => service if service.needs_session_secret }
+  cloudant_services        = { for name, service in var.services : name => service if service.needs_cloudant }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
   # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses. Empty until
@@ -54,17 +55,25 @@ locals {
   allowed_origins = join(",", var.frontend_origins)
 
   # Literal (non-secret) env per app. `NODE_ENV` for every app, `ALLOWED_ORIGINS`
-  # only where it means something, and `env` last so a service can override either.
+  # only for services that pin CORS to it, and `env` last so a service can override
+  # either.
   #
-  # A guarded service gets `ALLOWED_ORIGINS` unconditionally, not only when it is
-  # non-empty: the binding states what the container needs, and whether the value
+  # A CORS-pinning service gets `ALLOWED_ORIGINS` unconditionally, not only when it
+  # is non-empty: the binding states what the container needs, and whether the value
   # exists is the precondition's job. Omitting the variable when the list is empty —
   # which is the stock default — is what deployed two apps whose `requireConfig()`
   # calls `process.exit(1)` before they ever listen.
+  #
+  # Deliberately separate from `needs_session_secret`: pos-api verifies the same
+  # session token the two proxies do, but (unlike them) answers every origin itself
+  # (`'Access-Control-Allow-Origin': '*'` in its own `server.ts`) and reads no
+  # `ALLOWED_ORIGINS` at all — binding it there would be dead config, and worse,
+  # would drag pos-api into the two-pass-apply dance below for a check it never
+  # performs.
   service_env = {
     for name, service in var.services : name => merge(
       { NODE_ENV = "production" },
-      service.guards_browser_calls ? { ALLOWED_ORIGINS = local.allowed_origins } : {},
+      service.pins_cors_origins ? { ALLOWED_ORIGINS = local.allowed_origins } : {},
       service.env,
     )
   }
@@ -97,11 +106,11 @@ resource "ibm_code_engine_secret" "model_key" {
 
 # The session-signing secret, one for the whole project.
 #
-# Shared deliberately: the proxies verify the same HS256 token the browser already
-# mints (`src/app/core/infrastructure/auth/session-issuer.ts`), so a per-app secret
-# would mean a token that one app accepts and its sibling rejects.
+# Shared deliberately: pos-api and the two proxies all verify the same HS256 token
+# the browser already mints (`src/app/core/infrastructure/auth/session-issuer.ts`),
+# so a per-app secret would mean a token that one app accepts and its sibling rejects.
 resource "ibm_code_engine_secret" "session_jwt" {
-  count = length(local.guarded_services) > 0 ? 1 : 0
+  count = length(local.session_guarded_services) > 0 ? 1 : 0
 
   project_id = ibm_code_engine_project.project.project_id
   name       = "session-jwt"
@@ -116,6 +125,55 @@ resource "ibm_code_engine_secret" "session_jwt" {
       condition     = length(var.session_jwt_secret) > 0
       error_message = "Session verification needs TF_VAR_session_jwt_secret, matching getJwtSecret() in session-issuer.ts."
     }
+  }
+}
+
+# One shared Cloudant instance for the estate, same pattern as the one CR namespace
+# and one Code Engine project above: pos-api is the only consumer today, but a
+# database is provisioned once, not per-app. The dedicated `ibm_cloudant` resource
+# (not the generic `ibm_resource_instance`) is IBM's own documented way to provision
+# one — see the provider's examples/ibm-cloudant/lite-plan.
+resource "ibm_cloudant" "store" {
+  name     = "${var.project_name}-cloudant"
+  location = var.region
+  plan     = "lite"
+}
+
+# Real, generated credentials — never hand-entered, never a literal env var.
+resource "ibm_resource_key" "cloudant_key" {
+  name                 = "${var.project_name}-cloudant-key"
+  role                 = "Manager"
+  resource_instance_id = ibm_cloudant.store.id
+}
+
+locals {
+  # `credentials_json` + jsondecode over the flat `credentials` map: IBM's own
+  # resource_key docs document both, and jsondecode reads correctly whether a
+  # service's credential JSON is flat or nested (unlike Cloud Object Storage's
+  # `cos_hmac_keys.access_key_id`, Cloudant's is documented as flat). `apikey`
+  # and `url` are IBM Cloudant's long-stable IAM service-credential field
+  # names — worth a glance at the real output on the first `terraform apply`
+  # (`terraform state show ibm_resource_key.cloudant_key`) before trusting this
+  # blindly, since this project has never applied against a real Cloudant
+  # instance before.
+  cloudant_credentials = jsondecode(ibm_resource_key.cloudant_key.credentials_json)
+}
+
+# Cloudant credentials, one generic secret per app that sets `needs_cloudant`.
+#
+# Per-app rather than one shared secret for the same reason the model key is
+# per-app: revoking one service's access should not blind its sibling. Only
+# pos-api sets the flag today, but the loop costs nothing extra to keep general.
+resource "ibm_code_engine_secret" "cloudant_creds" {
+  for_each = local.cloudant_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-cloudant-creds"
+  format     = "generic"
+
+  data = {
+    CLOUDANT_URL    = local.cloudant_credentials.url
+    CLOUDANT_APIKEY = local.cloudant_credentials.apikey
   }
 }
 
@@ -162,7 +220,7 @@ resource "ibm_code_engine_app" "apps" {
   }
 
   dynamic "run_env_variables" {
-    for_each = each.value.guards_browser_calls ? [1] : []
+    for_each = each.value.needs_session_secret ? [1] : []
 
     content {
       type      = "secret_key_reference"
@@ -172,21 +230,43 @@ resource "ibm_code_engine_app" "apps" {
     }
   }
 
-  # `guards_browser_calls` needs three values, and until now only two of them failed
-  # the plan when missing: `anthropic_api_key` and `session_jwt_secret` each have a
-  # precondition on their secret, while `frontend_origins` — required by the same
-  # flag, and defaulting to `[]` — had none. So a stock `terraform apply` planned
-  # clean and then deployed two revisions that exit(1) on the missing variable, which
-  # surfaces as a scaling failure rather than as the configuration mistake it is.
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_cloudant ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "CLOUDANT_URL"
+      key       = "CLOUDANT_URL"
+      reference = ibm_code_engine_secret.cloudant_creds[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_cloudant ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "CLOUDANT_APIKEY"
+      key       = "CLOUDANT_APIKEY"
+      reference = ibm_code_engine_secret.cloudant_creds[each.key].name
+    }
+  }
+
+  # `pins_cors_origins` needs two values, and until now only one of them failed the
+  # plan when missing: `frontend_origins` — required by the flag, and defaulting to
+  # `[]` — had no precondition of its own. So a stock `terraform apply` planned clean
+  # and then deployed a revision that exit(1)s on the missing variable, which surfaces
+  # as a scaling failure rather than as the configuration mistake it is.
   #
   # Here rather than on a secret because origins are a literal env var, so there is no
-  # secret resource of their own to hang it from. The condition short-circuits for the
-  # frontend, which is unguarded and needs no origins list.
+  # secret resource of their own to hang it from. The condition short-circuits for
+  # every service that does not pin CORS — the frontend, and (deliberately) pos-api,
+  # which answers every origin itself and needs no origins list.
   lifecycle {
     precondition {
-      condition     = !each.value.guards_browser_calls || local.allowed_origins != ""
+      condition     = !each.value.pins_cors_origins || local.allowed_origins != ""
       error_message = <<-EOT
-        ${each.key} sets guards_browser_calls, so it needs TF_VAR_frontend_origins:
+        ${each.key} sets pins_cors_origins, so it needs TF_VAR_frontend_origins:
         without it the container refuses to start rather than answer every origin.
         The frontend's URL is an output of this same apply, so on a first deploy:
           1. apply the frontend alone, with

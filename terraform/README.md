@@ -16,12 +16,15 @@ template kept for reference and is not applied by this root module — see
 | `ibm_code_engine_project.project`       | One project for the estate.                                              |
 | `ibm_code_engine_secret.cr_secret`      | Registry pull secret (`icr-secret`).                                      |
 | `ibm_code_engine_secret.model_key`      | `ANTHROPIC_API_KEY`, one per app that sets `needs_model_key`.             |
-| `ibm_code_engine_secret.session_jwt`    | `SESSION_JWT_SECRET`, one for the project, when any app is guarded.       |
+| `ibm_code_engine_secret.session_jwt`    | `SESSION_JWT_SECRET`, one for the project, when any app sets `needs_session_secret`. |
+| `ibm_cloudant.store`                    | One shared Cloudant (Lite plan) instance, for pos-api's own data.         |
+| `ibm_resource_key.cloudant_key`         | Generated Cloudant credentials — never hand-entered.                     |
+| `ibm_code_engine_secret.cloudant_creds` | `CLOUDANT_URL`/`CLOUDANT_APIKEY`, one per app that sets `needs_cloudant`. |
 | `ibm_code_engine_app.apps`              | `for_each` over `var.services`.                                          |
 
 The apps are a `for_each` rather than one resource block per service on purpose:
-the frontend, the vision proxy and the clerk relay differ only in a port, a tag and
-which secrets they need. Adding `infra/pos-api` is a map entry, not a new file.
+the frontend, the two proxies and pos-api differ only in a port, a tag and which
+secrets they need.
 
 ## Directory structure
 
@@ -45,24 +48,25 @@ state. Per-environment deploys are separate workspaces/state files with differen
 - Terraform >= 1.5.0
 - IBM Cloud CLI (`ibmcloud`) with the Container Registry plugin
 - Docker, to build and push the service images
-- An IBM Cloud API key with Code Engine and Container Registry access
+- An IBM Cloud API key with Code Engine, Container Registry, and Resource Controller
+  (to provision the Cloudant instance and its credentials) access
 
 ## Inputs
 
 Set these as `TF_VAR_*` environment variables (never in a committed `.tfvars`):
 
-| Variable              | Required                        | Default     | Notes                                                            |
-| --------------------- | ------------------------------- | ----------- | ---------------------------------------------------------------- |
-| `ibmcloud_api_key`    | always                          | —           | Sensitive. Also used as the registry pull password.              |
-| `anthropic_api_key`   | if any service `needs_model_key`| `""`        | Sensitive. Bound as a secret, never as a literal env var.        |
-| `session_jwt_secret`  | if any service is guarded       | `""`        | Sensitive. Must match `getJwtSecret()` — see the auth note below.|
-| `frontend_origins`    | if any service is guarded       | `[]`        | List of `scheme://host[:port]`, no trailing slash.                |
+| Variable              | Required                          | Default     | Notes                                                            |
+| --------------------- | ---------------------------------- | ----------- | ---------------------------------------------------------------- |
+| `ibmcloud_api_key`    | always                             | —           | Sensitive. Also used as the registry pull password.              |
+| `anthropic_api_key`   | if any service `needs_model_key`   | `""`        | Sensitive. Bound as a secret, never as a literal env var.        |
+| `session_jwt_secret`  | if any service `needs_session_secret` | `""`     | Sensitive. Must match `getJwtSecret()` — see the auth note below.|
+| `frontend_origins`    | if any service `pins_cors_origins` | `[]`        | List of `scheme://host[:port]`, no trailing slash.                |
 | `region`              | no                              | `us-south`  |                                                                  |
 | `resource_group_name` | no                              | `Default`   |                                                                  |
 | `project_name`        | no                              | `capy-pos`  | Code Engine project name.                                        |
 | `cr_namespace`        | no                              | `capy-pos`  | Registry namespace holding every image.                          |
 | `image_tag`           | no                              | `latest`    | Applied to every service that does not override it.              |
-| `services`            | no                              | 3 apps      | See below.                                                       |
+| `services`            | no                              | 4 apps      | See below.                                                       |
 
 There is **no `app_name` variable**. The frontend used to be a single hardcoded app
 named by `var.app_name`; it is now the `capy-pos-app` key in `var.services`. Rename
@@ -75,16 +79,24 @@ Keyed by app name, which is also the image name inside `cr_namespace`:
 ```hcl
 services = {
   capy-pos-app           = { image_port = 8080 }
-  capy-vision-proxy      = { image_port = 8787, needs_model_key = true, guards_browser_calls = true }
-  capy-clerk-agent-relay = { image_port = 8789, needs_model_key = true, guards_browser_calls = true }
+  capy-vision-proxy      = { image_port = 8787, needs_model_key = true, needs_session_secret = true, pins_cors_origins = true }
+  capy-clerk-agent-relay = { image_port = 8789, needs_model_key = true, needs_session_secret = true, pins_cors_origins = true }
+  capy-pos-api           = { image_port = 8790, needs_session_secret = true, needs_cloudant = true }
 }
 ```
 
 - `image_port` — what the container listens on. A mismatch is a revision that never
   passes its port check.
 - `needs_model_key` — binds `ANTHROPIC_API_KEY` from a per-app secret.
-- `guards_browser_calls` — binds `SESSION_JWT_SECRET` and `ALLOWED_ORIGINS`, i.e. the
-  service verifies the browser's session token itself.
+- `needs_session_secret` — binds `SESSION_JWT_SECRET`, i.e. the service verifies the
+  browser's session token itself.
+- `pins_cors_origins` — binds `ALLOWED_ORIGINS` and requires `frontend_origins` (see
+  "Two-pass apply"). Separate from `needs_session_secret` because pos-api verifies the
+  same token the two proxies do but answers every origin itself and needs no origins
+  list — it sets the former, not the latter, and is a genuine one-pass, deploy-alone
+  first target: `terraform apply -target='ibm_code_engine_app.apps["capy-pos-api"]'`.
+- `needs_cloudant` — binds `CLOUDANT_URL`/`CLOUDANT_APIKEY` from the shared Cloudant
+  instance's per-app secret.
 - `image_tag`, `scale_*`, `env` — optional per-service overrides. `env` merges last,
   so it can override `NODE_ENV`.
 
@@ -96,6 +108,7 @@ services = {
 | `app_url`               | The frontend's URL. This is what `frontend_origins` needs.               |
 | `vision_proxy_url`      | Base for `visionApiUrl`; append `/vision/identify`.                       |
 | `clerk_agent_relay_url` | Base for `clerkAgentApiUrl`; append `/clerk/agent`.                       |
+| `pos_api_url`           | Base for `apiUrl`.                                                       |
 | `project_id`            | Code Engine project id, for `ibmcloud ce project select`.                 |
 | `cr_namespace`          | Registry namespace, for `docker push`.                                    |
 
@@ -113,10 +126,17 @@ export CR_NAMESPACE=capy-pos
 docker build -t us.icr.io/$CR_NAMESPACE/capy-pos-app:v1 .
 docker build -t us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1 infra/vision-proxy
 docker build -t us.icr.io/$CR_NAMESPACE/capy-clerk-agent-relay:v1 infra/clerk-agent-relay
+docker build -t us.icr.io/$CR_NAMESPACE/capy-pos-api:v1 infra/pos-api
 docker push us.icr.io/$CR_NAMESPACE/capy-pos-app:v1
 docker push us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1
 docker push us.icr.io/$CR_NAMESPACE/capy-clerk-agent-relay:v1
+docker push us.icr.io/$CR_NAMESPACE/capy-pos-api:v1
 ```
+
+Deploying one service alone first (recommended for a first-ever apply against a new
+account)? Build and push just that image, then target it:
+`terraform apply -target='ibm_code_engine_app.apps["capy-pos-api"]'`. pos-api needs no
+`frontend_origins` and no other service deployed first — see `pins_cors_origins` above.
 
 ### 2. Set the inputs
 
@@ -142,10 +162,10 @@ deliberate, and the next section is why.
 
 ## Two-pass apply
 
-`guards_browser_calls` needs three values: `anthropic_api_key`, `session_jwt_secret`
-and `frontend_origins`. The first two you know up front. The third is the frontend's
-own Code Engine URL — which is an **output of this same apply**, so on a first deploy
-it does not exist yet.
+`pins_cors_origins` needs `frontend_origins`, which is the frontend's own Code
+Engine URL — an **output of this same apply**, so on a first deploy it does not exist
+yet. (`needs_session_secret` and `needs_model_key` need `session_jwt_secret` and
+`anthropic_api_key`, which you know up front — no cycle there.)
 
 A guarded container refuses to start without `ALLOWED_ORIGINS` (`requireConfig()` in
 each proxy's `server.ts` calls `process.exit(1)`), because the alternative it replaces
@@ -209,8 +229,9 @@ block is a destroy-and-recreate, and the new URL invalidates `frontend_origins`.
 
 ## Troubleshooting
 
-**Plan fails: `… sets guards_browser_calls, so it needs TF_VAR_frontend_origins`**
-Expected on a first deploy. See "Two-pass apply".
+**Plan fails: `… sets pins_cors_origins, so it needs TF_VAR_frontend_origins`**
+Expected on a first deploy of a CORS-pinned service (vision-proxy, clerk-agent-relay
+— not pos-api). See "Two-pass apply".
 
 **Plan fails: `… needs a model key` / `Session verification needs TF_VAR_session_jwt_secret`**
 The precondition on the secret. Export the variable; never commit it.
@@ -244,9 +265,9 @@ ibmcloud login --apikey "$TF_VAR_ibmcloud_api_key"
 
 Single root module, single state. `terraform state list`,
 `terraform state show ibm_code_engine_app.apps['capy-vision-proxy']`. Use a remote
-backend for anything shared; a local `terraform.tfstate` holds
-`session_jwt_secret` and `anthropic_api_key` in plaintext and is gitignored for that
-reason.
+backend for anything shared; a local `terraform.tfstate` holds `session_jwt_secret`,
+`anthropic_api_key`, and now the Cloudant credentials `ibm_resource_key.cloudant_key`
+generates, in plaintext, and is gitignored for that reason.
 
 ## Links
 
