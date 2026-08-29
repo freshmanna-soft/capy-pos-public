@@ -21,6 +21,11 @@ output "clerk_agent_relay_url" {
   value       = try(ibm_code_engine_app.apps["capy-clerk-agent-relay"].endpoint, "")
 }
 
+output "pos_api_url" {
+  description = "Base URL for apiUrl in the environment file being deployed"
+  value       = try(ibm_code_engine_app.apps["capy-pos-api"].endpoint, "")
+}
+
 output "project_id" {
   description = "Code Engine project ID"
   value       = ibm_code_engine_project.project.project_id

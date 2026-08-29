@@ -89,9 +89,17 @@ variable "services" {
     image_tag = optional(string)
     # Binds ANTHROPIC_API_KEY from a per-app generic secret.
     needs_model_key = optional(bool, false)
-    # Verifies the browser's session token and pins CORS to `frontend_origins`:
-    # binds SESSION_JWT_SECRET and ALLOWED_ORIGINS.
-    guards_browser_calls    = optional(bool, false)
+    # Verifies the browser's session token: binds SESSION_JWT_SECRET.
+    needs_session_secret = optional(bool, false)
+    # Pins CORS to `frontend_origins`: binds ALLOWED_ORIGINS, and requires
+    # `frontend_origins` to be set (see the precondition in main.tf). Separate from
+    # `needs_session_secret` because pos-api verifies the same session token the two
+    # proxies do but, unlike them, answers every origin itself and reads no
+    # ALLOWED_ORIGINS at all.
+    pins_cors_origins = optional(bool, false)
+    # Binds CLOUDANT_URL and CLOUDANT_APIKEY from the shared Cloudant instance's
+    # per-app secret.
+    needs_cloudant          = optional(bool, false)
     scale_min_instances     = optional(number, 0)
     scale_max_instances     = optional(number, 2)
     scale_initial_instances = optional(number, 1)
@@ -111,13 +119,25 @@ variable "services" {
     capy-vision-proxy = {
       image_port           = 8787
       needs_model_key      = true
-      guards_browser_calls = true
+      needs_session_secret = true
+      pins_cors_origins    = true
     }
     # infra/clerk-agent-relay — one agent hop, holding tools that change a cart.
     capy-clerk-agent-relay = {
       image_port           = 8789
       needs_model_key      = true
-      guards_browser_calls = true
+      needs_session_secret = true
+      pins_cors_origins    = true
+    }
+    # infra/pos-api — products/transactions/health, over Cloudant. Verifies the same
+    # session token the two proxies do, but answers every origin itself
+    # ('Access-Control-Allow-Origin: *' in its own server.ts) so it does not set
+    # `pins_cors_origins` and needs no `frontend_origins` — a genuine one-pass,
+    # deploy-this-alone-first service.
+    capy-pos-api = {
+      image_port           = 8790
+      needs_session_secret = true
+      needs_cloudant       = true
     }
   }
 
