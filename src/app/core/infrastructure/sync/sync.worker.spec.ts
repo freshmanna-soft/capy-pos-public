@@ -32,7 +32,12 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { DEFAULT_SYNC_CONFIG, SyncWorkerCommand, SyncWorkerConfig } from './sync.types';
+import {
+  DEFAULT_SYNC_CONFIG,
+  SyncWorkerCommand,
+  SyncWorkerConfig,
+  SyncWorkerEvent,
+} from './sync.types';
 
 /** Shaped like a session JWT because that is what it now is — see #224. */
 const TOKEN = 'header.payload.signature';
@@ -51,6 +56,7 @@ type Call = [string, RequestInit | undefined];
  */
 async function loadWorker() {
   const calls: Call[] = [];
+  const events: SyncWorkerEvent[] = [];
 
   const fetchStub = vi.fn(async (url: string | URL, init?: RequestInit) => {
     calls.push([String(url), init]);
@@ -61,7 +67,9 @@ async function loadWorker() {
   });
 
   vi.stubGlobal('fetch', fetchStub);
-  vi.spyOn(self, 'postMessage').mockImplementation(() => undefined);
+  vi.spyOn(self, 'postMessage').mockImplementation((event: unknown) => {
+    events.push(event as SyncWorkerEvent);
+  });
 
   vi.resetModules();
   await import('./sync.worker');
@@ -72,7 +80,15 @@ async function loadWorker() {
 
   return {
     calls,
+    events,
     send,
+    /** Every `PUSH_COMPLETED` the worker reported back to the main thread. */
+    pushResults(): Extract<SyncWorkerEvent, { type: 'PUSH_COMPLETED' }>[] {
+      return events.filter(
+        (event): event is Extract<SyncWorkerEvent, { type: 'PUSH_COMPLETED' }> =>
+          event.type === 'PUSH_COMPLETED'
+      );
+    },
     /** Authorization header the worker set on the call to `path`, if any. */
     authFor(path: string): string | undefined {
       const call = calls.find(([url]) => url.includes(path));
@@ -215,6 +231,9 @@ describe('sync worker request authorization (#206, #224)', () => {
     ])('omits the header entirely when the token is %s', async (_case, token) => {
       // Never `Bearer undefined` — a malformed credential is a denial that reads
       // like a wrong token, which is a worse thing to debug than no credential.
+      // The guards below mean no authorized request goes out at all in this state;
+      // this asserts the second line of defence, so that a future caller reaching
+      // `authHeaders` on an unguarded path still cannot emit a malformed credential.
       const worker = await loadWorker();
       worker.send({ type: 'START_SYNC', config: config(token) });
       await worker.settle();
@@ -222,6 +241,7 @@ describe('sync worker request authorization (#206, #224)', () => {
       await worker.settle();
       worker.send({ type: 'STOP_SYNC' });
 
+      expect(worker.calls, 'the health probe should still have run').not.toHaveLength(0);
       for (const [, init] of worker.calls) {
         const headers = (init?.headers ?? {}) as Record<string, string>;
         expect(Object.keys(headers)).not.toContain('Authorization');
@@ -247,6 +267,91 @@ describe('sync worker request authorization (#206, #224)', () => {
       worker.send({ type: 'STOP_SYNC' });
 
       expect(worker.calls.some(([url]) => url.includes('/api/health'))).toBe(true);
+    });
+
+    // The pull guard's siblings. Every authorized write is as unauthorized as the
+    // pull is before sign-in, and each 401 would count against the same breaker
+    // (threshold 5) — so a couple of unauthenticated pushes would leave the circuit
+    // open and stall the till's first real sync after sign-in.
+    it.each([
+      [
+        'create',
+        {
+          type: 'PUSH_PRODUCTS',
+          products: [{ id: 'p1', name: 'Hay', price: 3, category: 'feed' }],
+        },
+        'POST',
+      ],
+      [
+        'update',
+        {
+          type: 'PUSH_UPDATE_PRODUCTS',
+          products: [{ id: 'p1', name: 'Hay', price: 3, category: 'feed', stock: 9 }],
+        },
+        'PATCH',
+      ],
+      ['delete', { type: 'PUSH_DELETE_PRODUCTS', productIds: ['p1'] }, 'DELETE'],
+    ] as const)('sends no %s request without a session', async (_verb, command, method) => {
+      const worker = await loadWorker();
+      worker.send({ type: 'START_SYNC', config: config('') });
+      await worker.settle();
+      worker.send(command as SyncWorkerCommand);
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(worker.calls.some(([, init]) => init?.method === method)).toBe(false);
+    });
+
+    it('reports the refused push as failed instead of leaving the caller hanging', async () => {
+      // `SyncService.pushUpdateAsync` awaits a PUSH_COMPLETED keyed by product id.
+      // Skipping silently the way the pull does would strand that promise until its
+      // own 20s timeout, which then rejects with "timed out" — blaming the network
+      // for a missing session. The worker has to settle it, with the real reason.
+      const worker = await loadWorker();
+      worker.send({ type: 'START_SYNC', config: config('') });
+      await worker.settle();
+      worker.send({
+        type: 'PUSH_UPDATE_PRODUCTS',
+        products: [
+          { id: 'p1', name: 'Hay', price: 3, category: 'feed' },
+          { id: 'p2', name: 'Oats', price: 4, category: 'feed' },
+        ],
+      });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      const [report] = worker.pushResults();
+      expect(report, 'the worker must answer the push').toBeDefined();
+      expect(report.pushed).toBe(0);
+      expect(report.failed).toBe(2);
+      // Keyed per product, because that is how the pending promises are looked up —
+      // a single aggregate failure would settle neither.
+      expect(report.results.map((r) => r.productId)).toEqual(['p1', 'p2']);
+      for (const result of report.results) {
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/session/i);
+      }
+    });
+
+    it('pushes normally once a token arrives', async () => {
+      // Same deferral-not-latch property the pull has: the refusal must not outlive
+      // the sign-in that follows it.
+      const worker = await loadWorker();
+      worker.send({ type: 'START_SYNC', config: config('') });
+      await worker.settle();
+      worker.send({ type: 'UPDATE_CONFIG', config: { sessionToken: TOKEN } });
+      worker.send({
+        type: 'PUSH_PRODUCTS',
+        products: [{ id: 'p1', name: 'Hay', price: 3, category: 'feed' }],
+      });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      const post = worker.calls.find(([, init]) => init?.method === 'POST');
+      expect(post, 'the push should go out once authorized').toBeDefined();
+      expect((post?.[1]?.headers as Record<string, string>)['Authorization']).toBe(
+        `Bearer ${TOKEN}`
+      );
     });
 
     it('pulls as soon as a token arrives', async () => {

@@ -275,6 +275,42 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * Refuse a push that has no credential to present, reporting every item as failed.
+ *
+ * The pull can simply skip and retry on the next tick (#224). A push cannot: the
+ * items are pending local writes, and `SyncService.pushUpdateAsync` is *awaiting* a
+ * `PUSH_COMPLETED` result keyed by product id. Returning silently would leave that
+ * promise unsettled until its own 20s timeout, which then rejects with "timed out"
+ * — blaming the network for a missing session. So the guard settles the results
+ * itself, immediately and with the real reason.
+ *
+ * The point it shares with the pull guard is what it *doesn't* do: no request goes
+ * out. Every one would 401, and each 401 is a `circuitBreaker.execute` failure
+ * against a threshold of 5, so a handful of unauthenticated pushes would leave the
+ * circuit open and stall the first real sync after sign-in for the breaker timeout.
+ */
+function refuseUnauthorizedPush(productIds: string[], action: string): boolean {
+  if (sessionToken() !== null) return false;
+
+  console.warn(
+    `[Worker:Push] No operator session — refusing to ${action} ${productIds.length} product(s).`
+  );
+
+  postEvent({
+    type: 'PUSH_COMPLETED',
+    pushed: 0,
+    failed: productIds.length,
+    results: productIds.map((productId) => ({
+      productId,
+      success: false,
+      error: 'No operator session — sign in before syncing changes.',
+    })),
+  });
+
+  return true;
+}
+
 // ─── API Fetch with timeout ─────────────────────────────────────────────────
 
 async function fetchWithTimeout(
@@ -468,6 +504,8 @@ async function performSync(): Promise<void> {
 
 async function pushProducts(products: PushProductPayload[]): Promise<void> {
   if (!products.length) return;
+  const ids = products.map((p) => p.id);
+  if (refuseUnauthorizedPush(ids, 'create')) return;
 
   const url = `${config.apiBaseUrl}${config.endpoints.products}`;
   const results: PushResult[] = [];
@@ -537,6 +575,8 @@ async function pushProducts(products: PushProductPayload[]): Promise<void> {
 
 async function pushUpdates(products: PushProductPayload[]): Promise<void> {
   if (!products.length) return;
+  const ids = products.map((p) => p.id);
+  if (refuseUnauthorizedPush(ids, 'update')) return;
 
   const base = `${config.apiBaseUrl}${config.endpoints.products}`;
   const results: PushResult[] = [];
@@ -598,6 +638,7 @@ async function pushUpdates(products: PushProductPayload[]): Promise<void> {
 
 async function pushDeletes(productIds: string[]): Promise<void> {
   if (!productIds.length) return;
+  if (refuseUnauthorizedPush(productIds, 'delete')) return;
 
   const base = `${config.apiBaseUrl}${config.endpoints.products}`;
   const results: PushResult[] = [];

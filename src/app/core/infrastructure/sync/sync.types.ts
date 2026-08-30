@@ -105,7 +105,9 @@ export interface SyncWorkerConfig {
    *
    * Empty or absent means "nobody is signed in". The worker then sends no
    * `Authorization` header and skips the authorized calls altogether rather than
-   * collecting 401s — see `authHeaders`/`performSync` in `sync.worker.ts`.
+   * collecting 401s: the pull defers to the next tick and a push reports every item
+   * as failed so its awaiting caller settles at once. See `authHeaders`,
+   * `performSync` and `refuseUnauthorizedPush` in `sync.worker.ts`.
    */
   sessionToken?: string;
   syncIntervalMs: number; // How often to sync (default: 30s)
