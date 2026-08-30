@@ -1,5 +1,5 @@
 /**
- * Sync worker resilience paths (issue #206 follow-on).
+ * Sync worker resilience paths (issue #206 follow-on, updated for #224).
  *
  * The worker had no unit tests at all, which is why #206's server-side change could
  * land with the client half missing and every suite still green. Adding
@@ -7,9 +7,11 @@
  * exposed how much of it was never exercised: the circuit breaker, the retry
  * classifier and every push failure path.
  *
- * That is not incidental to the authorization work. Turning on the authorizer makes
- * **401 a live, expected failure mode** for the first time — a blank, stale or
- * wrong token now produces one on every call. Whether the worker retries a 401
+ * That is not incidental to the authorization work. Authorizing the backend makes
+ * **401 a live, expected failure mode** for the first time — since #224 the
+ * credential is the operator's session JWT, which expires after eight hours and is
+ * re-issued on a role change, so a stale token is a routine occurrence rather than a
+ * misconfiguration. Whether the worker retries a 401
  * therefore stops being a hypothetical: retrying means three requests per product
  * per cycle against a gateway that will refuse all of them, on a 30-second timer,
  * plus a circuit breaker tripped by a fault no backoff can fix. `isRetryable`
@@ -107,6 +109,11 @@ async function loadWorker(impl: (url: string, init?: RequestInit) => Promise<Res
 function config(overrides: Partial<SyncWorkerConfig> = {}): SyncWorkerConfig {
   return {
     ...DEFAULT_SYNC_CONFIG,
+    // A signed-in till, which is the only state in which these paths run at all:
+    // since #224 the worker defers its pulls entirely when no session token is set,
+    // so a config without one would exercise the skip rather than the retry
+    // classifier and the circuit breaker.
+    sessionToken: 'header.payload.signature',
     syncIntervalMs: 600_000,
     retry: { maxAttempts: 3, initialDelay: 1, maxDelay: 2, backoffMultiplier: 1 },
     circuitBreaker: {

@@ -20,7 +20,7 @@ import { INVENTORY_AGENT_PROVIDERS } from '@app/agents/inventory/infrastructure'
 import { SALES_AGENT_PROVIDERS } from '@app/agents/sales/infrastructure';
 import { PAYMENT_AGENT_PROVIDER } from '@app/agents/payment/infrastructure/payment-agent.provider';
 import { AgentRegistry } from '@app/agents/agent.registry';
-import { SyncService } from '@core/infrastructure/sync';
+import { SyncService, SyncSessionCredentialService } from '@core/infrastructure/sync';
 import { AUTH_PROVIDERS } from '@core/infrastructure/auth/auth.providers';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { ThemeService } from '@core/application/services/theme.service';
@@ -117,15 +117,20 @@ export const appConfig: ApplicationConfig = {
     PAYMENT_AGENT_PROVIDER,
     // Auth providers (local credential adapter — swap for Cognito in Story #42)
     ...AUTH_PROVIDERS,
-    // Background sync worker (syncs local Dexie ↔ AWS API)
+    // Background sync worker (syncs local Dexie ↔ the pos-api sync backend).
+    // Runs after session hydration above so a returning operator's token is already
+    // resolved and the first pull goes out authorized.
     provideAppInitializer(() => {
       const syncService = inject(SyncService);
+      // Injecting this registers the effect that pushes the session token to the
+      // worker on every sign-in, sign-out and re-issue (#224).
+      const credential = inject(SyncSessionCredentialService);
       syncService.start({
         apiBaseUrl: environment.apiUrl.replace('/api', ''),
-        // Every backend route except the health probe needs this (#206). Empty in
-        // every checked-in environment — a shared secret in the bundle is public —
-        // so the worker sends no Authorization header until it is injected.
-        serviceToken: environment.apiServiceToken,
+        // Every backend route except the health probe requires the operator's session
+        // JWT (#224) — `infra/pos-api/src/session-auth.ts` verifies it. Blank until
+        // someone signs in, and the worker defers its pulls while it is.
+        sessionToken: credential.token(),
         syncIntervalMs: 30000,
         circuitBreaker: environment.circuitBreaker,
         retry: environment.retry,

@@ -1,36 +1,46 @@
 /**
- * Sync worker request authorization (issue #206).
+ * Sync worker request authorization (issues #206, #224).
  *
- * #206 put a shared-token authorizer in front of every `terraform/aws-demo` route
- * except `GET /api/health`. That change was server-side only, which left the two
- * halves disagreeing: the gateway now demands `Authorization` and this worker — the
- * one client that talks to it — never sent the header. Restanding the stack would
- * have 401d every pull and every push while the Terraform specs stayed green,
- * because they assert the *declaration* and never the caller.
+ * #206 put an authorizer in front of every backend route except `GET /api/health`
+ * and left the two halves disagreeing: the backend demanded `Authorization` and
+ * this worker — the one client that talks to it — never sent the header. #224 then
+ * settled *which* credential that header carries: IBM `pos-api` is the sync backend
+ * and it verifies the operator's session JWT (`infra/pos-api/src/session-auth.ts`),
+ * not `terraform/aws-demo`'s shared service token. The header mechanics are
+ * identical; the value comes from `SyncSessionCredentialService` now instead of a
+ * build-time constant.
  *
- * These are the assertions from the other side of the wire. They drive the real
+ * These are the assertions from the caller's side of the wire. They drive the real
  * worker through real `postMessage` commands and inspect what it hands `fetch`, so
  * "the client sends the token" is checked against the code that does the sending
  * rather than against a description of it.
  *
- * Two properties matter as much as the header itself:
+ * Three properties matter as much as the header itself:
  *
- *  - **Health stays unauthenticated.** It is the worker's connectivity probe and
- *    the one route the authorizer is not attached to. Sending a credential there
- *    would turn a simple GET into a preflighted one and make the liveness signal
- *    depend on CORS and on the token being current — the probe has to keep working
- *    when the token is stale, which is precisely when you want to know the API is
- *    reachable.
- *  - **No token configured means no header**, not `Bearer undefined`. The token is
- *    empty in every checked-in environment (a shared secret in a browser bundle is
- *    readable by every visitor, so it is injected, not committed), and that
- *    unconfigured state has to behave exactly as it did before this change.
+ *  - **Health stays unauthenticated.** It is the worker's connectivity probe and the
+ *    one route no authorizer is attached to. Sending a credential there would turn a
+ *    simple GET into a preflighted one and make the liveness signal depend on CORS
+ *    and on the token being current — the probe has to keep working when the token
+ *    is stale, which is precisely when you want to know the API is reachable.
+ *  - **No token configured means no header**, not `Bearer undefined`. A malformed
+ *    credential is denied the same way a wrong one is, so it presents as "the token
+ *    is wrong" when the truth is "there is no token".
+ *  - **No session means no authorized call at all.** The worker starts at app boot,
+ *    before anyone has signed in, and `pos-api` answers 401 without a token. Pulling
+ *    anyway would retry three times per tick and trip the circuit breaker, so the
+ *    till's first sync after sign-in would sit behind an open circuit for a minute.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { DEFAULT_SYNC_CONFIG, SyncWorkerCommand, SyncWorkerConfig } from './sync.types';
+import {
+  DEFAULT_SYNC_CONFIG,
+  SyncWorkerCommand,
+  SyncWorkerConfig,
+  SyncWorkerEvent,
+} from './sync.types';
 
-const TOKEN = 'sk-capy-b9tQ2m4XvR7pLdN1';
+/** Shaped like a session JWT because that is what it now is — see #224. */
+const TOKEN = 'header.payload.signature';
 
 /** Every `fetch` the worker made, as `[url, init]`. */
 type Call = [string, RequestInit | undefined];
@@ -46,6 +56,7 @@ type Call = [string, RequestInit | undefined];
  */
 async function loadWorker() {
   const calls: Call[] = [];
+  const events: SyncWorkerEvent[] = [];
 
   const fetchStub = vi.fn(async (url: string | URL, init?: RequestInit) => {
     calls.push([String(url), init]);
@@ -56,7 +67,9 @@ async function loadWorker() {
   });
 
   vi.stubGlobal('fetch', fetchStub);
-  vi.spyOn(self, 'postMessage').mockImplementation(() => undefined);
+  vi.spyOn(self, 'postMessage').mockImplementation((event: unknown) => {
+    events.push(event as SyncWorkerEvent);
+  });
 
   vi.resetModules();
   await import('./sync.worker');
@@ -67,7 +80,15 @@ async function loadWorker() {
 
   return {
     calls,
+    events,
     send,
+    /** Every `PUSH_COMPLETED` the worker reported back to the main thread. */
+    pushResults(): Extract<SyncWorkerEvent, { type: 'PUSH_COMPLETED' }>[] {
+      return events.filter(
+        (event): event is Extract<SyncWorkerEvent, { type: 'PUSH_COMPLETED' }> =>
+          event.type === 'PUSH_COMPLETED'
+      );
+    },
     /** Authorization header the worker set on the call to `path`, if any. */
     authFor(path: string): string | undefined {
       const call = calls.find(([url]) => url.includes(path));
@@ -81,11 +102,11 @@ async function loadWorker() {
 
 /** A `START_SYNC` config with the given token, and an interval long enough to
  *  never fire a second cycle inside a test. */
-function config(serviceToken: string | undefined): SyncWorkerConfig {
-  return { ...DEFAULT_SYNC_CONFIG, serviceToken, syncIntervalMs: 600_000 };
+function config(sessionToken: string | undefined): SyncWorkerConfig {
+  return { ...DEFAULT_SYNC_CONFIG, sessionToken, syncIntervalMs: 600_000 };
 }
 
-describe('sync worker request authorization (#206)', () => {
+describe('sync worker request authorization (#206, #224)', () => {
   beforeEach(() => {
     vi.spyOn(console, 'log').mockImplementation(() => undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -97,7 +118,7 @@ describe('sync worker request authorization (#206)', () => {
     vi.unstubAllGlobals();
   });
 
-  describe('with a service token configured', () => {
+  describe('with a session token configured', () => {
     it('sends the token on the products pull', async () => {
       const worker = await loadWorker();
       worker.send({ type: 'START_SYNC', config: config(TOKEN) });
@@ -183,12 +204,12 @@ describe('sync worker request authorization (#206)', () => {
     });
 
     it('picks up a token supplied later via UPDATE_CONFIG', async () => {
-      // The token is injected at runtime rather than compiled in, so it can arrive
-      // after the worker has already started.
+      // The whole reason UPDATE_CONFIG carries it: the worker starts at app boot and
+      // the operator signs in afterwards, so the credential always arrives late.
       const worker = await loadWorker();
       worker.send({ type: 'START_SYNC', config: config('') });
       await worker.settle();
-      worker.send({ type: 'UPDATE_CONFIG', config: { serviceToken: TOKEN } });
+      worker.send({ type: 'UPDATE_CONFIG', config: { sessionToken: TOKEN } });
       worker.send({ type: 'FORCE_SYNC' });
       await worker.settle();
       worker.send({ type: 'STOP_SYNC' });
@@ -202,7 +223,7 @@ describe('sync worker request authorization (#206)', () => {
     });
   });
 
-  describe('with no service token configured', () => {
+  describe('with no session token configured', () => {
     it.each([
       ['an empty string', ''],
       ['whitespace only', '   '],
@@ -210,6 +231,9 @@ describe('sync worker request authorization (#206)', () => {
     ])('omits the header entirely when the token is %s', async (_case, token) => {
       // Never `Bearer undefined` — a malformed credential is a denial that reads
       // like a wrong token, which is a worse thing to debug than no credential.
+      // The guards below mean no authorized request goes out at all in this state;
+      // this asserts the second line of defence, so that a future caller reaching
+      // `authHeaders` on an unguarded path still cannot emit a malformed credential.
       const worker = await loadWorker();
       worker.send({ type: 'START_SYNC', config: config(token) });
       await worker.settle();
@@ -217,10 +241,133 @@ describe('sync worker request authorization (#206)', () => {
       await worker.settle();
       worker.send({ type: 'STOP_SYNC' });
 
+      expect(worker.calls, 'the health probe should still have run').not.toHaveLength(0);
       for (const [, init] of worker.calls) {
         const headers = (init?.headers ?? {}) as Record<string, string>;
         expect(Object.keys(headers)).not.toContain('Authorization');
       }
+    });
+
+    it('skips the pull entirely rather than 401ing its way to an open circuit', async () => {
+      const worker = await loadWorker();
+      worker.send({ type: 'START_SYNC', config: config('') });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(worker.calls.some(([url]) => url.includes('/api/products'))).toBe(false);
+      expect(worker.calls.some(([url]) => url.includes('/api/transactions'))).toBe(false);
+    });
+
+    it('still probes health, so the connectivity signal survives being signed out', async () => {
+      // The login screen shows whether the backend is reachable; that has to stay
+      // true before anyone holds a credential.
+      const worker = await loadWorker();
+      worker.send({ type: 'START_SYNC', config: config(undefined) });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(worker.calls.some(([url]) => url.includes('/api/health'))).toBe(true);
+    });
+
+    // The pull guard's siblings. Every authorized write is as unauthorized as the
+    // pull is before sign-in, and each 401 would count against the same breaker
+    // (threshold 5) — so a couple of unauthenticated pushes would leave the circuit
+    // open and stall the till's first real sync after sign-in.
+    it.each([
+      [
+        'create',
+        {
+          type: 'PUSH_PRODUCTS',
+          products: [{ id: 'p1', name: 'Hay', price: 3, category: 'feed' }],
+        },
+        'POST',
+      ],
+      [
+        'update',
+        {
+          type: 'PUSH_UPDATE_PRODUCTS',
+          products: [{ id: 'p1', name: 'Hay', price: 3, category: 'feed', stock: 9 }],
+        },
+        'PATCH',
+      ],
+      ['delete', { type: 'PUSH_DELETE_PRODUCTS', productIds: ['p1'] }, 'DELETE'],
+    ] as const)('sends no %s request without a session', async (_verb, command, method) => {
+      const worker = await loadWorker();
+      worker.send({ type: 'START_SYNC', config: config('') });
+      await worker.settle();
+      worker.send(command as SyncWorkerCommand);
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(worker.calls.some(([, init]) => init?.method === method)).toBe(false);
+    });
+
+    it('reports the refused push as failed instead of leaving the caller hanging', async () => {
+      // `SyncService.pushUpdateAsync` awaits a PUSH_COMPLETED keyed by product id.
+      // Skipping silently the way the pull does would strand that promise until its
+      // own 20s timeout, which then rejects with "timed out" — blaming the network
+      // for a missing session. The worker has to settle it, with the real reason.
+      const worker = await loadWorker();
+      worker.send({ type: 'START_SYNC', config: config('') });
+      await worker.settle();
+      worker.send({
+        type: 'PUSH_UPDATE_PRODUCTS',
+        products: [
+          { id: 'p1', name: 'Hay', price: 3, category: 'feed' },
+          { id: 'p2', name: 'Oats', price: 4, category: 'feed' },
+        ],
+      });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      const [report] = worker.pushResults();
+      expect(report, 'the worker must answer the push').toBeDefined();
+      expect(report.pushed).toBe(0);
+      expect(report.failed).toBe(2);
+      // Keyed per product, because that is how the pending promises are looked up —
+      // a single aggregate failure would settle neither.
+      expect(report.results.map((r) => r.productId)).toEqual(['p1', 'p2']);
+      for (const result of report.results) {
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(/session/i);
+      }
+    });
+
+    it('pushes normally once a token arrives', async () => {
+      // Same deferral-not-latch property the pull has: the refusal must not outlive
+      // the sign-in that follows it.
+      const worker = await loadWorker();
+      worker.send({ type: 'START_SYNC', config: config('') });
+      await worker.settle();
+      worker.send({ type: 'UPDATE_CONFIG', config: { sessionToken: TOKEN } });
+      worker.send({
+        type: 'PUSH_PRODUCTS',
+        products: [{ id: 'p1', name: 'Hay', price: 3, category: 'feed' }],
+      });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      const post = worker.calls.find(([, init]) => init?.method === 'POST');
+      expect(post, 'the push should go out once authorized').toBeDefined();
+      expect((post?.[1]?.headers as Record<string, string>)['Authorization']).toBe(
+        `Bearer ${TOKEN}`
+      );
+    });
+
+    it('pulls as soon as a token arrives', async () => {
+      // The skip is a deferral, not a latch: the sign-in that follows boot has to
+      // start syncing without waiting for the next tick.
+      const worker = await loadWorker();
+      worker.send({ type: 'START_SYNC', config: config('') });
+      await worker.settle();
+      expect(worker.calls.some(([url]) => url.includes('/api/products'))).toBe(false);
+
+      worker.send({ type: 'UPDATE_CONFIG', config: { sessionToken: TOKEN } });
+      worker.send({ type: 'FORCE_SYNC' });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(worker.authFor('/api/products')).toBe(`Bearer ${TOKEN}`);
     });
   });
 });

@@ -19,6 +19,10 @@
 # Dependencies
 # =============================================================================
 node_modules/
+# Also ignore it as a bare path: in a git worktree `node_modules` is a symlink
+# to the main checkout, and the trailing-slash pattern above does not match a
+# symlink — which is how an absolute-path link got committed once already.
+node_modules
 npm-debug.log
 yarn-error.log
 pnpm-debug.log

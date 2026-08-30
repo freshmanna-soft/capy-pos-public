@@ -8,31 +8,20 @@ export const environment = {
 
   // API Configuration
   //
-  // terraform/aws-demo's API Gateway (issue #206): torn down, DNS no longer
-  // resolves, and it never had an authorizer even when it existed. Repointed at
-  // the IBM Code Engine pos-api (terraform/, IBM-migration epic #195/#196/#197),
-  // which does verify the session token — see infra/pos-api/src/session-auth.ts.
+  // One sync backend, decided in #224: IBM Code Engine pos-api (terraform/,
+  // IBM-migration epic #195/#196/#197). terraform/aws-demo's API Gateway (#206) is
+  // torn down, DNS no longer resolves, and #206's shared-service-token authorizer
+  // has no caller — that stack stays dormant/reference-only per terraform/README.md.
+  //
+  // Auth is the operator's own session JWT, not a token committed here: pos-api
+  // verifies it in infra/pos-api/src/session-auth.ts and checks a per-route
+  // permission claim. SyncSessionCredentialService pushes it to the sync worker on
+  // every sign-in, sign-out and re-issue, so nothing credential-shaped is compiled
+  // into this bundle. The remaining ceiling is that the signing secret is shared
+  // with the bundle — that bounds reachability, not identity, and a server-side
+  // issuer (#140/#200) is what closes it.
   apiUrl: 'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api',
   apiTimeout: 30000,
-
-  // Shared service token for the sync backend (issue #206). Every route on
-  // `terraform/aws-demo` except `GET /api/health` requires
-  // `Authorization: Bearer <token>`; the sync worker sends it when this is set and
-  // sends no header at all when it is blank.
-  //
-  // Empty here on purpose, and it must stay that way: this file is compiled into
-  // the browser bundle, so anything written here is readable by every visitor and
-  // the token would be public with extra steps — the same reason the OTLP
-  // credentials below are empty. Supply it at runtime (a config fetch, or a build
-  // that injects it for a trusted deployment) and pass it to
-  // `SyncService.start({ serviceToken })`. Server-to-server callers — seed
-  // scripts, the MCP server, curl — pass it directly and work today.
-  //
-  // While it is empty, sync 401s against a restood stack and the till runs on Dexie
-  // alone. That is the deliberate #206 trade: an API nobody can write to
-  // anonymously beats a working sync anyone on the internet can write to. Real
-  // per-user auth (Cognito, #200) is what removes the trade.
-  apiServiceToken: '',
 
   // AI clerk vision proxy, relative to apiUrl. The model API key lives in
   // this endpoint, never in the browser bundle — see infra/vision-proxy.
