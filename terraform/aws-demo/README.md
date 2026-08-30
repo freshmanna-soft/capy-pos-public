@@ -1,6 +1,29 @@
-# 🤖 AI-Powered Troubleshooting with AWS X-Ray
+# Capy-POS AWS backend (+ the X-Ray troubleshooting demo)
 
-> **Talk Demo**: How to use AI agents to diagnose production failures using distributed tracing.
+> ## ⚠️ Read this before running anything here
+>
+> **This directory is not a disposable conference demo, despite its name and the
+> talk material further down.** It is the only real backend the shipped Capy-POS
+> frontend's offline-first sync talks to: `src/environments/environment.prod.ts`,
+> `environment.ts`, `environment.vision.ts` and
+> `src/app/core/infrastructure/sync/sync.types.ts` hardcode its API Gateway
+> hostname, and product features were built straight against it (`fc889356`,
+> `00e3ab10`). `AWS_DEPLOYMENT.md` at the repo root is its runbook. Issue #206
+> was filed because the "throwaway, easy teardown" framing here did not match
+> that reality.
+>
+> **Current state: destroyed.** `terraform.tfstate` reads `"resources": []` and
+> the gateway hostname no longer resolves, so sync from the deployed frontend
+> goes nowhere. See [Restanding this stack](#restanding-this-stack) — it needs an
+> authorized deploy decision and a service token, not just `terraform apply`.
+>
+> **Authorization:** every route except `GET /api/health` requires a shared
+> service token. Until #206 there was no authorizer of any kind, so product
+> writes and the transaction log were open to anyone with the hostname. Do not
+> remove it to "get sync working again".
+
+The X-Ray/AI-troubleshooting talk material below is still accurate and still
+useful — it is just not the whole story of what this stack is for.
 
 ## 🎯 What This Demo Shows
 
@@ -79,12 +102,83 @@ chmod +x scripts/deploy.sh scripts/seed-data.sh
 ./scripts/deploy.sh
 ```
 
-### Teardown (One Command)
+`scripts/deploy.sh` runs `terraform apply`, so it needs `TF_VAR_api_service_token`
+exported (see below). The apply fails fast without it — `var.api_service_token` has
+no default on purpose, so no deploy can quietly ship a token that is public in git
+history.
+
+### Restanding this stack
+
+The stack is currently destroyed. Bringing it back is four steps, and step 2 is the
+one that is easy to skip:
+
+1. **Pick a service token and export it.** Any high-entropy string;
+   `openssl rand -base64 32` is fine. Never commit it, and do not put it in a
+   `.tfvars` file inside the repo.
+
+   ```bash
+   export TF_VAR_api_service_token="$(openssl rand -base64 32)"
+   ```
+
+2. **Decide how clients will present it.** The authorizer expects
+   `Authorization: Bearer <token>` on every route except `GET /api/health`. The
+   browser SPA has no safe place to keep this — anything in the Angular bundle is
+   readable by every visitor, so shipping the token to the frontend would make it
+   public again with extra steps. That means:
+
+   - server-to-server callers (seed scripts, the MCP server, `curl`) work today;
+   - the deployed SPA's sync **stays broken until real per-user auth exists**
+     (Cognito / the multi-cloud auth-gateway work, #200). That is a deliberate
+     trade from #206: an API nobody can write to anonymously is better than a
+     working sync that anyone on the internet can write to.
+
+   The till itself is unaffected either way — Dexie is the source of truth and
+   `enableOfflineMode` is on, so sync being down degrades rather than breaks it.
+
+3. **Apply, then re-point the hostname.** A fresh apply gets a new API Gateway
+   hostname (`random_id.suffix` also re-rolls). The old one is hardcoded in four
+   places and **all four must be updated together**, or sync will half-work:
+
+   | File | Field |
+   | --- | --- |
+   | `src/environments/environment.ts` | `apiUrl` |
+   | `src/environments/environment.prod.ts` | `apiUrl` |
+   | `src/environments/environment.vision.ts` | `apiUrl` |
+   | `src/app/core/infrastructure/sync/sync.types.ts` | `DEFAULT_SYNC_CONFIG.apiBaseUrl` |
+
+   `app.config.ts` derives the worker's base URL from `environment.apiUrl`, so
+   `sync.types.ts` is only the pre-configuration fallback — which is exactly why it
+   gets forgotten.
+
+4. **Verify what the last apply broke before.** These have each regressed at least
+   once:
+
+   ```bash
+   curl -i "$API/api/health"                     # 200, unauthenticated
+   curl -i "$API/api/products"                   # 401 without a token
+   curl -i -H "Authorization: Bearer $TOKEN" "$API/api/products"   # 200
+   curl -i -X PATCH -H "Authorization: Bearer $TOKEN" \
+        -H 'Content-Type: application/json' -d '{"stock":1}' \
+        "$API/api/products/prod-001"             # 200 — PATCH CORS regressed in 92765619
+   ```
+
+   Also confirm `x-trace-id` comes back on a browser `fetch()` (API Gateway manages
+   CORS response headers and strips the Lambda's, so `expose_headers` on the
+   gateway is what makes it readable) and that traces appear in X-Ray.
+
+### Teardown
+
+**Not a routine step.** Destroying this stack takes the frontend's sync backend
+with it and drops the DynamoDB product/transaction tables — that is exactly how
+the situation in #206 came about. Confirm nothing depends on it, then:
 
 ```bash
 cd terraform/aws-demo
-terraform destroy -auto-approve
+terraform plan -destroy          # read this before agreeing to it
+terraform destroy
 ```
+
+`-auto-approve` is deliberately not shown here.
 
 ---
 
@@ -224,7 +318,11 @@ This demo costs essentially **$0** when idle:
 - X-Ray: Free tier covers 100K traces/month
 - CloudWatch: 7-day retention, minimal logs
 
-**Always run `terraform destroy` after the talk to be safe.**
+Idle cost is near zero, so there is no cost argument for tearing the stack down
+between uses — and a teardown is not free, because the frontend points at it (see
+the warning at the top of this file). This file used to say "always run
+`terraform destroy` after the talk to be safe"; that advice is what #206 is
+about, and it has been removed.
 
 ---
 
