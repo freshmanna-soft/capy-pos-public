@@ -572,7 +572,12 @@ resource "aws_apigatewayv2_api" "api" {
   cors_configuration {
     allow_origins = ["*"]
     allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-    allow_headers = ["Content-Type", "X-Amzn-Trace-Id"]
+    # Authorization is required here, not optional: every route except
+    # GET /api/health is behind the service-token authorizer, and a browser will
+    # not send a header the preflight response does not allow. Omitting it makes
+    # the guarded routes unreachable from any browser client regardless of whether
+    # that client has a valid token.
+    allow_headers = ["Authorization", "Content-Type", "X-Amzn-Trace-Id"]
     # HTTP API manages CORS response headers and strips the Lambda's, so the
     # trace header must be exposed here for browser fetch() to read it.
     expose_headers = ["x-trace-id"]

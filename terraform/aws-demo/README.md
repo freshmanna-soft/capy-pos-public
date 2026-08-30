@@ -120,17 +120,28 @@ one that is easy to skip:
    export TF_VAR_api_service_token="$(openssl rand -base64 32)"
    ```
 
-2. **Decide how clients will present it.** The authorizer expects
-   `Authorization: Bearer <token>` on every route except `GET /api/health`. The
-   browser SPA has no safe place to keep this — anything in the Angular bundle is
-   readable by every visitor, so shipping the token to the frontend would make it
-   public again with extra steps. That means:
+2. **Give the token to the clients that need it.** The authorizer expects
+   `Authorization: Bearer <token>` on every route except `GET /api/health`.
 
-   - server-to-server callers (seed scripts, the MCP server, `curl`) work today;
-   - the deployed SPA's sync **stays broken until real per-user auth exists**
-     (Cognito / the multi-cloud auth-gateway work, #200). That is a deliberate
-     trade from #206: an API nobody can write to anonymously is better than a
-     working sync that anyone on the internet can write to.
+   - **Server-to-server callers** (seed scripts, the MCP server, `curl`) pass the
+     header directly and work as soon as the stack is up.
+   - **The browser SPA** sends the header when `environment.apiServiceToken` is
+     non-empty, and sends no `Authorization` header at all when it is blank. The
+     sync worker reads it through `SyncWorkerConfig.serviceToken`
+     (`app.config.ts` → `SyncService.start()`), skipping the health probe so the
+     connectivity signal never depends on the token being current.
+
+   `apiServiceToken` is empty in every checked-in environment file and **must stay
+   that way**: those files are compiled into the browser bundle, so a token written
+   there is readable by every visitor and the API is public again with extra steps.
+   To let a browser client sync, inject the value at runtime (a config fetch, or a
+   build step that substitutes it for a deployment you control) — not by editing the
+   committed environments.
+
+   While it is blank the deployed SPA's sync 401s, and that is the deliberate #206
+   trade: an API nobody can write to anonymously beats a working sync anyone on the
+   internet can write to. Real per-user auth (Cognito / the multi-cloud
+   auth-gateway work, #200) is what removes the trade rather than working around it.
 
    The till itself is unaffected either way — Dexie is the source of truth and
    `enableOfflineMode` is on, so sync being down degrades rather than breaks it.
@@ -162,9 +173,15 @@ one that is easy to skip:
         "$API/api/products/prod-001"             # 200 — PATCH CORS regressed in 92765619
    ```
 
-   Also confirm `x-trace-id` comes back on a browser `fetch()` (API Gateway manages
-   CORS response headers and strips the Lambda's, so `expose_headers` on the
-   gateway is what makes it readable) and that traces appear in X-Ray.
+   Also confirm, from a browser rather than `curl`:
+
+   - the `OPTIONS` preflight allows `Authorization` — the gateway's
+     `cors_configuration.allow_headers` is what permits it, and a browser silently
+     drops a header the preflight does not allow, which presents as a rejected
+     token rather than a CORS fault;
+   - `x-trace-id` comes back on a `fetch()` (API Gateway manages CORS response
+     headers and strips the Lambda's, so `expose_headers` on the gateway is what
+     makes it readable) and traces appear in X-Ray.
 
 ### Teardown
 

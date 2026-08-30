@@ -122,6 +122,10 @@ export const appConfig: ApplicationConfig = {
       const syncService = inject(SyncService);
       syncService.start({
         apiBaseUrl: environment.apiUrl.replace('/api', ''),
+        // Every backend route except the health probe needs this (#206). Empty in
+        // every checked-in environment — a shared secret in the bundle is public —
+        // so the worker sends no Authorization header until it is injected.
+        serviceToken: environment.apiServiceToken,
         syncIntervalMs: 30000,
         circuitBreaker: environment.circuitBreaker,
         retry: environment.retry,

@@ -150,6 +150,34 @@ describe('sync backend authorization (#206)', () => {
     });
   });
 
+  describe('CORS lets a browser present the token', () => {
+    // The block is nested one level inside the `aws_apigatewayv2_api` resource, so
+    // its closing brace is indented by exactly two spaces — that is what delimits it
+    // without swallowing the rest of the resource.
+    const cors = /cors_configuration\s*\{([\s\S]*?)^ {2}\}/m.exec(hcl)?.[1] ?? '';
+
+    it('parses the cors_configuration block', () => {
+      expect(cors).not.toBe('');
+    });
+
+    it('allows the Authorization header', () => {
+      // The asymmetry this catches: guarding every route while the preflight
+      // response omits `Authorization` makes the guarded routes unreachable from
+      // *any* browser client, valid token or not — the header is dropped before the
+      // request is sent, so the failure looks like a bad token rather than a bad
+      // CORS policy. Server-to-server callers never hit it, which is why it can
+      // pass a curl-based smoke test and still be broken for the app.
+      expect(argument(cors, 'allow_headers')).toContain('Authorization');
+    });
+
+    it('still allows the headers the payload and tracing need', () => {
+      const allowed = argument(cors, 'allow_headers') ?? '';
+
+      expect(allowed).toContain('Content-Type');
+      expect(allowed).toContain('X-Amzn-Trace-Id');
+    });
+  });
+
   describe('scan coverage', () => {
     // The parser *is* the guard, so it gets fixtures of its own. These are written
     // out literally rather than derived from `main.tf`; a parser that reads its own
