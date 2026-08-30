@@ -1,6 +1,10 @@
 #!/bin/bash
 # =============================================================================
-# Deploy Capy-POS Demo to AWS
+# Deploy the Capy-POS AWS backend
+#
+# Not a throwaway demo stack — this is the backend the shipped frontend syncs
+# against (issue #206). Requires TF_VAR_api_service_token; every route except
+# GET /api/health sits behind a shared-token authorizer.
 # 
 # Architecture: Single-responsibility Lambdas
 #   - get-products:     GET /api/products
@@ -10,7 +14,7 @@
 #
 # Usage: ./deploy.sh
 # Enable failures: ./deploy.sh --fail
-# Teardown: cd terraform/aws-demo && terraform destroy -auto-approve
+# Teardown: NOT routine — see terraform/aws-demo/README.md ("Teardown")
 # =============================================================================
 
 set -e
@@ -109,6 +113,6 @@ echo "   Then trigger failures:"
 echo "   curl ${API_URL}/api/products              # → timeout (25s)"
 echo "   curl -X POST ${API_URL}/api/products/prod-010/sell  # → negative stock error"
 echo ""
-echo "🗑️  Teardown (removes EVERYTHING):"
-echo "   cd $DEMO_DIR && terraform destroy -auto-approve"
+echo "🗑️  Teardown (removes EVERYTHING, including the frontend's sync backend):"
+echo "   cd $DEMO_DIR && terraform plan -destroy   # read it before agreeing"
 echo ""

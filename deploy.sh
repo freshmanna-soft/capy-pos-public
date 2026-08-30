@@ -1,12 +1,31 @@
 #!/bin/bash
-# Quick deployment script for Capy-POS to AWS
+# Deployment script for Capy-POS's AWS backend (terraform/aws-demo).
+#
+# Despite the "demo" naming kept here for resource-name compatibility with the
+# existing state, this deploys the real sync backend the shipped frontend depends
+# on — see terraform/aws-demo/README.md and issue #206 before running it.
+#
+# Requires TF_VAR_api_service_token: every route except GET /api/health is behind
+# a shared-token authorizer, and the Terraform variable has no default so that an
+# apply cannot ship a committed credential.
+#
 # Usage: ./deploy.sh [production|staging|demo]
 
 set -euo pipefail
 
 ENVIRONMENT=${1:-demo}
 REGION="us-east-1"
+# Resource-name prefix. Kept as-is because it is baked into every deployed
+# resource name and the DynamoDB tables; renaming it would replace the stack.
 PROJECT="capy-pos-demo"
+
+if [[ -z "${TF_VAR_api_service_token:-}" ]]; then
+  echo "❌ TF_VAR_api_service_token is not set."
+  echo "   Every route except GET /api/health requires this shared token (#206)."
+  echo "   Generate one and re-run:"
+  echo "     export TF_VAR_api_service_token=\"\$(openssl rand -base64 32)\""
+  exit 1
+fi
 
 echo "🚀 Deploying Capy-POS to AWS ($ENVIRONMENT)"
 
@@ -159,6 +178,6 @@ echo ""
 echo "🔄 To redeploy after code changes:"
 echo "   ./deploy.sh $ENVIRONMENT"
 echo ""
-echo "🗑️  To destroy resources:"
-echo "   cd terraform/aws-demo && terraform destroy -auto-approve"
+echo "🗑️  To destroy resources (NOT routine — this is the frontend's sync backend):"
+echo "   cd terraform/aws-demo && terraform plan -destroy   # read it first"
 echo ""

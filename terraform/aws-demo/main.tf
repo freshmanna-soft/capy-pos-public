@@ -1,9 +1,24 @@
 # =============================================================================
-# Capy-POS AWS Demo Infrastructure
-# Purpose: Talk demo - "AI-Powered Troubleshooting with AWS X-Ray"
+# Capy-POS AWS backend
+#
 # Architecture: Single-responsibility Lambdas (one function per operation)
-# 
-# EASY TEARDOWN: terraform destroy -auto-approve
+#
+# THIS IS NOT A THROWAWAY (issue #206). This header used to read "Talk demo" with
+# an "EASY TEARDOWN" invitation, and that framing was wrong in a way that cost
+# something: this stack is the only real backend the shipped frontend's
+# offline-first sync talks to. `environment.prod.ts`, `environment.ts`,
+# `environment.vision.ts` and `sync.types.ts` all hardcode its API Gateway
+# hostname, and product features were built directly against it — see
+# `fc889356 feat(sync): add PUT/PATCH/DELETE product sync with Lambdas`. Read
+# AWS_DEPLOYMENT.md before destroying anything here.
+#
+# CURRENT STATE: destroyed. `terraform.tfstate` holds `"resources": []` and the
+# gateway hostname no longer resolves, so the deployed frontend's sync calls go
+# nowhere. Restanding it is a real, authorized-deploy decision, not a formality —
+# see README.md ("Restanding this stack").
+#
+# AUTHORIZATION: every route except `GET /api/health` now requires the shared
+# service token in `var.api_service_token`. It had none at all before #206.
 # =============================================================================
 
 terraform {
@@ -49,6 +64,20 @@ variable "enable_failure_mode" {
   description = "Toggle to enable intentional failures for demo"
   type        = bool
   default     = false
+}
+
+variable "api_service_token" {
+  description = <<-EOT
+    Shared bearer token every client must send as `Authorization: Bearer <token>`
+    on all routes except `GET /api/health` (issue #206). Supply it at apply time
+    (`TF_VAR_api_service_token`), never in a committed tfvars file.
+
+    Intentionally has no fallback value: an apply without a token must fail rather
+    than silently stand up an API whose credential is public in git history. See
+    lambda/authorizer/index.js for what this does and does not protect.
+  EOT
+  type        = string
+  sensitive   = true
 }
 
 # =============================================================================
@@ -543,7 +572,12 @@ resource "aws_apigatewayv2_api" "api" {
   cors_configuration {
     allow_origins = ["*"]
     allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-    allow_headers = ["Content-Type", "X-Amzn-Trace-Id"]
+    # Authorization is required here, not optional: every route except
+    # GET /api/health is behind the service-token authorizer, and a browser will
+    # not send a header the preflight response does not allow. Omitting it makes
+    # the guarded routes unreachable from any browser client regardless of whether
+    # that client has a valid token.
+    allow_headers = ["Authorization", "Content-Type", "X-Amzn-Trace-Id"]
     # HTTP API manages CORS response headers and strips the Lambda's, so the
     # trace header must be exposed here for browser fetch() to read it.
     expose_headers = ["x-trace-id"]
@@ -572,6 +606,77 @@ resource "aws_apigatewayv2_stage" "api" {
 resource "aws_cloudwatch_log_group" "api_logs" {
   name              = "/aws/apigateway/${var.project_name}"
   retention_in_days = 7
+}
+
+# --- Authorizer (issue #206) ---
+#
+# Every route below except `GET /api/health` requires the shared service token.
+# Before this existed the whole API — including product writes and the transaction
+# log — was open to anyone who knew the hostname.
+#
+# A REQUEST (Lambda) authorizer rather than a JWT one: a JWT authorizer needs an
+# OIDC issuer, and standing up Cognito is explicitly a separate decision (#200).
+# `identity_sources` makes API Gateway reject a request with no Authorization
+# header before the Lambda is even invoked.
+
+data "archive_file" "authorizer_zip" {
+  type        = "zip"
+  source_dir  = "${path.module}/lambda/authorizer"
+  output_path = "${path.module}/.build/authorizer.zip"
+}
+
+resource "aws_lambda_function" "authorizer" {
+  filename         = data.archive_file.authorizer_zip.output_path
+  function_name    = "${var.project_name}-authorizer"
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "index.handler"
+  source_code_hash = data.archive_file.authorizer_zip.output_base64sha256
+  runtime          = "nodejs20.x"
+  timeout          = 5
+  memory_size      = 128
+
+  # No `layers` on purpose — this function runs in front of every request and is
+  # dependency-free so a layer change cannot take the entire API down with it.
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      API_SERVICE_TOKEN = var.api_service_token
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_group" "authorizer_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.authorizer.function_name}"
+  retention_in_days = 7
+}
+
+resource "aws_apigatewayv2_authorizer" "service_token" {
+  api_id                            = aws_apigatewayv2_api.api.id
+  name                              = "${var.project_name}-service-token"
+  authorizer_type                   = "REQUEST"
+  authorizer_uri                    = aws_lambda_function.authorizer.invoke_arn
+  identity_sources                  = ["$request.header.Authorization"]
+  authorizer_payload_format_version = "2.0"
+
+  # Return `{ isAuthorized }` instead of a hand-rolled IAM policy document —
+  # fewer ways to accidentally write an allow.
+  enable_simple_responses = true
+
+  # Cache an allow for 5 minutes keyed on the Authorization header, so the till's
+  # sync loop does not pay a Lambda invocation per request.
+  authorizer_result_ttl_in_seconds = 300
+}
+
+resource "aws_lambda_permission" "authorizer" {
+  statement_id  = "AllowAPIGatewayAuthorizer"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.authorizer.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api.execution_arn}/authorizers/${aws_apigatewayv2_authorizer.service_token.id}"
 }
 
 # --- Integrations (one per Lambda) ---
@@ -628,21 +733,27 @@ resource "aws_apigatewayv2_integration" "health" {
 # --- Routes (explicit, one per endpoint) ---
 
 resource "aws_apigatewayv2_route" "get_products" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "GET /api/products"
-  target    = "integrations/${aws_apigatewayv2_integration.get_products.id}"
+  api_id             = aws_apigatewayv2_api.api.id
+  route_key          = "GET /api/products"
+  target             = "integrations/${aws_apigatewayv2_integration.get_products.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.service_token.id
 }
 
 resource "aws_apigatewayv2_route" "sell_product" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "POST /api/products/{id}/sell"
-  target    = "integrations/${aws_apigatewayv2_integration.sell_product.id}"
+  api_id             = aws_apigatewayv2_api.api.id
+  route_key          = "POST /api/products/{id}/sell"
+  target             = "integrations/${aws_apigatewayv2_integration.sell_product.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.service_token.id
 }
 
 resource "aws_apigatewayv2_route" "get_transactions" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "GET /api/transactions"
-  target    = "integrations/${aws_apigatewayv2_integration.get_transactions.id}"
+  api_id             = aws_apigatewayv2_api.api.id
+  route_key          = "GET /api/transactions"
+  target             = "integrations/${aws_apigatewayv2_integration.get_transactions.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.service_token.id
 }
 
 resource "aws_apigatewayv2_route" "get_health" {
@@ -652,27 +763,35 @@ resource "aws_apigatewayv2_route" "get_health" {
 }
 
 resource "aws_apigatewayv2_route" "create_product" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "POST /api/products"
-  target    = "integrations/${aws_apigatewayv2_integration.create_product.id}"
+  api_id             = aws_apigatewayv2_api.api.id
+  route_key          = "POST /api/products"
+  target             = "integrations/${aws_apigatewayv2_integration.create_product.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.service_token.id
 }
 
 resource "aws_apigatewayv2_route" "update_product_put" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "PUT /api/products/{id}"
-  target    = "integrations/${aws_apigatewayv2_integration.update_product.id}"
+  api_id             = aws_apigatewayv2_api.api.id
+  route_key          = "PUT /api/products/{id}"
+  target             = "integrations/${aws_apigatewayv2_integration.update_product.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.service_token.id
 }
 
 resource "aws_apigatewayv2_route" "update_product_patch" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "PATCH /api/products/{id}"
-  target    = "integrations/${aws_apigatewayv2_integration.update_product.id}"
+  api_id             = aws_apigatewayv2_api.api.id
+  route_key          = "PATCH /api/products/{id}"
+  target             = "integrations/${aws_apigatewayv2_integration.update_product.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.service_token.id
 }
 
 resource "aws_apigatewayv2_route" "delete_product" {
-  api_id    = aws_apigatewayv2_api.api.id
-  route_key = "DELETE /api/products/{id}"
-  target    = "integrations/${aws_apigatewayv2_integration.delete_product.id}"
+  api_id             = aws_apigatewayv2_api.api.id
+  route_key          = "DELETE /api/products/{id}"
+  target             = "integrations/${aws_apigatewayv2_integration.delete_product.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.service_token.id
 }
 
 

@@ -246,6 +246,23 @@ function readTraceId(res: Response): string | undefined {
   return value && value !== 'unavailable' ? value : undefined;
 }
 
+// ─── API Authorization ──────────────────────────────────────────────────────
+
+/**
+ * The `Authorization` header every guarded route requires (issue #206), or nothing
+ * when no service token is configured.
+ *
+ * Returning `{}` rather than `Bearer undefined` matters: a malformed credential is
+ * denied the same way a wrong one is, so it presents as "the token is wrong" when
+ * the truth is "there is no token", which is a materially harder thing to debug.
+ * The token is empty in every checked-in environment and injected at runtime —
+ * see `SyncWorkerConfig.serviceToken`.
+ */
+function authHeaders(): Record<string, string> {
+  const token = config.serviceToken?.trim();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 // ─── API Fetch with timeout ─────────────────────────────────────────────────
 
 async function fetchWithTimeout(
@@ -276,11 +293,34 @@ async function fetchWithTimeout(
   }
 }
 
+/**
+ * `fetchWithTimeout` for the authorized routes — everything except the health
+ * probe, which is deliberately left unauthenticated so the connectivity signal
+ * does not depend on the token being current.
+ *
+ * Caller-supplied headers win over the token so a call can override it explicitly;
+ * nothing does today.
+ */
+function fetchAuthorized(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs?: number
+): Promise<Response> {
+  return fetchWithTimeout(
+    url,
+    {
+      ...options,
+      headers: { ...authHeaders(), ...((options.headers as Record<string, string>) || {}) },
+    },
+    timeoutMs
+  );
+}
+
 // ─── Sync Operations ────────────────────────────────────────────────────────
 
 async function syncProducts(): Promise<SyncedProduct[]> {
   const url = `${config.apiBaseUrl}${config.endpoints.products}`;
-  const response = await fetchWithTimeout(url);
+  const response = await fetchAuthorized(url);
   const data = await response.json();
 
   // API may return { products: [...] } or just [...]
@@ -291,7 +331,7 @@ async function syncProducts(): Promise<SyncedProduct[]> {
 
 async function syncTransactions(): Promise<number> {
   const url = `${config.apiBaseUrl}${config.endpoints.transactions}`;
-  const response = await fetchWithTimeout(url);
+  const response = await fetchAuthorized(url);
   const data = await response.json();
 
   const transactions = Array.isArray(data) ? data : data.transactions || data.Items || [];
@@ -302,6 +342,11 @@ async function syncTransactions(): Promise<number> {
 async function checkHealth(): Promise<boolean> {
   try {
     const url = `${config.apiBaseUrl}${config.endpoints.health}`;
+    // Unauthenticated on purpose (#206): `GET /api/health` is the one route with no
+    // authorizer, and this is the worker's connectivity probe. Attaching a
+    // credential would make a simple GET preflighted and would couple "is the API
+    // reachable?" to "is our token current?" — the probe has to answer the first
+    // question when the answer to the second is no.
     const response = await fetchWithTimeout(url, {}, 5000);
     const data = await response.json();
     return data.status === 'healthy' || response.ok;
@@ -418,7 +463,7 @@ async function pushProducts(products: PushProductPayload[]): Promise<void> {
             const res = await fetch(url, {
               method: 'POST',
               signal: controller.signal,
-              headers: { 'Content-Type': 'application/json' },
+              headers: { ...authHeaders(), 'Content-Type': 'application/json' },
               body: JSON.stringify(product),
             });
 
@@ -491,7 +536,7 @@ async function pushUpdates(products: PushProductPayload[]): Promise<void> {
             const res = await fetch(`${base}/${id}`, {
               method: 'PATCH',
               signal: controller.signal,
-              headers: { 'Content-Type': 'application/json' },
+              headers: { ...authHeaders(), 'Content-Type': 'application/json' },
               body: JSON.stringify(changes),
             });
             traceId = readTraceId(res);
@@ -551,6 +596,7 @@ async function pushDeletes(productIds: string[]): Promise<void> {
             const res = await fetch(`${base}/${id}`, {
               method: 'DELETE',
               signal: controller.signal,
+              headers: authHeaders(),
             });
             traceId = readTraceId(res);
 

@@ -91,6 +91,18 @@ export interface PushResult {
  */
 export interface SyncWorkerConfig {
   apiBaseUrl: string;
+  /**
+   * Shared service token presented as `Authorization: Bearer <token>` on every
+   * request except the health probe (issue #206).
+   *
+   * Empty or absent means "send no Authorization header", which is the checked-in
+   * default and the behaviour before #206. It is empty on purpose: a shared secret
+   * compiled into the Angular bundle is readable by every visitor, so it is
+   * supplied at runtime (see `terraform/aws-demo/README.md`) rather than committed.
+   * The authorizer this pairs with denies a blank token, so an unconfigured client
+   * gets a clean 401 instead of partial access.
+   */
+  serviceToken?: string;
   syncIntervalMs: number; // How often to sync (default: 30s)
   circuitBreaker: {
     failureThreshold: number;
@@ -169,6 +181,8 @@ export interface SyncedProduct {
  */
 export const DEFAULT_SYNC_CONFIG: SyncWorkerConfig = {
   apiBaseUrl: 'https://fqjj2r15m7.execute-api.us-east-1.amazonaws.com',
+  // Never a real token — see the field docs on SyncWorkerConfig.
+  serviceToken: '',
   syncIntervalMs: 30000, // 30 seconds
   circuitBreaker: {
     failureThreshold: 5,
