@@ -59,12 +59,13 @@ Set these as `TF_VAR_*` environment variables (never in a committed `.tfvars`):
 | --------------------- | ---------------------------------- | ----------- | ---------------------------------------------------------------- |
 | `ibmcloud_api_key`    | always                             | —           | Sensitive. Also used as the registry pull password.              |
 | `anthropic_api_key`   | if any service `needs_model_key`   | `""`        | Sensitive. Bound as a secret, never as a literal env var.        |
+| `anthropic_base_url`  | no                              | `""`        | Route model calls through a gateway (e.g. an IBM litellm proxy) instead of the real API. Not sensitive — a literal env var. `anthropic_api_key` must be shaped for whichever endpoint this points at. |
 | `session_jwt_secret`  | if any service `needs_session_secret` | `""`     | Sensitive. Must match `getJwtSecret()` — see the auth note below.|
 | `frontend_origins`    | if any service `pins_cors_origins` | `[]`        | List of `scheme://host[:port]`, no trailing slash.                |
 | `region`              | no                              | `us-south`  |                                                                  |
 | `resource_group_name` | no                              | `Default`   |                                                                  |
 | `project_name`        | no                              | `capy-pos`  | Code Engine project name.                                        |
-| `cr_namespace`        | no                              | `capy-pos`  | Registry namespace holding every image.                          |
+| `cr_namespace`        | no                              | `capy-pos-3223793` | Registry namespace holding every image — globally unique across every IBM Cloud account in the region, so the default carries this account's number. |
 | `image_tag`           | no                              | `latest`    | Applied to every service that does not override it.              |
 | `services`            | no                              | 4 apps      | See below.                                                       |
 
@@ -121,7 +122,7 @@ Terraform references images; it does not build them. Each tag pushed here must m
 
 ```bash
 ibmcloud cr login
-export CR_NAMESPACE=capy-pos
+export CR_NAMESPACE=capy-pos-3223793   # must match var.cr_namespace, and be globally unique
 
 docker build -t us.icr.io/$CR_NAMESPACE/capy-pos-app:v1 .
 docker build -t us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1 infra/vision-proxy
