@@ -63,15 +63,34 @@ async function loadWorker(impl: (url: string, init?: RequestInit) => Promise<Res
     return undefined;
   }) as typeof self.postMessage);
 
+  // Every re-import registers another 'message' listener on the shared global, and
+  // resetting the module registry does not detach the previous one. Capturing the
+  // handler this import adds — instead of dispatching on the global — keeps one
+  // test's worker from answering the next test's commands and inflating its fetch log.
+  let handler: ((event: MessageEvent<SyncWorkerCommand>) => void) | undefined;
+  const addListener = vi.spyOn(self, 'addEventListener').mockImplementation(((
+    type: string,
+    listener: EventListener
+  ) => {
+    if (type === 'message') {
+      handler = listener as unknown as (event: MessageEvent<SyncWorkerCommand>) => void;
+    }
+  }) as typeof self.addEventListener);
+
   vi.resetModules();
   await import('./sync.worker');
+  addListener.mockRestore();
+
+  if (!handler) {
+    throw new Error('sync.worker registered no message listener');
+  }
+  const post = handler;
 
   return {
     events,
     urls,
     fetchStub,
-    send: (command: SyncWorkerCommand) =>
-      self.dispatchEvent(new MessageEvent('message', { data: command })),
+    send: (command: SyncWorkerCommand) => post(new MessageEvent('message', { data: command })),
     /** Every posted event of the given type. */
     ofType: <T extends SyncWorkerEvent['type']>(type: T) =>
       events.filter((event): event is Extract<SyncWorkerEvent, { type: T }> => event.type === type),
@@ -259,7 +278,10 @@ describe('sync worker resilience (#206)', () => {
     it('reports healthy and echoes the base URL it probed', async () => {
       const worker = await loadWorker(async () => json({ status: 'healthy', products: [] }));
 
-      worker.send({ type: 'START_SYNC', config: config({ apiBaseUrl: 'https://api.example.test' }) });
+      worker.send({
+        type: 'START_SYNC',
+        config: config({ apiBaseUrl: 'https://api.example.test' }),
+      });
       await worker.settle();
       worker.send({ type: 'STOP_SYNC' });
 
