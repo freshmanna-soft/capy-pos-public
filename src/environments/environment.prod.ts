@@ -7,32 +7,32 @@ export const environment = {
   name: 'production',
 
   // API Configuration
-  apiUrl: 'https://fqjj2r15m7.execute-api.us-east-1.amazonaws.com/api',
+  //
+  // terraform/aws-demo's API Gateway (issue #206): torn down, DNS no longer
+  // resolves, and it never had an authorizer even when it existed. Repointed at
+  // the IBM Code Engine pos-api (terraform/, IBM-migration epic #195/#196/#197),
+  // which does verify the session token — see infra/pos-api/src/session-auth.ts.
+  apiUrl: 'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api',
   apiTimeout: 30000,
 
   // AI clerk vision proxy, relative to apiUrl. The model API key lives in
   // this endpoint, never in the browser bundle — see infra/vision-proxy.
   visionApiPath: '/vision/identify',
 
-  // Absolute override for the vision endpoint. Empty means "append visionApiPath
-  // to apiUrl", which is right in production where both are the same gateway.
-  //
-  // It exists so real recognition can be switched on locally against
-  // `npm start` in infra/vision-proxy without repointing `apiUrl` — doing that
-  // would send products, transactions and the whole sync worker at a service
-  // that only answers /vision/identify, and the till would look broken for
-  // reasons that have nothing to do with vision.
-  visionApiUrl: '',
+  // Absolute: capy-vision-proxy on IBM Code Engine, matching environment.vision.ts's
+  // local-dev pattern (full URL including the route, since ClaudeVisionAdapter
+  // matches by endsWith and doesn't append visionApiPath to an absolute override).
+  visionApiUrl:
+    'https://capy-vision-proxy.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/vision/identify',
 
   // AI clerk agent relay, relative to apiUrl. The model API key lives behind
   // this endpoint, never in the browser bundle, exactly as the vision proxy does.
   clerkAgentApiPath: '/clerk/agent',
 
-  // Absolute override for the agent endpoint. Empty means "append
-  // clerkAgentApiPath to apiUrl"; the override wins when it is set, so a local
-  // relay can be pointed at without repointing `apiUrl` at a service that only
-  // answers /clerk/agent.
-  clerkAgentApiUrl: '',
+  // Absolute: capy-clerk-agent-relay on IBM Code Engine, same reasoning as
+  // visionApiUrl above.
+  clerkAgentApiUrl:
+    'https://capy-clerk-agent-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/clerk/agent',
 
   // Database
   databaseName: 'capy_pos_prod',
@@ -64,11 +64,11 @@ export const environment = {
     telemetry: true,
     auditLogging: true,
     offlineMode: true,
-    aiVision: false,
+    aiVision: true,
     // The agentic clerk tier — the phrases the keyword parser cannot name. Its own
     // flag, not aiVision: that one governs paying the model to *look*, and the two
     // switch on independently.
-    clerkAgent: false,
+    clerkAgent: true,
   },
 
   // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but
