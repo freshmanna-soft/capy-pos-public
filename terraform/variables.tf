@@ -29,9 +29,12 @@ variable "image_tag" {
 }
 
 variable "cr_namespace" {
+  # IBM Container Registry namespace names are unique across every IBM Cloud
+  # account in the region, not just this one — "capy-pos" was already taken by
+  # someone else, so the default carries this account's own number.
   description = "IBM Container Registry namespace holding every service image"
   type        = string
-  default     = "capy-pos"
+  default     = "capy-pos-3223793"
 }
 
 variable "anthropic_api_key" {
@@ -43,6 +46,21 @@ variable "anthropic_api_key" {
   EOT
   type        = string
   sensitive   = true
+  default     = ""
+}
+
+variable "anthropic_base_url" {
+  description = <<-EOT
+    Optional override for the Anthropic SDK's base URL, e.g. an IBM litellm gateway
+    (`https://api.servicesessentials.ibm.com`) instead of the real `api.anthropic.com`.
+    `new Anthropic()` in both vision-proxy and clerk-agent-relay already reads
+    `ANTHROPIC_BASE_URL` from its own environment natively — no code change either
+    side of this switch. Not sensitive (a URL, not a credential), so it is a literal
+    env var, unlike `anthropic_api_key`. Leave unset to call the real API directly;
+    `anthropic_api_key` must then be a real Anthropic key either way — the gateway
+    and the real API are not expected to accept the same key.
+  EOT
+  type        = string
   default     = ""
 }
 

@@ -74,6 +74,10 @@ locals {
     for name, service in var.services : name => merge(
       { NODE_ENV = "production" },
       service.pins_cors_origins ? { ALLOWED_ORIGINS = local.allowed_origins } : {},
+      # Not gated on needs_model_key alone: a model-key app with no override set
+      # gets nothing here, and the Anthropic SDK's own default (the real API)
+      # applies untouched.
+      service.needs_model_key && var.anthropic_base_url != "" ? { ANTHROPIC_BASE_URL = var.anthropic_base_url } : {},
       service.env,
     )
   }
@@ -144,6 +148,23 @@ resource "ibm_resource_key" "cloudant_key" {
   name                 = "${var.project_name}-cloudant-key"
   role                 = "Manager"
   resource_instance_id = ibm_cloudant.store.id
+}
+
+# Cloudant is CouchDB underneath: a database has to exist before any document can
+# be written or listed in it, or every call 404s (confirmed live: pos-api's first
+# real deploy logged "Cloudant create failed with 404" / "list failed with 404"
+# against a freshly-provisioned instance with no databases in it yet). Names match
+# pos-api's own defaults for CLOUDANT_PRODUCTS_DB/CLOUDANT_TRANSACTIONS_DB
+# (src/server.ts:73-74) exactly — an override on one side with no matching database
+# here reproduces the same 404.
+resource "ibm_cloudant_database" "products" {
+  db           = "products"
+  instance_crn = ibm_cloudant.store.crn
+}
+
+resource "ibm_cloudant_database" "transactions" {
+  db           = "transactions"
+  instance_crn = ibm_cloudant.store.crn
 }
 
 locals {

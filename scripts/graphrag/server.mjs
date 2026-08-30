@@ -81,7 +81,12 @@ export function createServer(pool) {
     try {
       const url = new URL(req.url, 'http://localhost');
       if (req.method === 'GET' && url.pathname === '/health') {
-        return send(res, 200, { ok: true });
+        try {
+          await pool.query('SELECT 1');
+          return send(res, 200, { ok: true, db: true });
+        } catch (err) {
+          return send(res, 200, { ok: false, db: false, error: err?.message ?? String(err) });
+        }
       }
       if (req.method === 'POST' && url.pathname === '/search') {
         const { query, k } = validateSearch(await readJson(req));
