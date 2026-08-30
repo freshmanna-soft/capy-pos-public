@@ -60,14 +60,22 @@ variable "session_jwt_secret" {
 
 variable "frontend_origins" {
   description = <<-EOT
-    Browser origins the guarded services will answer, e.g.
-    ["https://capy-pos-app.abc123.us-south.codeengine.appdomain.cloud"]. Scheme and
-    host only, no trailing slash: it is compared against the request's `Origin`
-    header verbatim. Unset on the first apply — the frontend's URL is an output of
-    that apply — then set and apply again; see README.md.
+    Browser origins the guarded services will answer. Scheme and host only, no
+    path and no trailing slash: it is compared against the request's `Origin`
+    header verbatim. On a fresh estate this is unset on the first apply — the
+    Code Engine frontend's URL is an output of that apply — then set and apply
+    again; see README.md.
+
+    Defaulted to this estate's two real production frontends (issue #206/#221):
+    the original GitHub Pages site and the capy-pos-app Code Engine app. Override
+    with TF_VAR_frontend_origins for a different estate/project, where the Code
+    Engine hostname will differ.
   EOT
   type        = list(string)
-  default     = []
+  default = [
+    "https://freshmanna-soft.github.io",
+    "https://capy-pos-app.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud",
+  ]
 
   validation {
     condition     = alltrue([for origin in var.frontend_origins : can(regex("^https?://[^/]+$", origin))])
