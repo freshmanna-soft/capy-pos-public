@@ -3,24 +3,29 @@
 > ## ⚠️ Read this before running anything here
 >
 > **This directory is not a disposable conference demo, despite its name and the
-> talk material further down.** It is the only real backend the shipped Capy-POS
-> frontend's offline-first sync talks to: `src/environments/environment.prod.ts`,
-> `environment.ts`, `environment.vision.ts` and
-> `src/app/core/infrastructure/sync/sync.types.ts` hardcode its API Gateway
-> hostname, and product features were built straight against it (`fc889356`,
-> `00e3ab10`). `AWS_DEPLOYMENT.md` at the repo root is its runbook. Issue #206
-> was filed because the "throwaway, easy teardown" framing here did not match
-> that reality.
+> talk material further down.** It *was* the only real backend the shipped
+> Capy-POS frontend's offline-first sync talked to: `environment.prod.ts` and
+> `sync.types.ts` hardcoded its API Gateway hostname, and product features were
+> built straight against it (`fc889356`, `00e3ab10`). `AWS_DEPLOYMENT.md` at the
+> repo root is its runbook. Issue #206 was filed because the "throwaway, easy
+> teardown" framing here did not match that reality.
 >
-> **Current state: destroyed.** `terraform.tfstate` reads `"resources": []` and
-> the gateway hostname no longer resolves, so sync from the deployed frontend
-> goes nowhere. See [Restanding this stack](#restanding-this-stack) — it needs an
-> authorized deploy decision and a service token, not just `terraform apply`.
+> **Current state: destroyed, and dormant by decision.** `terraform.tfstate`
+> reads `"resources": []` and the gateway hostname no longer resolves. #224 chose
+> IBM Code Engine `capy-pos-api` (`infra/pos-api`, epic #195) as the one sync
+> backend, so `environment.prod.ts` points there and **nothing in the frontend
+> calls this stack any more**. It stays checked in as a reference template — see
+> `terraform/README.md` — not as something waiting to be restood.
+> `environment.ts`/`environment.vision.ts` still carry the retired hostname for
+> local dev, which syncs nowhere; repointing them at a locally-run `infra/pos-api`
+> is the open follow-up.
 >
 > **Authorization:** every route except `GET /api/health` requires a shared
 > service token. Until #206 there was no authorizer of any kind, so product
-> writes and the transaction log were open to anyone with the hostname. Do not
-> remove it to "get sync working again".
+> writes and the transaction log were open to anyone with the hostname. It is kept
+> — and guarded by `sync-backend-authorization.spec.ts` — so that a future apply
+> cannot put a public write API back. Do not remove it to "get sync working
+> again"; the frontend's credential is now a session JWT (see below).
 
 The X-Ray/AI-troubleshooting talk material below is still accurate and still
 useful — it is just not the whole story of what this stack is for.
@@ -125,23 +130,23 @@ one that is easy to skip:
 
    - **Server-to-server callers** (seed scripts, the MCP server, `curl`) pass the
      header directly and work as soon as the stack is up.
-   - **The browser SPA** sends the header when `environment.apiServiceToken` is
-     non-empty, and sends no `Authorization` header at all when it is blank. The
-     sync worker reads it through `SyncWorkerConfig.serviceToken`
-     (`app.config.ts` → `SyncService.start()`), skipping the health probe so the
-     connectivity signal never depends on the token being current.
+   - **The browser SPA no longer has a shared token to send.** #224 removed
+     `environment.apiServiceToken` and pointed sync at IBM `pos-api`, which
+     authorizes with the operator's session JWT instead
+     (`infra/pos-api/src/session-auth.ts`); the sync worker's credential comes from
+     `SyncSessionCredentialService` and is per-operator, not per-deployment. So a
+     restood stack is reachable by server-to-server callers and **not** by the
+     shipped frontend.
 
-   `apiServiceToken` is empty in every checked-in environment file and **must stay
-   that way**: those files are compiled into the browser bundle, so a token written
-   there is readable by every visitor and the API is public again with extra steps.
-   To let a browser client sync, inject the value at runtime (a config fetch, or a
-   build step that substitutes it for a deployment you control) — not by editing the
-   committed environments.
+   Making the SPA talk to this stack again therefore means picking one of: teaching
+   this authorizer to verify the same session JWT (the honest option — it is the
+   credential the till already holds), or reintroducing runtime injection of a shared
+   token. It does **not** mean writing a token into a checked-in environment file:
+   those are compiled into the browser bundle, so a token there is readable by every
+   visitor and the API is public again with extra steps.
 
-   While it is blank the deployed SPA's sync 401s, and that is the deliberate #206
-   trade: an API nobody can write to anonymously beats a working sync anyone on the
-   internet can write to. Real per-user auth (Cognito / the multi-cloud
-   auth-gateway work, #200) is what removes the trade rather than working around it.
+   Real per-user auth (Cognito / the multi-cloud auth-gateway work, #200) is what
+   removes the shared-secret question entirely rather than working around it.
 
    The till itself is unaffected either way — Dexie is the source of truth and
    `enableOfflineMode` is on, so sync being down degrades rather than breaks it.

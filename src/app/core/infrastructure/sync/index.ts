@@ -1,4 +1,5 @@
 export { SyncService, PushFailedError } from './sync.service';
+export { SyncSessionCredentialService } from './sync-session-credential.service';
 export type {
   SyncWorkerConfig,
   SyncWorkerCommand,

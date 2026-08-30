@@ -2,7 +2,8 @@
 
 /**
  * Sync Web Worker
- * Runs in a background thread to sync local Dexie data with AWS APIs.
+ * Runs in a background thread to sync local Dexie data with the sync backend —
+ * IBM Code Engine `capy-pos-api` since #224 (`infra/pos-api`).
  * Implements Circuit Breaker + Retry with Exponential Backoff patterns.
  *
  * Uses native fetch() (no Angular HttpClient available in worker context).
@@ -249,17 +250,28 @@ function readTraceId(res: Response): string | undefined {
 // ─── API Authorization ──────────────────────────────────────────────────────
 
 /**
- * The `Authorization` header every guarded route requires (issue #206), or nothing
- * when no service token is configured.
+ * The operator's session token, or null when nobody is signed in.
+ *
+ * Trimmed because a whitespace-only value is the same absence of a credential as an
+ * empty string, and `Bearer    ` is a malformed one.
+ */
+function sessionToken(): string | null {
+  const token = config.sessionToken?.trim();
+  return token ? token : null;
+}
+
+/**
+ * The `Authorization` header every guarded route requires (issues #206, #224), or
+ * nothing when nobody is signed in.
  *
  * Returning `{}` rather than `Bearer undefined` matters: a malformed credential is
  * denied the same way a wrong one is, so it presents as "the token is wrong" when
  * the truth is "there is no token", which is a materially harder thing to debug.
- * The token is empty in every checked-in environment and injected at runtime —
- * see `SyncWorkerConfig.serviceToken`.
+ * The value is never compiled in — `SyncSessionCredentialService` pushes the live
+ * session token across on every change. See `SyncWorkerConfig.sessionToken`.
  */
 function authHeaders(): Record<string, string> {
-  const token = config.serviceToken?.trim();
+  const token = sessionToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -342,8 +354,8 @@ async function syncTransactions(): Promise<number> {
 async function checkHealth(): Promise<boolean> {
   try {
     const url = `${config.apiBaseUrl}${config.endpoints.health}`;
-    // Unauthenticated on purpose (#206): `GET /api/health` is the one route with no
-    // authorizer, and this is the worker's connectivity probe. Attaching a
+    // Unauthenticated on purpose (#206): `GET /api/health` is the one route outside
+    // the auth boundary, and this is the worker's connectivity probe. Attaching a
     // credential would make a simple GET preflighted and would couple "is the API
     // reachable?" to "is our token current?" — the probe has to answer the first
     // question when the answer to the second is no.
@@ -360,6 +372,18 @@ async function checkHealth(): Promise<boolean> {
 async function performSync(): Promise<void> {
   if (isSyncing) {
     console.log('[Worker:Sync] Already syncing, skipping...');
+    return;
+  }
+
+  // No session, no pull (#224). The worker starts at app boot, before anyone has
+  // signed in, and every products/transactions route on `pos-api` answers 401
+  // without a token. Attempting it anyway would spend three retries per tick and
+  // trip the circuit breaker, so the first sync *after* sign-in would wait out an
+  // open circuit. Skipping is a deferral: `UPDATE_CONFIG` lands the token and the
+  // next tick — or the `FORCE_SYNC` that follows it — syncs normally. Health is
+  // probed separately and stays unauthenticated, so connectivity is still reported.
+  if (sessionToken() === null) {
+    console.log('[Worker:Sync] No operator session — deferring sync until sign-in.');
     return;
   }
 

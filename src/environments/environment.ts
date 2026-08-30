@@ -7,27 +7,14 @@ export const environment = {
   name: 'development',
 
   // API Configuration
+  //
+  // Still the retired terraform/aws-demo host (#206): DNS no longer resolves, so the
+  // sync worker's health probe fails and the till runs on Dexie alone. #224 pointed
+  // *production* at IBM pos-api and deliberately left local dev unrepointed rather
+  // than have a dev till write into the production Cloudant store — running
+  // infra/pos-api locally and pointing this at it is the open follow-up.
   apiUrl: 'https://fqjj2r15m7.execute-api.us-east-1.amazonaws.com/api',
   apiTimeout: 30000,
-
-  // Shared service token for the sync backend (issue #206). Every route on
-  // `terraform/aws-demo` except `GET /api/health` requires
-  // `Authorization: Bearer <token>`; the sync worker sends it when this is set and
-  // sends no header at all when it is blank.
-  //
-  // Empty here on purpose, and it must stay that way: this file is compiled into
-  // the browser bundle, so anything written here is readable by every visitor and
-  // the token would be public with extra steps — the same reason the OTLP
-  // credentials below are empty. Supply it at runtime (a config fetch, or a build
-  // that injects it for a trusted deployment) and pass it to
-  // `SyncService.start({ serviceToken })`. Server-to-server callers — seed
-  // scripts, the MCP server, curl — pass it directly and work today.
-  //
-  // While it is empty, sync 401s against a restood stack and the till runs on Dexie
-  // alone. That is the deliberate #206 trade: an API nobody can write to
-  // anonymously beats a working sync anyone on the internet can write to. Real
-  // per-user auth (Cognito, #200) is what removes the trade.
-  apiServiceToken: '',
 
   // AI clerk vision proxy, relative to apiUrl. The model API key lives in
   // this endpoint, never in the browser bundle — see infra/vision-proxy.
