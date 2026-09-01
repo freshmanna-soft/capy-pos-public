@@ -25,6 +25,7 @@ import { ProductService } from '@core/application/services/product.service';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
 import { RecognitionLogService } from '@core/application/services/recognition-log.service';
+import { RecognitionSampleService } from '@core/application/services/recognition-sample.service';
 import { ScannedCode } from '@core/infrastructure/media/barcode-gate';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventType } from '@core/infrastructure/messaging/event-bus.events';
@@ -173,6 +174,7 @@ describe('ClerkFacade', () => {
   let recordHistogram: ReturnType<typeof vi.fn>;
   let logRecord: ReturnType<typeof vi.fn>;
   let logAmend: ReturnType<typeof vi.fn>;
+  let sampleRecord: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     identify = vi.fn().mockResolvedValue(confident());
@@ -251,6 +253,7 @@ describe('ClerkFacade', () => {
     recordHistogram = vi.fn();
     logRecord = vi.fn().mockImplementation(() => 'log-1');
     logAmend = vi.fn();
+    sampleRecord = vi.fn();
 
     TestBed.configureTestingModule({
       providers: [
@@ -336,6 +339,7 @@ describe('ClerkFacade', () => {
           provide: RecognitionLogService,
           useValue: { record: logRecord, amend: logAmend, summarise: vi.fn(), clear: vi.fn() },
         },
+        { provide: RecognitionSampleService, useValue: { record: sampleRecord } },
       ],
     });
 
@@ -3503,6 +3507,7 @@ describe('ClerkFacade where the browser cannot listen', () => {
           provide: RecognitionLogService,
           useValue: { record: vi.fn(), amend: vi.fn(), summarise: vi.fn(), clear: vi.fn() },
         },
+        { provide: RecognitionSampleService, useValue: { record: vi.fn() } },
       ],
     });
     clerk = TestBed.inject(ClerkFacade);
@@ -3622,6 +3627,7 @@ describe('ClerkFacade on a till told to take commands only', () => {
           provide: RecognitionLogService,
           useValue: { record: vi.fn(), amend: vi.fn(), summarise: vi.fn(), clear: vi.fn() },
         },
+        { provide: RecognitionSampleService, useValue: { record: vi.fn() } },
       ],
     });
   });

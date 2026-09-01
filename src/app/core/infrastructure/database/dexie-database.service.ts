@@ -282,6 +282,39 @@ export interface IRecognitionLogDB {
   createdAt: Date;
 }
 
+/**
+ * One human-confirmed recognition, with the frame that produced it.
+ *
+ * `IRecognitionLogDB` records the *label* — which product was proposed and
+ * which one was actually right — but never the pixels. This table exists
+ * because a future on-device classifier needs the pixels too: `logId` ties a
+ * sample back to the log row it confirms, so the two tables can be joined
+ * without duplicating the label.
+ *
+ * Only `chosen`/`corrected` rows get a sample — those are the only outcomes
+ * with a human-confirmed ground truth (`shouldScoreChoice` in
+ * `candidate-ranking.ts` is the same gate `IRecognitionLogDB` rows go
+ * through). An auto-add was never checked by anyone; a rejection has no
+ * product to label the frame with.
+ */
+export interface IRecognitionSampleDB {
+  id: string;
+  tenantId?: string;
+  /** The `IRecognitionLogDB` row this sample proves. */
+  logId: string;
+  /** Ground truth — what the frame actually shows. */
+  productId: string;
+  /** Which tier proposed the candidate this confirmed or corrected. */
+  tier: string;
+  /** 'chosen' the top candidate was right; 'corrected' it wasn't. */
+  outcome: string;
+  /** The frame itself. A Blob, not base64 — IndexedDB stores it natively. */
+  imageBlob: Blob;
+  width: number;
+  height: number;
+  createdAt: Date;
+}
+
 export interface ISettingsDB {
   id: string;
   tenantId?: string;
@@ -439,6 +472,7 @@ export class DexieDatabase extends Dexie {
   rolePermissions!: Table<IRolePermissionDB, string>;
   recognitionLog!: Table<IRecognitionLogDB, string>;
   operatorCredentials!: Table<IOperatorCredentialDB, string>;
+  recognitionSamples!: Table<IRecognitionSampleDB, string>;
 
   constructor() {
     super('CapyPOSDB');
@@ -688,6 +722,18 @@ export class DexieDatabase extends Dexie {
     // put latency between holding a card up and being greeted.
     this.version(7).stores({
       customers: 'id, email, phone, status, tier, tenantId, loyaltyCode, [status+tier], deletedAt',
+    });
+
+    // Version 8: recognition samples — the pixels behind a confirmed recognitionLog
+    // row, for training a future on-device classifier. Do NOT edit v1..v7 above.
+    //
+    // Additive only, same as v5/v6/v7: a new table needs no `.upgrade()` hook.
+    this.version(8).stores({
+      // Indexed by productId so a training export can pull "every sample of this
+      // SKU" without a full-table scan, and by tenantId + createdAt for the same
+      // recency reasons recognitionLog is.
+      recognitionSamples:
+        'id, tenantId, productId, tier, outcome, createdAt, [productId+createdAt]',
     });
 
     // Map tables to classes (optional, for better type safety)

@@ -28,12 +28,13 @@ import {
   RecognitionLogService,
   RecognitionTier,
 } from '@core/application/services/recognition-log.service';
+import { RecognitionSampleService } from '@core/application/services/recognition-sample.service';
 import {
   clampSpokenQuantity,
   parseClerkIntent,
   rankLabelsBySpokenWords,
 } from '@core/application/services/voice-intent.parser';
-import { CameraService } from '@core/infrastructure/media/camera.service';
+import { CameraService, CapturedFrame } from '@core/infrastructure/media/camera.service';
 import {
   BarcodeGate,
   GATED_TIMING,
@@ -291,6 +292,7 @@ export class ClerkFacade {
   private readonly eventBus = inject(EventBusService);
   private readonly telemetry = inject(TelemetryService);
   private readonly log = inject(RecognitionLogService);
+  private readonly samples = inject(RecognitionSampleService);
 
   // ─── State ────────────────────────────────────────────────────────────────
 
@@ -609,6 +611,16 @@ export class ClerkFacade {
   private moodTimer: ReturnType<typeof setTimeout> | null = null;
   private inFlight: AbortController | null = null;
   private agentInFlight: AbortController | null = null;
+  /**
+   * The frame behind whatever candidates are currently offered, so
+   * `takeCandidate` can attach it to the `chosen`/`corrected` row it writes.
+   *
+   * Safe to keep as one field rather than threading it through: `tick()`
+   * refuses to start a new `identify()` while candidates are still on offer
+   * (`awaitingChoice()`), so this can never hold a frame from a different
+   * look than the candidates it will be paired with.
+   */
+  private pendingSampleFrame: CapturedFrame | null = null;
   /**
    * Monotonic id for exchange lines.
    *
@@ -1298,6 +1310,7 @@ export class ClerkFacade {
     if (!frame) {
       return;
     }
+    this.pendingSampleFrame = frame;
 
     this._busy.set(true);
     this._visualState.set('scanning');
@@ -1585,15 +1598,31 @@ export class ClerkFacade {
     // it — see `shouldScoreChoice` for why neither half is optional.
     const score = shouldScoreChoice(origin, confirmedBy);
     if (score) {
-      this.log.record({
+      const outcome = position === 1 ? 'chosen' : 'corrected';
+      const logId = this.log.record({
         tier: 'model',
         proposedProductId: top?.productId,
         confidence: top?.confidence ?? 0,
         candidateCount: offered.length,
-        outcome: position === 1 ? 'chosen' : 'corrected',
+        outcome,
         actualProductId: product.id,
       });
+      // The frame behind this exact choice — see `pendingSampleFrame`'s own doc for
+      // why it can never be a stale look's. Only `chosen`/`corrected` rows get a
+      // sample: an auto-add was never checked by anyone to attach a truth to.
+      if (this.pendingSampleFrame) {
+        this.samples.record({
+          logId,
+          productId: product.id,
+          tier: 'model',
+          outcome,
+          imageBase64: this.pendingSampleFrame.base64,
+          width: this.pendingSampleFrame.width,
+          height: this.pendingSampleFrame.height,
+        });
+      }
     }
+    this.pendingSampleFrame = null;
     // Route through the same auto-add path: a hand-picked item still has to
     // satisfy stock, still gets an undo window, still emits the same event.
     // The tier comes off the same predicate, so a suppressed choice row cannot
