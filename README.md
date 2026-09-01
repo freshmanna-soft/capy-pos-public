@@ -1,7 +1,21 @@
 # CapyPos
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version
-21.2.12.
+An AI-assisted point-of-sale till, running today as a real pilot rather than a demo: a small
+snack bar in the office, stocked with real goods, sold through Capy-POS. There's no cashier —
+each coworker opens the till on their **own phone**, points their phone's camera at the snack
+they're taking, and **Capy Clerk** (`/clerk`, camera + voice, `infra/vision-proxy` +
+`infra/clerk-agent-relay`) recognizes the item, rings it up, and takes payment right there,
+self-checkout, honor-system-adjacent. The pilot's job is surfacing what breaks under real,
+concurrent, personal-device use before any of this becomes one of the
+[Freshmanna](docs/ECOSYSTEM_PLAN.md) product line's shipped retail offerings.
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the architecture (and its own note on
+what's real vs. planned), [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for sprint status,
+and [`terraform/README.md`](terraform/README.md) for the live IBM Cloud Code Engine deployment.
+
+---
+
+*Scaffolded with [Angular CLI](https://github.com/angular/angular-cli) version 21.2.12.*
 
 ## Development server
 
