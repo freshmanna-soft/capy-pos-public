@@ -36,6 +36,8 @@ export class CurrentUserService {
 
   private readonly _session = signal<AuthSessionDto | null>(null);
   private readonly _activeTenantId = signal<string | null>(null);
+  private readonly _logoutReason = signal<'expired' | 'manual' | null>(null);
+  private expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ── public read-only projections ────────────────────────────────────────
 
@@ -47,6 +49,16 @@ export class CurrentUserService {
 
   /** True when a valid session is loaded. */
   readonly isAuthenticated = computed(() => this._session() !== null);
+
+  /**
+   * Why the last logout happened, or null before any logout this session.
+   *
+   * Read by `SessionExpiryNavigatorService` to tell an expiry apart from a
+   * future manual sign-out — both clear the same `_session` signal, so the
+   * *reason* has to be its own signal rather than inferred from the
+   * true→false transition alone.
+   */
+  readonly logoutReason = this._logoutReason.asReadonly();
 
   /** Operator id string, or null when not authenticated. */
   readonly operatorId = computed(() => this._session()?.operatorId ?? null);
@@ -140,6 +152,7 @@ export class CurrentUserService {
     const session = await this.gateway.getActiveSession();
     this._session.set(session);
     this._activeTenantId.set(session?.tenantId ?? null);
+    this.armExpiryTimer(session?.expiresAt);
   }
 
   /**
@@ -150,6 +163,36 @@ export class CurrentUserService {
   setSession(session: AuthSessionDto): void {
     this._session.set(session);
     this._activeTenantId.set(session.tenantId);
+    this.armExpiryTimer(session.expiresAt);
+  }
+
+  /**
+   * Arm a one-shot timer for the moment this session's token expires.
+   *
+   * A single `setTimeout` for the exact instant, not a polling interval —
+   * `expiresAt` is already known exactly, so there is nothing to poll for.
+   * A session already expired by the time this runs (a stale tab reopened
+   * long after the token lapsed) logs out immediately rather than waiting
+   * out a negative delay forever.
+   */
+  private armExpiryTimer(expiresAt: string | undefined): void {
+    this.clearExpiryTimer();
+    if (!expiresAt) {
+      return;
+    }
+    const delayMs = new Date(expiresAt).getTime() - Date.now();
+    if (delayMs <= 0) {
+      void this.logout('expired');
+      return;
+    }
+    this.expiryTimer = setTimeout(() => void this.logout('expired'), delayMs);
+  }
+
+  private clearExpiryTimer(): void {
+    if (this.expiryTimer !== null) {
+      clearTimeout(this.expiryTimer);
+      this.expiryTimer = null;
+    }
   }
 
   /**
@@ -166,6 +209,7 @@ export class CurrentUserService {
     const stillMember =
       !!previousActive && (session.memberships ?? []).some((m) => m.tenantId === previousActive);
     this._activeTenantId.set(stillMember ? previousActive : session.tenantId);
+    this.armExpiryTimer(session.expiresAt);
   }
 
   // ── tenant switching ─────────────────────────────────────────────────────
@@ -206,10 +250,18 @@ export class CurrentUserService {
   /**
    * Sign out: call the gateway, then clear the in-memory session so
    * guards and reactive consumers react immediately.
+   *
+   * @param reason 'expired' when this fires from the token's own expiry timer
+   *   or a 401 the server-side check caught first; 'manual' for an explicit
+   *   sign-out. Read by `SessionExpiryNavigatorService`, which needs to tell
+   *   the two apart — both clear the same session, so this can't be inferred
+   *   from that alone.
    */
-  async logout(): Promise<void> {
+  async logout(reason: 'expired' | 'manual' = 'manual'): Promise<void> {
+    this.clearExpiryTimer();
     await this.gateway.signOut();
     this._session.set(null);
     this._activeTenantId.set(null);
+    this._logoutReason.set(reason);
   }
 }
