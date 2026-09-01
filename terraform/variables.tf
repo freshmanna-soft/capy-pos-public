@@ -138,8 +138,15 @@ variable "services" {
   default = {
     # Angular build served by nginx — the root Dockerfile. Scaled to zero like the
     # rest: this is a demo estate, not a storefront with a warm-start SLO.
+    #
+    # image_tag pinned here rather than left on the global default: only this
+    # service's source changed in the #221/#224 work (environment.prod.ts's IBM
+    # repoint, SyncSessionCredentialService), so it gets its own v2 build while
+    # pos-api/vision-proxy/clerk-agent-relay — untouched tonight — stay on
+    # whatever `TF_VAR_image_tag` says, currently "v1".
     capy-pos-app = {
       image_port = 8080
+      image_tag  = "v2"
     }
     # infra/vision-proxy — one frame in, candidate products out.
     capy-vision-proxy = {
