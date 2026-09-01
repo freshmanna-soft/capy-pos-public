@@ -39,6 +39,16 @@
 Enterprise-grade Point of Sale (POS) system built with Angular 21+, a clean-architecture frontend,
 and offline-first local persistence.
 
+**Running today as a real pilot, not just a demo.** A small snack bar in the office sells real
+goods through it. There is no cashier: each coworker self-checks-out on their **own phone** —
+Capy Clerk (`/clerk`) recognizes the item through the phone's own camera and mic, rings it up, and
+takes payment, honor-system-adjacent. That means real concurrent load from many personal devices
+(not one attended till), and it's the reason the vision-recognition path
+(`infra/vision-proxy`/`infra/clerk-agent-relay`) is cost- and confidence-gated as carefully as it
+is (`FrameGate`, the near-tie auto-add cap in `candidate-ranking.ts`) — a wrong or overconfident
+call has nobody standing at a register to catch it. The pilot's purpose is finding out what breaks
+under that real usage before any of this becomes a shipped Freshmanna retail product.
+
 **Planned:** a microservices backend deployed to IBM Cloud Code Engine using Terraform. See the
 status note above for what of that exists.
 
