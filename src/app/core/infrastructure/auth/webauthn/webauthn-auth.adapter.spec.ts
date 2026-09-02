@@ -589,8 +589,13 @@ describe('WebAuthnAuthAdapter', () => {
       await adapter.setPin(OPERATOR_ID, '4917');
       const operator = await db.operators.get(OPERATOR_ID);
 
+      // The format assertion alone already proves this: a `pbkdf2:<iterations>:
+      // <hex-salt>:<hex-derived-key>` triple cannot structurally *be* the raw PIN.
+      // A `.not.toContain('4917')` on top of it would be flaky, not additional
+      // proof — a random-salted hex digest has a real (~1.5% per run) chance of
+      // containing any fixed 4-digit substring by pure chance, which is exactly
+      // what failed an unrelated PR's pre-push run on 2026-09-02.
       expect(operator?.pinHash).toMatch(/^pbkdf2:\d+:[0-9a-f]+:[0-9a-f]+$/);
-      expect(operator?.pinHash).not.toContain('4917');
       expect(operator?.pinUpdatedAt).toBeDefined();
     });
 
