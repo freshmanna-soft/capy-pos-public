@@ -7,8 +7,11 @@ import { environment } from '../../../../environments/environment';
  * bcrypt hash (cost 10) of the default admin password "admin1234".
  * Dev/test bootstrap credential only. `seedRbacDefaults()` and the v3
  * upgrade hook below both gate *creating* this account on
- * `!environment.production` — not just documentation, an enforced guard — so
- * a real pilot install never has this row to sign into. NEVER store plaintext.
+ * `environment.allowSeededAdmin` — not just documentation, an enforced guard —
+ * so a real pilot install never has this row to sign into.
+ * `environment.prod.ts`, the file that actually ships, sets this false; only a
+ * build config that is not the real deployment (dev, test, staging, and CI's
+ * production-bundle smoke config) may set it true. NEVER store plaintext.
  */
 const DEFAULT_ADMIN_PASSWORD_HASH = '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW';
 
@@ -549,10 +552,12 @@ export class DexieDatabase extends Dexie {
           );
         }
 
-        // Dev/test bootstrap only — see the same guard in seedRbacDefaults().
-        // An existing v2 database upgrading in a real pilot must not gain a
-        // publicly-known account any more than a fresh install should.
-        if (!environment.production) {
+        // Dev/test bootstrap only — see the same guard, and why it's keyed on
+        // `allowSeededAdmin` rather than `!environment.production`, in
+        // seedRbacDefaults() below. An existing v2 database upgrading in a
+        // real pilot must not gain a publicly-known account any more than a
+        // fresh install should.
+        if (environment.allowSeededAdmin) {
           const operatorCount = await tx.table('operators').count();
           if (operatorCount === 0) {
             await tx.table('operators').add({
@@ -1014,9 +1019,14 @@ export class DexieDatabase extends Dexie {
     // A real pilot install must not ship a publicly-known account. Once IBM
     // App ID auth is wired up, production sign-in never touches this path at
     // all; until then, local dev and the test suite still need *something*
-    // to sign in as.
+    // to sign in as. Gated on `allowSeededAdmin`, not `!environment.production`:
+    // the CI route-smoke suite builds with real production optimizations
+    // (environment.smoke.ts) to catch prod-bundle-only bugs, and needs to sign
+    // in to reach a protected route — `!environment.production` would have
+    // refused that build the account too, which is exactly what
+    // environment.prod.ts, the file that actually ships, must keep doing.
     // -----------------------------------------------------------------------
-    if (!environment.production) {
+    if (environment.allowSeededAdmin) {
       const operatorCount = await this.operators.count();
       if (operatorCount === 0) {
         await this.operators.add({

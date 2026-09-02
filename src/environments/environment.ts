@@ -6,6 +6,13 @@ export const environment = {
   production: false,
   name: 'development',
 
+  // Gates *creating* the seeded admin@capy-pos.local bootstrap account in
+  // dexie-database.service.ts. Deliberately its own flag rather than
+  // `!production`: a build config can be "production" in every optimization/
+  // bundling sense (see environment.smoke.ts) without being the real deployed
+  // pilot, and only the real deployed pilot may never gain this account.
+  allowSeededAdmin: true,
+
   // API Configuration
   //
   // Still the retired terraform/aws-demo host (#206): DNS no longer resolves, so the

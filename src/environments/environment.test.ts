@@ -6,6 +6,9 @@ export const environment = {
   production: false,
   name: 'test',
 
+  // See environment.ts — decoupled from `production` on purpose.
+  allowSeededAdmin: true,
+
   // API Configuration
   apiUrl: 'http://localhost:4200/api',
   apiTimeout: 10000,

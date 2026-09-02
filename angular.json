@@ -118,6 +118,31 @@
               "extractLicenses": false,
               "sourceMap": true,
               "namedChunks": true
+            },
+            "smoke": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.smoke.ts"
+                }
+              ],
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "750kB",
+                  "maximumError": "1.5MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "8kB",
+                  "maximumError": "16kB"
+                }
+              ],
+              "outputHashing": "all",
+              "optimization": true,
+              "sourceMap": false,
+              "namedChunks": false,
+              "extractLicenses": true
             }
           },
           "defaultConfiguration": "production"
@@ -133,6 +158,9 @@
             },
             "vision": {
               "buildTarget": "capy-pos:build:vision"
+            },
+            "smoke": {
+              "buildTarget": "capy-pos:build:smoke"
             }
           },
           "defaultConfiguration": "development"

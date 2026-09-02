@@ -32,6 +32,9 @@ export const environment = {
   production: false,
   name: 'development-vision',
 
+  // See environment.ts — decoupled from `production` on purpose.
+  allowSeededAdmin: true,
+
   // API Configuration
   //
   // Still the retired terraform/aws-demo host (#206): DNS no longer resolves, so the

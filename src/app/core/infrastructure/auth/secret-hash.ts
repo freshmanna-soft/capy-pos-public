@@ -69,12 +69,12 @@ export async function compareSecret(plaintext: string, storedHash: string): Prom
  *
  * bcrypt is not available in WebCrypto, so a real comparison is impossible here
  * without shipping a WASM implementation. `dexie-database.service.ts` gates
- * creating this account on `!environment.production`, so this branch is only
- * ever reachable in a dev or test build — a real pilot install has no such
- * row to compare against in the first place. Its hash and plaintext are both
- * public knowledge in this repo, which is exactly why it must never exist
- * outside dev/test. Every account created through the UI is PBKDF2 and takes
- * the branch above.
+ * creating this account on `environment.allowSeededAdmin`, which
+ * `environment.prod.ts` — the file that actually ships — sets `false`, so a
+ * real pilot install has no such row to compare against in the first place.
+ * Its hash and plaintext are both public knowledge in this repo, which is
+ * exactly why it must never exist in a real deployment. Every account created
+ * through the UI is PBKDF2 and takes the branch above.
  *
  * Any *other* bcrypt hash is rejected outright rather than guessed at.
  */

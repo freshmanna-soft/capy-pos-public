@@ -6,6 +6,13 @@ export const environment = {
   production: true,
   name: 'production',
 
+  // Never true here. See environment.ts for what this gates and why it is
+  // decoupled from `production` — environment.smoke.ts is the one build config
+  // that is `production: true` (real optimization, real bundle) with this flag
+  // flipped, so CI can exercise a logged-in state without this file granting
+  // the same thing to the real deployed pilot.
+  allowSeededAdmin: false,
+
   // API Configuration
   //
   // One sync backend, decided in #224: IBM Code Engine pos-api (terraform/,
