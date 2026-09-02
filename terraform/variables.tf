@@ -223,8 +223,17 @@ variable "services" {
     # needs_session_secret sense: it verifies nothing (it issues the very
     # session a caller doesn't have yet) — pins_cors_origins alone is what
     # keeps an unlisted page from spending sign-in attempts against the tenant.
+    #
+    # image_tag pinned to v2, not left on the global v1: the image pushed
+    # under v1 was built for arm64 (an Apple Silicon `docker build` with no
+    # --platform flag) and could never start on Code Engine's amd64 nodes —
+    # "Initial scale was never achieved". Terraform tracks the tag string, not
+    # the underlying digest, so re-pushing a corrected image under the same v1
+    # tag would not by itself trigger a new revision; a new tag does, same as
+    # capy-pos-app's own v2 pin above.
     capy-appid-token-relay = {
       image_port         = 8792
+      image_tag          = "v2"
       needs_appid_secret = true
       pins_cors_origins  = true
     }
