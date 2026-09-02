@@ -1,0 +1,19 @@
+{
+  "name": "capy-appid-token-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Server-side relay for IBM Cloud App ID sign-in. Holds the client secret App ID's token endpoint requires, so it never has to live in the browser bundle.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --experimental-strip-types src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --test \"src/**/*.test.mjs\"",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "~5.9.2"
+  }
+}
