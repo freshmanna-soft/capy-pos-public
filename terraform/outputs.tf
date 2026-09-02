@@ -26,6 +26,11 @@ output "pos_api_url" {
   value       = try(ibm_code_engine_app.apps["capy-pos-api"].endpoint, "")
 }
 
+output "appid_token_relay_url" {
+  description = "Base URL for appId.relayUrl in the environment file being deployed (append /appid/token)"
+  value       = try(ibm_code_engine_app.apps["capy-appid-token-relay"].endpoint, "")
+}
+
 output "project_id" {
   description = "Code Engine project ID"
   value       = ibm_code_engine_project.project.project_id
