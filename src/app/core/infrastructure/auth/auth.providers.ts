@@ -7,26 +7,33 @@ import { QUICK_AUTH_GATEWAY } from '@core/application/auth/ports/quick-auth.port
 import { QUICK_AUTH_ADMIN_PORT } from '@core/application/auth/ports/quick-auth-admin.port';
 import { LocalCredentialAuthAdapter } from './local-credential-auth.adapter';
 import { CognitoAuthAdapter } from './cognito-auth.adapter';
+import { AppIdAuthAdapter } from './appid-auth.adapter';
 import { DexieOperatorAdminAdapter } from './dexie-operator-admin.adapter';
 import { DexieRoleAdminAdapter } from './dexie-role-admin.adapter';
 import { WebAuthnAuthAdapter } from './webauthn/webauthn-auth.adapter';
 
 /**
- * The AuthGateway swap seam (Story #140).
+ * The AuthGateway swap seam (Story #140; IBM App ID added 2026-09-01).
  *
  * The gateway is chosen from config at composition time: flip
- * `environment.cognito.enabled` to route logins through Cognito instead of the
- * local credential adapter. Both adapters are registered so the choice is a
- * single flag — no code change — but only the selected one is ever instantiated
- * (`useExisting` resolves lazily).
+ * `environment.appId.enabled` or `environment.cognito.enabled` to route logins
+ * through IBM App ID or Cognito instead of the local credential adapter. All
+ * three adapters are registered so the choice is a single flag — no code
+ * change — but only the selected one is ever instantiated (`useExisting`
+ * resolves lazily). App ID takes priority if both happen to be enabled at
+ * once, since it's the one actually being stood up for this pilot; that
+ * combination isn't a real deployment target, just a defined order rather
+ * than an undefined one.
  */
+const useAppIdGateway = environment.appId?.enabled === true;
 const useCognitoGateway = environment.cognito?.enabled === true;
 
 /**
  * AUTH_PROVIDERS
  *
  * Binds the auth ports to their adapters:
- *   - AuthGateway        → Cognito (when enabled) or LocalCredentialAuthAdapter
+ *   - AuthGateway        → App ID (when enabled), else Cognito (when enabled),
+ *                          else LocalCredentialAuthAdapter
  *   - QuickAuthGateway   → WebAuthnAuthAdapter (passkey + PIN sign-in)
  *   - QuickAuthAdminPort → WebAuthnAuthAdapter (enrollment + PIN management)
  *   - OperatorAdminPort  → DexieOperatorAdminAdapter (admin user management)
@@ -45,9 +52,14 @@ const useCognitoGateway = environment.cognito?.enabled === true;
 export const AUTH_PROVIDERS: Provider[] = [
   LocalCredentialAuthAdapter,
   CognitoAuthAdapter,
+  AppIdAuthAdapter,
   {
     provide: AUTH_GATEWAY,
-    useExisting: useCognitoGateway ? CognitoAuthAdapter : LocalCredentialAuthAdapter,
+    useExisting: useAppIdGateway
+      ? AppIdAuthAdapter
+      : useCognitoGateway
+        ? CognitoAuthAdapter
+        : LocalCredentialAuthAdapter,
   },
   WebAuthnAuthAdapter,
   {

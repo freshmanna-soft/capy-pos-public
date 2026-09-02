@@ -83,6 +83,16 @@ export const environment = {
     allowedStoreDomain: '',
   },
 
+  // IBM Cloud App ID — see environment.ts for the full rationale.
+  appId: {
+    enabled: false,
+    region: 'us-south',
+    tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
+    staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
+    customerClientId: '',
+    relayUrl: 'http://localhost:8790/appid/token',
+  },
+
   // Payment Gateway (Stripe Test Mode)
   stripe: {
     publicKey: 'pk_test_51234567890',
