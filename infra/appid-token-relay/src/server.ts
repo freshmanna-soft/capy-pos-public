@@ -6,10 +6,10 @@
  * cannot exercise without a bound port.
  *
  *   APPID_REGION=us-south APPID_TENANT_ID=… APPID_CLIENT_ID=… APPID_CLIENT_SECRET=… \
- *   ALLOWED_ORIGINS=http://localhost:4200 npm start                # laptop, port 8790
+ *   ALLOWED_ORIGINS=http://localhost:4200 npm start                # laptop, port 8792
  *
  * Then set `appId.enabled = true` and `appId.relayUrl =
- * 'http://localhost:8790/appid/token'` in the environment file you are serving.
+ * 'http://localhost:8792/appid/token'` in the environment file you are serving.
  */
 import { createServer } from 'node:http';
 import { relay } from './relay.ts';
@@ -17,7 +17,7 @@ import { validate, MAX_BODY_BYTES } from './validate.ts';
 import { createRequestListener } from './http.ts';
 import { readAllowedOrigins } from './cors.ts';
 
-const PORT = Number(process.env['PORT'] ?? 8790);
+const PORT = Number(process.env['PORT'] ?? 8792);
 
 const ROUTE = '/appid/token';
 

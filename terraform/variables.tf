@@ -76,6 +76,48 @@ variable "session_jwt_secret" {
   default     = ""
 }
 
+variable "appid_region" {
+  description = "IBM Cloud region the App ID tenant lives in. Not sensitive — see appid_client_id."
+  type        = string
+  default     = "us-south"
+}
+
+variable "appid_tenant_id" {
+  description = <<-EOT
+    App ID tenant (instance) id, e.g. from `ibmcloud resource service-instance
+    <name> --output json`. Not sensitive — it identifies the tenant, the same way
+    Cognito's pool id is committed in plaintext in environment.*.ts; only the
+    client *secret* below is a credential.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "appid_client_id" {
+  description = <<-EOT
+    App ID staff application's client id (the "Resource Owner Password" or
+    equivalent app registered in the App ID instance's Applications tab). Not
+    sensitive, same reasoning as appid_tenant_id — matches the value committed in
+    environment.*.ts's `appId.staffClientId`.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "appid_client_secret" {
+  description = <<-EOT
+    The one genuinely sensitive App ID value: the staff application's client
+    secret. `infra/appid-token-relay` exists specifically so this never has to
+    live in the browser bundle — App ID's token endpoint requires
+    `Authorization: Basic base64(clientId:clientSecret)` on every call, unlike
+    Cognito's public-client grant. Bound as a Code Engine secret, never a literal
+    env var.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "frontend_origins" {
   description = <<-EOT
     Browser origins the guarded services will answer. Scheme and host only, no
@@ -125,7 +167,11 @@ variable "services" {
     pins_cors_origins = optional(bool, false)
     # Binds CLOUDANT_URL and CLOUDANT_APIKEY from the shared Cloudant instance's
     # per-app secret.
-    needs_cloudant          = optional(bool, false)
+    needs_cloudant = optional(bool, false)
+    # Binds APPID_REGION/APPID_TENANT_ID/APPID_CLIENT_ID as literal env and
+    # APPID_CLIENT_SECRET from a per-app secret. Only infra/appid-token-relay sets
+    # this — it is the one service that ever holds the App ID client secret.
+    needs_appid_secret      = optional(bool, false)
     scale_min_instances     = optional(number, 0)
     scale_max_instances     = optional(number, 2)
     scale_initial_instances = optional(number, 1)
@@ -171,6 +217,16 @@ variable "services" {
       image_port           = 8790
       needs_session_secret = true
       needs_cloudant       = true
+    }
+    # infra/appid-token-relay — holds the App ID client secret so the browser
+    # bundle never has to. Not a "session-guarded" service in the
+    # needs_session_secret sense: it verifies nothing (it issues the very
+    # session a caller doesn't have yet) — pins_cors_origins alone is what
+    # keeps an unlisted page from spending sign-in attempts against the tenant.
+    capy-appid-token-relay = {
+      image_port         = 8792
+      needs_appid_secret = true
+      pins_cors_origins  = true
     }
   }
 

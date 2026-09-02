@@ -13,7 +13,7 @@
  *
  *   SMOKE_APPID_USERNAME=… SMOKE_APPID_PASSWORD=… node smoke.mjs   # another
  */
-const PORT = Number(process.env.PORT ?? 8790);
+const PORT = Number(process.env.PORT ?? 8792);
 const URL = `http://127.0.0.1:${PORT}/appid/token`;
 const ORIGIN = (process.env.ALLOWED_ORIGINS ?? '').split(',')[0]?.trim() ?? 'http://localhost:4200';
 

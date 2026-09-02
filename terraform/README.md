@@ -20,6 +20,7 @@ template kept for reference and is not applied by this root module — see
 | `ibm_cloudant.store`                    | One shared Cloudant (Lite plan) instance, for pos-api's own data.         |
 | `ibm_resource_key.cloudant_key`         | Generated Cloudant credentials — never hand-entered.                     |
 | `ibm_code_engine_secret.cloudant_creds` | `CLOUDANT_URL`/`CLOUDANT_APIKEY`, one per app that sets `needs_cloudant`. |
+| `ibm_code_engine_secret.appid_secret`   | `APPID_CLIENT_SECRET`, one per app that sets `needs_appid_secret`.       |
 | `ibm_code_engine_app.apps`              | `for_each` over `var.services`.                                          |
 
 The apps are a `for_each` rather than one resource block per service on purpose:
@@ -62,12 +63,16 @@ Set these as `TF_VAR_*` environment variables (never in a committed `.tfvars`):
 | `anthropic_base_url`  | no                              | `""`        | Route model calls through a gateway (e.g. an IBM litellm proxy) instead of the real API. Not sensitive — a literal env var. `anthropic_api_key` must be shaped for whichever endpoint this points at. |
 | `session_jwt_secret`  | if any service `needs_session_secret` | `""`     | Sensitive. Must match `getJwtSecret()` — see the auth note below.|
 | `frontend_origins`    | if any service `pins_cors_origins` | `[]`        | List of `scheme://host[:port]`, no trailing slash.                |
+| `appid_region`        | if any service `needs_appid_secret` | `us-south` | Not sensitive.                                                   |
+| `appid_tenant_id`     | if any service `needs_appid_secret` | `""`      | Not sensitive — matches `environment.*.ts`'s `appId.tenantId`.    |
+| `appid_client_id`     | if any service `needs_appid_secret` | `""`      | Not sensitive — matches `environment.*.ts`'s `appId.staffClientId`.|
+| `appid_client_secret` | if any service `needs_appid_secret` | `""`      | Sensitive. The App ID staff application's client secret.          |
 | `region`              | no                              | `us-south`  |                                                                  |
 | `resource_group_name` | no                              | `Default`   |                                                                  |
 | `project_name`        | no                              | `capy-pos`  | Code Engine project name.                                        |
 | `cr_namespace`        | no                              | `capy-pos-3223793` | Registry namespace holding every image — globally unique across every IBM Cloud account in the region, so the default carries this account's number. |
 | `image_tag`           | no                              | `latest`    | Applied to every service that does not override it.              |
-| `services`            | no                              | 4 apps      | See below.                                                       |
+| `services`            | no                              | 5 apps      | See below.                                                       |
 
 There is **no `app_name` variable**. The frontend used to be a single hardcoded app
 named by `var.app_name`; it is now the `capy-pos-app` key in `var.services`. Rename
@@ -79,10 +84,11 @@ Keyed by app name, which is also the image name inside `cr_namespace`:
 
 ```hcl
 services = {
-  capy-pos-app           = { image_port = 8080 }
-  capy-vision-proxy      = { image_port = 8787, needs_model_key = true, needs_session_secret = true, pins_cors_origins = true }
-  capy-clerk-agent-relay = { image_port = 8789, needs_model_key = true, needs_session_secret = true, pins_cors_origins = true }
-  capy-pos-api           = { image_port = 8790, needs_session_secret = true, needs_cloudant = true }
+  capy-pos-app            = { image_port = 8080 }
+  capy-vision-proxy       = { image_port = 8787, needs_model_key = true, needs_session_secret = true, pins_cors_origins = true }
+  capy-clerk-agent-relay  = { image_port = 8789, needs_model_key = true, needs_session_secret = true, pins_cors_origins = true }
+  capy-pos-api            = { image_port = 8790, needs_session_secret = true, needs_cloudant = true }
+  capy-appid-token-relay  = { image_port = 8792, needs_appid_secret = true, pins_cors_origins = true }
 }
 ```
 
@@ -98,6 +104,11 @@ services = {
   first target: `terraform apply -target='ibm_code_engine_app.apps["capy-pos-api"]'`.
 - `needs_cloudant` — binds `CLOUDANT_URL`/`CLOUDANT_APIKEY` from the shared Cloudant
   instance's per-app secret.
+- `needs_appid_secret` — binds `APPID_REGION`/`APPID_TENANT_ID`/`APPID_CLIENT_ID` as
+  literal env and `APPID_CLIENT_SECRET` from a per-app secret. Only
+  `capy-appid-token-relay` sets this. Unlike pos-api, this service also sets
+  `pins_cors_origins` — it is not a one-pass, deploy-alone-first target; it needs
+  `frontend_origins` set the same as the two model-key proxies do.
 - `image_tag`, `scale_*`, `env` — optional per-service overrides. `env` merges last,
   so it can override `NODE_ENV`.
 
@@ -110,6 +121,7 @@ services = {
 | `vision_proxy_url`      | Base for `visionApiUrl`; append `/vision/identify`.                       |
 | `clerk_agent_relay_url` | Base for `clerkAgentApiUrl`; append `/clerk/agent`.                       |
 | `pos_api_url`           | Base for `apiUrl`.                                                       |
+| `appid_token_relay_url` | Base for `appId.relayUrl`; append `/appid/token`.                        |
 | `project_id`            | Code Engine project id, for `ibmcloud ce project select`.                 |
 | `cr_namespace`          | Registry namespace, for `docker push`.                                    |
 
@@ -128,10 +140,12 @@ docker build -t us.icr.io/$CR_NAMESPACE/capy-pos-app:v1 .
 docker build -t us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1 infra/vision-proxy
 docker build -t us.icr.io/$CR_NAMESPACE/capy-clerk-agent-relay:v1 infra/clerk-agent-relay
 docker build -t us.icr.io/$CR_NAMESPACE/capy-pos-api:v1 infra/pos-api
+docker build -t us.icr.io/$CR_NAMESPACE/capy-appid-token-relay:v1 infra/appid-token-relay
 docker push us.icr.io/$CR_NAMESPACE/capy-pos-app:v1
 docker push us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1
 docker push us.icr.io/$CR_NAMESPACE/capy-clerk-agent-relay:v1
 docker push us.icr.io/$CR_NAMESPACE/capy-pos-api:v1
+docker push us.icr.io/$CR_NAMESPACE/capy-appid-token-relay:v1
 ```
 
 Deploying one service alone first (recommended for a first-ever apply against a new
@@ -146,6 +160,11 @@ export TF_VAR_ibmcloud_api_key="…"
 export TF_VAR_anthropic_api_key="sk-ant-…"
 export TF_VAR_session_jwt_secret="…"       # must match the browser's, see below
 export TF_VAR_image_tag="v1"
+
+# Only needed once capy-appid-token-relay is in var.services:
+export TF_VAR_appid_tenant_id="…"          # matches environment.*.ts's appId.tenantId
+export TF_VAR_appid_client_id="…"          # matches environment.*.ts's appId.staffClientId
+export TF_VAR_appid_client_secret="…"      # from the App ID instance's Applications tab
 ```
 
 ### 3. Apply

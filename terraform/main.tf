@@ -47,6 +47,7 @@ locals {
   model_key_services       = { for name, service in var.services : name => service if service.needs_model_key }
   session_guarded_services = { for name, service in var.services : name => service if service.needs_session_secret }
   cloudant_services        = { for name, service in var.services : name => service if service.needs_cloudant }
+  appid_secret_services    = { for name, service in var.services : name => service if service.needs_appid_secret }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
   # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses. Empty until
@@ -78,6 +79,14 @@ locals {
       # gets nothing here, and the Anthropic SDK's own default (the real API)
       # applies untouched.
       service.needs_model_key && var.anthropic_base_url != "" ? { ANTHROPIC_BASE_URL = var.anthropic_base_url } : {},
+      # Tenant/client id are not secrets — see appid_tenant_id's description —
+      # so they are literal env here, same as ALLOWED_ORIGINS above. Only the
+      # client *secret* gets a Code Engine secret, bound separately below.
+      service.needs_appid_secret ? {
+        APPID_REGION    = var.appid_region
+        APPID_TENANT_ID = var.appid_tenant_id
+        APPID_CLIENT_ID = var.appid_client_id
+      } : {},
       service.env,
     )
   }
@@ -104,6 +113,30 @@ resource "ibm_code_engine_secret" "model_key" {
     precondition {
       condition     = length(var.anthropic_api_key) > 0
       error_message = "${each.key} needs a model key: set TF_VAR_anthropic_api_key (never commit it)."
+    }
+  }
+}
+
+# The App ID client secret, one generic secret per app that sets needs_appid_secret.
+#
+# Per-app for the same reason the model key is per-app — today only
+# infra/appid-token-relay sets the flag, but revoking one app's App ID access
+# should never blind a sibling that might use a different App ID application.
+resource "ibm_code_engine_secret" "appid_secret" {
+  for_each = local.appid_secret_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-appid-secret"
+  format     = "generic"
+
+  data = {
+    APPID_CLIENT_SECRET = var.appid_client_secret
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(var.appid_client_secret) > 0 && length(var.appid_tenant_id) > 0 && length(var.appid_client_id) > 0
+      error_message = "${each.key} needs an App ID tenant: set TF_VAR_appid_tenant_id, TF_VAR_appid_client_id and TF_VAR_appid_client_secret (never commit the secret)."
     }
   }
 }
@@ -208,9 +241,10 @@ resource "ibm_code_engine_app" "apps" {
   image_reference = "us.icr.io/${var.cr_namespace}/${each.key}:${coalesce(each.value.image_tag, var.image_tag)}"
   image_secret    = ibm_code_engine_secret.cr_secret.name
 
-  # What the container actually listens on: 8080 for the nginx frontend, 8787 and
-  # 8789 for the two proxies, which default to those ports in their own
-  # `server.ts`. A mismatch here is a revision that never passes its port check.
+  # What the container actually listens on: 8080 for the nginx frontend, 8787,
+  # 8789, 8790 and 8792 for the four backend services, which default to those
+  # ports in their own `server.ts`. A mismatch here is a revision that never
+  # passes its port check.
   image_port = each.value.image_port
 
   scale_min_instances     = each.value.scale_min_instances
@@ -270,6 +304,17 @@ resource "ibm_code_engine_app" "apps" {
       name      = "CLOUDANT_APIKEY"
       key       = "CLOUDANT_APIKEY"
       reference = ibm_code_engine_secret.cloudant_creds[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_appid_secret ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "APPID_CLIENT_SECRET"
+      key       = "APPID_CLIENT_SECRET"
+      reference = ibm_code_engine_secret.appid_secret[each.key].name
     }
   }
 

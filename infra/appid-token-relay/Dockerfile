@@ -45,11 +45,11 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 
-# The `node` user ships with the image. Root is not needed to bind 8790 — it is
+# The `node` user ships with the image. Root is not needed to bind 8792 — it is
 # above 1024 — so nothing here has to run as it.
 USER node
 
-EXPOSE 8790
+EXPOSE 8792
 
 # No HEALTHCHECK: Code Engine probes the port itself (`image_port`). Unlike the
 # sibling proxies, every route here is deliberately unauthenticated — that is
