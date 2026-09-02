@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    // Source imports name the real files (`./relay.ts`), because both `npm start`
+    // and `npm test` run the TypeScript directly under Node's type stripping and
+    // Node will not guess that a `.js` specifier means a `.ts` file on disk. These
+    // two options let that same source compile: TS accepts the `.ts` specifier and
+    // rewrites it to `.js` in `dist/`. Carried over verbatim from
+    // infra/vision-proxy/infra/clerk-agent-relay — siblings, same convention.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    // Type stripping cannot tell a type import from a value one, so a type left in
+    // a value import crashes `npm start` at load. This turns that into a build error.
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "declaration": false,
+    "sourceMap": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  // The `.test.mjs` suites are deliberately outside this: plain JavaScript run by
+  // `node --test`, importing the stripped `.ts` sources at runtime — nothing
+  // typechecks them, same trade every sibling service in `infra/` already makes.
+  "include": ["src/**/*.ts"]
+}
