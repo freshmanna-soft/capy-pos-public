@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { CurrentUserService, TenantIsolationError } from './current-user.service';
 import { AUTH_GATEWAY } from './ports/auth-gateway.port';
 import { AuthSessionDto } from './dtos/auth-session.dto';
@@ -307,6 +307,103 @@ describe('CurrentUserService', () => {
       service.setSession(sessionWithMemberships);
       await service.logout();
       expect(gateway.signOut).toHaveBeenCalledOnce();
+    });
+
+    it('defaults to a manual reason, so an unrelated future sign-out button is not misread as an expiry', async () => {
+      service.setSession(sessionWithMemberships);
+      await service.logout();
+      expect(service.logoutReason()).toBe('manual');
+    });
+
+    it('records an explicit expired reason, so the navigator can tell the two apart', async () => {
+      service.setSession(sessionWithMemberships);
+      await service.logout('expired');
+      expect(service.logoutReason()).toBe('expired');
+    });
+  });
+
+  // ── session expiry timer ──────────────────────────────────────────────
+
+  describe('the session expiry timer', () => {
+    // The teardown trap this project has already hit once: a fake-timer test
+    // that forgets to restore real timers leaks into whichever spec file runs
+    // next. Every test in this block must leave with real timers.
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('logs out automatically the instant the token expires', async () => {
+      vi.useFakeTimers();
+      service.setSession({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 5000).toISOString(),
+      });
+      expect(service.isAuthenticated()).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(service.isAuthenticated()).toBe(false);
+      expect(service.logoutReason()).toBe('expired');
+    });
+
+    it('does not log out before the token actually expires', async () => {
+      vi.useFakeTimers();
+      service.setSession({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 5000).toISOString(),
+      });
+
+      await vi.advanceTimersByTimeAsync(4999);
+
+      expect(service.isAuthenticated()).toBe(true);
+    });
+
+    it('logs out immediately for a session that was already expired when loaded', async () => {
+      // A stale tab reopened long after the token lapsed — hydrate() must not
+      // arm a timer with a negative delay and wait forever.
+      gateway.getActiveSession.mockResolvedValue({
+        ...baseSession,
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
+      });
+
+      await service.hydrate();
+
+      expect(service.isAuthenticated()).toBe(false);
+    });
+
+    it('re-arms the timer to the refreshed session, not the original one', async () => {
+      vi.useFakeTimers();
+      service.setSession({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 100_000).toISOString(),
+      });
+
+      gateway.refresh.mockResolvedValue({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 5000).toISOString(),
+      });
+      await service.refresh();
+
+      // The *original* 100s timer must not be what fires — refresh() should
+      // have replaced it with one matching the new, shorter expiry.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(service.isAuthenticated()).toBe(false);
+    });
+
+    it('a manual logout cancels the pending expiry timer', async () => {
+      vi.useFakeTimers();
+      service.setSession({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 5000).toISOString(),
+      });
+
+      await service.logout();
+      expect(service.logoutReason()).toBe('manual');
+
+      // If the old timer were still armed, it would overwrite 'manual' with
+      // 'expired' once fake time crosses the original expiry.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(service.logoutReason()).toBe('manual');
     });
   });
 

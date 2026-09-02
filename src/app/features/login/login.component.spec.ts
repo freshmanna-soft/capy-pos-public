@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, vi } from 'vitest';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { RouterTestingModule } from '@angular/router/testing';
 import { LoginComponent } from './login.component';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
@@ -230,6 +230,31 @@ describe('LoginComponent', () => {
 
       expect(component.authError()).toBeNull();
     });
+  });
+
+  it('shows the expiry message when arriving with ?reason=expired', async () => {
+    const gateway = makeGateway({ succeeds: true });
+    await TestBed.configureTestingModule({
+      imports: [LoginComponent, RouterTestingModule],
+      providers: [
+        { provide: AUTH_GATEWAY, useValue: gateway },
+        { provide: QUICK_AUTH_GATEWAY, useValue: makeQuickAuth() },
+        {
+          provide: ActivatedRoute,
+          useValue: { snapshot: { queryParamMap: convertToParamMap({ reason: 'expired' }) } },
+        },
+      ],
+    }).compileComponents();
+
+    const fixture = TestBed.createComponent(LoginComponent);
+    fixture.detectChanges();
+    await Promise.resolve();
+    await Promise.resolve();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.authError()).toBe(
+      'Your session expired. Please sign in again.'
+    );
   });
 
   // -------------------------------------------------------------------------

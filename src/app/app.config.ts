@@ -22,6 +22,7 @@ import { PAYMENT_AGENT_PROVIDER } from '@app/agents/payment/infrastructure/payme
 import { AgentRegistry } from '@app/agents/agent.registry';
 import { SyncService, SyncSessionCredentialService } from '@core/infrastructure/sync';
 import { AUTH_PROVIDERS } from '@core/infrastructure/auth/auth.providers';
+import { SessionExpiryNavigatorService } from '@core/infrastructure/auth/session-expiry-navigator.service';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { ThemeService } from '@core/application/services/theme.service';
 import { OtlpExporterService } from '@core/infrastructure/telemetry/otlp-exporter.service';
@@ -69,6 +70,18 @@ export const appConfig: ApplicationConfig = {
         // Non-fatal — falls back to the default light theme.
         console.warn('Theme load failed (using default):', error);
       }
+    }),
+    // Registers the effect that redirects to /login the moment a session's
+    // expiry timer fires — without it, an already-open tab keeps showing a
+    // protected route until the next navigation happens to re-run authGuard.
+    // Its own initializer, and `inject()` called before any `await`: crossing
+    // an await inside an async initializer drops the injection context
+    // (NG0203), which is exactly what broke here the first time — injecting
+    // it at the tail of the hydrate initializer below, after its own
+    // `await currentUser.hydrate()`, failed on every route in a real browser
+    // while every unit test (a synchronous TestBed injection) stayed green.
+    provideAppInitializer(() => {
+      inject(SessionExpiryNavigatorService);
     }),
     // Rehydrate existing session AFTER the DB is open so the JWT gateway
     // can resolve the operator record if needed. Runs before routing resolves.

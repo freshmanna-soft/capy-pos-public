@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import {
@@ -483,6 +483,7 @@ export class LoginComponent implements OnInit {
   private readonly quickAuth = inject(QUICK_AUTH_GATEWAY);
   private readonly currentUser = inject(CurrentUserService);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
   private readonly fb = inject(FormBuilder);
 
   readonly form = this.fb.group({
@@ -531,6 +532,9 @@ export class LoginComponent implements OnInit {
   });
 
   async ngOnInit(): Promise<void> {
+    if (this.route.snapshot.queryParamMap.get('reason') === 'expired') {
+      this.authError.set('Your session expired. Please sign in again.');
+    }
     await this.probeQuickAuth();
   }
 
