@@ -132,6 +132,16 @@ services = {
 Terraform references images; it does not build them. Each tag pushed here must match
 `var.image_tag` (or the service's `image_tag`) or the revision pulls the wrong image.
 
+**On Apple Silicon, `docker build` alone is not enough.** Code Engine's nodes are
+`amd64`; a plain `docker build` on an M-series Mac produces `arm64` by default, and
+that image will never start — it sits in `Not Ready` with `Initial scale was never
+achieved` until the deploy's wait times out, with no more specific error anywhere
+(confirmed live: this is exactly what happened to `capy-appid-token-relay`'s first
+deploy). Use `docker buildx build --platform linux/amd64 ... --push` instead of
+`docker build` + `docker push` on Apple Silicon — it cross-compiles correctly and
+pushes in one step. On an Intel Mac or Linux, plain `docker build` already produces
+`amd64` and needs no change.
+
 ```bash
 ibmcloud cr login
 export CR_NAMESPACE=capy-pos-3223793   # must match var.cr_namespace, and be globally unique
