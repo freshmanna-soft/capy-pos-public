@@ -63,6 +63,25 @@ export const environment = {
     allowedStoreDomain: '',
   },
 
+  // IBM Cloud App ID — the IBM-hosted swap for Cognito (spike: reconcile auth
+  // provider, 2026-09-01). Same AuthGateway seam, same enabled-flag pattern.
+  // `relayUrl` points at `infra/appid-token-relay` (not yet built) — App ID's
+  // token endpoint requires a client secret via HTTP Basic auth, which cannot
+  // safely live in a browser bundle the way Cognito's public client can skip
+  // it, so login goes through a small server-side relay instead of App ID
+  // directly. Real tenantId/staffClientId below — not secrets, same as
+  // Cognito's pool/client ids are committed in plaintext; only the client
+  // *secret* is sensitive, and that lives in the relay's Code Engine secret,
+  // never here.
+  appId: {
+    enabled: false,
+    region: 'us-south',
+    tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
+    staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
+    customerClientId: '',
+    relayUrl: 'http://localhost:8790/appid/token',
+  },
+
   // Payment Gateway (Stripe Test Mode)
   stripe: {
     publicKey: 'pk_test_51234567890',

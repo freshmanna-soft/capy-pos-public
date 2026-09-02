@@ -60,6 +60,19 @@ export const environment = {
     allowedStoreDomain: '',
   },
 
+  // IBM Cloud App ID — see environment.ts for the full rationale. Enabled:
+  // false until infra/appid-token-relay exists and pos-api verifies App ID
+  // tokens instead of (or alongside) SessionIssuer's shared-secret ones.
+  appId: {
+    enabled: false,
+    region: 'us-south',
+    tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
+    staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
+    customerClientId: '',
+    relayUrl:
+      'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/token',
+  },
+
   // Payment Gateway (Stripe Live Mode)
   stripe: {
     publicKey: '', // Set via environment variable

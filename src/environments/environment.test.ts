@@ -52,6 +52,18 @@ export const environment = {
     allowedStoreDomain: '',
   },
 
+  // Deterministic test placeholders — specs override via APPID_CONFIG, same as
+  // COGNITO_CONFIG above, but a real-shaped default here is what a spec gets
+  // if it forgets to.
+  appId: {
+    enabled: false,
+    region: 'us-south',
+    tenantId: 'test-tenant-id',
+    staffClientId: 'test-appid-client-id',
+    customerClientId: 'test-appid-customer-client-id',
+    relayUrl: 'http://localhost:8790/appid/token',
+  },
+
   // Payment Gateway (Mock)
   stripe: {
     publicKey: 'pk_test_mock',
