@@ -6,6 +6,9 @@ export const environment = {
   production: false,
   name: 'staging',
 
+  // See environment.ts — decoupled from `production` on purpose.
+  allowSeededAdmin: true,
+
   // API Configuration
   apiUrl: 'https://api-staging.capy-pos.com/api',
   apiTimeout: 30000,

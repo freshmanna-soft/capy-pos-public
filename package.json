@@ -33,6 +33,7 @@
     "graphrag:serve": "node scripts/graphrag/server.mjs",
     "graphrag:celebrate": "node scripts/graphrag/celebrate.mjs",
     "start:prod": "ng serve --configuration production --serve-path /",
+    "start:smoke": "ng serve --configuration smoke --serve-path /",
     "test:e2e:smoke": "playwright test --config playwright.smoke.config.ts"
   },
   "private": true,

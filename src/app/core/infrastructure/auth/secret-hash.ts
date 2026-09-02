@@ -65,12 +65,15 @@ export async function compareSecret(plaintext: string, storedHash: string): Prom
 }
 
 /**
- * The one bcrypt hash this app can check: the seeded admin account.
+ * The one bcrypt hash this app can check: the seeded dev/test admin account.
  *
  * bcrypt is not available in WebCrypto, so a real comparison is impossible here
- * without shipping a WASM implementation. The seeded account exists so a fresh
- * install can be signed into at all, and its hash and plaintext are both public
- * knowledge in this repo — hence the direct equality check. Every account created
+ * without shipping a WASM implementation. `dexie-database.service.ts` gates
+ * creating this account on `environment.allowSeededAdmin`, which
+ * `environment.prod.ts` — the file that actually ships — sets `false`, so a
+ * real pilot install has no such row to compare against in the first place.
+ * Its hash and plaintext are both public knowledge in this repo, which is
+ * exactly why it must never exist in a real deployment. Every account created
  * through the UI is PBKDF2 and takes the branch above.
  *
  * Any *other* bcrypt hash is rejected outright rather than guessed at.

@@ -1,11 +1,17 @@
 import Dexie, { Table } from 'dexie';
 import { Injectable } from '@angular/core';
 import { Role, Permission } from '@core/domain/auth';
+import { environment } from '../../../../environments/environment';
 
 /**
  * bcrypt hash (cost 10) of the default admin password "admin1234".
- * Dev/single-tenant bootstrap credential only — rotate via the operator
- * management UI before any real deployment. NEVER store plaintext.
+ * Dev/test bootstrap credential only. `seedRbacDefaults()` and the v3
+ * upgrade hook below both gate *creating* this account on
+ * `environment.allowSeededAdmin` — not just documentation, an enforced guard —
+ * so a real pilot install never has this row to sign into.
+ * `environment.prod.ts`, the file that actually ships, sets this false; only a
+ * build config that is not the real deployment (dev, test, staging, and CI's
+ * production-bundle smoke config) may set it true. NEVER store plaintext.
  */
 const DEFAULT_ADMIN_PASSWORD_HASH = '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW';
 
@@ -546,19 +552,26 @@ export class DexieDatabase extends Dexie {
           );
         }
 
-        const operatorCount = await tx.table('operators').count();
-        if (operatorCount === 0) {
-          await tx.table('operators').add({
-            id: 'operator-admin-default',
-            email: 'admin@capy-pos.local',
-            displayName: 'Admin',
-            roleId: 'role-admin',
-            tenantId: 'default-tenant',
-            passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
-            isActive: true,
-            createdAt: now,
-            updatedAt: now,
-          });
+        // Dev/test bootstrap only — see the same guard, and why it's keyed on
+        // `allowSeededAdmin` rather than `!environment.production`, in
+        // seedRbacDefaults() below. An existing v2 database upgrading in a
+        // real pilot must not gain a publicly-known account any more than a
+        // fresh install should.
+        if (environment.allowSeededAdmin) {
+          const operatorCount = await tx.table('operators').count();
+          if (operatorCount === 0) {
+            await tx.table('operators').add({
+              id: 'operator-admin-default',
+              email: 'admin@capy-pos.local',
+              displayName: 'Admin',
+              roleId: 'role-admin',
+              tenantId: 'default-tenant',
+              passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
+              isActive: true,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
         }
       });
 
@@ -966,7 +979,12 @@ export class DexieDatabase extends Dexie {
    * from the domain Role value object (permission.constants.ts) so the persisted
    * data can never drift from the authorization rules (R11).
    *
-   * Default credentials: admin@capy-pos.local / admin1234.
+   * Default credentials (admin@capy-pos.local / admin1234): dev/test only, never
+   * production. Roles themselves seed everywhere — they're structural, not a
+   * credential — but the seeded admin *operator* is gated on `!environment.production`
+   * below, so a real pilot install has no built-in account. Local dev and the test
+   * suite still need something to sign in as before a real IBM App ID tenant is
+   * wired up; that's what this remains for.
    */
   async seedRbacDefaults(): Promise<void> {
     const now = new Date();
@@ -996,37 +1014,46 @@ export class DexieDatabase extends Dexie {
     await this._rederiveRolePermissions(now);
 
     // -----------------------------------------------------------------------
-    // 3. Default admin operator — seed once
+    // 3 & 4. Default admin operator + membership — dev/test bootstrap ONLY.
+    //
+    // A real pilot install must not ship a publicly-known account. Once IBM
+    // App ID auth is wired up, production sign-in never touches this path at
+    // all; until then, local dev and the test suite still need *something*
+    // to sign in as. Gated on `allowSeededAdmin`, not `!environment.production`:
+    // the CI route-smoke suite builds with real production optimizations
+    // (environment.smoke.ts) to catch prod-bundle-only bugs, and needs to sign
+    // in to reach a protected route — `!environment.production` would have
+    // refused that build the account too, which is exactly what
+    // environment.prod.ts, the file that actually ships, must keep doing.
     // -----------------------------------------------------------------------
-    const operatorCount = await this.operators.count();
-    if (operatorCount === 0) {
-      await this.operators.add({
-        id: 'operator-admin-default',
-        email: 'admin@capy-pos.local',
-        displayName: 'Admin',
-        roleId: 'role-admin',
-        tenantId: DEFAULT_TENANT_ID,
-        passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
-        isActive: true,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
+    if (environment.allowSeededAdmin) {
+      const operatorCount = await this.operators.count();
+      if (operatorCount === 0) {
+        await this.operators.add({
+          id: 'operator-admin-default',
+          email: 'admin@capy-pos.local',
+          displayName: 'Admin',
+          roleId: 'role-admin',
+          tenantId: DEFAULT_TENANT_ID,
+          passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
 
-    // -----------------------------------------------------------------------
-    // 4. userTenants membership for default admin — idempotent via put
-    // -----------------------------------------------------------------------
-    const adminTenantRowId = userTenantId('operator-admin-default', DEFAULT_TENANT_ID);
-    const existingMembership = await this.userTenants.get(adminTenantRowId);
-    if (!existingMembership) {
-      await this.userTenants.add({
-        id: adminTenantRowId,
-        userId: 'operator-admin-default',
-        tenantId: DEFAULT_TENANT_ID,
-        roleId: 'role-admin',
-        createdAt: now,
-        updatedAt: now,
-      });
+      const adminTenantRowId = userTenantId('operator-admin-default', DEFAULT_TENANT_ID);
+      const existingMembership = await this.userTenants.get(adminTenantRowId);
+      if (!existingMembership) {
+        await this.userTenants.add({
+          id: adminTenantRowId,
+          userId: 'operator-admin-default',
+          tenantId: DEFAULT_TENANT_ID,
+          roleId: 'role-admin',
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     }
   }
 
