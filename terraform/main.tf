@@ -80,9 +80,12 @@ locals {
       # applies untouched.
       service.needs_model_key && var.anthropic_base_url != "" ? { ANTHROPIC_BASE_URL = var.anthropic_base_url } : {},
       # Tenant/client id are not secrets — see appid_tenant_id's description —
-      # so they are literal env here, same as ALLOWED_ORIGINS above. Only the
-      # client *secret* gets a Code Engine secret, bound separately below.
-      service.needs_appid_secret ? {
+      # so they are literal env here, same as ALLOWED_ORIGINS above. Bound for
+      # either flag: a service that mints tokens (needs_appid_secret) and one
+      # that only verifies them (needs_appid_verification) both need to know
+      # which tenant and audience they're talking about; only the former also
+      # gets the client *secret*, bound separately below.
+      service.needs_appid_secret || service.needs_appid_verification ? {
         APPID_REGION    = var.appid_region
         APPID_TENANT_ID = var.appid_tenant_id
         APPID_CLIENT_ID = var.appid_client_id

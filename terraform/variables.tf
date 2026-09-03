@@ -171,12 +171,19 @@ variable "services" {
     # Binds APPID_REGION/APPID_TENANT_ID/APPID_CLIENT_ID as literal env and
     # APPID_CLIENT_SECRET from a per-app secret. Only infra/appid-token-relay sets
     # this — it is the one service that ever holds the App ID client secret.
-    needs_appid_secret      = optional(bool, false)
-    scale_min_instances     = optional(number, 0)
-    scale_max_instances     = optional(number, 2)
-    scale_initial_instances = optional(number, 1)
-    scale_cpu_limit         = optional(string, "0.5")
-    scale_memory_limit      = optional(string, "1G")
+    needs_appid_secret = optional(bool, false)
+    # Binds the same three literals (APPID_REGION/APPID_TENANT_ID/APPID_CLIENT_ID)
+    # but never a secret — for a service that *verifies* App ID's RS256 access
+    # tokens (pos-api, the two proxies) rather than minting them. Separate from
+    # `needs_appid_secret` on purpose: giving pos-api the client secret would be
+    # a real credential it has no reason to hold, for a capability (verification)
+    # that only ever needs the tenant's public JWKS.
+    needs_appid_verification = optional(bool, false)
+    scale_min_instances      = optional(number, 0)
+    scale_max_instances      = optional(number, 2)
+    scale_initial_instances  = optional(number, 1)
+    scale_cpu_limit          = optional(string, "0.5")
+    scale_memory_limit       = optional(string, "1G")
     # Extra literal env vars. Merged last, so it can override NODE_ENV.
     env = optional(map(string), {})
   }))
@@ -195,18 +202,24 @@ variable "services" {
       image_tag  = "v2"
     }
     # infra/vision-proxy — one frame in, candidate products out.
+    #
+    # needs_appid_verification is not yet load-bearing: environment.appId.enabled
+    # is false everywhere, so no RS256 token reaches this service in practice.
+    # It's set now so that flag flip needs no accompanying Terraform change.
     capy-vision-proxy = {
-      image_port           = 8787
-      needs_model_key      = true
-      needs_session_secret = true
-      pins_cors_origins    = true
+      image_port               = 8787
+      needs_model_key          = true
+      needs_session_secret     = true
+      needs_appid_verification = true
+      pins_cors_origins        = true
     }
     # infra/clerk-agent-relay — one agent hop, holding tools that change a cart.
     capy-clerk-agent-relay = {
-      image_port           = 8789
-      needs_model_key      = true
-      needs_session_secret = true
-      pins_cors_origins    = true
+      image_port               = 8789
+      needs_model_key          = true
+      needs_session_secret     = true
+      needs_appid_verification = true
+      pins_cors_origins        = true
     }
     # infra/pos-api — products/transactions/health, over Cloudant. Verifies the same
     # session token the two proxies do, but answers every origin itself
@@ -214,9 +227,10 @@ variable "services" {
     # `pins_cors_origins` and needs no `frontend_origins` — a genuine one-pass,
     # deploy-this-alone-first service.
     capy-pos-api = {
-      image_port           = 8790
-      needs_session_secret = true
-      needs_cloudant       = true
+      image_port               = 8790
+      needs_session_secret     = true
+      needs_appid_verification = true
+      needs_cloudant           = true
     }
     # infra/appid-token-relay — holds the App ID client secret so the browser
     # bundle never has to. Not a "session-guarded" service in the

@@ -30,10 +30,16 @@
  *    browser from *reading* the reply, but by then the hop has been taken and the
  *    model billed.
  * 3. Route → 404.
- * 4. Auth → 401/403/503, on headers, before a single body byte is read. The token is
- *    in a header, so there is nothing to wait for — and an unauthenticated caller
- *    that cannot make this process buffer megabytes is a cheaper thing to be pointed
- *    at.
+ * 4. Auth → 401/403/503, before a single body byte is read. Once App ID's RS256
+ *    path was added to `session-guard.ts`, this stopped being purely a header
+ *    check with "nothing to wait for": a JWKS cache miss is a real network call.
+ *    The order is unchanged — auth still runs before the body is touched, and an
+ *    unauthenticated caller still cannot make this process buffer megabytes — but
+ *    the wait is why the body-reading listener is now attached from inside the
+ *    same `await`ed async wrapper rather than before it. Node's `IncomingMessage`
+ *    does not start flowing until something attaches a listener for incoming
+ *    chunks (paused by default), so deferring that attachment behind the `await`
+ *    drops no bytes.
  * 5. Body cap → 413, while the body streams. Needed *even though* auth ran first: an
  *    authenticated caller can still stream without bound, and the field caps inside
  *    `validate` are only consulted once the whole body is in memory.
@@ -41,7 +47,7 @@
  *    real error in the log and out of the response.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { Permission, authorize, corsHeaders, originAllowed } from './session-guard.ts';
+import { Permission, authorize, corsHeaders, originAllowed, type AppIdVerificationConfig } from './session-guard.ts';
 
 /** Both proxies are one POST route. `OPTIONS` is the preflight for it. */
 export const ALLOWED_METHODS = 'POST, OPTIONS';
@@ -56,6 +62,8 @@ export interface BoundaryConfig<TRequest> {
   readonly route: string;
   /** HS256 secret browser session tokens are verified against. */
   readonly secret: string;
+  /** Omitted: this deployment verifies HS256 (`secret`) only — today's exact behaviour. */
+  readonly appId?: AppIdVerificationConfig;
   /** Browser origins that may be answered. Never a wildcard. */
   readonly origins: readonly string[];
   /** Transport cap, above the service's own field caps so it cannot reject a legal body. */
@@ -109,63 +117,70 @@ export function createRequestListener<TRequest>(
       return;
     }
 
-    const outcome = authorize(req.headers.authorization, Permission.PROCESS_SALE, config.secret, clock());
-    if (!outcome.ok) {
-      send(outcome.status, { error: outcome.error });
-      return;
-    }
-
-    const chunks: Buffer[] = [];
-    let received = 0;
-    let aborted = false;
-
-    req.on('data', (chunk: Buffer) => {
-      if (aborted) {
+    void (async () => {
+      const outcome = await authorize(
+        req.headers.authorization,
+        Permission.PROCESS_SALE,
+        { secret: config.secret, appId: config.appId },
+        clock()
+      );
+      if (!outcome.ok) {
+        send(outcome.status, { error: outcome.error });
         return;
       }
-      received += chunk.length;
-      if (received > config.maxBodyBytes) {
-        aborted = true;
-        send(413, { error: 'Request body too large.' });
-        // Stop reading, then drop the socket once the reply is on the wire.
-        // `req.destroy()` on the spot races the write and can cut the 413 the caller
-        // needs in order to learn to send less.
-        req.pause();
-        res.on('finish', () => req.destroy());
-        return;
-      }
-      chunks.push(chunk);
-    });
 
-    req.on('end', () => {
-      if (aborted) {
-        return;
-      }
-      void (async () => {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        } catch {
-          send(400, { error: 'Body must be JSON.' });
+      const chunks: Buffer[] = [];
+      let received = 0;
+      let aborted = false;
+
+      req.on('data', (chunk: Buffer) => {
+        if (aborted) {
           return;
         }
-
-        const request = config.validate(parsed);
-        if (isRejection(request)) {
-          send(400, { error: request.error });
+        received += chunk.length;
+        if (received > config.maxBodyBytes) {
+          aborted = true;
+          send(413, { error: 'Request body too large.' });
+          // Stop reading, then drop the socket once the reply is on the wire.
+          // `req.destroy()` on the spot races the write and can cut the 413 the caller
+          // needs in order to learn to send less.
+          req.pause();
+          res.on('finish', () => req.destroy());
           return;
         }
+        chunks.push(chunk);
+      });
 
-        try {
-          send(200, await config.handle(request));
-        } catch (error) {
-          // Never leak a model error, a key, or a stack to the till. The operator id
-          // stays in the log so a 502 can be traced to a session.
-          console.error(`${config.logPrefix} request failed`, { operatorId: outcome.claims.operatorId, error });
-          send(502, { error: config.unavailable });
+      req.on('end', () => {
+        if (aborted) {
+          return;
         }
-      })();
-    });
+        void (async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          } catch {
+            send(400, { error: 'Body must be JSON.' });
+            return;
+          }
+
+          const request = config.validate(parsed);
+          if (isRejection(request)) {
+            send(400, { error: request.error });
+            return;
+          }
+
+          try {
+            send(200, await config.handle(request));
+          } catch (error) {
+            // Never leak a model error, a key, or a stack to the till. The operator id
+            // stays in the log so a 502 can be traced to a session.
+            console.error(`${config.logPrefix} request failed`, { operatorId: outcome.claims.operatorId, error });
+            send(502, { error: config.unavailable });
+          }
+        })();
+      });
+    })();
   };
 }
 

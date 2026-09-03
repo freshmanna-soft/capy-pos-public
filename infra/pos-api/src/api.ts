@@ -27,7 +27,7 @@
  * the till at a backend that speaks a different dialect, so they are copied
  * deliberately, field for field.
  */
-import { Permission, authorize } from './session-auth.ts';
+import { Permission, authorize, type AppIdVerificationConfig } from './session-auth.ts';
 import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
 
 /** The catalogue document. Field-for-field what `create-product/index.js` writes. */
@@ -79,6 +79,8 @@ export interface ApiDeps {
   readonly products: DocumentStore<ProductDocument>;
   readonly transactions: DocumentStore<TransactionDocument>;
   readonly secret: string;
+  /** Omitted: this deployment verifies HS256 (`secret`) only — today's exact behaviour. */
+  readonly appId?: AppIdVerificationConfig;
   readonly nowSeconds: () => number;
   readonly nowIso: () => string;
   readonly newId: () => string;
@@ -116,7 +118,12 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
     return health(deps);
   }
 
-  const outcome = authorize(request.authorization, route.permission, deps.secret, deps.nowSeconds());
+  const outcome = await authorize(
+    request.authorization,
+    route.permission,
+    { secret: deps.secret, appId: deps.appId },
+    deps.nowSeconds()
+  );
   if (!outcome.ok) {
     return { status: outcome.status, body: { error: outcome.error } };
   }

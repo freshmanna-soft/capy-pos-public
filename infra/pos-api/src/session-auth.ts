@@ -54,9 +54,48 @@
  * two sibling services, and one HMAC comparison does not justify breaking that:
  * `node:crypto` verifies HS256 in a dozen lines, and the algorithm is pinned to
  * HS256 by construction below rather than by a library option that can be passed
- * wrongly.
+ * wrongly. The same reasoning extends to App ID's RS256 tokens below: Node's
+ * `createPublicKey` has accepted a JWK-shaped public key directly since v15.9, so
+ * verifying an RSA signature needs no library either.
+ *
+ * ## App ID's RS256 tokens
+ *
+ * `AppIdAuthAdapter` (`src/app/core/infrastructure/auth/appid-auth.adapter.ts`)
+ * stores App ID's own access token and sends it here as-is — there is no second,
+ * locally-minted HS256 token the way `LocalCredentialAuthAdapter` produces one via
+ * `SessionIssuer`. That token is signed RS256 against the tenant's own key, not
+ * HS256 against `SESSION_JWT_SECRET`, so it needs its own verification path —
+ * `AppIdAuthAdapter`'s own doc comment names this file as the known gap this
+ * closes.
+ *
+ * `authorize()` dispatches on the token's own declared `alg`: `HS256` is exactly
+ * the path this file already had; `RS256` fetches (and caches) the tenant's JWKS
+ * and verifies against it, pinning issuer and audience the same way
+ * `AppIdAuthAdapter.verifyAccessToken()` does client-side. Either algorithm is
+ * refused as a plain invalid token — 401, not 503 — when this deployment has not
+ * been given credentials for it: only "neither method is configured at all" is a
+ * 503, the same "the service is broken, not your token" distinction the original
+ * HS256-only version already drew.
+ *
+ * App ID's own `tenant` claim is the *service instance's* id, the same for every
+ * user, not a per-store Capy-POS tenant — so `tenantId` below is the fixed
+ * `DEFAULT_TENANT_ID`, matching the choice `AppIdAuthAdapter.sessionFromToken()`
+ * already makes. And App ID's access-control model is scopes-compiled-into-roles,
+ * verified via the token's `scope` claim, not a permissions array — `ROLE_PERMISSIONS`
+ * below is this file's own copy of that mapping, restricted to the five
+ * permissions `Permission` already copies, the same way `Permission` itself is
+ * already a restricted copy of `permission.constants.ts`.
  */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, createPublicKey, timingSafeEqual, verify as verifyRsaSignature } from 'node:crypto';
+
+/**
+ * The multi-tenant id App ID's own tokens are stamped with, since this pilot is
+ * effectively single-tenant today. Copied from
+ * `src/app/core/infrastructure/database/dexie-database.service.ts`'s
+ * `DEFAULT_TENANT_ID` for the same reason `Permission` below is copied rather
+ * than imported: a container has no path into `src/`.
+ */
+const DEFAULT_TENANT_ID = 'default-tenant';
 
 /** The claims this API reads. A superset exists in the token; the rest is ignored. */
 export interface SessionClaims {
@@ -91,6 +130,24 @@ export const Permission = {
 
 export type Permission = (typeof Permission)[keyof typeof Permission];
 
+/** What App ID's own token endpoint requires this API to know to verify one. */
+export interface AppIdVerificationConfig {
+  readonly region: string;
+  readonly tenantId: string;
+  /** The staff application's client id — the token's `aud` must include this. */
+  readonly audience: string;
+}
+
+/**
+ * Everything `authorize()` needs. `secret` alone (`appId` omitted) is exactly
+ * today's behaviour: a deployment that has not been given App ID env vars
+ * verifies HS256 only, unchanged.
+ */
+export interface AuthConfig {
+  readonly secret: string;
+  readonly appId?: AppIdVerificationConfig;
+}
+
 /**
  * Verify the bearer token and check one permission.
  *
@@ -101,19 +158,23 @@ export type Permission = (typeof Permission)[keyof typeof Permission];
  *
  * `nowSeconds` is a parameter rather than a `Date.now()` call so expiry is testable
  * without waiting or faking the clock, the same way `retry.service.spec.ts` treats
- * time in the Angular app.
+ * time in the Angular app. Async now, unlike the rest of this file's originally
+ * pure functions: a cache-miss on the App ID JWKS is a real network call — see
+ * `verifyAppIdAccessToken` below.
  */
-export function authorize(
+export async function authorize(
   authorization: string | undefined,
   required: Permission | null,
-  secret: string,
+  config: AuthConfig,
   nowSeconds: number
-): AuthOutcome {
-  // Fail closed, loudly, on a misconfigured deployment. `server.ts` refuses to
-  // start without the secret, so reaching this means the env changed underneath a
-  // running process — a 503 says "this service is broken", which is true, rather
-  // than 401 "your token is bad", which is not.
-  if (secret.length === 0) {
+): Promise<AuthOutcome> {
+  // Fail closed, loudly, on a deployment configured for neither method at all.
+  // `server.ts` refuses to start without at least one, so reaching this means the
+  // env changed underneath a running process — a 503 says "this service is
+  // broken", which is true, rather than 401 "your token is bad", which is not.
+  // A token whose algorithm matches only the *other*, unconfigured method is a
+  // different case — see `verifyAnyToken` — and is a plain 401, not this 503.
+  if (config.secret.length === 0 && !config.appId) {
     return { ok: false, status: 503, error: 'Auth is not configured.' };
   }
 
@@ -122,7 +183,7 @@ export function authorize(
     return { ok: false, status: 401, error: 'Authorization required.' };
   }
 
-  const claims = verifySessionToken(token, secret, nowSeconds);
+  const claims = await verifyAnyToken(token, config, nowSeconds);
   if (claims === null) {
     return { ok: false, status: 401, error: 'Authorization required.' };
   }
@@ -135,6 +196,34 @@ export function authorize(
   }
 
   return { ok: true, claims };
+}
+
+/**
+ * Dispatch on the token's own declared `alg`. Neither branch trusts a caller who
+ * merely claims an algorithm without the key to back it: HS256 is verified
+ * against `config.secret`, RS256 against the App ID tenant's JWKS. An algorithm
+ * this deployment has no credentials for — including HS256 with an *empty*
+ * secret, which is a known, publicly-computable HMAC key and not "HS256
+ * disabled" — is refused exactly like a malformed token, one `null` for every
+ * reason, same as `verifySessionToken`'s own documented contract.
+ */
+async function verifyAnyToken(
+  token: string,
+  config: AuthConfig,
+  nowSeconds: number
+): Promise<SessionClaims | null> {
+  const header = decodeJson(token.split('.')[0] ?? '');
+  if (header === null) {
+    return null;
+  }
+
+  if (header['alg'] === 'HS256') {
+    return config.secret.length > 0 ? verifySessionToken(token, config.secret, nowSeconds) : null;
+  }
+  if (header['alg'] === 'RS256' && config.appId) {
+    return verifyAppIdAccessToken(token, config.appId, nowSeconds);
+  }
+  return null;
 }
 
 /**
@@ -217,6 +306,234 @@ export function verifySessionToken(
     permissions: stringArray(payload['permissions']),
     expiresAt,
   };
+}
+
+/**
+ * Verify an App ID RS256 access token and return its claims, or null for any
+ * reason at all — same one-`null` contract as `verifySessionToken` above, for
+ * the same reason: the caller turns it into one 401, and distinguishing failure
+ * modes would be a probing oracle for no operational gain.
+ */
+export async function verifyAppIdAccessToken(
+  token: string,
+  config: AppIdVerificationConfig,
+  nowSeconds: number
+): Promise<SessionClaims | null> {
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    return null;
+  }
+  const [encodedHeader, encodedPayload, signature] = parts as [string, string, string];
+
+  const header = decodeJson(encodedHeader);
+  if (header === null || header['alg'] !== 'RS256') {
+    return null;
+  }
+
+  const kid = header['kid'];
+  if (typeof kid !== 'string' || kid.length === 0) {
+    return null;
+  }
+
+  const jwk = await findJwk(kid, config);
+  if (jwk === null) {
+    return null;
+  }
+
+  if (!rs256SignatureMatches(`${encodedHeader}.${encodedPayload}`, signature, jwk)) {
+    return null;
+  }
+
+  const payload = decodeJson(encodedPayload);
+  if (payload === null) {
+    return null;
+  }
+
+  const expiresAt = payload['exp'];
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= nowSeconds) {
+    return null;
+  }
+  const notBefore = payload['nbf'];
+  if (typeof notBefore === 'number' && Number.isFinite(notBefore) && notBefore > nowSeconds) {
+    return null;
+  }
+
+  // Pinned the same way `AppIdAuthAdapter.verifyAccessToken()` pins them
+  // client-side — a token from a different tenant, or minted for a different
+  // application, must not verify here just because the signature is real.
+  if (payload['iss'] !== issuerFor(config)) {
+    return null;
+  }
+  if (!audienceMatches(payload['aud'], config.audience)) {
+    return null;
+  }
+
+  const operatorId = payload['sub'];
+  if (typeof operatorId !== 'string' || operatorId.length === 0) {
+    return null;
+  }
+
+  const { roles, permissions } = resolveAppIdScopes(payload['scope']);
+
+  return {
+    operatorId,
+    // App ID's own `tenant` claim is the service instance's id, the same for
+    // every user — not a per-store Capy-POS tenant. See this file's header.
+    tenantId: DEFAULT_TENANT_ID,
+    roles,
+    permissions,
+    expiresAt,
+  };
+}
+
+function issuerFor(config: AppIdVerificationConfig): string {
+  return `https://${config.region}.appid.cloud.ibm.com/oauth/v4/${config.tenantId}`;
+}
+
+/** `aud` is an array on a real App ID token, confirmed by decoding one — but a string is accepted too, defensively. */
+function audienceMatches(aud: unknown, expected: string): boolean {
+  if (typeof aud === 'string') {
+    return aud === expected;
+  }
+  return Array.isArray(aud) && aud.includes(expected);
+}
+
+/**
+ * Map App ID's `scope` claim → this API's own permission set.
+ *
+ * Restricted to the five permissions `Permission` above already copies —
+ * additive by role level, mirroring `permission.constants.ts`'s
+ * `OPERATOR_PERMISSIONS`/`MANAGER_PERMISSIONS`/`ADMIN_PERMISSIONS`,
+ * hand-restricted the same way `Permission` itself already is. Only resolves
+ * these three built-in role names — a custom App ID scope beyond
+ * operator/manager/admin would need a matching entry here, same limitation
+ * `AppIdAuthAdapter`'s own `Role.fromName()` filtering already has
+ * client-side. `session-auth.test.mjs` pins this table so a rename on the
+ * Angular side that is not mirrored here silently narrows or widens what a
+ * role can do, rather than failing a test.
+ */
+const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> = {
+  operator: [Permission.PROCESS_SALE, Permission.VIEW_TRANSACTIONS, Permission.VIEW_INVENTORY],
+  manager: [
+    Permission.PROCESS_SALE,
+    Permission.VIEW_TRANSACTIONS,
+    Permission.VIEW_INVENTORY,
+    Permission.MANAGE_INVENTORY,
+  ],
+  admin: [
+    Permission.PROCESS_SALE,
+    Permission.VIEW_TRANSACTIONS,
+    Permission.VIEW_INVENTORY,
+    Permission.MANAGE_INVENTORY,
+    Permission.DELETE_PRODUCT,
+  ],
+};
+
+function resolveAppIdScopes(rawScope: unknown): { roles: string[]; permissions: string[] } {
+  const scopes = typeof rawScope === 'string' ? rawScope.split(/\s+/).filter(Boolean) : [];
+  const permissions = new Set<Permission>();
+  const roles: string[] = [];
+
+  for (const scope of scopes) {
+    const granted = ROLE_PERMISSIONS[scope];
+    if (!granted) {
+      continue; // an App ID framework scope, or an unknown name — not a role
+    }
+    roles.push(scope);
+    for (const permission of granted) {
+      permissions.add(permission);
+    }
+  }
+
+  return { roles, permissions: [...permissions] };
+}
+
+interface Jwk {
+  readonly kid: string;
+  readonly kty: string;
+  readonly n: string;
+  readonly e: string;
+}
+
+/** JWKS is immutable per tenant; cache it after the first fetch, same shape as `AppIdAuthAdapter.jwksCache`. */
+let jwksCache: readonly Jwk[] | null = null;
+
+async function findJwk(kid: string, config: AppIdVerificationConfig): Promise<Jwk | null> {
+  if (jwksCache === null) {
+    const fetched = await fetchJwks(config);
+    // A failed fetch is not "an empty JWKS" — leave the cache null (so the next
+    // call retries from scratch) and refuse this one lookup outright, rather
+    // than spending a second attempt that is no more likely to succeed than
+    // the first.
+    if (fetched === null) {
+      return null;
+    }
+    jwksCache = fetched;
+  }
+
+  const hit = jwksCache.find((key) => key.kid === kid);
+  if (hit) {
+    return hit;
+  }
+
+  // Not in the cached set — maybe a fresh rotation. Refetch once, same as
+  // `AppIdAuthAdapter.findJwk()`. If *this* attempt also fails, keep the
+  // existing cache rather than discarding a possibly-still-good one over a
+  // transient blip.
+  const refetched = await fetchJwks(config);
+  if (refetched === null) {
+    return null;
+  }
+  jwksCache = refetched;
+  return jwksCache.find((key) => key.kid === kid) ?? null;
+}
+
+/** `null` means the fetch itself failed — distinct from a successful fetch of zero keys. */
+async function fetchJwks(config: AppIdVerificationConfig): Promise<readonly Jwk[] | null> {
+  let response: Response;
+  try {
+    response = await fetch(`${issuerFor(config)}/publickeys`);
+  } catch (error) {
+    // Not folded into the caller's 401: a JWKS outage means every real App ID
+    // token fails the same way a forged one would, and an operator watching the
+    // logs deserves to tell those two apart even though the caller cannot.
+    console.error('[pos-api] App ID JWKS fetch failed', error);
+    return null;
+  }
+  if (!response.ok) {
+    console.error(`[pos-api] App ID JWKS fetch returned ${response.status}`);
+    return null;
+  }
+  try {
+    const data = (await response.json()) as { keys?: Jwk[] };
+    return data.keys ?? [];
+  } catch (error) {
+    console.error('[pos-api] App ID JWKS response was not valid JSON', error);
+    return null;
+  }
+}
+
+/**
+ * RSA signature check for an App ID access token. `createPublicKey` has taken a
+ * JWK-shaped public key directly since Node v15.9, and `verify`'s synchronous
+ * overload (no callback) returns a boolean rather than throwing on a bad
+ * signature — only a malformed key or a malformed signature buffer throws,
+ * both caught below and treated as "does not verify", not "crashes the process".
+ */
+function rs256SignatureMatches(signingInput: string, signature: string, jwk: Jwk): boolean {
+  let signatureBytes: Buffer;
+  try {
+    signatureBytes = Buffer.from(base64UrlToBase64(signature), 'base64');
+  } catch {
+    return false;
+  }
+
+  try {
+    const publicKey = createPublicKey({ key: { kty: jwk.kty, n: jwk.n, e: jwk.e }, format: 'jwk' });
+    return verifyRsaSignature('RSA-SHA256', Buffer.from(signingInput), publicKey, signatureBytes);
+  } catch {
+    return false;
+  }
 }
 
 /**
