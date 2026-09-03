@@ -17,6 +17,10 @@
  * Then point a dev build at it: `features.aiVision = true`, `apiUrl =
  * 'http://localhost:8787'` and `visionApiPath = '/vision/identify'` in
  * `src/environments/environment.ts`.
+ *
+ * APPID_REGION/APPID_TENANT_ID/APPID_CLIENT_ID are optional — unset, this
+ * verifies HS256 only, exactly as above. Set all three together to also accept
+ * App ID's RS256 access tokens (see `session-guard.ts`'s own doc comment).
  */
 import { createServer } from 'node:http';
 import { identify, validate, MAX_BODY_BYTES } from './identify.ts';
@@ -62,13 +66,45 @@ function requireConfig(): { secret: string; origins: readonly string[] } {
   return { secret, origins };
 }
 
+/**
+ * App ID verification is fully optional — three unset vars means exactly today's
+ * HS256-only behaviour, not a misconfiguration. A *partial* set is refused the
+ * same way an unset `SESSION_JWT_SECRET` is: "refuse to guess" rather than start
+ * a revision that verifies RS256 tokens against the wrong tenant or audience.
+ */
+function readAppIdConfig(): { region: string; tenantId: string; audience: string } | undefined {
+  const region = process.env['APPID_REGION'] ?? '';
+  const tenantId = process.env['APPID_TENANT_ID'] ?? '';
+  const audience = process.env['APPID_CLIENT_ID'] ?? '';
+
+  // "Configured at all" turns on `tenantId`/`audience` only, not `region`:
+  // `region` has one sensible value across this whole estate (`us-south`) and
+  // Terraform gives it a real default, so it is set on every deployment whether
+  // or not App ID is actually wanted. Keying "unconfigured" off all three would
+  // make that harmless default look like a *partial* App ID config and refuse
+  // to start every deployment that has never touched these vars at all.
+  if (tenantId.length === 0 && audience.length === 0) {
+    return undefined;
+  }
+  if (tenantId.length === 0 || audience.length === 0 || region.length === 0) {
+    console.error(
+      '[vision] APPID_REGION, APPID_TENANT_ID and APPID_CLIENT_ID must be set together, ' +
+        'or not at all. Refusing to start rather than verify App ID tokens against a partial config.'
+    );
+    process.exit(1);
+  }
+  return { region, tenantId, audience };
+}
+
 const { secret, origins } = requireConfig();
+const appId = readAppIdConfig();
 
 createServer(
   createRequestListener({
     logPrefix: '[vision]',
     route: ROUTE,
     secret,
+    appId,
     origins,
     maxBodyBytes: MAX_BODY_BYTES,
     validate,

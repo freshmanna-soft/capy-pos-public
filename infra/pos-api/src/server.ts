@@ -13,6 +13,13 @@
  *
  *   SESSION_JWT_SECRET=… POS_API_STORE=memory npm start      # laptop, port 8790
  *   SESSION_JWT_SECRET=… CLOUDANT_URL=… CLOUDANT_APIKEY=… npm start
+ *
+ * APPID_REGION/APPID_TENANT_ID/APPID_CLIENT_ID are optional — unset, this
+ * verifies HS256 only, exactly as above. Set all three together to also accept
+ * App ID's RS256 access tokens (see `session-auth.ts`'s own doc comment):
+ *
+ *   SESSION_JWT_SECRET=… POS_API_STORE=memory \
+ *   APPID_REGION=us-south APPID_TENANT_ID=… APPID_CLIENT_ID=… npm start
  */
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -53,6 +60,36 @@ function requireSecret(): string {
     process.exit(1);
   }
   return secret;
+}
+
+/**
+ * App ID verification is fully optional — three unset vars means exactly today's
+ * HS256-only behaviour, not a misconfiguration. A *partial* set is refused the
+ * same way an unset `SESSION_JWT_SECRET` is: "refuse to guess" rather than start
+ * a revision that verifies RS256 tokens against the wrong tenant or audience.
+ */
+function readAppIdConfig(): { region: string; tenantId: string; audience: string } | undefined {
+  const region = process.env['APPID_REGION'] ?? '';
+  const tenantId = process.env['APPID_TENANT_ID'] ?? '';
+  const audience = process.env['APPID_CLIENT_ID'] ?? '';
+
+  // "Configured at all" turns on `tenantId`/`audience` only, not `region`:
+  // `region` has one sensible value across this whole estate (`us-south`) and
+  // Terraform gives it a real default, so it is set on every deployment whether
+  // or not App ID is actually wanted. Keying "unconfigured" off all three would
+  // make that harmless default look like a *partial* App ID config and refuse
+  // to start every deployment that has never touched these vars at all.
+  if (tenantId.length === 0 && audience.length === 0) {
+    return undefined;
+  }
+  if (tenantId.length === 0 || audience.length === 0 || region.length === 0) {
+    console.error(
+      '[pos-api] APPID_REGION, APPID_TENANT_ID and APPID_CLIENT_ID must be set together, ' +
+        'or not at all. Refusing to start rather than verify App ID tokens against a partial config.'
+    );
+    process.exit(1);
+  }
+  return { region, tenantId, audience };
 }
 
 /**
@@ -103,6 +140,7 @@ function buildStores(): {
 const deps: ApiDeps = {
   ...buildStores(),
   secret: requireSecret(),
+  appId: readAppIdConfig(),
   nowSeconds: () => Math.floor(Date.now() / 1000),
   nowIso: () => new Date().toISOString(),
   newId: () => randomUUID(),
