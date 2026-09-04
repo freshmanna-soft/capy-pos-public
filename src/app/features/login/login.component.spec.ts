@@ -25,7 +25,7 @@ const mockSession: AuthSessionDto = {
   expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
 };
 
-function makeGateway(opts: { succeeds: boolean }) {
+function makeGateway(opts: { succeeds: boolean; supportsPasswordReset?: boolean }) {
   return {
     authenticate: opts.succeeds
       ? vi.fn().mockResolvedValue(mockSession)
@@ -34,6 +34,8 @@ function makeGateway(opts: { succeeds: boolean }) {
     refresh: vi.fn(),
     signOut: vi.fn(),
     getAccessToken: vi.fn().mockReturnValue(null),
+    supportsPasswordReset: opts.supportsPasswordReset ?? false,
+    requestPasswordReset: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -589,5 +591,80 @@ describe('LoginComponent — PIN sign-in', () => {
 
     expect(fixture.componentInstance.loading()).toBe(false);
     expect(fixture.componentInstance.busy()).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Forgot password
+// ---------------------------------------------------------------------------
+
+describe('LoginComponent — forgot password', () => {
+  it('offers no link when the active gateway does not support password reset', async () => {
+    const gateway = makeGateway({ succeeds: true, supportsPasswordReset: false });
+    const fixture = await createComponent(gateway);
+    fixture.detectChanges();
+
+    expect(getEl(fixture, '[data-testid="btn-forgot-password"]')).toBeNull();
+  });
+
+  it('offers the link when the active gateway supports it, and opens the panel with the typed email carried over', async () => {
+    const gateway = makeGateway({ succeeds: true, supportsPasswordReset: true });
+    const fixture = await createComponent(gateway);
+    fixture.componentInstance.form.patchValue({ email: 'ada@capy.test' });
+    fixture.detectChanges();
+
+    getEl<HTMLButtonElement>(fixture, '[data-testid="btn-forgot-password"]').click();
+    fixture.detectChanges();
+
+    expect(getEl(fixture, '[data-testid="forgot-password-form"]')).not.toBeNull();
+    expect(fixture.componentInstance.forgotPasswordForm.getRawValue().email).toBe('ada@capy.test');
+  });
+
+  it('requests a reset and shows a neutral confirmation, for a real account', async () => {
+    const gateway = makeGateway({ succeeds: true, supportsPasswordReset: true });
+    const fixture = await createComponent(gateway);
+    fixture.componentInstance.openForgotPassword();
+    fixture.componentInstance.forgotPasswordForm.setValue({ email: 'ada@capy.test' });
+    fixture.detectChanges();
+
+    getEl<HTMLFormElement>(fixture, '[data-testid="forgot-password-form"]').dispatchEvent(
+      new Event('submit', { cancelable: true })
+    );
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(gateway.requestPasswordReset).toHaveBeenCalledWith('ada@capy.test');
+    expect(getEl(fixture, '[data-testid="forgot-password-message"]').textContent).toContain(
+      "we've sent a link"
+    );
+  });
+
+  it('shows the identical neutral confirmation even when the gateway rejects — never reveals whether the account exists', async () => {
+    const gateway = makeGateway({ succeeds: true, supportsPasswordReset: true });
+    gateway.requestPasswordReset.mockRejectedValue(new Error('transport failure'));
+    const fixture = await createComponent(gateway);
+    fixture.componentInstance.openForgotPassword();
+    fixture.componentInstance.forgotPasswordForm.setValue({ email: 'nobody@capy.test' });
+
+    await fixture.componentInstance.submitForgotPassword();
+    fixture.detectChanges();
+
+    expect(getEl(fixture, '[data-testid="forgot-password-message"]').textContent).toContain(
+      "we've sent a link"
+    );
+  });
+
+  it('"Back to sign in" returns to the login form and clears the message', async () => {
+    const gateway = makeGateway({ succeeds: true, supportsPasswordReset: true });
+    const fixture = await createComponent(gateway);
+    fixture.componentInstance.openForgotPassword();
+    await fixture.componentInstance.submitForgotPassword();
+    fixture.detectChanges();
+
+    getEl<HTMLButtonElement>(fixture, '[data-testid="btn-forgot-password-cancel"]').click();
+    fixture.detectChanges();
+
+    expect(getEl(fixture, '[data-testid="forgot-password-form"]')).toBeNull();
+    expect(fixture.componentInstance.forgotPasswordMessage()).toBeNull();
   });
 });

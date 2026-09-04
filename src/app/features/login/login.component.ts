@@ -157,80 +157,148 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
           <div class="divider"><span>or</span></div>
         }
 
-        <form
-          [formGroup]="form"
-          (ngSubmit)="submit()"
-          novalidate
-          aria-label="Login form"
-          class="login-form"
-        >
-          <!-- Email field -->
-          <div class="form-field">
-            <label for="email" class="field-label">Email address</label>
-            <input
-              id="email"
-              type="email"
-              formControlName="email"
-              class="field-input"
-              [class.field-input--error]="showEmailError()"
-              autocomplete="username"
-              aria-required="true"
-              [attr.aria-invalid]="showEmailError() ? 'true' : null"
-              aria-describedby="email-error"
-              data-testid="input-email"
-            />
-            @if (showEmailError()) {
-              <span id="email-error" class="field-error" role="alert" data-testid="email-error">
-                Please enter a valid email address.
-              </span>
-            }
-          </div>
-
-          <!-- Password field -->
-          <div class="form-field">
-            <label for="password" class="field-label">Password</label>
-            <input
-              id="password"
-              type="password"
-              formControlName="password"
-              class="field-input"
-              [class.field-input--error]="showPasswordError()"
-              autocomplete="current-password"
-              aria-required="true"
-              [attr.aria-invalid]="showPasswordError() ? 'true' : null"
-              aria-describedby="password-error"
-              data-testid="input-password"
-            />
-            @if (showPasswordError()) {
-              <span
-                id="password-error"
-                class="field-error"
-                role="alert"
-                data-testid="password-error"
-              >
-                Password is required.
-              </span>
-            }
-          </div>
-
-          <!-- Server-side error region -->
-          @if (authError()) {
-            <div class="auth-error" role="alert" aria-live="assertive" data-testid="auth-error">
-              {{ authError() }}
-            </div>
-          }
-
-          <!-- Submit -->
-          <button
-            type="submit"
-            class="btn-login"
-            [disabled]="loading() || form.invalid"
-            data-testid="btn-login"
-            aria-label="Sign in"
+        @if (!forgotPasswordMode()) {
+          <form
+            [formGroup]="form"
+            (ngSubmit)="submit()"
+            novalidate
+            aria-label="Login form"
+            class="login-form"
           >
-            {{ loading() ? 'Signing in…' : 'Sign in' }}
-          </button>
-        </form>
+            <!-- Email field -->
+            <div class="form-field">
+              <label for="email" class="field-label">Email address</label>
+              <input
+                id="email"
+                type="email"
+                formControlName="email"
+                class="field-input"
+                [class.field-input--error]="showEmailError()"
+                autocomplete="username"
+                aria-required="true"
+                [attr.aria-invalid]="showEmailError() ? 'true' : null"
+                aria-describedby="email-error"
+                data-testid="input-email"
+              />
+              @if (showEmailError()) {
+                <span id="email-error" class="field-error" role="alert" data-testid="email-error">
+                  Please enter a valid email address.
+                </span>
+              }
+            </div>
+
+            <!-- Password field -->
+            <div class="form-field">
+              <label for="password" class="field-label">Password</label>
+              <input
+                id="password"
+                type="password"
+                formControlName="password"
+                class="field-input"
+                [class.field-input--error]="showPasswordError()"
+                autocomplete="current-password"
+                aria-required="true"
+                [attr.aria-invalid]="showPasswordError() ? 'true' : null"
+                aria-describedby="password-error"
+                data-testid="input-password"
+              />
+              @if (showPasswordError()) {
+                <span
+                  id="password-error"
+                  class="field-error"
+                  role="alert"
+                  data-testid="password-error"
+                >
+                  Password is required.
+                </span>
+              }
+            </div>
+
+            <!-- Server-side error region -->
+            @if (authError()) {
+              <div class="auth-error" role="alert" aria-live="assertive" data-testid="auth-error">
+                {{ authError() }}
+              </div>
+            }
+
+            <!-- Submit -->
+            <button
+              type="submit"
+              class="btn-login"
+              [disabled]="loading() || form.invalid"
+              data-testid="btn-login"
+              aria-label="Sign in"
+            >
+              {{ loading() ? 'Signing in…' : 'Sign in' }}
+            </button>
+
+            @if (showForgotPassword()) {
+              <button
+                type="button"
+                class="btn-quiet forgot-password-link"
+                (click)="openForgotPassword()"
+                data-testid="btn-forgot-password"
+              >
+                Forgot password?
+              </button>
+            }
+          </form>
+        } @else {
+          <form
+            [formGroup]="forgotPasswordForm"
+            (ngSubmit)="submitForgotPassword()"
+            novalidate
+            aria-label="Forgot password"
+            class="login-form"
+            data-testid="forgot-password-form"
+          >
+            <p class="quick-hint">
+              Enter your email and we'll send you a link to set a new password.
+            </p>
+
+            <div class="form-field">
+              <label for="forgot-password-email" class="field-label">Email address</label>
+              <input
+                id="forgot-password-email"
+                type="email"
+                formControlName="email"
+                class="field-input"
+                autocomplete="username"
+                aria-required="true"
+                data-testid="input-forgot-password-email"
+              />
+            </div>
+
+            @if (forgotPasswordMessage()) {
+              <div
+                class="auth-error"
+                role="status"
+                aria-live="polite"
+                data-testid="forgot-password-message"
+              >
+                {{ forgotPasswordMessage() }}
+              </div>
+            }
+
+            <button
+              type="submit"
+              class="btn-login"
+              [disabled]="forgotPasswordBusy() || forgotPasswordForm.invalid"
+              data-testid="btn-forgot-password-submit"
+            >
+              {{ forgotPasswordBusy() ? 'Sending…' : 'Send reset link' }}
+            </button>
+
+            <button
+              type="button"
+              class="btn-quiet forgot-password-link"
+              (click)="closeForgotPassword()"
+              data-testid="btn-forgot-password-cancel"
+            >
+              Back to sign in
+            </button>
+          </form>
+        }
       </div>
     </div>
   `,
@@ -390,6 +458,11 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
         padding: 0.375rem;
       }
 
+      .forgot-password-link {
+        align-self: center;
+        margin-top: 0.25rem;
+      }
+
       .divider {
         display: flex;
         align-items: center;
@@ -491,8 +564,19 @@ export class LoginComponent implements OnInit {
     password: ['', Validators.required],
   });
 
+  readonly forgotPasswordForm = this.fb.group({
+    email: ['', [Validators.required, Validators.email]],
+  });
+
   readonly loading = signal(false);
   readonly authError = signal<string | null>(null);
+
+  readonly forgotPasswordMode = signal(false);
+  readonly forgotPasswordBusy = signal(false);
+  readonly forgotPasswordMessage = signal<string | null>(null);
+
+  /** Offered only when the active gateway can actually do anything with it — see `AuthGateway.supportsPasswordReset`. */
+  readonly showForgotPassword = computed(() => this.gateway.supportsPasswordReset);
 
   /** Driven by the submit attempt — avoids non-signal form state in computed. */
   readonly showEmailError = signal(false);
@@ -598,6 +682,43 @@ export class LoginComponent implements OnInit {
     this.pinMode.set(false);
     this.pin.set('');
     this.authError.set(null);
+  }
+
+  openForgotPassword(): void {
+    this.forgotPasswordMessage.set(null);
+    // Carries over whatever was already typed in the main form — the common
+    // case is someone who just failed to sign in and wants to reset from there.
+    this.forgotPasswordForm.patchValue({ email: this.form.getRawValue().email });
+    this.forgotPasswordMode.set(true);
+  }
+
+  closeForgotPassword(): void {
+    this.forgotPasswordMode.set(false);
+    this.forgotPasswordMessage.set(null);
+  }
+
+  async submitForgotPassword(): Promise<void> {
+    if (this.forgotPasswordForm.invalid || this.forgotPasswordBusy()) return;
+    const { email } = this.forgotPasswordForm.getRawValue();
+    if (!email) return;
+
+    this.forgotPasswordBusy.set(true);
+    try {
+      await this.gateway.requestPasswordReset(email);
+    } catch {
+      // Swallowed on purpose: the gateway itself never distinguishes "sent" from
+      // "no such account" (anti-enumeration), and a genuine transport failure
+      // here is not this person's problem to diagnose — the message below is
+      // truthful either way, since a real send failure is rare and retryable.
+    } finally {
+      this.forgotPasswordBusy.set(false);
+      // Never reveals whether the account exists — the message is identical
+      // for a real account, an unknown email, and (deliberately) even a
+      // transport failure, so nothing here can be used to enumerate accounts.
+      this.forgotPasswordMessage.set(
+        "If that email has an account, we've sent a link to reset the password."
+      );
+    }
   }
 
   selectOperator(event: Event): void {

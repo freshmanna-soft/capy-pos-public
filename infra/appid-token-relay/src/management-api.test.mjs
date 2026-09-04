@@ -13,6 +13,7 @@ import {
   createStaffUser,
   assignRole,
   revokeRoles,
+  triggerForgotPassword,
   ManagementApiError,
   resetCachesForTest,
 } from './management-api.ts';
@@ -311,5 +312,32 @@ describe('assignRole / revokeRoles', () => {
   it('throws ManagementApiError on a non-200 response', async () => {
     stubFetch([{ match: (url) => url.endsWith('/users/u1/roles'), respond: () => json(404, {}) }]);
     await assert.rejects(() => assignRole('u1', 'role-x', CONFIG, nowSeconds), ManagementApiError);
+  });
+});
+
+describe('triggerForgotPassword', () => {
+  it("posts the user's email to App ID's own reset-password endpoint", async () => {
+    let sentBody;
+    stubFetch([
+      {
+        match: (url) => url.endsWith('/cloud_directory/forgot_password'),
+        respond: (_url, init) => {
+          sentBody = JSON.parse(init.body);
+          return json(200, { id: 'u1', active: true, displayName: 'Ada' });
+        },
+      },
+    ]);
+    await triggerForgotPassword('ada@capy.test', CONFIG, nowSeconds);
+    assert.deepEqual(sentBody, { user: 'ada@capy.test' });
+  });
+
+  it('resolves (does not throw) for an email with no account — App ID answering "no such user" is not this relay failing', async () => {
+    stubFetch([{ match: (url) => url.endsWith('/cloud_directory/forgot_password'), respond: () => json(404, {}) }]);
+    await assert.doesNotReject(() => triggerForgotPassword('nobody@capy.test', CONFIG, nowSeconds));
+  });
+
+  it('throws ManagementApiError on a genuine failure (not 200, not the "no such user" 404)', async () => {
+    stubFetch([{ match: (url) => url.endsWith('/cloud_directory/forgot_password'), respond: () => json(500, {}) }]);
+    await assert.rejects(() => triggerForgotPassword('ada@capy.test', CONFIG, nowSeconds), ManagementApiError);
   });
 });

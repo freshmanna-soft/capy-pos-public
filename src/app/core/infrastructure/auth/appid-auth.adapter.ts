@@ -224,6 +224,30 @@ export class AppIdAuthAdapter implements AuthGateway {
     return getItem(ACCESS_TOKEN_KEY);
   }
 
+  readonly supportsPasswordReset = true;
+
+  /**
+   * Posts to `infra/appid-token-relay`'s public `/appid/forgot-password`
+   * route — never to App ID's Management API directly, which needs an IBM
+   * Cloud IAM credential this browser bundle must never hold (same
+   * reasoning as the client secret this class already keeps server-side,
+   * one credential tier further up). Resolves either way, by design: the
+   * relay never reveals whether the email had an account, so neither does
+   * this method.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const url = this.config.relayUrl.replace(/\/appid\/token$/, '/appid/forgot-password');
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+    } catch (err) {
+      throw new AppIdAuthError(`Password-reset request failed: ${(err as Error).message}`);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------

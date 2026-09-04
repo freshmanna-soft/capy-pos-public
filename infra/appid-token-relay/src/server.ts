@@ -25,11 +25,16 @@ import { createRequestListener } from './http.ts';
 import { createAdminRequestListener } from './admin-http.ts';
 import { validateCreate, validateAssignRole, MAX_BODY_BYTES as ADMIN_MAX_BODY_BYTES } from './admin-validate.ts';
 import {
+  validate as validateForgotPassword,
+  MAX_BODY_BYTES as FORGOT_PASSWORD_MAX_BODY_BYTES,
+} from './forgot-password-validate.ts';
+import {
   createStaffUser,
   listStaffUsers,
   listAssignableStaffRoles,
   assignRole,
   revokeRoles,
+  triggerForgotPassword,
   type ManagementConfig,
 } from './management-api.ts';
 import { readAllowedOrigins } from './cors.ts';
@@ -38,6 +43,7 @@ const PORT = Number(process.env['PORT'] ?? 8792);
 
 const TOKEN_ROUTE = '/appid/token';
 const ADMIN_ROUTE_PREFIX = '/appid/admin/';
+const FORGOT_PASSWORD_ROUTE = '/appid/forgot-password';
 
 /**
  * Fail before listening, not on the first request.
@@ -109,6 +115,28 @@ const tokenListener = createRequestListener({
   unavailable: 'The sign-in service is unavailable.',
 });
 
+/**
+ * Public, unauthenticated — a person asking to reset their own password does
+ * not have a session yet either, same reasoning as `tokenListener`. Never
+ * reveals whether the email has an account: `triggerForgotPassword` itself
+ * swallows App ID's 404 (no such user) and this always answers `200 {}`
+ * either way, so the response can't be used to enumerate real accounts. A
+ * genuine failure (management API down, bad key) still surfaces as this
+ * boundary's own generic 502 — see `http.ts`'s own contract.
+ */
+const forgotPasswordListener = createRequestListener({
+  logPrefix: '[appid-relay]',
+  route: FORGOT_PASSWORD_ROUTE,
+  origins,
+  maxBodyBytes: FORGOT_PASSWORD_MAX_BODY_BYTES,
+  validate: validateForgotPassword,
+  handle: async (request) => {
+    await triggerForgotPassword(request.email, managementConfig);
+    return { status: 200, body: {} };
+  },
+  unavailable: 'The password-reset service is unavailable.',
+});
+
 const adminListener = createAdminRequestListener({
   logPrefix: '[appid-relay]',
   // HS256 deliberately disabled in production: every real caller here signed in
@@ -153,10 +181,13 @@ createServer((req: IncomingMessage, res: ServerResponse) => {
   const path = req.url?.split('?')[0] ?? '';
   if (path.startsWith(ADMIN_ROUTE_PREFIX)) {
     adminListener(req, res);
+  } else if (path === FORGOT_PASSWORD_ROUTE) {
+    forgotPasswordListener(req, res);
   } else {
     tokenListener(req, res);
   }
 }).listen(PORT, () => {
   console.log(`[appid-relay] listening on http://localhost:${PORT}${TOKEN_ROUTE}`);
   console.log(`[appid-relay] listening on http://localhost:${PORT}${ADMIN_ROUTE_PREFIX}staff`);
+  console.log(`[appid-relay] listening on http://localhost:${PORT}${FORGOT_PASSWORD_ROUTE}`);
 });
