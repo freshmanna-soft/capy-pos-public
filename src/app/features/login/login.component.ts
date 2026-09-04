@@ -663,6 +663,10 @@ export class LoginComponent implements OnInit {
       if (err instanceof InvalidCredentialsError) {
         this.authError.set('Invalid email or password. Please try again.');
       } else {
+        // The UI message stays generic on purpose (no gateway-internal detail
+        // shown to whoever is typing), but swallowing the real error entirely
+        // leaves nothing to debug a real failure with — log it.
+        console.error('[login] unexpected sign-in error', err);
         this.authError.set('An unexpected error occurred. Please try again.');
       }
     } finally {

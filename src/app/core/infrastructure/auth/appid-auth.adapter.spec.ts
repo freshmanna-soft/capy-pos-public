@@ -92,6 +92,24 @@ function jsonResponse(body: unknown, status = 200) {
   } as Response;
 }
 
+/**
+ * Simulates IBM App ID's real, observed JWKS encoding defect: prepend a
+ * non-minimal zero byte to a base64url-encoded unsigned integer. The
+ * integer's *value* is identical either way — only its encoding changes —
+ * which is exactly why `resolveSigningKey`'s fix (stripping it back off) can
+ * still verify a real signature from the same key.
+ */
+function prependZeroByte(base64Url: string): string {
+  const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+  const bytes = Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+  const withZero = new Uint8Array(bytes.length + 1);
+  withZero.set(bytes, 1);
+  let binary = '';
+  for (const byte of withZero) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 interface FetchScenario {
   /** The relay's response body (App ID's own token response, passed through). */
   tokenResult?: Record<string, unknown>;
@@ -330,6 +348,45 @@ describe('AppIdAuthAdapter', () => {
       const adapter = makeAdapter();
 
       expect(await adapter.getActiveSession()).toBeNull();
+    });
+
+    /**
+     * Confirmed live, against the real tenant during Phase 0's bootstrap: IBM
+     * App ID's actual JWKS encodes its RSA modulus with a non-minimal leading
+     * zero byte (the ASN.1 "keep an integer positive" convention) whenever the
+     * value's high bit is set. A real browser's *native* WebCrypto
+     * (`crypto.subtle.importKey`) enforces RFC 7518's minimal-encoding rule
+     * strictly and throws `DataError: The JWK "n" member contained a leading
+     * zero.` when handed one — confirmed by the exact error text, which is
+     * Chrome's own, not a `jose`-authored message.
+     *
+     * This test cannot reproduce *that* failure: this suite polyfills
+     * `crypto.subtle` with Node's own `node:crypto` `webcrypto`, which is
+     * lenient about the identical bytes (verified directly — the unmodified,
+     * pre-fix adapter passes this exact test unchanged). That is a genuine
+     * engine-level gap between Node's WebCrypto and a real browser's, the same
+     * class of "only a real browser sees this" bug as the NG0203 and
+     * `process is not defined` lessons already logged elsewhere in this
+     * codebase — closing it for real would need a Playwright check running
+     * against the actual compiled bundle in Chromium, not a unit test here.
+     *
+     * What this test *does* prove, and is still worth having: `n`'s *value* is
+     * unchanged by the padding — only its encoding is — so
+     * `stripLeadingZeroPadding` producing a key that still verifies a real
+     * signature from the same private key is a real correctness guarantee on
+     * the fix's own transformation, independent of which WebCrypto engine
+     * eventually runs it.
+     */
+    it('verifies against a JWKS whose modulus carries a non-minimal leading zero byte', async () => {
+      const paddedJwk: JWK = { ...publicJwk, n: prependZeroByte(publicJwk.n) };
+      const accessToken = await mintAccessToken();
+      sessionStorage.setItem('capy_pos_access_token', accessToken);
+      installFetch({ jwksKeys: [paddedJwk] });
+      const adapter = makeAdapter();
+
+      const session = await adapter.getActiveSession();
+
+      expect(session?.operatorId).toBe('op-123');
     });
   });
 

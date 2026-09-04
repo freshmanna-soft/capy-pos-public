@@ -313,7 +313,18 @@ export class AppIdAuthAdapter implements AuthGateway {
     const jwk = await this.findJwk(kid);
     if (!jwk) throw new AppIdAuthError(`No JWKS key matches kid ${kid}`);
 
-    return (await importJWK(jwk, jwk.alg ?? 'RS256')) as CryptoKey;
+    // IBM App ID's real JWKS encodes the RSA modulus with a non-minimal
+    // leading zero byte when its high bit is set — the ASN.1
+    // "keep an integer positive" convention. RFC 7518's JWK `n` is defined as
+    // the *minimal* unsigned big-endian encoding, and `jose` enforces that
+    // strictly (`DataError: The JWK "n" member contained a leading zero.`) —
+    // confirmed against this tenant's real, live JWKS, not a hypothetical.
+    // Node's own `crypto.createPublicKey` is lenient about the identical
+    // bytes (`infra/pos-api/src/session-auth.ts`'s RS256 path uses it as-is,
+    // unmodified); `jose` is not, so the browser has to strip the padding
+    // itself before `importJWK` ever sees it.
+    const normalized = { ...jwk, n: stripLeadingZeroPadding(jwk.n) };
+    return (await importJWK(normalized, jwk.alg ?? 'RS256')) as CryptoKey;
   }
 
   private async findJwk(kid: string): Promise<Jwk | undefined> {
@@ -396,4 +407,44 @@ export class AppIdAuthAdapter implements AuthGateway {
     removeItem(ACCESS_TOKEN_KEY);
     removeItem(REFRESH_TOKEN_KEY);
   }
+}
+
+// ---------------------------------------------------------------------------
+// JWK normalization — see resolveSigningKey's own doc comment for why this
+// exists at all. Free functions, not methods: pure byte manipulation, nothing
+// here touches adapter state.
+// ---------------------------------------------------------------------------
+
+function base64UrlToBytes(value: string): Uint8Array {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Strip non-minimal leading zero bytes from a base64url-encoded unsigned
+ * big-endian integer. Keeps at least one byte — an integer whose value is
+ * genuinely zero has nothing further to strip, and an RSA modulus is never
+ * zero regardless.
+ */
+function stripLeadingZeroPadding(base64Url: string): string {
+  const bytes = base64UrlToBytes(base64Url);
+  let start = 0;
+  while (start < bytes.length - 1 && bytes[start] === 0) {
+    start++;
+  }
+  return start === 0 ? base64Url : bytesToBase64Url(bytes.slice(start));
 }
