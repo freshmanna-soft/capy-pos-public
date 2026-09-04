@@ -37,7 +37,13 @@ export class CurrentUserService {
   private readonly _session = signal<AuthSessionDto | null>(null);
   private readonly _activeTenantId = signal<string | null>(null);
   private readonly _logoutReason = signal<'expired' | 'manual' | null>(null);
+  private readonly _sessionExpiresAt = signal<string | null>(null);
+  private readonly _expiryWarningActive = signal(false);
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
+  private expiryWarningTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** How long before the hard expiry the warning fires — see `armExpiryTimer`'s own doc. */
+  private static readonly EXPIRY_WARNING_LEAD_MS = 60_000;
 
   // ── public read-only projections ────────────────────────────────────────
 
@@ -59,6 +65,22 @@ export class CurrentUserService {
    * true→false transition alone.
    */
   readonly logoutReason = this._logoutReason.asReadonly();
+
+  /**
+   * ISO timestamp the current session's token expires at, or null when not
+   * authenticated. Read by `SessionExpiryWarningComponent` to compute a live
+   * countdown — the exact instant is already known, so the countdown ticks
+   * off wall-clock time rather than a separately-tracked remaining duration.
+   */
+  readonly sessionExpiresAt = this._sessionExpiresAt.asReadonly();
+
+  /**
+   * True for the last `EXPIRY_WARNING_LEAD_MS` before the hard expiry fires.
+   * `SessionExpiryWarningComponent` shows its countdown while this is true;
+   * `refresh()` clears it immediately by re-arming both timers against the
+   * new, later expiry.
+   */
+  readonly expiryWarningActive = this._expiryWarningActive.asReadonly();
 
   /** Operator id string, or null when not authenticated. */
   readonly operatorId = computed(() => this._session()?.operatorId ?? null);
@@ -167,16 +189,21 @@ export class CurrentUserService {
   }
 
   /**
-   * Arm a one-shot timer for the moment this session's token expires.
+   * Arm a one-shot timer for the moment this session's token expires, plus a
+   * second one `EXPIRY_WARNING_LEAD_MS` earlier that flips on the countdown
+   * `SessionExpiryWarningComponent` shows.
    *
-   * A single `setTimeout` for the exact instant, not a polling interval —
-   * `expiresAt` is already known exactly, so there is nothing to poll for.
-   * A session already expired by the time this runs (a stale tab reopened
-   * long after the token lapsed) logs out immediately rather than waiting
-   * out a negative delay forever.
+   * Two single `setTimeout`s for the exact instants, not a polling interval —
+   * `expiresAt` is already known exactly, so there is nothing to poll for. A
+   * session already expired by the time this runs (a stale tab reopened long
+   * after the token lapsed) logs out immediately rather than waiting out a
+   * negative delay forever. A session inside the warning window already
+   * (less than the lead time remains) shows the warning immediately instead
+   * of waiting out its own negative delay the same way.
    */
   private armExpiryTimer(expiresAt: string | undefined): void {
     this.clearExpiryTimer();
+    this._sessionExpiresAt.set(expiresAt ?? null);
     if (!expiresAt) {
       return;
     }
@@ -186,6 +213,16 @@ export class CurrentUserService {
       return;
     }
     this.expiryTimer = setTimeout(() => void this.logout('expired'), delayMs);
+
+    const warningDelayMs = delayMs - CurrentUserService.EXPIRY_WARNING_LEAD_MS;
+    if (warningDelayMs <= 0) {
+      this._expiryWarningActive.set(true);
+    } else {
+      this.expiryWarningTimer = setTimeout(
+        () => this._expiryWarningActive.set(true),
+        warningDelayMs
+      );
+    }
   }
 
   private clearExpiryTimer(): void {
@@ -193,6 +230,11 @@ export class CurrentUserService {
       clearTimeout(this.expiryTimer);
       this.expiryTimer = null;
     }
+    if (this.expiryWarningTimer !== null) {
+      clearTimeout(this.expiryWarningTimer);
+      this.expiryWarningTimer = null;
+    }
+    this._expiryWarningActive.set(false);
   }
 
   /**
@@ -263,5 +305,6 @@ export class CurrentUserService {
     this._session.set(null);
     this._activeTenantId.set(null);
     this._logoutReason.set(reason);
+    this._sessionExpiresAt.set(null);
   }
 }
