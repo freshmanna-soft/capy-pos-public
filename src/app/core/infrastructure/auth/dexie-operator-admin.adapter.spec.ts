@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DexieOperatorAdminAdapter } from './dexie-operator-admin.adapter';
+import { ROLE_ADMIN_PORT } from '@core/application/auth/ports/role-admin.port';
 import {
   DexieDatabase,
   IOperatorDB,
@@ -54,7 +55,13 @@ describe('DexieOperatorAdminAdapter', () => {
     await db.open();
 
     TestBed.configureTestingModule({
-      providers: [DexieOperatorAdminAdapter, { provide: DexieDatabase, useValue: db }],
+      providers: [
+        DexieOperatorAdminAdapter,
+        { provide: DexieDatabase, useValue: db },
+        // Not exercised by this suite (see `dexie-role-admin.adapter.spec.ts`
+        // for `listAssignableRoles`'s own coverage) — just enough to satisfy DI.
+        { provide: ROLE_ADMIN_PORT, useValue: { listRoles: async () => [] } },
+      ],
     });
     adapter = TestBed.inject(DexieOperatorAdminAdapter);
   });

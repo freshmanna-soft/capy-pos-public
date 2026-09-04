@@ -125,6 +125,11 @@ resource "ibm_code_engine_secret" "model_key" {
 # Per-app for the same reason the model key is per-app — today only
 # infra/appid-token-relay sets the flag, but revoking one app's App ID access
 # should never blind a sibling that might use a different App ID application.
+#
+# APPID_MANAGEMENT_APIKEY rides in the same secret rather than a new resource —
+# only this one relay ever holds it, same as APPID_CLIENT_SECRET, and it's
+# optional (Phase 3d): left empty, sign-in keeps working; only the admin
+# staff-management routes fail once reached, per server.ts's own startup check.
 resource "ibm_code_engine_secret" "appid_secret" {
   for_each = local.appid_secret_services
 
@@ -133,7 +138,8 @@ resource "ibm_code_engine_secret" "appid_secret" {
   format     = "generic"
 
   data = {
-    APPID_CLIENT_SECRET = var.appid_client_secret
+    APPID_CLIENT_SECRET     = var.appid_client_secret
+    APPID_MANAGEMENT_APIKEY = var.appid_management_api_key
   }
 
   lifecycle {
@@ -317,6 +323,17 @@ resource "ibm_code_engine_app" "apps" {
       type      = "secret_key_reference"
       name      = "APPID_CLIENT_SECRET"
       key       = "APPID_CLIENT_SECRET"
+      reference = ibm_code_engine_secret.appid_secret[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_appid_secret ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "APPID_MANAGEMENT_APIKEY"
+      key       = "APPID_MANAGEMENT_APIKEY"
       reference = ibm_code_engine_secret.appid_secret[each.key].name
     }
   }

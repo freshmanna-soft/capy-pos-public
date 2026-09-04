@@ -6,6 +6,8 @@ import {
 } from '@core/infrastructure/database/dexie-database.service';
 import { OperatorAdminPort } from '@core/application/auth/ports/operator-admin.port';
 import { OperatorSummaryDto } from '@core/application/auth/dtos/operator-summary.dto';
+import { RoleSummaryDto } from '@core/application/auth/dtos/role-summary.dto';
+import { ROLE_ADMIN_PORT } from '@core/application/auth/ports/role-admin.port';
 
 /**
  * DexieOperatorAdminAdapter
@@ -21,6 +23,21 @@ import { OperatorSummaryDto } from '@core/application/auth/dtos/operator-summary
 @Injectable()
 export class DexieOperatorAdminAdapter implements OperatorAdminPort {
   private readonly db = inject(DexieDatabase);
+  private readonly roleAdmin = inject(ROLE_ADMIN_PORT);
+
+  readonly supportsCreate = false;
+
+  /** Delegates to {@link RoleAdminPort} — byte-identical to what `ManageOperatorMembershipUseCase` called directly before this port owned the concern. */
+  listAssignableRoles(): Promise<RoleSummaryDto[]> {
+    return this.roleAdmin.listRoles();
+  }
+
+  /** Local/dev never had a creation path — Dexie operators are seeded, not admin-created through this port. */
+  createOperator(): Promise<OperatorSummaryDto> {
+    return Promise.reject(
+      new Error('Creating a staff account is only supported with IBM App ID enabled.')
+    );
+  }
 
   async listOperatorsForTenant(tenantId: string): Promise<OperatorSummaryDto[]> {
     // Tenant isolation is structural: we only read membership rows for the

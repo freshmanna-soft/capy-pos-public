@@ -118,6 +118,22 @@ variable "appid_client_secret" {
   default     = ""
 }
 
+variable "appid_management_api_key" {
+  description = <<-EOT
+    An IBM Cloud API key scoped to just this App ID service instance (least
+    privilege — not the broad Terraform account key in ibmcloud_api_key above).
+    Used only by infra/appid-token-relay's admin-only staff-management routes
+    (Phase 3d) to call App ID's Management API — create/list Cloud Directory
+    users, assign roles, trigger the reset-password email. Created once, by
+    hand, the same one-time out-of-band way appid_tenant_id's tenant itself was
+    provisioned. Left empty, sign-in keeps working exactly as before; only the
+    admin staff-management routes fail once an authorized caller reaches them.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "frontend_origins" {
   description = <<-EOT
     Browser origins the guarded services will answer. Scheme and host only, no
