@@ -210,9 +210,13 @@ export async function listAssignableStaffRoles(
 
 /**
  * List every Cloud Directory user with the roles they currently hold. N+1 calls
- * (one per user for their roles) — the Management API has no bulk roles
- * endpoint, and this pilot's staff tenant is small enough that this is not a
- * real cost.
+ * per user (one for their `sub`, one for their roles) — the Management API has
+ * no bulk endpoint for either, and this pilot's staff tenant is small enough
+ * that this is not a real cost.
+ *
+ * `StaffUser.id` is each user's `sub` (from `userinfo`), never the SCIM `id`
+ * `cloud_directory/Users` itself returns — see `getUserSub`'s own doc comment
+ * for why that distinction is load-bearing.
  */
 export async function listStaffUsers(
   config: ManagementConfig,
@@ -226,9 +230,13 @@ export async function listStaffUsers(
 
   return Promise.all(
     resources.map(async (user): Promise<StaffUser> => {
-      const roles = await getUserRoles(user.id, config, nowSeconds);
+      const sub = await getUserSub(user.id, config, nowSeconds);
+      const roles = sub === null ? [] : await getUserRoles(sub, config, nowSeconds);
       return {
-        id: user.id,
+        // Falls back to the SCIM id only when `userinfo` itself failed — an
+        // id this codebase can no longer use for role operations, but still
+        // better than dropping the person from the list entirely.
+        id: sub ?? user.id,
         email: user.emails?.find((e) => e.primary)?.value ?? user.emails?.[0]?.value ?? '',
         displayName: user.displayName ?? user.userName ?? user.id,
         roles,
@@ -237,12 +245,36 @@ export async function listStaffUsers(
   );
 }
 
+/**
+ * Resolve a Cloud Directory user's real `sub` (profile id) from their SCIM
+ * `id` — confirmed live 2026-09-04: `/users/{id}/roles` 404s
+ * (`"Profile not found"`) when given the SCIM id `cloud_directory/Users`
+ * itself returns, for *every* user checked, including a real admin who had
+ * signed in for real. App ID keeps a separate "profile" identity — the same
+ * value the token's own `sub` claim carries — and role operations key off
+ * that, not the SCIM record. `null` means the lookup itself failed (network,
+ * a user with no profile at all) — treated as "no roles", not a reason to
+ * drop the user from the list.
+ */
+async function getUserSub(
+  scimId: string,
+  config: ManagementConfig,
+  nowSeconds: () => number
+): Promise<string | null> {
+  const result = await managementFetch(`/cloud_directory/${encodeURIComponent(scimId)}/userinfo`, config, nowSeconds);
+  if (result.status !== 200) {
+    return null;
+  }
+  const sub = (result.body as { sub?: unknown }).sub;
+  return typeof sub === 'string' && sub.length > 0 ? sub : null;
+}
+
 async function getUserRoles(
-  userId: string,
+  sub: string,
   config: ManagementConfig,
   nowSeconds: () => number
 ): Promise<readonly StaffRole[]> {
-  const result = await managementFetch(`/users/${encodeURIComponent(userId)}/roles`, config, nowSeconds);
+  const result = await managementFetch(`/users/${encodeURIComponent(sub)}/roles`, config, nowSeconds);
   if (result.status !== 200) {
     // A user with no roles assigned yet still exists — treat any failure to
     // read their roles as "none", not a reason to drop them from the list.
@@ -257,13 +289,20 @@ async function getUserRoles(
  * immediately follows this with `triggerForgotPassword` so the new hire sets
  * their own real password via App ID's own hosted email, and this relay never
  * has a "choose your password" secret to protect in the first place.
+ *
+ * Uses `/cloud_directory/sign_up?shouldCreateProfile=true`, not the plainer
+ * `/cloud_directory/Users` — confirmed live: the latter's own docs say
+ * outright it "does not... create a profile," and role assignment 404s
+ * (`"Profile not found"`) without one. The returned `id` is `profileId`
+ * (`sign_up`'s name for the same `sub` `getUserSub`/`userinfo` resolves for
+ * existing users) — the id every later role operation on this account must use.
  */
 export async function createStaffUser(
   email: string,
   config: ManagementConfig,
   nowSeconds: () => number = defaultNow
 ): Promise<{ id: string; email: string; displayName: string }> {
-  const result = await managementFetch('/cloud_directory/Users', config, nowSeconds, {
+  const result = await managementFetch('/cloud_directory/sign_up?shouldCreateProfile=true', config, nowSeconds, {
     method: 'POST',
     body: {
       active: true,
@@ -280,8 +319,11 @@ export async function createStaffUser(
     throw new ManagementApiError(`Creating the App ID user failed: ${description}`);
   }
   const user = result.body as ScimUser;
+  if (typeof user.profileId !== 'string' || user.profileId.length === 0) {
+    throw new ManagementApiError('App ID sign-up did not return a profileId.');
+  }
   return {
-    id: user.id,
+    id: user.profileId,
     email: user.emails?.find((e) => e.primary)?.value ?? email,
     displayName: user.displayName ?? user.userName ?? email,
   };
@@ -339,6 +381,8 @@ export async function triggerForgotPassword(
 
 interface ScimUser {
   readonly id: string;
+  /** Only present on `sign_up`'s response — the profile id, i.e. `sub`. */
+  readonly profileId?: string;
   readonly displayName?: string;
   readonly userName?: string;
   readonly emails?: readonly { readonly value: string; readonly primary?: boolean }[];

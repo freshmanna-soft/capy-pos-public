@@ -74,8 +74,8 @@ describe('IAM token exchange', () => {
     // the separate, non-expiring roles cache exercised above.
     stubFetch([
       {
-        match: (url) => url.endsWith('/cloud_directory/Users'),
-        respond: () => json(201, { id: 'u', displayName: 'u', emails: [] }),
+        match: (url) => url.includes('/cloud_directory/sign_up'),
+        respond: () => json(201, { id: 'u', profileId: 'sub-u', displayName: 'u', emails: [] }),
       },
     ]);
 
@@ -148,55 +148,93 @@ describe('resolveRoleId / listAssignableStaffRoles', () => {
 });
 
 describe('listStaffUsers', () => {
-  it('resolves each user’s roles alongside their identity (N+1, no bulk endpoint exists)', async () => {
+  // Confirmed live against the real tenant, 2026-09-04: `cloud_directory/Users`
+  // returns each user's SCIM id, but role operations 404 ("Profile not found")
+  // when given that SCIM id directly — even for a real, already-signed-in
+  // admin. `userinfo` is the only way to resolve the real `sub` a role
+  // operation actually needs. Every fixture here reflects that two-step
+  // reality, not the original (wrong) single-lookup assumption.
+  it('resolves each user’s sub via userinfo, then their roles via that sub — never the SCIM id', async () => {
     stubFetch([
       {
         match: (url) => url.endsWith('/cloud_directory/Users'),
         respond: () =>
           json(200, {
             Resources: [
-              { id: 'u1', displayName: 'Ada', emails: [{ value: 'ada@capy.test', primary: true }] },
-              { id: 'u2', displayName: 'Bea', emails: [{ value: 'bea@capy.test', primary: true }] },
+              { id: 'scim-u1', displayName: 'Ada', emails: [{ value: 'ada@capy.test', primary: true }] },
+              { id: 'scim-u2', displayName: 'Bea', emails: [{ value: 'bea@capy.test', primary: true }] },
             ],
           }),
       },
       {
-        match: (url) => url.endsWith('/users/u1/roles'),
-        respond: () => json(200, { roles: [{ id: 'role-admin', name: 'admin' }] }),
+        match: (url) => url.endsWith('/cloud_directory/scim-u1/userinfo'),
+        respond: () => json(200, { sub: 'sub-u1' }),
       },
-      { match: (url) => url.endsWith('/users/u2/roles'), respond: () => json(200, { roles: [] }) },
+      {
+        match: (url) => url.endsWith('/cloud_directory/scim-u2/userinfo'),
+        respond: () => json(200, { sub: 'sub-u2' }),
+      },
+      {
+        match: (url) => url.endsWith('/users/sub-u1/roles'),
+        respond: () => json(200, { roles: [{ id: 'role-admin', name: 'Admin' }] }),
+      },
+      { match: (url) => url.endsWith('/users/sub-u2/roles'), respond: () => json(200, { roles: [] }) },
     ]);
 
     const users = await listStaffUsers(CONFIG, nowSeconds);
     assert.deepEqual(users, [
-      { id: 'u1', email: 'ada@capy.test', displayName: 'Ada', roles: [{ id: 'role-admin', name: 'admin' }] },
-      { id: 'u2', email: 'bea@capy.test', displayName: 'Bea', roles: [] },
+      { id: 'sub-u1', email: 'ada@capy.test', displayName: 'Ada', roles: [{ id: 'role-admin', name: 'Admin' }] },
+      { id: 'sub-u2', email: 'bea@capy.test', displayName: 'Bea', roles: [] },
     ]);
+  });
+
+  it('falls back to the SCIM id and reports no roles when userinfo itself fails, rather than dropping the user', async () => {
+    stubFetch([
+      {
+        match: (url) => url.endsWith('/cloud_directory/Users'),
+        respond: () => json(200, { Resources: [{ id: 'scim-u1', displayName: 'Ada', emails: [] }] }),
+      },
+      { match: (url) => url.endsWith('/cloud_directory/scim-u1/userinfo'), respond: () => json(404, {}) },
+    ]);
+    const users = await listStaffUsers(CONFIG, nowSeconds);
+    assert.deepEqual(users, [{ id: 'scim-u1', email: '', displayName: 'Ada', roles: [] }]);
   });
 
   it('treats a failed per-user roles lookup as "no roles", not a reason to drop the user', async () => {
     stubFetch([
       {
         match: (url) => url.endsWith('/cloud_directory/Users'),
-        respond: () => json(200, { Resources: [{ id: 'u1', displayName: 'Ada', emails: [] }] }),
+        respond: () => json(200, { Resources: [{ id: 'scim-u1', displayName: 'Ada', emails: [] }] }),
       },
-      { match: (url) => url.endsWith('/users/u1/roles'), respond: () => json(500, {}) },
+      {
+        match: (url) => url.endsWith('/cloud_directory/scim-u1/userinfo'),
+        respond: () => json(200, { sub: 'sub-u1' }),
+      },
+      { match: (url) => url.endsWith('/users/sub-u1/roles'), respond: () => json(500, {}) },
     ]);
     const users = await listStaffUsers(CONFIG, nowSeconds);
-    assert.deepEqual(users, [{ id: 'u1', email: '', displayName: 'Ada', roles: [] }]);
+    assert.deepEqual(users, [{ id: 'sub-u1', email: '', displayName: 'Ada', roles: [] }]);
   });
 });
 
 describe('createStaffUser', () => {
-  it('creates the user with a random password never echoed back, and returns identity only', async () => {
+  // Confirmed live: `cloud_directory/Users` "does not... create a profile"
+  // (its own docs' wording), and role assignment 404s without one. `sign_up
+  // ?shouldCreateProfile=true` is the endpoint that actually creates one, and
+  // its `profileId` — not its SCIM `id` — is the id every later role
+  // operation on this account must use.
+  it('signs up with profile creation, and returns profileId as the account id — a random password never echoed back', async () => {
+    let sentUrl;
     let sentBody;
     stubFetch([
       {
-        match: (url) => url.endsWith('/cloud_directory/Users'),
-        respond: (_url, init) => {
+        match: (url) => url.includes('/cloud_directory/sign_up'),
+        respond: (url, init) => {
+          sentUrl = url;
           sentBody = JSON.parse(init.body);
           return json(201, {
-            id: 'new-user-1',
+            id: 'scim-new-1',
+            profileId: 'sub-new-1',
             displayName: 'new@capy.test',
             emails: [{ value: 'new@capy.test', primary: true }],
           });
@@ -206,16 +244,30 @@ describe('createStaffUser', () => {
 
     const user = await createStaffUser('new@capy.test', CONFIG, nowSeconds);
 
-    assert.deepEqual(user, { id: 'new-user-1', email: 'new@capy.test', displayName: 'new@capy.test' });
+    assert.match(sentUrl, /shouldCreateProfile=true/);
+    assert.deepEqual(user, { id: 'sub-new-1', email: 'new@capy.test', displayName: 'new@capy.test' });
     assert.equal(sentBody.emails[0].value, 'new@capy.test');
     assert.equal(typeof sentBody.password, 'string');
     assert.ok(sentBody.password.length >= 24, 'password should be a real random value, not a placeholder');
   });
 
+  it('throws ManagementApiError when sign_up succeeds but returns no profileId, rather than silently using the SCIM id', async () => {
+    stubFetch([
+      {
+        match: (url) => url.includes('/cloud_directory/sign_up'),
+        respond: () => json(201, { id: 'scim-new-1', displayName: 'new@capy.test', emails: [] }),
+      },
+    ]);
+    await assert.rejects(
+      () => createStaffUser('new@capy.test', CONFIG, nowSeconds),
+      (error) => error instanceof ManagementApiError && error.message.includes('profileId')
+    );
+  });
+
   it('throws ManagementApiError on a non-201 response, without leaking the request body', async () => {
     stubFetch([
       {
-        match: (url) => url.endsWith('/cloud_directory/Users'),
+        match: (url) => url.includes('/cloud_directory/sign_up'),
         respond: () => json(409, { message: 'already exists' }),
       },
     ]);
