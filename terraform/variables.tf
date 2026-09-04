@@ -254,14 +254,15 @@ variable "services" {
     # keeps an unlisted page from spending sign-in attempts against the tenant.
     #
     # image_tag pinned here for the same reason capy-pos-app's own pin is:
-    # v4 fixes role operations to use the profile sub, not the SCIM id
-    # (#247) — found live testing v3's own "add staff" flow. (v3 shipped the
-    # admin-only /appid/admin/* routes, #244/#245; v2 replaced an arm64
-    # image — an Apple Silicon `docker build` with no --platform flag — that
-    # could never start on Code Engine's amd64 nodes.)
+    # v5 drops the forgot_password call from staff creation (#249) — it 409s
+    # unconditionally against a freshly sign_up'd, not-yet-confirmed account.
+    # (v4 fixed role operations to use the profile sub, not the SCIM id,
+    # #247; v3 shipped the admin-only /appid/admin/* routes, #244/#245; v2
+    # replaced an arm64 image that could never start on Code Engine's amd64
+    # nodes.)
     capy-appid-token-relay = {
       image_port         = 8792
-      image_tag          = "v4"
+      image_tag          = "v5"
       needs_appid_secret = true
       pins_cors_origins  = true
     }
