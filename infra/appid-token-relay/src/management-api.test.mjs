@@ -99,31 +99,44 @@ describe('IAM token exchange', () => {
 });
 
 describe('resolveRoleId / listAssignableStaffRoles', () => {
-  it('resolves a configured role name to its id', async () => {
-    stubFetch([
-      {
-        match: (url) => url.endsWith('/roles'),
-        respond: () => json(200, { roles: [{ id: 'role-admin', name: 'admin' }] }),
-      },
-    ]);
+  // Confirmed live against the real tenant, 2026-09-05: a role's own `name` is
+  // a free-text display label (e.g. "Admin", capitalized) and is NOT the scope
+  // it grants (`access[].scopes`, e.g. "admin", lowercase — the string that
+  // actually ends up in the token). Every fixture here reflects that real
+  // shape, not the wrong "name === scope" assumption the first version of this
+  // file was written against.
+  const adminRole = { id: 'role-admin', name: 'Admin', access: [{ scopes: ['admin'] }] };
+
+  it('resolves a configured scope to its role id, matching access[].scopes, never the display name', async () => {
+    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) }]);
     assert.equal(await resolveRoleId('admin', CONFIG, nowSeconds), 'role-admin');
   });
 
-  it('returns null for a role name with no matching App ID role — a 400 upstream, not a crash', async () => {
+  it('does not match on the role’s display name alone', async () => {
+    stubFetch([
+      {
+        match: (url) => url.endsWith('/roles'),
+        respond: () => json(200, { roles: [{ id: 'role-x', name: 'admin', access: [{ scopes: ['something-else'] }] }] }),
+      },
+    ]);
+    assert.equal(await resolveRoleId('admin', CONFIG, nowSeconds), null);
+  });
+
+  it('returns null for a scope with no matching App ID role — a 400 upstream, not a crash', async () => {
     stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [] }) }]);
     assert.equal(await resolveRoleId('operator', CONFIG, nowSeconds), null);
   });
 
-  it('omits an unconfigured built-in role rather than failing the whole list', async () => {
+  it('omits an unconfigured built-in scope rather than failing the whole list, and reports the role’s real display name', async () => {
     stubFetch([
       {
         match: (url) => url.endsWith('/roles'),
         // Only `admin` exists — matches Phase 0's own state before `operator`/`manager` are configured.
-        respond: () => json(200, { roles: [{ id: 'role-admin', name: 'admin' }] }),
+        respond: () => json(200, { roles: [adminRole] }),
       },
     ]);
     const roles = await listAssignableStaffRoles(CONFIG, nowSeconds);
-    assert.deepEqual(roles, [{ id: 'role-admin', name: 'admin' }]);
+    assert.deepEqual(roles, [{ id: 'role-admin', name: 'Admin' }]);
   });
 
   it('caches the roles list — one /roles call across repeated lookups', async () => {
