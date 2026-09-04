@@ -9,6 +9,7 @@ import { LocalCredentialAuthAdapter } from './local-credential-auth.adapter';
 import { CognitoAuthAdapter } from './cognito-auth.adapter';
 import { AppIdAuthAdapter } from './appid-auth.adapter';
 import { DexieOperatorAdminAdapter } from './dexie-operator-admin.adapter';
+import { AppIdOperatorAdminAdapter } from './appid-operator-admin.adapter';
 import { DexieRoleAdminAdapter } from './dexie-role-admin.adapter';
 import { WebAuthnAuthAdapter } from './webauthn/webauthn-auth.adapter';
 
@@ -46,8 +47,13 @@ const useCognitoGateway = environment.cognito?.enabled === true;
  * verification moves server-side (see the TODO in that adapter) this binding is
  * where the swap happens.
  *
- * OperatorAdmin/RoleAdmin remain Dexie-backed until their Cognito/admin-API
- * counterparts land (Story #42/#43 follow-ups).
+ * OperatorAdmin swaps the same way, on the same flag (Phase 3d): App ID fully
+ * replaces the local adapter as `AuthGateway`, so it replaces
+ * `DexieOperatorAdminAdapter` too — the Dexie operator table has no
+ * relationship to who can sign in once App ID is active, see that adapter's
+ * own class doc. RoleAdmin stays Dexie-only regardless: custom role
+ * *authoring* has no App ID equivalent (Cognito's admin-API counterpart is a
+ * Story #42/#43 follow-up, still not built).
  */
 export const AUTH_PROVIDERS: Provider[] = [
   LocalCredentialAuthAdapter,
@@ -71,9 +77,10 @@ export const AUTH_PROVIDERS: Provider[] = [
     useExisting: WebAuthnAuthAdapter,
   },
   DexieOperatorAdminAdapter,
+  AppIdOperatorAdminAdapter,
   {
     provide: OPERATOR_ADMIN_PORT,
-    useExisting: DexieOperatorAdminAdapter,
+    useExisting: useAppIdGateway ? AppIdOperatorAdminAdapter : DexieOperatorAdminAdapter,
   },
   DexieRoleAdminAdapter,
   {

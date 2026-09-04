@@ -71,11 +71,13 @@ describe('corsHeaders', () => {
     assert.equal('Access-Control-Allow-Origin' in headers, false);
   });
 
-  it('does not advertise an Authorization allow-header — this service has no bearer auth to preflight', () => {
-    // The sibling proxies' corsHeaders allows Authorization because a token must
-    // survive their preflight. This service has no token yet on any call it serves.
+  it('advertises both Content-Type and Authorization allow-headers', () => {
+    // The token route (`http.ts`) never sends Authorization; the admin
+    // staff-management routes (`admin-http.ts`) always do. One shared
+    // `corsHeaders` allowing both is simpler and harmless for the route that
+    // doesn't need it — same convention as the sibling proxies' `session-guard.ts`.
     const headers = corsHeaders('https://till.example.com', ORIGINS, 'POST, OPTIONS');
-    assert.equal(headers['Access-Control-Allow-Headers'], 'Content-Type');
+    assert.equal(headers['Access-Control-Allow-Headers'], 'Content-Type, Authorization');
     assert.equal(headers['Access-Control-Allow-Methods'], 'POST, OPTIONS');
   });
 });

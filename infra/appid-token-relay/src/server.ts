@@ -10,16 +10,35 @@
  *
  * Then set `appId.enabled = true` and `appId.relayUrl =
  * 'http://localhost:8792/appid/token'` in the environment file you are serving.
+ *
+ * `APPID_MANAGEMENT_APIKEY` is optional and gates only the admin staff-management
+ * routes (`/appid/admin/staff*`) — a deployment without it keeps signing people in
+ * exactly as before; an admin action against those routes fails with a 502 the
+ * moment it actually calls the Management API with no real key, rather than this
+ * whole service refusing to start over a route most deployments won't use yet.
  */
 import { createServer } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { relay } from './relay.ts';
 import { validate, MAX_BODY_BYTES } from './validate.ts';
 import { createRequestListener } from './http.ts';
+import { createAdminRequestListener } from './admin-http.ts';
+import { validateCreate, validateAssignRole, MAX_BODY_BYTES as ADMIN_MAX_BODY_BYTES } from './admin-validate.ts';
+import {
+  createStaffUser,
+  listStaffUsers,
+  listAssignableStaffRoles,
+  assignRole,
+  revokeRoles,
+  triggerForgotPassword,
+  type ManagementConfig,
+} from './management-api.ts';
 import { readAllowedOrigins } from './cors.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8792);
 
-const ROUTE = '/appid/token';
+const TOKEN_ROUTE = '/appid/token';
+const ADMIN_ROUTE_PREFIX = '/appid/admin/';
 
 /**
  * Fail before listening, not on the first request.
@@ -34,6 +53,7 @@ function requireConfig(): {
   tenantId: string;
   clientId: string;
   clientSecret: string;
+  managementApiKey: string;
   origins: readonly string[];
 } {
   const region = process.env['APPID_REGION'] ?? '';
@@ -50,6 +70,17 @@ function requireConfig(): {
     process.exit(1);
   }
 
+  // Optional: gates only the admin staff-management routes — see this file's
+  // own header comment.
+  const managementApiKey = process.env['APPID_MANAGEMENT_APIKEY'] ?? '';
+  if (managementApiKey.length === 0) {
+    console.warn(
+      '[appid-relay] APPID_MANAGEMENT_APIKEY is not set — sign-in works as before, but ' +
+        '/appid/admin/staff* will fail once an authorized caller actually reaches the ' +
+        'Management API.'
+    );
+  }
+
   const origins = readAllowedOrigins(process.env['ALLOWED_ORIGINS']);
   if (origins.length === 0) {
     console.error(
@@ -62,21 +93,61 @@ function requireConfig(): {
   }
 
   console.log(`[appid-relay] origins: ${origins.join(', ')}`);
-  return { region, tenantId, clientId, clientSecret, origins };
+  return { region, tenantId, clientId, clientSecret, managementApiKey, origins };
 }
 
-const { region, tenantId, clientId, clientSecret, origins } = requireConfig();
+const { region, tenantId, clientId, clientSecret, managementApiKey, origins } = requireConfig();
 
-createServer(
-  createRequestListener({
-    logPrefix: '[appid-relay]',
-    route: ROUTE,
-    origins,
-    maxBodyBytes: MAX_BODY_BYTES,
-    validate,
-    handle: (request) => relay(request, { region, tenantId, clientId, clientSecret }),
-    unavailable: 'The sign-in service is unavailable.',
-  })
-).listen(PORT, () => {
-  console.log(`[appid-relay] listening on http://localhost:${PORT}${ROUTE}`);
+const managementConfig: ManagementConfig = { region, tenantId, apiKey: managementApiKey };
+
+const tokenListener = createRequestListener({
+  logPrefix: '[appid-relay]',
+  route: TOKEN_ROUTE,
+  origins,
+  maxBodyBytes: MAX_BODY_BYTES,
+  validate,
+  handle: (request) => relay(request, { region, tenantId, clientId, clientSecret }),
+  unavailable: 'The sign-in service is unavailable.',
+});
+
+const adminListener = createAdminRequestListener({
+  logPrefix: '[appid-relay]',
+  // HS256 deliberately disabled in production: every real caller here signed in
+  // through AppIdAuthAdapter, which only exists while `appId.enabled` is true —
+  // there is no local-credential caller that would ever present an HS256 token
+  // to this specific relay. `admin-auth.test.mjs` exercises the HS256 branch
+  // directly, without going through this wiring.
+  auth: { secret: '', appId: { region, tenantId, audience: clientId } },
+  origins,
+  maxBodyBytes: ADMIN_MAX_BODY_BYTES,
+  validateCreate,
+  validateAssignRole,
+  listRoles: () => listAssignableStaffRoles(managementConfig),
+  list: () => listStaffUsers(managementConfig),
+  create: async (request) => {
+    // `request.roleId` is already a real App ID role id — the browser got it
+    // from `GET /appid/admin/roles` and never invents one itself.
+    const user = await createStaffUser(request.email, managementConfig);
+    await assignRole(user.id, request.roleId, managementConfig);
+    await triggerForgotPassword(user.email, managementConfig);
+    return user;
+  },
+  reassignRole: async (userId, request) => {
+    await assignRole(userId, request.roleId, managementConfig);
+    return undefined;
+  },
+  revoke: (userId) => revokeRoles(userId, managementConfig),
+  unavailable: 'The staff-management service is unavailable.',
+});
+
+createServer((req: IncomingMessage, res: ServerResponse) => {
+  const path = req.url?.split('?')[0] ?? '';
+  if (path.startsWith(ADMIN_ROUTE_PREFIX)) {
+    adminListener(req, res);
+  } else {
+    tokenListener(req, res);
+  }
+}).listen(PORT, () => {
+  console.log(`[appid-relay] listening on http://localhost:${PORT}${TOKEN_ROUTE}`);
+  console.log(`[appid-relay] listening on http://localhost:${PORT}${ADMIN_ROUTE_PREFIX}staff`);
 });

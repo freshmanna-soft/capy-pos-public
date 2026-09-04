@@ -72,7 +72,9 @@ function operatorSession(): AuthSessionDto {
 interface Mocks {
   fixture: ComponentFixture<OperatorListComponent>;
   membership: {
+    supportsCreate: boolean;
     listAssignableRoles: ReturnType<typeof vi.fn>;
+    createOperator: ReturnType<typeof vi.fn>;
     assignRole: ReturnType<typeof vi.fn>;
     revokeMembership: ReturnType<typeof vi.fn>;
   };
@@ -90,6 +92,8 @@ async function setup(opts: {
   result?: OperatorSummaryDto[];
   reject?: boolean;
   assignRejects?: boolean;
+  supportsCreate?: boolean;
+  createRejects?: boolean;
 }): Promise<Mocks> {
   const listUseCase = {
     execute: opts.reject
@@ -97,7 +101,19 @@ async function setup(opts: {
       : vi.fn().mockResolvedValue(opts.result ?? []),
   };
   const membership = {
+    supportsCreate: opts.supportsCreate ?? true,
     listAssignableRoles: vi.fn().mockResolvedValue(ROLES),
+    createOperator: opts.createRejects
+      ? vi.fn().mockRejectedValue(new Error('nope'))
+      : vi.fn().mockResolvedValue({
+          id: 'new-1',
+          email: 'new@capy.test',
+          displayName: 'new@capy.test',
+          roleId: 'role-operator',
+          roleName: 'operator',
+          isActive: true,
+          tenantId: 'store-a',
+        } satisfies OperatorSummaryDto),
     assignRole: opts.assignRejects
       ? vi.fn().mockRejectedValue(new Error('nope'))
       : vi.fn().mockResolvedValue(undefined),
@@ -263,5 +279,90 @@ describe('OperatorListComponent', () => {
     select.dispatchEvent(new Event('change'));
     await flush(fixture);
     expect(toast.error).toHaveBeenCalled();
+  });
+
+  describe('add staff', () => {
+    it('offers the form when the active backend supports creation', async () => {
+      const { fixture } = await setup({
+        session: adminSession(),
+        result: OPERATORS,
+        supportsCreate: true,
+      });
+      const el = fixture.nativeElement as HTMLElement;
+      expect(el.querySelector('[data-testid="add-staff-form"]')).not.toBeNull();
+    });
+
+    it('hides the form entirely when the backend cannot create — Dexie/dev, no half-working button', async () => {
+      const { fixture } = await setup({
+        session: adminSession(),
+        result: OPERATORS,
+        supportsCreate: false,
+      });
+      const el = fixture.nativeElement as HTMLElement;
+      expect(el.querySelector('[data-testid="add-staff-form"]')).toBeNull();
+    });
+
+    it('creates a staff member with the chosen role, then reloads and resets the form', async () => {
+      const { fixture, membership } = await setup({ session: adminSession(), result: OPERATORS });
+      const el = fixture.nativeElement as HTMLElement;
+
+      const emailInput = el.querySelector<HTMLInputElement>('[data-testid="add-staff-email"]')!;
+      const roleSelect = el.querySelector<HTMLSelectElement>('[data-testid="add-staff-role"]')!;
+      emailInput.value = 'new@capy.test';
+      emailInput.dispatchEvent(new Event('input'));
+      roleSelect.value = 'role-operator';
+      roleSelect.dispatchEvent(new Event('change'));
+      fixture.detectChanges();
+
+      el.querySelector<HTMLFormElement>('[data-testid="add-staff-form"]')!.dispatchEvent(
+        new Event('submit', { cancelable: true })
+      );
+      await flush(fixture);
+
+      expect(membership.createOperator).toHaveBeenCalledWith('new@capy.test', 'role-operator');
+      expect(emailInput.value).toBe('');
+    });
+
+    it('does not submit with an invalid email or no role chosen', async () => {
+      const { fixture, membership } = await setup({ session: adminSession(), result: OPERATORS });
+      const el = fixture.nativeElement as HTMLElement;
+
+      const emailInput = el.querySelector<HTMLInputElement>('[data-testid="add-staff-email"]')!;
+      emailInput.value = 'not-an-email';
+      emailInput.dispatchEvent(new Event('input'));
+      fixture.detectChanges();
+
+      el.querySelector<HTMLFormElement>('[data-testid="add-staff-form"]')!.dispatchEvent(
+        new Event('submit', { cancelable: true })
+      );
+      await flush(fixture);
+
+      expect(membership.createOperator).not.toHaveBeenCalled();
+    });
+
+    it('shows an error toast when creation fails, and does not clear the form', async () => {
+      const { fixture, toast } = await setup({
+        session: adminSession(),
+        result: OPERATORS,
+        createRejects: true,
+      });
+      const el = fixture.nativeElement as HTMLElement;
+
+      const emailInput = el.querySelector<HTMLInputElement>('[data-testid="add-staff-email"]')!;
+      const roleSelect = el.querySelector<HTMLSelectElement>('[data-testid="add-staff-role"]')!;
+      emailInput.value = 'new@capy.test';
+      emailInput.dispatchEvent(new Event('input'));
+      roleSelect.value = 'role-operator';
+      roleSelect.dispatchEvent(new Event('change'));
+      fixture.detectChanges();
+
+      el.querySelector<HTMLFormElement>('[data-testid="add-staff-form"]')!.dispatchEvent(
+        new Event('submit', { cancelable: true })
+      );
+      await flush(fixture);
+
+      expect(toast.error).toHaveBeenCalled();
+      expect(emailInput.value).toBe('new@capy.test');
+    });
   });
 });

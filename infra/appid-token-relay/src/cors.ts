@@ -68,9 +68,14 @@ export function corsHeaders(
   allowed: readonly string[],
   methods: string
 ): Record<string, string> {
+  // `Authorization` is only ever sent by the admin staff-management routes
+  // (`admin-http.ts`) — this service's original token route needs no header
+  // beyond `Content-Type`, but allowing both unconditionally is harmless for
+  // it and required for the other, same convention as `session-guard.ts`'s
+  // own `corsHeaders` in the sibling proxies.
   const headers: Record<string, string> = {
     Vary: 'Origin',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': methods,
     'Access-Control-Max-Age': '600',
   };

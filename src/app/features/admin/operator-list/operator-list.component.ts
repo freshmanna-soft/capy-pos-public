@@ -1,5 +1,6 @@
 import { Component, ChangeDetectionStrategy, inject, signal, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { HasPermissionDirective } from '@shared/ui/directives/has-permission.directive';
 import { ListTenantOperatorsUseCase } from '@core/application/auth/list-tenant-operators.use-case';
 import { ManageOperatorMembershipUseCase } from '@core/application/auth/manage-operator-membership.use-case';
@@ -27,7 +28,7 @@ import { Permission } from '@core/domain/auth';
 @Component({
   selector: 'app-operator-list',
   standalone: true,
-  imports: [CommonModule, HasPermissionDirective],
+  imports: [CommonModule, ReactiveFormsModule, HasPermissionDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page-container" data-testid="operators-page">
@@ -35,6 +36,54 @@ import { Permission } from '@core/domain/auth';
         <h1>👥 Users &amp; Roles</h1>
         <p class="page-subtitle">Operators with access to the current store.</p>
       </div>
+
+      <section *appHasPermission="manageOperators" data-testid="add-staff-section">
+        @if (canCreateStaff()) {
+          <form
+            class="add-staff-form"
+            [formGroup]="addStaffForm"
+            (ngSubmit)="onAddStaff()"
+            data-testid="add-staff-form"
+          >
+            <div class="form-field">
+              <label class="sr-only" for="add-staff-email">Email address</label>
+              <input
+                id="add-staff-email"
+                type="email"
+                formControlName="email"
+                class="field-input"
+                placeholder="new.hire@store.example"
+                autocomplete="off"
+                [disabled]="busy()"
+                data-testid="add-staff-email"
+              />
+            </div>
+            <div class="form-field">
+              <label class="sr-only" for="add-staff-role">Role</label>
+              <select
+                id="add-staff-role"
+                formControlName="roleId"
+                class="role-select"
+                [disabled]="busy()"
+                data-testid="add-staff-role"
+              >
+                <option value="" disabled>Choose a role…</option>
+                @for (role of assignableRoles(); track role.id) {
+                  <option [value]="role.id">{{ role.name }}</option>
+                }
+              </select>
+            </div>
+            <button
+              type="submit"
+              class="add-staff-btn"
+              [disabled]="busy() || addStaffForm.invalid"
+              data-testid="add-staff-submit"
+            >
+              Add staff
+            </button>
+          </form>
+        }
+      </section>
 
       <section *appHasPermission="manageOperators" data-testid="operators-section">
         @if (loading()) {
@@ -137,6 +186,53 @@ import { Permission } from '@core/domain/auth';
 
       .state-error {
         color: #b91c1c;
+      }
+
+      .add-staff-form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+        margin-top: 1.5rem;
+        padding: 1rem;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+      }
+
+      .add-staff-form .form-field {
+        flex: 1 1 200px;
+      }
+
+      .add-staff-form .field-input,
+      .add-staff-form .role-select {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 0.9375rem;
+        background: white;
+      }
+
+      .add-staff-btn {
+        padding: 0.5rem 1rem;
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        cursor: pointer;
+        min-height: 38px;
+      }
+
+      .add-staff-btn:hover:not(:disabled) {
+        background: #1d4ed8;
+      }
+
+      .add-staff-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
       }
 
       .operators-table {
@@ -249,6 +345,7 @@ export class OperatorListComponent implements OnInit {
   private readonly membership = inject(ManageOperatorMembershipUseCase);
   private readonly currentUser = inject(CurrentUserService);
   private readonly toast = inject(ToastService);
+  private readonly fb = inject(FormBuilder);
 
   /** Bound in the template to the `*appHasPermission` directive. */
   protected readonly manageOperators = Permission.MANAGE_OPERATORS;
@@ -259,8 +356,37 @@ export class OperatorListComponent implements OnInit {
   protected readonly busy = signal(false);
   protected readonly error = signal<string | null>(null);
 
+  /** Offered only when the active backend can actually create an account — see `OperatorAdminPort.supportsCreate`. */
+  protected readonly canCreateStaff = signal(false);
+
+  protected readonly addStaffForm = this.fb.group({
+    email: ['', [Validators.required, Validators.email]],
+    roleId: ['', Validators.required],
+  });
+
   ngOnInit(): void {
+    this.canCreateStaff.set(this.membership.supportsCreate);
     void this.load();
+  }
+
+  protected async onAddStaff(): Promise<void> {
+    if (this.addStaffForm.invalid || this.busy()) return;
+    const { email, roleId } = this.addStaffForm.getRawValue();
+    if (!email || !roleId) return;
+
+    this.busy.set(true);
+    try {
+      const created = await this.membership.createOperator(email, roleId);
+      this.toast.success(
+        `Added ${created.displayName || created.email}. They'll receive an email to set their password.`
+      );
+      this.addStaffForm.reset({ email: '', roleId: '' });
+      await this.load();
+    } catch {
+      this.toast.error('Could not add that staff member. Check the email and try again.');
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   /** Read the changed <select>'s value (typed narrow so the template stays clean). */
