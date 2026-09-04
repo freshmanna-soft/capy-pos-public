@@ -209,12 +209,12 @@ variable "services" {
     # rest: this is a demo estate, not a storefront with a warm-start SLO.
     #
     # image_tag pinned here rather than left on the global default, so this
-    # service's own rebuilds (most recently: v4, shipping App ID enabled in
-    # environment.prod.ts, #242) don't require bumping every other service's
-    # tag too, and vice versa.
+    # service's own rebuilds (most recently: v5, shipping the "Add staff"
+    # admin UI, #244/#245) don't require bumping every other service's tag
+    # too, and vice versa.
     capy-pos-app = {
       image_port = 8080
-      image_tag  = "v4"
+      image_tag  = "v5"
     }
     # infra/vision-proxy — one frame in, candidate products out.
     #
@@ -253,16 +253,15 @@ variable "services" {
     # session a caller doesn't have yet) — pins_cors_origins alone is what
     # keeps an unlisted page from spending sign-in attempts against the tenant.
     #
-    # image_tag pinned to v2, not left on the global v1: the image pushed
-    # under v1 was built for arm64 (an Apple Silicon `docker build` with no
-    # --platform flag) and could never start on Code Engine's amd64 nodes —
-    # "Initial scale was never achieved". Terraform tracks the tag string, not
-    # the underlying digest, so re-pushing a corrected image under the same v1
-    # tag would not by itself trigger a new revision; a new tag does, same as
-    # capy-pos-app's own v2 pin above.
+    # image_tag pinned here for the same reason capy-pos-app's own pin is:
+    # v3 ships the admin-only /appid/admin/* staff-management routes (Phase 3d,
+    # #244/#245) — a rebuild this service's own tag bump is what actually
+    # triggers, independent of every other service's tag. (v2 itself replaced
+    # an arm64 image — an Apple Silicon `docker build` with no --platform
+    # flag — that could never start on Code Engine's amd64 nodes.)
     capy-appid-token-relay = {
       image_port         = 8792
-      image_tag          = "v2"
+      image_tag          = "v3"
       needs_appid_secret = true
       pins_cors_origins  = true
     }
