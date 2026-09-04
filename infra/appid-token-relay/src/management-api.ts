@@ -130,10 +130,28 @@ async function managementFetch(
   return { status: response.status, body };
 }
 
-/** JWKS-cache-style: roles rarely change, so the name→id table is cached after the first fetch. */
-let rolesCache: readonly StaffRole[] | null = null;
+/**
+ * A role as `GET /roles` actually returns it — confirmed live against the
+ * real tenant, not the docs alone: the role's own `name` is a free-text
+ * display label an admin chose in the App ID console (e.g. `"Admin"`,
+ * capitalized) and is **not** the same string as the scope it grants
+ * (`access[].scopes`, e.g. `"admin"`, lowercase — the exact string that ends
+ * up in the token's `scope` claim and that `AppIdAuthAdapter`/`session-auth.ts`
+ * actually check). Matching by `name` here would silently omit every
+ * configured role — found live 2026-09-05 provisioning the very first
+ * `Manager`-scoped key for this file, not something a fixture would have
+ * caught, since the fixture data was written from the same wrong assumption.
+ */
+interface AppIdRoleWire {
+  readonly id: string;
+  readonly name: string;
+  readonly access?: readonly { readonly scopes?: readonly string[] }[];
+}
 
-async function listRoles(config: ManagementConfig, nowSeconds: () => number): Promise<readonly StaffRole[]> {
+/** JWKS-cache-style: roles rarely change, so the scope→id table is cached after the first fetch. */
+let rolesCache: readonly AppIdRoleWire[] | null = null;
+
+async function listRoles(config: ManagementConfig, nowSeconds: () => number): Promise<readonly AppIdRoleWire[]> {
   if (rolesCache) {
     return rolesCache;
   }
@@ -141,45 +159,53 @@ async function listRoles(config: ManagementConfig, nowSeconds: () => number): Pr
   if (result.status !== 200) {
     throw new ManagementApiError(`Listing App ID roles returned ${result.status}.`);
   }
-  const roles = (result.body as { roles?: StaffRole[] }).roles ?? [];
+  const roles = (result.body as { roles?: AppIdRoleWire[] }).roles ?? [];
   rolesCache = roles;
   return roles;
 }
 
-/** `null` means no App ID role with this name is configured — a 400 to the caller, not a crash. */
+/**
+ * `null` means no App ID role grants this scope — a 400 to the caller, not a
+ * crash. Matches by `access[].scopes`, never by the role's display `name` —
+ * see `AppIdRoleWire`'s own doc comment for why that distinction is load-bearing.
+ */
 export async function resolveRoleId(
-  roleName: string,
+  scope: string,
   config: ManagementConfig,
   nowSeconds: () => number = defaultNow
 ): Promise<string | null> {
   const roles = await listRoles(config, nowSeconds);
-  return roles.find((role) => role.name === roleName)?.id ?? null;
+  return roles.find((role) => role.access?.some((entry) => entry.scopes?.includes(scope)))?.id ?? null;
 }
 
 /**
- * The three role names this codebase's own scope→permission mapping resolves
+ * The three scopes this codebase's own scope→permission mapping resolves
  * (`AppIdAuthAdapter.resolveRoles()`, `session-auth.ts`'s `ROLE_PERMISSIONS`) —
- * the only names an "add staff" action could ever meaningfully assign.
+ * the only ones an "add staff" action could ever meaningfully assign. Scopes,
+ * not display names — see `AppIdRoleWire`'s own doc comment.
  */
-const ASSIGNABLE_ROLE_NAMES = ['operator', 'manager', 'admin'] as const;
+const ASSIGNABLE_SCOPES = ['operator', 'manager', 'admin'] as const;
 
 /**
  * The roles `GET /appid/admin/roles` actually offers: each of the three
- * built-in names that has a real App ID role configured, with its real id.
- * A name with none configured yet is silently omitted, not an error — see
- * Phase 3d's own prerequisite note (Phase 0 only ever confirmed `admin`).
+ * scopes that has a real App ID role granting it, reported under that role's
+ * own real display name and id (e.g. `{id: "e8c7...", name: "Admin"}` — the
+ * name an admin actually configured in the App ID console, not the internal
+ * scope string used to find it). A scope with no role configured yet is
+ * silently omitted, not an error — see Phase 3d's own prerequisite note
+ * (Phase 0 only ever confirmed `admin`).
  */
 export async function listAssignableStaffRoles(
   config: ManagementConfig,
   nowSeconds: () => number = defaultNow
 ): Promise<readonly StaffRole[]> {
-  const resolved = await Promise.all(
-    ASSIGNABLE_ROLE_NAMES.map(async (name): Promise<StaffRole | null> => {
-      const id = await resolveRoleId(name, config, nowSeconds);
-      return id === null ? null : { id, name };
-    })
+  const roles = await listRoles(config, nowSeconds);
+  const matches = ASSIGNABLE_SCOPES.map((scope) =>
+    roles.find((role) => role.access?.some((entry) => entry.scopes?.includes(scope)))
   );
-  return resolved.filter((role): role is StaffRole => role !== null);
+  return matches
+    .filter((role): role is AppIdRoleWire => role !== undefined)
+    .map((role) => ({ id: role.id, name: role.name }));
 }
 
 /**
