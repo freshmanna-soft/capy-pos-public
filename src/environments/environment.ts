@@ -15,12 +15,18 @@ export const environment = {
 
   // API Configuration
   //
-  // Still the retired terraform/aws-demo host (#206): DNS no longer resolves, so the
-  // sync worker's health probe fails and the till runs on Dexie alone. #224 pointed
-  // *production* at IBM pos-api and deliberately left local dev unrepointed rather
-  // than have a dev till write into the production Cloudant store — running
-  // infra/pos-api locally and pointing this at it is the open follow-up.
-  apiUrl: 'https://fqjj2r15m7.execute-api.us-east-1.amazonaws.com/api',
+  // The open follow-up #224 left behind: local dev now points at a *locally
+  // run* infra/pos-api, not the retired terraform/aws-demo host (#206, DNS no
+  // longer resolves) and deliberately not the real production IBM pos-api —
+  // pointing a dev till at that would mean every local sync writes real
+  // products/transactions into the actual pilot's live Cloudant store.
+  //
+  //   SESSION_JWT_SECRET=capy-pos-local-jwt-secret-change-in-production \
+  //   POS_API_STORE=memory PORT=8790 npm start   # in infra/pos-api, another terminal
+  //
+  // In-memory store: data resets on every restart, by design — this is a
+  // throwaway backend for local dev, not somewhere to keep anything real.
+  apiUrl: 'http://localhost:8790/api',
   apiTimeout: 30000,
 
   // AI clerk vision proxy, relative to apiUrl. The model API key lives in
