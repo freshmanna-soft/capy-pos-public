@@ -285,11 +285,16 @@ async function getUserRoles(
 
 /**
  * Create a Cloud Directory user with a cryptographically random, throwaway
- * password — never logged, never returned. The caller (`admin-http.ts`)
- * immediately follows this with `triggerForgotPassword` so the new hire sets
- * their own real password via App ID's own hosted email, and this relay never
- * has a "choose your password" secret to protect in the first place.
+ * password — never logged, never returned, and never sent anywhere. This
+ * relay never triggers App ID's `forgot_password` for a freshly created
+ * account — confirmed live it 409s unconditionally against one still
+ * `PENDING` identity confirmation, which every `sign_up` account starts as
+ * on a tenant configured to require it (this one is). The new hire finishes
+ * setup through the welcome/confirmation email `sign_up` itself already
+ * sends (this tenant has `welcomeEnabled: true`) — this relay has no
+ * "choose your password" secret to protect because it never chooses one.
  *
+
  * Uses `/cloud_directory/sign_up?shouldCreateProfile=true`, not the plainer
  * `/cloud_directory/Users` — confirmed live: the latter's own docs say
  * outright it "does not... create a profile," and role assignment 404s
@@ -361,21 +366,6 @@ export async function revokeRoles(
   });
   if (result.status !== 200) {
     throw new ManagementApiError(`Revoking the App ID role returned ${result.status}.`);
-  }
-}
-
-/** Triggers App ID's own hosted reset-password email. Fire-and-forget from the caller's point of view — see `createStaffUser`'s doc comment. */
-export async function triggerForgotPassword(
-  email: string,
-  config: ManagementConfig,
-  nowSeconds: () => number = defaultNow
-): Promise<void> {
-  const result = await managementFetch('/cloud_directory/forgot_password', config, nowSeconds, {
-    method: 'POST',
-    body: { user: email },
-  });
-  if (result.status !== 200) {
-    throw new ManagementApiError(`Triggering the reset-password email returned ${result.status}.`);
   }
 }
 

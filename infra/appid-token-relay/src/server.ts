@@ -30,7 +30,6 @@ import {
   listAssignableStaffRoles,
   assignRole,
   revokeRoles,
-  triggerForgotPassword,
   type ManagementConfig,
 } from './management-api.ts';
 import { readAllowedOrigins } from './cors.ts';
@@ -127,9 +126,19 @@ const adminListener = createAdminRequestListener({
   create: async (request) => {
     // `request.roleId` is already a real App ID role id — the browser got it
     // from `GET /appid/admin/roles` and never invents one itself.
+    //
+    // No `triggerForgotPassword` call here, despite the plan's original
+    // intent — confirmed live that this tenant's `identityConfirmation` is
+    // required (`accessMode: "FULL"`), so `createStaffUser`'s own `sign_up`
+    // call always leaves a brand-new account `PENDING` and App ID
+    // unconditionally 409s a forgot_password request against a
+    // not-yet-confirmed account. There is no timing to get right here: it
+    // would fail on every single call, not occasionally. `welcomeEnabled:
+    // true` on this tenant means `sign_up` already sent its own welcome/
+    // confirmation email — the new hire finishes setup through that link,
+    // not a second email App ID would refuse to send yet.
     const user = await createStaffUser(request.email, managementConfig);
     await assignRole(user.id, request.roleId, managementConfig);
-    await triggerForgotPassword(user.email, managementConfig);
     return user;
   },
   reassignRole: async (userId, request) => {
