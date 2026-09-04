@@ -85,9 +85,9 @@ Keyed by app name, which is also the image name inside `cr_namespace`:
 ```hcl
 services = {
   capy-pos-app            = { image_port = 8080 }
-  capy-vision-proxy       = { image_port = 8787, needs_model_key = true, needs_session_secret = true, pins_cors_origins = true }
-  capy-clerk-agent-relay  = { image_port = 8789, needs_model_key = true, needs_session_secret = true, pins_cors_origins = true }
-  capy-pos-api            = { image_port = 8790, needs_session_secret = true, needs_cloudant = true }
+  capy-vision-proxy       = { image_port = 8787, needs_model_key = true, needs_session_secret = true, needs_appid_verification = true, pins_cors_origins = true }
+  capy-clerk-agent-relay  = { image_port = 8789, needs_model_key = true, needs_session_secret = true, needs_appid_verification = true, pins_cors_origins = true }
+  capy-pos-api            = { image_port = 8790, needs_session_secret = true, needs_appid_verification = true, needs_cloudant = true }
   capy-appid-token-relay  = { image_port = 8792, needs_appid_secret = true, pins_cors_origins = true }
 }
 ```
@@ -109,6 +109,11 @@ services = {
   `capy-appid-token-relay` sets this. Unlike pos-api, this service also sets
   `pins_cors_origins` — it is not a one-pass, deploy-alone-first target; it needs
   `frontend_origins` set the same as the two model-key proxies do.
+- `needs_appid_verification` — binds the same three literals as
+  `needs_appid_secret`, but never the client secret: for a service that
+  *verifies* App ID's RS256 access tokens (`pos-api` and the two proxies)
+  rather than minting them. All three env vars are optional in practice —
+  unset, the service verifies HS256 only, its original behaviour.
 - `image_tag`, `scale_*`, `env` — optional per-service overrides. `env` merges last,
   so it can override `NODE_ENV`.
 
@@ -149,7 +154,9 @@ export CR_NAMESPACE=capy-pos-3223793   # must match var.cr_namespace, and be glo
 docker build -t us.icr.io/$CR_NAMESPACE/capy-pos-app:v1 .
 docker build -t us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1 infra/vision-proxy
 docker build -t us.icr.io/$CR_NAMESPACE/capy-clerk-agent-relay:v1 infra/clerk-agent-relay
-docker build -t us.icr.io/$CR_NAMESPACE/capy-pos-api:v1 infra/pos-api
+# pos-api's context is infra/, not infra/pos-api: it imports the DocumentStore
+# port from infra/shared/, which Docker can only see if it's inside the context.
+docker build -f infra/pos-api/Dockerfile -t us.icr.io/$CR_NAMESPACE/capy-pos-api:v1 infra
 docker build -t us.icr.io/$CR_NAMESPACE/capy-appid-token-relay:v1 infra/appid-token-relay
 docker push us.icr.io/$CR_NAMESPACE/capy-pos-app:v1
 docker push us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1
