@@ -407,6 +407,80 @@ describe('CurrentUserService', () => {
     });
   });
 
+  // ── session expiry warning ──────────────────────────────────────────────
+
+  describe('the session expiry warning', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('exposes the current session’s expiry, and clears it on logout', async () => {
+      vi.useFakeTimers();
+      const expiresAt = new Date(Date.now() + 5000).toISOString();
+      service.setSession({ ...baseSession, expiresAt });
+      expect(service.sessionExpiresAt()).toBe(expiresAt);
+
+      await service.logout();
+      expect(service.sessionExpiresAt()).toBeNull();
+    });
+
+    it('stays false until the last minute before expiry, then flips true', async () => {
+      vi.useFakeTimers();
+      service.setSession({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+      expect(service.expiryWarningActive()).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(59_000); // 61s remaining — still outside the 60s window
+      expect(service.expiryWarningActive()).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(2000); // 59s remaining — inside it
+      expect(service.expiryWarningActive()).toBe(true);
+    });
+
+    it('activates immediately for a session already inside the warning window when set', async () => {
+      // A stale tab reopened with less than a minute left — there is no
+      // "wait for the window" left to do, same reasoning as the hard-expiry
+      // timer's own "already expired" immediate case.
+      vi.useFakeTimers();
+      service.setSession({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 5000).toISOString(),
+      });
+      expect(service.expiryWarningActive()).toBe(true);
+    });
+
+    it('refresh() clears the warning by re-arming against the new, later expiry', async () => {
+      vi.useFakeTimers();
+      service.setSession({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 5000).toISOString(),
+      });
+      expect(service.expiryWarningActive()).toBe(true);
+
+      gateway.refresh.mockResolvedValue({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+      await service.refresh();
+
+      expect(service.expiryWarningActive()).toBe(false);
+    });
+
+    it('a manual logout clears the warning', async () => {
+      vi.useFakeTimers();
+      service.setSession({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 5000).toISOString(),
+      });
+      expect(service.expiryWarningActive()).toBe(true);
+
+      await service.logout();
+      expect(service.expiryWarningActive()).toBe(false);
+    });
+  });
+
   // ── hydrate ────────────────────────────────────────────────────────────
 
   describe('hydrate()', () => {

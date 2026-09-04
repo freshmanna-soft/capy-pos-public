@@ -1,5 +1,5 @@
 import { Component, ChangeDetectionStrategy, signal, computed, inject } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { Permission } from '@core/domain/auth';
 
@@ -102,6 +102,18 @@ interface NavItem {
               <span class="text-xs font-medium">{{ item.shortLabel }}</span>
             </a>
           }
+          <button
+            type="button"
+            class="flex flex-col items-center justify-center gap-1 min-h-[56px]
+                   text-gray-400 bg-transparent border-none rounded-lg transition-colors duration-150
+                   active:bg-gray-800 cursor-pointer"
+            aria-label="Sign out"
+            data-testid="nav-sign-out"
+            (click)="signOut()"
+          >
+            <span class="text-2xl leading-none">🚪</span>
+            <span class="text-xs font-medium">Sign out</span>
+          </button>
         </div>
       </div>
     }
@@ -172,6 +184,25 @@ interface NavItem {
         }
       </ul>
 
+      <!-- Sign out -->
+      <div class="p-2 border-t border-gray-700">
+        <button
+          type="button"
+          class="flex items-center gap-3 px-3 py-3 rounded-lg text-gray-300 bg-transparent border-none
+                 text-sm font-medium whitespace-nowrap transition-all duration-150 cursor-pointer w-full
+                 hover:bg-gray-700 hover:text-gray-100 min-h-[44px]"
+          [class.justify-center]="collapsed()"
+          aria-label="Sign out"
+          data-testid="nav-sign-out"
+          (click)="signOut()"
+        >
+          <span class="text-xl flex-shrink-0 w-6 text-center">🚪</span>
+          @if (!collapsed()) {
+            <span>Sign out</span>
+          }
+        </button>
+      </div>
+
       <!-- Footer -->
       @if (!collapsed()) {
         <div class="p-4 border-t border-gray-700 text-center">
@@ -201,6 +232,7 @@ interface NavItem {
 })
 export class NavigationComponent {
   private readonly currentUser = inject(CurrentUserService);
+  private readonly router = inject(Router);
 
   readonly collapsed = signal(false);
   readonly mobileMenuOpen = signal(false);
@@ -321,5 +353,17 @@ export class NavigationComponent {
 
   closeMobileMenu(): void {
     this.mobileMenuOpen.set(false);
+  }
+
+  /**
+   * Sign out and return to `/login`. `CurrentUserService.logout('manual')`
+   * clears the session synchronously with respect to change detection, but
+   * `SessionExpiryNavigatorService` only redirects on an `'expired'` reason —
+   * a manual sign-out has to navigate itself.
+   */
+  async signOut(): Promise<void> {
+    this.closeMobileMenu();
+    await this.currentUser.logout('manual');
+    await this.router.navigate(['/login']);
   }
 }
