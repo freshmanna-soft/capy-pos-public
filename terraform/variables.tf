@@ -254,14 +254,14 @@ variable "services" {
     # keeps an unlisted page from spending sign-in attempts against the tenant.
     #
     # image_tag pinned here for the same reason capy-pos-app's own pin is:
-    # v3 ships the admin-only /appid/admin/* staff-management routes (Phase 3d,
-    # #244/#245) — a rebuild this service's own tag bump is what actually
-    # triggers, independent of every other service's tag. (v2 itself replaced
-    # an arm64 image — an Apple Silicon `docker build` with no --platform
-    # flag — that could never start on Code Engine's amd64 nodes.)
+    # v4 fixes role operations to use the profile sub, not the SCIM id
+    # (#247) — found live testing v3's own "add staff" flow. (v3 shipped the
+    # admin-only /appid/admin/* routes, #244/#245; v2 replaced an arm64
+    # image — an Apple Silicon `docker build` with no --platform flag — that
+    # could never start on Code Engine's amd64 nodes.)
     capy-appid-token-relay = {
       image_port         = 8792
-      image_tag          = "v3"
+      image_tag          = "v4"
       needs_appid_secret = true
       pins_cors_origins  = true
     }
