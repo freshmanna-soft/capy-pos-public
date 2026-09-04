@@ -67,11 +67,17 @@ export const environment = {
     allowedStoreDomain: '',
   },
 
-  // IBM Cloud App ID — see environment.ts for the full rationale. Enabled:
-  // false until infra/appid-token-relay exists and pos-api verifies App ID
-  // tokens instead of (or alongside) SessionIssuer's shared-secret ones.
+  // IBM Cloud App ID — see environment.ts for the full rationale. Enabled
+  // 2026-09-04: the relay is deployed, pos-api/vision-proxy/clerk-agent-relay
+  // all verify App ID's RS256 tokens (#237/#238), and Phase 0's bootstrap
+  // (real admin sign-in through this exact adapter, against this exact
+  // tenant) is confirmed. Confirmed with the user first: no real staff were
+  // signing in with a local password on this pilot yet, so switching
+  // AuthGateway's whole selection over (see auth.providers.ts — this is not
+  // additive, App ID now fully replaces the local adapter here) locks nobody
+  // out. Passkey/PIN quick sign-in is unaffected either way.
   appId: {
-    enabled: false,
+    enabled: true,
     region: 'us-south',
     tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
     staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
