@@ -1,0 +1,21 @@
+# Context root for infra/pos-api/Dockerfile, the one build in this repo whose
+# image needs a sibling directory (infra/shared) — see that Dockerfile's own
+# comment for why. Every other infra/* service still builds from its own
+# subdirectory as context and never reads this file.
+node_modules/
+dist/
+.env
+.env.example
+*.log
+
+# Only pos-api/ and shared/ are ever COPYed from this context. Excluding the
+# sibling services keeps what gets sent to the Docker daemon to what's actually
+# used — none of it ends up in the image either way, since nothing here COPYs it.
+vision-proxy/
+clerk-agent-relay/
+appid-token-relay/
+
+pos-api/src/**/*.test.mjs
+pos-api/smoke.mjs
+pos-api/README.md
+shared/src/**/*.test.mjs
