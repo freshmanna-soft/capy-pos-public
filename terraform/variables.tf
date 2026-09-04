@@ -193,12 +193,12 @@ variable "services" {
     # rest: this is a demo estate, not a storefront with a warm-start SLO.
     #
     # image_tag pinned here rather than left on the global default, so this
-    # service's own rebuilds (most recently: the current frontend, which the
-    # IBM-hosted mirror had fallen behind GitHub Pages on) don't require
-    # bumping every other service's tag too, and vice versa.
+    # service's own rebuilds (most recently: v4, shipping App ID enabled in
+    # environment.prod.ts, #242) don't require bumping every other service's
+    # tag too, and vice versa.
     capy-pos-app = {
       image_port = 8080
-      image_tag  = "v3"
+      image_tag  = "v4"
     }
     # infra/vision-proxy — one frame in, candidate products out.
     #
