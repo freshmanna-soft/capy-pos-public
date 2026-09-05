@@ -19,6 +19,7 @@ import { MemoryStore } from '../../shared/src/document-store.ts';
 import { Permission } from './session-auth.ts';
 
 const SECRET = 'test-secret';
+const INTERNAL_SECRET = 'test-internal-secret';
 const NOW = 1_800_000_000;
 const ISO = '2027-01-15T10:00:00.000Z';
 
@@ -58,12 +59,14 @@ function product(overrides = {}) {
 }
 
 /** A fresh set of deps per test, so no test can see another's writes. */
-function deps({ products = [product()], transactions = [], productStore } = {}) {
+function deps({ products = [product()], transactions = [], roles = [], productStore, internalSecret = INTERNAL_SECRET } = {}) {
   let counter = 0;
   return {
     products: productStore ?? new MemoryStore(products),
     transactions: new MemoryStore(transactions),
+    roles: new MemoryStore(roles),
     secret: SECRET,
+    internalSecret,
     nowSeconds: () => NOW,
     nowIso: () => ISO,
     newId: () => `txn-${++counter}`,
@@ -71,12 +74,13 @@ function deps({ products = [product()], transactions = [], productStore } = {}) 
 }
 
 /** Issue a request as an authorized admin unless told otherwise. */
-function call(method, path, { body, token = mint(), authorization } = {}, context = deps()) {
+function call(method, path, { body, token = mint(), authorization, internalSecret } = {}, context = deps()) {
   return handle(
     {
       method,
       path,
       authorization: authorization !== undefined ? authorization : token === null ? undefined : `Bearer ${token}`,
+      internalSecret,
       body,
     },
     context
@@ -93,6 +97,12 @@ describe('matchRoute', () => {
     assert.equal(matchRoute('DELETE', '/api/products/p-1')?.kind, 'deleteProduct');
     assert.equal(matchRoute('POST', '/api/products/p-1/sell')?.kind, 'sellProduct');
     assert.equal(matchRoute('GET', '/api/transactions')?.kind, 'listTransactions');
+  });
+
+  it('matches GET /internal/roles, outside the /api prefix entirely', () => {
+    assert.deepEqual(matchRoute('GET', '/internal/roles'), { kind: 'getRoles' });
+    assert.equal(matchRoute('POST', '/internal/roles'), null);
+    assert.equal(matchRoute('GET', '/internal/roles/extra'), null);
   });
 
   it('binds each route to the permission its operation needs', () => {
@@ -199,6 +209,57 @@ describe('GET /api/health', () => {
     const { body } = await call('GET', '/api/health', { token: null });
     assert.equal(body.architecture, 'single-container');
     assert.equal(body.platform, 'ibm-code-engine');
+  });
+});
+
+describe('GET /internal/roles', () => {
+  it('refuses a caller with no X-Internal-Secret at all, the same as one that is wrong', async () => {
+    const missing = await call('GET', '/internal/roles', { token: null, internalSecret: undefined });
+    assert.equal(missing.status, 401);
+    const wrong = await call('GET', '/internal/roles', { token: null, internalSecret: 'nope' });
+    assert.equal(wrong.status, 401);
+  });
+
+  it('503s rather than 401 when this deployment has not set INTERNAL_API_SECRET at all', async () => {
+    const context = deps({ internalSecret: '' });
+    const { status } = await call(
+      'GET',
+      '/internal/roles',
+      { token: null, internalSecret: INTERNAL_SECRET },
+      context
+    );
+    assert.equal(status, 503);
+  });
+
+  it('falls back to the literal ROLE_PERMISSIONS table when the roles document does not exist yet', async () => {
+    const { status, body } = await call('GET', '/internal/roles', {
+      token: null,
+      internalSecret: INTERNAL_SECRET,
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body.roles.operator, ['sale:process', 'sale:view_transactions', 'inventory:view']);
+    assert.ok(body.roles.admin.includes('inventory:delete'));
+  });
+
+  it('serves the stored document once one exists, not the fallback', async () => {
+    const context = deps({
+      roles: [{ id: 'role-permissions', roles: { operator: ['sale:process'], customer: ['sale:process'] } }],
+    });
+    const { status, body } = await call(
+      'GET',
+      '/internal/roles',
+      { token: null, internalSecret: INTERNAL_SECRET },
+      context
+    );
+    assert.equal(status, 200);
+    assert.deepEqual(body.roles, { operator: ['sale:process'], customer: ['sale:process'] });
+  });
+
+  it('never reaches this route through the bearer-token boundary at all', async () => {
+    // No Authorization header, no App ID/HS256 token — only the internal secret
+    // matters, confirming `handle()` truly special-cases this route before `authorize()`.
+    const { status } = await call('GET', '/internal/roles', { token: null, authorization: undefined, internalSecret: INTERNAL_SECRET });
+    assert.equal(status, 200);
   });
 });
 

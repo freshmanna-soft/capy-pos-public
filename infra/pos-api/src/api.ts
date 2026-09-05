@@ -27,7 +27,13 @@
  * the till at a backend that speaks a different dialect, so they are copied
  * deliberately, field for field.
  */
-import { Permission, authorize, type AppIdVerificationConfig } from './session-auth.ts';
+import {
+  Permission,
+  ROLE_PERMISSIONS,
+  authorize,
+  constantTimeStringsEqual,
+  type AppIdVerificationConfig,
+} from './session-auth.ts';
 import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
 
 /** The catalogue document. Field-for-field what `create-product/index.js` writes. */
@@ -61,11 +67,31 @@ export interface TransactionDocument extends StoredDocument {
   readonly tenantId: string;
 }
 
+/**
+ * The one document `GET /internal/roles` serves — every role name this
+ * deployment knows, mapped to the permission strings it grants. Phase 5,
+ * RBAC centralization: this is the single source of truth `vision-proxy`
+ * and `clerk-agent-relay` fetch instead of each hand-copying their own
+ * version of `ROLE_PERMISSIONS`.
+ */
+export interface RolesDocument extends StoredDocument {
+  readonly roles: Readonly<Record<string, readonly string[]>>;
+}
+
+/** The one document id `roles` ever holds — a single doc, not one per role. */
+export const ROLES_DOC_ID = 'role-permissions';
+
 export interface ApiRequest {
   readonly method: string;
   /** Path only — `server.ts` has already removed any query string. */
   readonly path: string;
   readonly authorization: string | undefined;
+  /**
+   * The `X-Internal-Secret` header, for the one route that has no end-user
+   * token to check (`GET /internal/roles`) — a sibling Code Engine app's
+   * bearer, not a browser's.
+   */
+  readonly internalSecret: string | undefined;
   /** Parsed JSON body, or `undefined` when there was none. */
   readonly body: unknown;
 }
@@ -78,9 +104,12 @@ export interface ApiResponse {
 export interface ApiDeps {
   readonly products: DocumentStore<ProductDocument>;
   readonly transactions: DocumentStore<TransactionDocument>;
+  readonly roles: DocumentStore<RolesDocument>;
   readonly secret: string;
   /** Omitted: this deployment verifies HS256 (`secret`) only — today's exact behaviour. */
   readonly appId?: AppIdVerificationConfig;
+  /** Empty means `GET /internal/roles` is unconfigured and always 503s — see `getRoles`. */
+  readonly internalSecret: string;
   readonly nowSeconds: () => number;
   readonly nowIso: () => string;
   readonly newId: () => string;
@@ -118,6 +147,13 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
     return health(deps);
   }
 
+  // Also outside `authorize()`'s bearer-token boundary, for the opposite reason:
+  // the caller here is a sibling Code Engine app with no end-user token at all,
+  // gated instead by its own shared-secret check inside `getRoles`.
+  if (route.kind === 'getRoles') {
+    return getRoles(request, deps);
+  }
+
   const outcome = await authorize(
     request.authorization,
     route.permission,
@@ -150,6 +186,7 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
 
 type Route =
   | { readonly kind: 'health' }
+  | { readonly kind: 'getRoles' }
   | { readonly kind: 'listProducts'; readonly permission: Permission }
   | { readonly kind: 'createProduct'; readonly permission: Permission }
   | { readonly kind: 'listTransactions'; readonly permission: Permission }
@@ -168,11 +205,16 @@ type Route =
  */
 export function matchRoute(method: string, path: string): Route | null {
   const segments = path.split('/').filter((segment) => segment.length > 0);
+  const upper = method.toUpperCase();
+
+  // Not under `api` — a sibling service, not the till, is the only caller.
+  if (segments.length === 2 && segments[0] === 'internal' && segments[1] === 'roles') {
+    return upper === 'GET' ? { kind: 'getRoles' } : null;
+  }
+
   if (segments[0] !== 'api') {
     return null;
   }
-
-  const upper = method.toUpperCase();
 
   if (segments.length === 2 && segments[1] === 'health') {
     return upper === 'GET' ? { kind: 'health' } : null;
@@ -268,9 +310,39 @@ function health(deps: ApiDeps): ApiResponse {
         sellProduct: 'POST /api/products/{id}/sell',
         getTransactions: 'GET /api/transactions',
         health: 'GET /api/health',
+        internalRoles: 'GET /internal/roles (X-Internal-Secret, sibling services only)',
       },
     },
   };
+}
+
+/**
+ * `GET /internal/roles` — Phase 5, RBAC centralization.
+ *
+ * Gated by `X-Internal-Secret`, not a bearer token: the caller is
+ * `vision-proxy` or `clerk-agent-relay`, not a browser, and neither holds an
+ * end-user session to present. `constantTimeStringsEqual` is the same
+ * closed-timing-side-channel comparison `signatureMatches` already uses for
+ * the HS256 path, generalized to a plain shared secret.
+ *
+ * Reads `ROLES_DOC_ID` and falls back to the literal `ROLE_PERMISSIONS`
+ * table (`session-auth.ts`) whenever the document does not exist yet — a
+ * fresh `roles` database, before anyone has written to it, answers exactly
+ * what today's hand-copied tables already say, not an empty grant.
+ */
+async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
+  if (deps.internalSecret.length === 0) {
+    return { status: 503, body: { error: 'Internal API is not configured.' } };
+  }
+  if (
+    request.internalSecret === undefined ||
+    !constantTimeStringsEqual(request.internalSecret, deps.internalSecret)
+  ) {
+    return { status: 401, body: { error: 'Invalid or missing X-Internal-Secret.' } };
+  }
+
+  const doc = await deps.roles.read(ROLES_DOC_ID);
+  return { status: 200, body: { roles: doc?.document.roles ?? ROLE_PERMISSIONS } };
 }
 
 async function listProducts(deps: ApiDeps): Promise<{ products: readonly ProductDocument[]; count: number }> {
