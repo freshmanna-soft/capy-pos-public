@@ -209,12 +209,12 @@ variable "services" {
     # rest: this is a demo estate, not a storefront with a warm-start SLO.
     #
     # image_tag pinned here rather than left on the global default, so this
-    # service's own rebuilds (most recently: v6, shipping the sign-out button
-    # and session-expiry warning, #251) don't require bumping every other
-    # service's tag too, and vice versa.
+    # service's own rebuilds (most recently: v7, shipping the "Forgot
+    # password?" link, #253) don't require bumping every other service's tag
+    # too, and vice versa.
     capy-pos-app = {
       image_port = 8080
-      image_tag  = "v6"
+      image_tag  = "v7"
     }
     # infra/vision-proxy — one frame in, candidate products out.
     #
@@ -254,15 +254,17 @@ variable "services" {
     # keeps an unlisted page from spending sign-in attempts against the tenant.
     #
     # image_tag pinned here for the same reason capy-pos-app's own pin is:
-    # v5 drops the forgot_password call from staff creation (#249) — it 409s
-    # unconditionally against a freshly sign_up'd, not-yet-confirmed account.
-    # (v4 fixed role operations to use the profile sub, not the SCIM id,
-    # #247; v3 shipped the admin-only /appid/admin/* routes, #244/#245; v2
-    # replaced an arm64 image that could never start on Code Engine's amd64
-    # nodes.)
+    # v6 adds the public /appid/forgot-password route (#253) — a genuine
+    # self-service password-reset flow for an already-confirmed account,
+    # not the doomed at-creation-time call v5 removed. (v5 dropped
+    # forgot_password from staff creation, #249 — it 409s unconditionally
+    # against a freshly sign_up'd, not-yet-confirmed account. v4 fixed role
+    # operations to use the profile sub, not the SCIM id, #247; v3 shipped
+    # the admin-only /appid/admin/* routes, #244/#245; v2 replaced an arm64
+    # image that could never start on Code Engine's amd64 nodes.)
     capy-appid-token-relay = {
       image_port         = 8792
-      image_tag          = "v5"
+      image_tag          = "v6"
       needs_appid_secret = true
       pins_cors_origins  = true
     }
