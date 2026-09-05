@@ -454,4 +454,33 @@ describe('AppIdAuthAdapter', () => {
       expect(adapter.getAccessToken()).toBeNull();
     });
   });
+
+  describe('requestPasswordReset', () => {
+    it('posts to the relay’s forgot-password route, derived from relayUrl', async () => {
+      const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+      vi.stubGlobal('fetch', fetchMock);
+      const adapter = makeAdapter();
+
+      await adapter.requestPasswordReset('Ada@Capy.Test');
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://relay.test/appid/forgot-password',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ email: 'ada@capy.test' }),
+        })
+      );
+    });
+
+    it('supportsPasswordReset is true — this is the one adapter that can', () => {
+      installFetch({});
+      expect(makeAdapter().supportsPasswordReset).toBe(true);
+    });
+
+    it('throws AppIdAuthError on a genuine transport failure', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+      const adapter = makeAdapter();
+      await expect(adapter.requestPasswordReset('ada@capy.test')).rejects.toThrow(AppIdAuthError);
+    });
+  });
 });

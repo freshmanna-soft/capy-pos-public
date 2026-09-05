@@ -369,6 +369,35 @@ export async function revokeRoles(
   }
 }
 
+/**
+ * Triggers App ID's own hosted reset-password email for a self-service
+ * "Forgot password" request — the legitimate use for this call. (An earlier
+ * version of this file called it right after `createStaffUser`, which
+ * always 409s: a freshly `sign_up`'d account is `PENDING` identity
+ * confirmation, and App ID refuses a password reset against one. Removed
+ * there for that reason — see #249 — reintroduced here for an
+ * already-confirmed account asking for itself, where the same call actually
+ * succeeds.) Always resolves, even for an email with no account: App ID's
+ * own endpoint does not distinguish the two in its response, and neither
+ * does this relay's public route — see `forgot-password-validate.ts`'s
+ * caller for why that matters (account enumeration).
+ */
+export async function triggerForgotPassword(
+  email: string,
+  config: ManagementConfig,
+  nowSeconds: () => number = defaultNow
+): Promise<void> {
+  const result = await managementFetch('/cloud_directory/forgot_password', config, nowSeconds, {
+    method: 'POST',
+    body: { user: email },
+  });
+  if (result.status !== 200 && result.status !== 404) {
+    // 404 is App ID answering "no such user" — not this relay's failure, and
+    // not something the caller should learn either (see the doc above).
+    throw new ManagementApiError(`Triggering the reset-password email returned ${result.status}.`);
+  }
+}
+
 interface ScimUser {
   readonly id: string;
   /** Only present on `sign_up`'s response — the profile id, i.e. `sub`. */

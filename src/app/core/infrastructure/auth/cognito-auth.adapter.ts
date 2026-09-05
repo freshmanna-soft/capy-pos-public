@@ -228,6 +228,13 @@ export class CognitoAuthAdapter implements AuthGateway {
     return getItem(ACCESS_TOKEN_KEY);
   }
 
+  readonly supportsPasswordReset = false;
+
+  /** Cognito's own ForgotPassword/ConfirmForgotPassword flow was never wired up here — not built. */
+  requestPasswordReset(): Promise<void> {
+    return Promise.reject(new Error('Password reset is not supported for Cognito yet.'));
+  }
+
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------

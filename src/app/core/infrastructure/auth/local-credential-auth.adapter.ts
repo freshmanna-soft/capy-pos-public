@@ -93,4 +93,11 @@ export class LocalCredentialAuthAdapter implements AuthGateway {
   getAccessToken(): string | null {
     return readToken();
   }
+
+  readonly supportsPasswordReset = false;
+
+  /** Local/dev has no self-service reset flow — a seeded operator's password is fixed at seed time. */
+  requestPasswordReset(): Promise<void> {
+    return Promise.reject(new Error('Password reset is not supported for local credentials.'));
+  }
 }
