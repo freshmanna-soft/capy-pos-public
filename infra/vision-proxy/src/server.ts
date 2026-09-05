@@ -25,7 +25,7 @@
 import { createServer } from 'node:http';
 import { identify, validate, MAX_BODY_BYTES } from './identify.ts';
 import { createRequestListener } from './http.ts';
-import { readAllowedOrigins } from './session-guard.ts';
+import { readAllowedOrigins, type RolesSourceConfig } from './session-guard.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8787);
 
@@ -72,7 +72,9 @@ function requireConfig(): { secret: string; origins: readonly string[] } {
  * same way an unset `SESSION_JWT_SECRET` is: "refuse to guess" rather than start
  * a revision that verifies RS256 tokens against the wrong tenant or audience.
  */
-function readAppIdConfig(): { region: string; tenantId: string; audience: string } | undefined {
+function readAppIdConfig():
+  | { region: string; tenantId: string; audience: string; rolesSource?: RolesSourceConfig }
+  | undefined {
   const region = process.env['APPID_REGION'] ?? '';
   const tenantId = process.env['APPID_TENANT_ID'] ?? '';
   const audience = process.env['APPID_CLIENT_ID'] ?? '';
@@ -93,7 +95,32 @@ function readAppIdConfig(): { region: string; tenantId: string; audience: string
     );
     process.exit(1);
   }
-  return { region, tenantId, audience };
+  return { region, tenantId, audience, rolesSource: readRolesSourceConfig() };
+}
+
+/**
+ * Phase 5, RBAC centralization — optional, unlike App ID itself above: an
+ * unset pair means `resolveAppIdScopes` (`session-guard.ts`) falls back to
+ * its own literal `ROLE_PERMISSIONS` table, exactly today's behaviour. A
+ * *partial* pair is refused the same way a partial App ID config is —
+ * "refuse to guess" rather than fetch against a URL with no secret to
+ * present, or a secret nothing will ever check.
+ */
+function readRolesSourceConfig(): RolesSourceConfig | undefined {
+  const url = process.env['POS_API_INTERNAL_ROLES_URL'] ?? '';
+  const secret = process.env['INTERNAL_API_SECRET'] ?? '';
+
+  if (url.length === 0 && secret.length === 0) {
+    return undefined;
+  }
+  if (url.length === 0 || secret.length === 0) {
+    console.error(
+      '[vision] POS_API_INTERNAL_ROLES_URL and INTERNAL_API_SECRET must be set together, or not ' +
+        'at all. Refusing to start rather than fetch the shared roles document half-configured.'
+    );
+    process.exit(1);
+  }
+  return { url, secret };
 }
 
 const { secret, origins } = requireConfig();

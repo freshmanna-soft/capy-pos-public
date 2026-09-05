@@ -155,6 +155,22 @@ variable "internal_api_secret" {
   default     = ""
 }
 
+variable "pos_api_internal_url" {
+  description = <<-EOT
+    pos-api's own GET /internal/roles endpoint (e.g. "https://capy-pos-api.…
+    .codeengine.appdomain.cloud/internal/roles"), for vision-proxy and
+    clerk-agent-relay to fetch the shared roles document from (Phase 5, RBAC
+    centralization). pos-api's own Code Engine URL is only known after that
+    app's first apply — same two-pass-apply category as frontend_origins —
+    except this one is optional: left unset, both proxies simply keep
+    answering from their own local ROLE_PERMISSIONS fallback, exactly
+    today's behaviour, rather than refusing to start. Set it and apply again
+    once `terraform output -raw pos_api_url` has a real value.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "frontend_origins" {
   description = <<-EOT
     Browser origins the guarded services will answer. Scheme and host only, no
