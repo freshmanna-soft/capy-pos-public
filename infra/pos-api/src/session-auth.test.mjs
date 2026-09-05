@@ -581,6 +581,122 @@ describe('verifyAppIdAccessToken', () => {
   });
 });
 
+describe('shared roles document (Phase 5)', () => {
+  // `rolesCache` is module-level and persists across every test in this file —
+  // there is nothing to key a roles read on (one document, one cache slot), so
+  // these are written as one deliberate sequence, each depending on the module
+  // state the previous one left behind, same convention as the two sibling
+  // proxies' own copy of this exact test shape. `nowSeconds` still advances
+  // between them so each is unambiguous about which side of the 5-minute TTL
+  // it lands on.
+  const ROLES_CONFIG_BASE = { ...APPID_CONFIG };
+
+  /** A fake `RolesReader` — no Cloudant, no fetch, just the `.read()` shape `resolvedRolePermissions` needs. */
+  function fakeRolesReader(reader) {
+    return { read: reader };
+  }
+
+  it('1. falls back to ROLE_PERMISSIONS when there is no document yet and nothing has ever been cached', async () => {
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-roles-1', async () => {
+      const config = { ...ROLES_CONFIG_BASE, rolesSource: fakeRolesReader(async () => null) };
+      const token = mintAppId({ scope: 'openid operator', exp: NOW + 1_000_000 + 3600 }, { kid: 'kid-roles-1', keyPair });
+      const claims = await verifyAppIdAccessToken(token, config, NOW + 1_000_000);
+      // ROLE_PERMISSIONS' own operator tier — proves the missing document
+      // degraded to it rather than granting nothing.
+      assert.deepEqual(
+        [...claims.permissions].sort(),
+        ['inventory:view', 'sale:process', 'sale:view_transactions'].sort()
+      );
+    });
+  });
+
+  it('2. uses the document instead of the literal table once a read succeeds', async () => {
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-roles-2', async () => {
+      let seenId;
+      const config = {
+        ...ROLES_CONFIG_BASE,
+        rolesSource: fakeRolesReader(async (id) => {
+          seenId = id;
+          return { document: { roles: { operator: ['custom:permission'] } } };
+        }),
+      };
+      const token = mintAppId({ scope: 'openid operator', exp: NOW + 2_000_100 + 3600 }, { kid: 'kid-roles-2', keyPair });
+      const claims = await verifyAppIdAccessToken(token, config, NOW + 2_000_000);
+      // Not ROLE_PERMISSIONS' operator tier — this can only be the read document.
+      assert.deepEqual(claims.permissions, ['custom:permission']);
+      assert.equal(seenId, 'role-permissions');
+    });
+  });
+
+  it('3. keeps serving the cached document within the TTL, without reading again', async () => {
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-roles-3', async () => {
+      const config = {
+        ...ROLES_CONFIG_BASE,
+        rolesSource: fakeRolesReader(async () => {
+          throw new Error('must not be called — the cache from test 2 is still fresh');
+        }),
+      };
+      // 60s after test 2's read — well inside the 5-minute TTL.
+      const token = mintAppId(
+        { scope: 'openid operator', exp: NOW + 2_000_060 + 3600 },
+        { kid: 'kid-roles-3', keyPair }
+      );
+      const claims = await verifyAppIdAccessToken(token, config, NOW + 2_000_000 + 60);
+      assert.deepEqual(claims.permissions, ['custom:permission']);
+    });
+  });
+
+  it('4. keeps serving the last good cache, not the literal table, when a post-TTL read fails', async () => {
+    const keyPair = generateRsaKeyPair();
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      await withJwks(keyPair, 'kid-roles-4', async () => {
+        let reads = 0;
+        const config = {
+          ...ROLES_CONFIG_BASE,
+          rolesSource: fakeRolesReader(async () => {
+            reads++;
+            throw new Error('Cloudant unreachable');
+          }),
+        };
+        // 400s after test 2's read — past the 5-minute TTL, so this forces a
+        // re-read attempt, which is made to fail here.
+        const token = mintAppId(
+          { scope: 'openid operator', exp: NOW + 2_000_400 + 3600 },
+          { kid: 'kid-roles-4', keyPair }
+        );
+        const claims = await verifyAppIdAccessToken(token, config, NOW + 2_000_000 + 400);
+        // Test 2's cached document, not ROLE_PERMISSIONS' operator tier and not empty.
+        assert.deepEqual(claims.permissions, ['custom:permission']);
+        assert.equal(reads, 1, 'a stale cache should still trigger exactly one re-read attempt');
+      });
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  it('never touches the roles source at all when rolesSource is not configured', async () => {
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-roles-unconfigured', async () => {
+      const token = mintAppId(
+        { scope: 'openid operator', exp: NOW + 3_000_000 + 3600 },
+        { kid: 'kid-roles-unconfigured', keyPair }
+      );
+      // APPID_CONFIG itself has no rolesSource — resolvedRolePermissions must
+      // return ROLE_PERMISSIONS without ever calling .read() on anything.
+      const claims = await verifyAppIdAccessToken(token, APPID_CONFIG, NOW + 3_000_000);
+      assert.deepEqual(
+        [...claims.permissions].sort(),
+        ['inventory:view', 'sale:process', 'sale:view_transactions'].sort()
+      );
+    });
+  });
+});
+
 describe('JWKS fetch failure', () => {
   it('refuses the token rather than throwing when the JWKS endpoint is unreachable', async () => {
     const keyPair = generateRsaKeyPair();
