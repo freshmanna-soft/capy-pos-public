@@ -24,7 +24,7 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { handle } from './api.ts';
-import type { ApiDeps, ProductDocument, TransactionDocument } from './api.ts';
+import type { ApiDeps, ProductDocument, RolesDocument, TransactionDocument } from './api.ts';
 import { CloudantStore } from './cloudant-store.ts';
 import { MemoryStore } from '../../shared/src/document-store.ts';
 import type { DocumentStore } from '../../shared/src/document-store.ts';
@@ -103,6 +103,7 @@ function readAppIdConfig(): { region: string; tenantId: string; audience: string
 function buildStores(): {
   products: DocumentStore<ProductDocument>;
   transactions: DocumentStore<TransactionDocument>;
+  roles: DocumentStore<RolesDocument>;
 } {
   const url = process.env['CLOUDANT_URL'] ?? '';
   const apiKey = process.env['CLOUDANT_APIKEY'] ?? '';
@@ -110,7 +111,8 @@ function buildStores(): {
   if (url.length > 0 && apiKey.length > 0) {
     const productsDb = process.env['CLOUDANT_PRODUCTS_DB'] ?? 'products';
     const transactionsDb = process.env['CLOUDANT_TRANSACTIONS_DB'] ?? 'transactions';
-    console.log(`[pos-api] store: cloudant (${productsDb}, ${transactionsDb})`);
+    const rolesDb = process.env['CLOUDANT_ROLES_DB'] ?? 'roles';
+    console.log(`[pos-api] store: cloudant (${productsDb}, ${transactionsDb}, ${rolesDb})`);
     return {
       products: new CloudantStore<ProductDocument>({
         url: url.replace(/\/+$/, ''),
@@ -122,12 +124,21 @@ function buildStores(): {
         apiKey,
         database: transactionsDb,
       }),
+      roles: new CloudantStore<RolesDocument>({
+        url: url.replace(/\/+$/, ''),
+        apiKey,
+        database: rolesDb,
+      }),
     };
   }
 
   if (process.env['POS_API_STORE'] === 'memory') {
     console.warn('[pos-api] store: in-memory — data is lost on restart. Never deploy this.');
-    return { products: new MemoryStore<ProductDocument>(), transactions: new MemoryStore<TransactionDocument>() };
+    return {
+      products: new MemoryStore<ProductDocument>(),
+      transactions: new MemoryStore<TransactionDocument>(),
+      roles: new MemoryStore<RolesDocument>(),
+    };
   }
 
   console.error(
@@ -137,10 +148,21 @@ function buildStores(): {
   process.exit(1);
 }
 
+/**
+ * Optional, unlike `requireSecret()` — an empty value means `GET
+ * /internal/roles` always 503s (see `getRoles` in `api.ts`), which is exactly
+ * today's behaviour for a deployment that has not opted into Phase 5's RBAC
+ * centralization yet, not a reason to refuse to start.
+ */
+function readInternalSecret(): string {
+  return process.env['INTERNAL_API_SECRET'] ?? '';
+}
+
 const deps: ApiDeps = {
   ...buildStores(),
   secret: requireSecret(),
   appId: readAppIdConfig(),
+  internalSecret: readInternalSecret(),
   nowSeconds: () => Math.floor(Date.now() / 1000),
   nowIso: () => new Date().toISOString(),
   newId: () => randomUUID(),
@@ -220,9 +242,17 @@ createServer((req, res) => {
       // would make `/api/health?x=1` a 404.
       const path = (req.url ?? '/').split('?')[0] ?? '/';
 
+      const internalSecretHeader = req.headers['x-internal-secret'];
+
       try {
         const response = await handle(
-          { method: req.method ?? 'GET', path, authorization: req.headers.authorization, body },
+          {
+            method: req.method ?? 'GET',
+            path,
+            authorization: req.headers.authorization,
+            internalSecret: typeof internalSecretHeader === 'string' ? internalSecretHeader : undefined,
+            body,
+          },
           deps
         );
         send(response.status, response.body);

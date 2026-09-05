@@ -411,8 +411,17 @@ function audienceMatches(aud: unknown, expected: string): boolean {
  * client-side. `session-auth.test.mjs` pins this table so a rename on the
  * Angular side that is not mirrored here silently narrows or widens what a
  * role can do, rather than failing a test.
+ *
+ * **Exported (Phase 5, RBAC centralization) as the seed content and the
+ * fallback for `GET /internal/roles`** (`api.ts`) — the route the two
+ * sibling proxies fetch instead of each hand-copying their own version of
+ * this exact table. This literal table does not disappear: it is what a
+ * fresh `roles` Cloudant database seeds from, and what every consumer falls
+ * back to if the document is missing or the fetch fails outright, so a
+ * partially-rolled-out deployment degrades to today's behaviour rather than
+ * granting zero permissions to every RS256-authenticated caller.
  */
-const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> = {
+export const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> = {
   operator: [Permission.PROCESS_SALE, Permission.VIEW_TRANSACTIONS, Permission.VIEW_INVENTORY],
   manager: [
     Permission.PROCESS_SALE,
@@ -552,6 +561,19 @@ function signatureMatches(signingInput: string, signature: string, secret: strin
     return false;
   }
   return presented.length === expected.length && timingSafeEqual(presented, expected);
+}
+
+/**
+ * Constant-time equality for two plain strings — same reasoning as
+ * `signatureMatches` above, generalized: `GET /internal/roles` (`api.ts`)
+ * compares a presented `X-Internal-Secret` header against `INTERNAL_API_SECRET`,
+ * and a `===` there would leak the secret's matching-prefix length through
+ * timing, the exact class of bug `timingSafeEqual` exists to close.
+ */
+export function constantTimeStringsEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 /** Decode one base64url JWT segment into a plain object, or null if it isn't one. */

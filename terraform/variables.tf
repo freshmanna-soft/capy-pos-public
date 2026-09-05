@@ -134,6 +134,27 @@ variable "appid_management_api_key" {
   default     = ""
 }
 
+variable "internal_api_secret" {
+  description = <<-EOT
+    Shared secret for service-to-service calls that have no end-user token to
+    check — today just pos-api's GET /internal/roles, which vision-proxy and
+    clerk-agent-relay call to resolve role→permission mappings instead of each
+    hand-copying its own table (RBAC centralization, Phase 5). Same pattern as
+    session_jwt_secret above: one value, known only to the services that need
+    it, bound as a Code Engine secret, never shipped to a browser.
+
+    Confirmed there is no other service-to-service auth anywhere in this
+    estate — every app in `services` below answers on a plain public HTTPS
+    endpoint, reachable from anywhere, not just from its siblings — so this is
+    the one thing standing between /internal/roles and any caller on the
+    internet. Generate with the same method used for session_jwt_secret
+    (e.g. `openssl rand -hex 32`), never hand-typed.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "frontend_origins" {
   description = <<-EOT
     Browser origins the guarded services will answer. Scheme and host only, no
@@ -195,11 +216,18 @@ variable "services" {
     # a real credential it has no reason to hold, for a capability (verification)
     # that only ever needs the tenant's public JWKS.
     needs_appid_verification = optional(bool, false)
-    scale_min_instances      = optional(number, 0)
-    scale_max_instances      = optional(number, 2)
-    scale_initial_instances  = optional(number, 1)
-    scale_cpu_limit          = optional(string, "0.5")
-    scale_memory_limit       = optional(string, "1G")
+    # Binds INTERNAL_API_SECRET from the shared internal-secret Code Engine
+    # secret — for a service that either answers or calls a service-to-service
+    # route with no end-user token (pos-api's GET /internal/roles today; the
+    # two proxies calling it). Same shared-secret shape as
+    # needs_session_secret, deliberately separate: this gates machine-to-
+    # machine calls between Code Engine apps, not a browser-issued session.
+    needs_internal_secret   = optional(bool, false)
+    scale_min_instances     = optional(number, 0)
+    scale_max_instances     = optional(number, 2)
+    scale_initial_instances = optional(number, 1)
+    scale_cpu_limit         = optional(string, "0.5")
+    scale_memory_limit      = optional(string, "1G")
     # Extra literal env vars. Merged last, so it can override NODE_ENV.
     env = optional(map(string), {})
   }))
@@ -226,7 +254,10 @@ variable "services" {
       needs_model_key          = true
       needs_session_secret     = true
       needs_appid_verification = true
-      pins_cors_origins        = true
+      # Fetches role→permission mappings from pos-api's GET /internal/roles
+      # (Phase 5 RBAC centralization) instead of hand-copying its own table.
+      needs_internal_secret = true
+      pins_cors_origins     = true
     }
     # infra/clerk-agent-relay — one agent hop, holding tools that change a cart.
     capy-clerk-agent-relay = {
@@ -234,6 +265,7 @@ variable "services" {
       needs_model_key          = true
       needs_session_secret     = true
       needs_appid_verification = true
+      needs_internal_secret    = true
       pins_cors_origins        = true
     }
     # infra/pos-api — products/transactions/health, over Cloudant. Verifies the same
@@ -246,6 +278,10 @@ variable "services" {
       needs_session_secret     = true
       needs_appid_verification = true
       needs_cloudant           = true
+      # Serves GET /internal/roles for the two proxies (Phase 5 RBAC
+      # centralization) — gated by this shared secret, since that route has
+      # no end-user token to check.
+      needs_internal_secret = true
     }
     # infra/appid-token-relay — holds the App ID client secret so the browser
     # bundle never has to. Not a "session-guarded" service in the

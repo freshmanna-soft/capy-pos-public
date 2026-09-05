@@ -48,6 +48,7 @@ locals {
   session_guarded_services = { for name, service in var.services : name => service if service.needs_session_secret }
   cloudant_services        = { for name, service in var.services : name => service if service.needs_cloudant }
   appid_secret_services    = { for name, service in var.services : name => service if service.needs_appid_secret }
+  internal_secret_services = { for name, service in var.services : name => service if service.needs_internal_secret }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
   # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses. Empty until
@@ -174,6 +175,30 @@ resource "ibm_code_engine_secret" "session_jwt" {
   }
 }
 
+# The internal service-to-service secret, one for the whole project — same
+# shape as session_jwt above, for the same reason: pos-api's /internal/roles
+# route and the two proxies calling it all need to agree on one value, so a
+# per-app secret would mean a caller that mints the header and a callee that
+# rejects it.
+resource "ibm_code_engine_secret" "internal_secret" {
+  count = length(local.internal_secret_services) > 0 ? 1 : 0
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "internal-api-secret"
+  format     = "generic"
+
+  data = {
+    INTERNAL_API_SECRET = var.internal_api_secret
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(var.internal_api_secret) > 0
+      error_message = "Internal service-to-service calls need TF_VAR_internal_api_secret (generate with openssl rand -hex 32)."
+    }
+  }
+}
+
 # One shared Cloudant instance for the estate, same pattern as the one CR namespace
 # and one Code Engine project above: pos-api is the only consumer today, but a
 # database is provisioned once, not per-app. The dedicated `ibm_cloudant` resource
@@ -206,6 +231,16 @@ resource "ibm_cloudant_database" "products" {
 
 resource "ibm_cloudant_database" "transactions" {
   db           = "transactions"
+  instance_crn = ibm_cloudant.store.crn
+}
+
+# Phase 5 RBAC centralization: one document holding every role's permission
+# set, replacing the three hand-copied ROLE_PERMISSIONS tables in
+# pos-api/session-auth.ts and the two proxies' session-guard.ts. Name matches
+# pos-api's own CLOUDANT_ROLES_DB default exactly, same convention as
+# products/transactions above.
+resource "ibm_cloudant_database" "roles" {
+  db           = "roles"
   instance_crn = ibm_cloudant.store.crn
 }
 
@@ -335,6 +370,17 @@ resource "ibm_code_engine_app" "apps" {
       name      = "APPID_MANAGEMENT_APIKEY"
       key       = "APPID_MANAGEMENT_APIKEY"
       reference = ibm_code_engine_secret.appid_secret[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_internal_secret ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "INTERNAL_API_SECRET"
+      key       = "INTERNAL_API_SECRET"
+      reference = ibm_code_engine_secret.internal_secret[0].name
     }
   }
 
