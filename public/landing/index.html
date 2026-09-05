@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capy POS</title>
+<meta name="description" content="Landing page for Capy POS, the friendly point-of-sale for small businesses, built by Freshmanna Soft.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦫</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800;900&family=Poppins:ital,wght@0,400;0,500;0,600;1,500&display=swap" rel="stylesheet">
+
+<style>
+  /* ---------------------------------------------------------------------
+     Tokens
+  --------------------------------------------------------------------- */
+  :root {
+    --cream:        #F7F2EC;
+    --cream-raised: #FDFBF8;
+    --paper-line:   #E8DFD3;
+    --moss:         #3E4C3F;
+    --moss-soft:    #6B7D6B;
+    --coral:        #E6A594;
+    --coral-deep:   #C97B67;
+    --tan:          #D2A679;
+    --cocoa:        #3B2F25;
+    --ink:          #2B241E;
+    --ink-soft:     #6B5F53;
+
+    --provenance-navy: #1E2A38;
+    --provenance-blue: #3D5A80;
+    --provenance-gold: #E8C98A;
+    --provenance-paper: #F7F7F4;
+
+    --bg:          var(--cream);
+    --surface:     var(--cream-raised);
+    --border:      var(--paper-line);
+    --text:        var(--ink);
+    --text-soft:   var(--ink-soft);
+    --text-strong: var(--cocoa);
+    --accent:      var(--coral-deep);
+    --accent-soft: var(--coral);
+    --brand:       var(--moss);
+    --brand-soft:  var(--moss-soft);
+    --highlight:   var(--tan);
+    --shadow:      rgba(59, 47, 37, 0.10);
+
+    --font-display: "Nunito", ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+    --font-body:    "Poppins", "Segoe UI", system-ui, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:          #1B211C;
+      --surface:     #232B24;
+      --border:      #384038;
+      --text:        #EFE9DF;
+      --text-soft:   #B9AF9F;
+      --text-strong: #FBF5EC;
+      --accent:      #F0B39E;
+      --accent-soft: #E6A594;
+      --brand:       #9AB09B;
+      --brand-soft:  #7C9280;
+      --highlight:   #D2A679;
+      --shadow:      rgba(0, 0, 0, 0.35);
+      --provenance-paper: #10151C;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:          #1B211C;
+    --surface:     #232B24;
+    --border:      #384038;
+    --text:        #EFE9DF;
+    --text-soft:   #B9AF9F;
+    --text-strong: #FBF5EC;
+    --accent:      #F0B39E;
+    --accent-soft: #E6A594;
+    --brand:       #9AB09B;
+    --brand-soft:  #7C9280;
+    --highlight:   #D2A679;
+    --shadow:      rgba(0, 0, 0, 0.35);
+    --provenance-paper: #10151C;
+  }
+
+  /* ---------------------------------------------------------------------
+     Reset & base
+  --------------------------------------------------------------------- */
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  img, svg { display: block; max-width: 100%; }
+  a { color: inherit; }
+  h1, h2, h3 { font-family: var(--font-display); color: var(--text-strong); margin: 0; text-wrap: balance; }
+  p { margin: 0; }
+  button { font-family: inherit; cursor: pointer; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+  .wrap {
+    max-width: 1120px;
+    margin-inline: auto;
+    padding-inline: 24px;
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--brand-soft);
+  }
+
+  /* ---------------------------------------------------------------------
+     Header
+  --------------------------------------------------------------------- */
+  header.site {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding-block: 14px;
+  }
+  .brandmark {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+  }
+  .brandmark span {
+    font-family: var(--font-display);
+    font-weight: 900;
+    font-size: 20px;
+    color: var(--text-strong);
+    letter-spacing: -0.01em;
+  }
+  .navlinks {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    font-size: 14.5px;
+    font-weight: 500;
+    color: var(--text-soft);
+  }
+  .navlinks a { text-decoration: none; transition: color 0.15s; }
+  .navlinks a:hover { color: var(--text-strong); }
+  .navlinks .cta-nav { display: none; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 22px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 14.5px;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+    box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+  .btn-primary:hover { box-shadow: 0 8px 22px -6px color-mix(in srgb, var(--accent) 80%, transparent); }
+  .btn-ghost {
+    background: transparent;
+    border-color: var(--border);
+    color: var(--text-strong);
+  }
+  .btn-ghost:hover { background: var(--surface); }
+
+  @media (min-width: 720px) {
+    .navlinks { display: flex; }
+    .navlinks .cta-nav { display: inline-flex; }
+  }
+  @media (max-width: 719px) {
+    .navlinks .navlink { display: none; }
+  }
+
+  /* ---------------------------------------------------------------------
+     Capybara mark — a two-tone ring device around a minimal muzzle glyph
+  --------------------------------------------------------------------- */
+  .mark {
+    --size: 40px;
+    width: var(--size);
+    height: var(--size);
+    flex-shrink: 0;
+  }
+  .mark .ring-a { stroke: var(--brand-soft); }
+  .mark .ring-b { stroke: var(--accent-soft); }
+  .mark .face   { fill: var(--tan); }
+  .mark .snout  { fill: var(--cocoa); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .mark .face { fill: #B58A5C; }
+  }
+  :root[data-theme="dark"] .mark .face { fill: #B58A5C; }
+
+  .mark-blink { animation: blink 6.5s ease-in-out infinite; transform-origin: center; }
+  @keyframes blink {
+    0%, 92%, 100% { transform: scaleY(1); }
+    95% { transform: scaleY(0.15); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mark-blink { animation: none; }
+  }
+
+  /* ---------------------------------------------------------------------
+     Hero
+  --------------------------------------------------------------------- */
+  .hero {
+    padding-block: 64px 88px;
+    display: grid;
+    gap: 56px;
+  }
+  .hero-copy { max-width: 620px; }
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px 6px 8px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-soft);
+    margin-bottom: 22px;
+  }
+  .hero-badge img { width: 18px; height: 18px; border-radius: 50%; }
+  .hero h1 {
+    font-size: clamp(2.5rem, 5vw, 3.4rem);
+    font-weight: 900;
+    line-height: 1.06;
+    letter-spacing: -0.015em;
+  }
+  .hero h1 em {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .hero .sub {
+    margin-top: 20px;
+    font-size: 18px;
+    color: var(--text-soft);
+    max-width: 46ch;
+  }
+  .hero-ctas { display: flex; gap: 14px; margin-top: 32px; flex-wrap: wrap; }
+  .hero-note {
+    margin-top: 18px;
+    font-size: 13.5px;
+    color: var(--text-soft);
+  }
+
+  /* Receipt-print reveal, once, on load */
+  .hero h1 {
+    clip-path: inset(0 0 0 0);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .hero h1 {
+      animation: print-reveal 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    .hero .sub, .hero-ctas, .hero-note {
+      animation: fade-up 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+      animation-delay: 480ms;
+    }
+  }
+  @keyframes print-reveal {
+    from { clip-path: inset(0 0 100% 0); opacity: 0.4; }
+    to   { clip-path: inset(0 0 0% 0); opacity: 1; }
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ---------------------------------------------------------------------
+     Dashboard mockup
+  --------------------------------------------------------------------- */
+  .mockup-stage {
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    gap: 0;
+    position: relative;
+  }
+  .laptop {
+    width: min(100%, 560px);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: 0 30px 60px -24px var(--shadow), 0 2px 6px var(--shadow);
+    overflow: hidden;
+  }
+  .laptop-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .laptop-bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+  .laptop-bar .dot:nth-child(1) { background: var(--coral); }
+  .laptop-bar .dot:nth-child(2) { background: var(--tan); }
+  .laptop-bar .dot:nth-child(3) { background: var(--moss-soft); }
+  .laptop-title {
+    margin-left: 8px;
+    font-size: 12px;
+    color: var(--text-soft);
+    font-weight: 500;
+  }
+  .dash {
+    padding: 18px;
+    display: grid;
+    gap: 14px;
+    background: var(--bg);
+  }
+  .dash-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+  .stat .k {
+    font-size: 11.5px;
+    color: var(--text-soft);
+    font-weight: 500;
+  }
+  .stat .v {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text-strong);
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+  }
+  .dash-row { display: grid; grid-template-columns: 1.3fr 1fr; gap: 10px; }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .panel .k {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+    margin-bottom: 10px;
+  }
+  .chart {
+    height: 64px;
+    display: flex;
+    align-items: flex-end;
+    gap: 5px;
+  }
+  .chart i {
+    flex: 1;
+    background: linear-gradient(to top, var(--accent-soft), color-mix(in srgb, var(--accent-soft) 40%, transparent));
+    border-radius: 3px 3px 0 0;
+  }
+  .toplist { display: grid; gap: 8px; }
+  .toplist div {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12.5px;
+    color: var(--text);
+  }
+  .toplist span:last-child { color: var(--text-soft); font-variant-numeric: tabular-nums; }
+
+  .phone {
+    width: 140px;
+    margin-left: -34px;
+    margin-bottom: -14px;
+    background: var(--surface);
+    border: 6px solid var(--cocoa);
+    border-radius: 26px;
+    box-shadow: 0 24px 50px -18px var(--shadow);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .phone { border-color: #0F130F; }
+  }
+  :root[data-theme="dark"] .phone { border-color: #0F130F; }
+  .phone-screen { padding: 12px 10px; background: var(--bg); }
+  .phone-greet {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-size: 10.5px;
+    color: var(--text-soft);
+    margin-bottom: 10px;
+  }
+  .phone-actions { display: grid; gap: 6px; }
+  .phone-actions button {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-strong);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 8px;
+  }
+  .phone-actions button.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; }
+    .phone { display: none; }
+  }
+  @media (min-width: 901px) {
+    .hero { grid-template-columns: 1fr 1fr; align-items: center; }
+    .mockup-stage { justify-content: flex-start; }
+  }
+
+  /* ---------------------------------------------------------------------
+     Sections generic
+  --------------------------------------------------------------------- */
+  section { padding-block: 76px; }
+  .section-head { max-width: 620px; margin-bottom: 44px; }
+  .section-head h2 { font-size: clamp(1.7rem, 3vw, 2.15rem); margin-top: 10px; }
+  .section-head p { color: var(--text-soft); margin-top: 12px; font-size: 16.5px; }
+
+  /* ---------------------------------------------------------------------
+     Feature grid
+  --------------------------------------------------------------------- */
+  .grid-features {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    overflow: hidden;
+  }
+  .feature {
+    background: var(--surface);
+    padding: 26px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .feature .icn {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--brand-soft) 16%, transparent);
+    color: var(--brand);
+  }
+  .feature h3 { font-size: 16px; font-weight: 800; }
+  .feature p { font-size: 14px; color: var(--text-soft); line-height: 1.55; }
+
+  @media (max-width: 980px) { .grid-features { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .grid-features { grid-template-columns: 1fr; } }
+
+  /* ---------------------------------------------------------------------
+     Clerk spotlight
+  --------------------------------------------------------------------- */
+  .spotlight {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    padding: 44px;
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 40px;
+    align-items: center;
+  }
+  .spotlight .eyebrow { color: var(--accent); }
+  .spotlight h2 { font-size: clamp(1.5rem, 2.6vw, 1.9rem); margin-top: 10px; }
+  .spotlight p.lede { margin-top: 14px; color: var(--text-soft); font-size: 16px; max-width: 42ch; }
+  .spotlight ul { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 10px; }
+  .spotlight li { display: flex; gap: 10px; font-size: 14.5px; color: var(--text); }
+  .spotlight li svg { flex-shrink: 0; margin-top: 3px; color: var(--brand); }
+
+  .scanner {
+    aspect-ratio: 4/3;
+    background: var(--cocoa);
+    border-radius: 16px;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .scanner .frame {
+    width: 62%;
+    aspect-ratio: 1;
+    border: 3px solid var(--accent-soft);
+    border-radius: 14px;
+    position: relative;
+  }
+  .scanner .frame::before, .scanner .frame::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border: 3px solid transparent;
+  }
+  .scanner .capy {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 46px;
+  }
+  .scanner .tag {
+    position: absolute;
+    bottom: 14px;
+    left: 14px;
+    right: 14px;
+    background: color-mix(in srgb, var(--cream) 92%, transparent);
+    color: var(--cocoa);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+  }
+  .scanner .tag span:last-child { color: var(--accent-deep); font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 800px) {
+    .spotlight { grid-template-columns: 1fr; padding: 30px; }
+  }
+
+  /* ---------------------------------------------------------------------
+     Provenance / brand story band
+  --------------------------------------------------------------------- */
+  .provenance {
+    background: var(--provenance-navy);
+    color: var(--provenance-paper);
+    padding-block: 64px;
+  }
+  .provenance .wrap {
+    display: grid;
+    gap: 40px;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+  }
+  .provenance h2 {
+    color: var(--provenance-paper);
+    font-size: clamp(1.5rem, 2.6vw, 1.9rem);
+  }
+  .provenance p {
+    color: color-mix(in srgb, var(--provenance-paper) 78%, transparent);
+    margin-top: 14px;
+    font-size: 15.5px;
+    max-width: 44ch;
+  }
+  .provenance .eyebrow { color: var(--provenance-gold); }
+  .chain {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid color-mix(in srgb, var(--provenance-paper) 22%, transparent);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .chain-step {
+    flex: 1;
+    padding: 18px 16px;
+    border-right: 1px solid color-mix(in srgb, var(--provenance-paper) 22%, transparent);
+  }
+  .chain-step:last-child { border-right: none; }
+  .chain-step .role {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--provenance-gold);
+    font-weight: 600;
+  }
+  .chain-step .name {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 15px;
+    margin-top: 6px;
+    color: var(--provenance-paper);
+  }
+  .chain-step .role-desc {
+    font-size: 12.5px;
+    color: color-mix(in srgb, var(--provenance-paper) 68%, transparent);
+    margin-top: 4px;
+  }
+  @media (max-width: 800px) {
+    .provenance .wrap { grid-template-columns: 1fr; }
+    .chain { flex-direction: column; }
+    .chain-step { border-right: none; border-bottom: 1px solid color-mix(in srgb, var(--provenance-paper) 22%, transparent); }
+    .chain-step:last-child { border-bottom: none; }
+  }
+
+  /* ---------------------------------------------------------------------
+     Pilot / case study — receipt card
+  --------------------------------------------------------------------- */
+  .pilot { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+  .pilot-copy .quote {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.3rem, 2.2vw, 1.6rem);
+    line-height: 1.4;
+    color: var(--text-strong);
+    margin-top: 14px;
+  }
+  .pilot-copy .attrib {
+    margin-top: 18px;
+    font-size: 14px;
+    color: var(--text-soft);
+  }
+  .pilot-copy .attrib strong { color: var(--text-strong); }
+
+  .receipt {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 26px 24px;
+    font-family: "Poppins", monospace;
+    font-size: 13px;
+    color: var(--text);
+    box-shadow: 0 20px 40px -20px var(--shadow);
+    position: relative;
+    width: 100%;
+    max-width: 340px;
+    margin-inline: auto;
+    justify-self: center;
+  }
+  .receipt::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: -9px;
+    height: 18px;
+    background: repeating-linear-gradient(
+      -45deg, transparent 0 6px, var(--bg) 6px 12px
+    ), var(--surface);
+    -webkit-mask: repeating-linear-gradient(-45deg, #000 0 9px, transparent 9px 18px);
+            mask: repeating-linear-gradient(-45deg, #000 0 9px, transparent 9px 18px);
+  }
+  .receipt .rtitle { font-weight: 700; letter-spacing: 0.06em; text-align: center; }
+  .receipt .rsub { text-align: center; color: var(--text-soft); font-size: 11px; margin-top: 2px; }
+  .receipt hr { border: none; border-top: 1px dashed var(--border); margin: 14px 0; }
+  .receipt .rline { display: flex; justify-content: space-between; padding: 3px 0; }
+  .receipt .rline span:last-child { font-variant-numeric: tabular-nums; }
+  .receipt .rtotal { font-weight: 700; font-size: 14px; }
+
+  @media (max-width: 800px) { .pilot { grid-template-columns: 1fr; } }
+
+  /* ---------------------------------------------------------------------
+     Final CTA
+  --------------------------------------------------------------------- */
+  .final-cta {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    padding: 56px 44px;
+    text-align: center;
+    max-width: 720px;
+    margin-inline: auto;
+  }
+  .final-cta h2 { font-size: clamp(1.6rem, 3vw, 2.1rem); }
+  .final-cta p { margin-top: 14px; color: var(--text-soft); font-size: 16px; }
+  .final-cta .hero-ctas { justify-content: center; }
+
+  /* ---------------------------------------------------------------------
+     Footer
+  --------------------------------------------------------------------- */
+  footer.site {
+    border-top: 1px solid var(--border);
+    padding-block: 32px;
+  }
+  footer.site .wrap {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--text-soft);
+  }
+  footer.site .flinks { display: flex; gap: 20px; }
+  footer.site a { text-decoration: none; }
+  footer.site a:hover { color: var(--text-strong); }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap nav">
+    <a class="brandmark" href="#top" aria-label="Capy POS home">
+      <svg class="mark" viewBox="0 0 40 40" aria-hidden="true">
+        <circle class="ring-a" cx="20" cy="20" r="17.5" fill="none" stroke-width="2.4" stroke-dasharray="78 32" stroke-linecap="round" transform="rotate(-40 20 20)"/>
+        <circle class="ring-b" cx="20" cy="20" r="17.5" fill="none" stroke-width="2.4" stroke-dasharray="46 64" stroke-linecap="round" transform="rotate(150 20 20)"/>
+        <g class="mark-blink">
+          <ellipse class="face" cx="21" cy="18" rx="10.5" ry="9.5"/>
+          <path class="snout" d="M9.5 19c0-3.6 3-6.6 7-6.9c-.6 2-.6 5 0 7.4c-3.6.6-7-.3-7-.5Z"/>
+          <path d="M12 19.3c2.4.9 5 .9 6.6-.2" fill="none" stroke="var(--cocoa)" stroke-width="1.4" stroke-linecap="round"/>
+        </g>
+      </svg>
+      <span>Capy POS</span>
+    </a>
+    <nav class="navlinks">
+      <a class="navlink" href="#features">Features</a>
+      <a class="navlink" href="#clerk">AI Clerk</a>
+      <a class="navlink" href="#pilot">Who's using it</a>
+      <a class="cta-nav btn btn-primary" href="#get-started">Start free</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero wrap">
+    <div class="hero-copy">
+      <span class="hero-badge">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 16 L12 4 L20 16" stroke="var(--provenance-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16h16" stroke="var(--provenance-blue)" stroke-width="2" stroke-linecap="round"/></svg>
+        Built by Freshmanna&nbsp;Soft
+      </span>
+      <h1>The friendly POS for <em>modern small businesses.</em></h1>
+      <p class="sub">Ring up sales, track stock, and know your regulars — from one calm dashboard your whole team can actually use. No terminal fees, no eighteen-tab setup.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" id="get-started" href="#pilot">Start free</a>
+        <a class="btn btn-ghost" href="#clerk">See the AI Clerk</a>
+      </div>
+      <p class="hero-note">Free for one till. No card required.</p>
+    </div>
+
+    <div class="mockup-stage">
+      <div class="laptop">
+        <div class="laptop-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="laptop-title">Capy POS — Dashboard</span>
+        </div>
+        <div class="dash">
+          <div class="dash-stats">
+            <div class="stat"><div class="k">Today's sales</div><div class="v">$1,248</div></div>
+            <div class="stat"><div class="k">Transactions</div><div class="v">28</div></div>
+            <div class="stat"><div class="k">Items sold</div><div class="v">156</div></div>
+          </div>
+          <div class="dash-row">
+            <div class="panel">
+              <div class="k">Sales overview</div>
+              <div class="chart" aria-hidden="true">
+                <i style="height:38%"></i><i style="height:52%"></i><i style="height:44%"></i>
+                <i style="height:70%"></i><i style="height:61%"></i><i style="height:84%"></i>
+                <i style="height:66%"></i><i style="height:92%"></i>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="k">Top products</div>
+              <div class="toplist">
+                <div><span>Kit Kat</span><span>46</span></div>
+                <div><span>Takis</span><span>32</span></div>
+                <div><span>Cheetos</span><span>28</span></div>
+                <div><span>Snickers</span><span>21</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="phone" aria-hidden="true">
+        <div class="phone-screen">
+          <div class="phone-greet">Hi there 👋 What would you like to do?</div>
+          <div class="phone-actions">
+            <button class="on">New sale</button>
+            <button>Products</button>
+            <button>Inventory</button>
+            <button>Reports</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="features">
+    <div class="section-head">
+      <span class="eyebrow">Everything on the counter</span>
+      <h2>One app, not eight subscriptions.</h2>
+      <p>Capy POS covers the till, the back room, and the regulars who keep coming back — without a separate login for each.</p>
+    </div>
+    <div class="grid-features">
+      <div class="feature">
+        <span class="icn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6h15l-1.5 9h-12z"/><circle cx="9" cy="20" r="1.4"/><circle cx="17" cy="20" r="1.4"/><path d="M3 3h2l1 3"/></svg></span>
+        <h3>Sales</h3>
+        <p>Search, scan, or tap to build a cart, then take cash or card and print the receipt.</p>
+      </div>
+      <div class="feature">
+        <span class="icn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg></span>
+        <h3>Inventory</h3>
+        <p>Stock counts update the moment something sells, with a nudge before anything runs out.</p>
+      </div>
+      <div class="feature">
+        <span class="icn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20c0-3 3-5 6-5s6 2 6 5"/><circle cx="10" cy="8" r="4"/><path d="M17 9c1.7.4 3 1.6 3 3.2"/></svg></span>
+        <h3>Customers</h3>
+        <p>Keep a record of regulars and reward them with loyalty points that add up automatically.</p>
+      </div>
+      <div class="feature">
+        <span class="icn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9M11 19V5M18 19v-7"/><path d="M3 19h18"/></svg></span>
+        <h3>Reports</h3>
+        <p>Every transaction, filed and searchable, so end-of-day math is a glance, not a spreadsheet.</p>
+      </div>
+      <div class="feature">
+        <span class="icn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><path d="M7 15h4"/></svg></span>
+        <h3>Payments</h3>
+        <p>Cash and card land in the same ledger, so nothing gets tallied twice or forgotten.</p>
+      </div>
+      <div class="feature">
+        <span class="icn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-6 4 3 5-8 4 5"/></svg></span>
+        <h3>Analytics</h3>
+        <p>See what's actually moving — by product, by day, by shift — without exporting anything.</p>
+      </div>
+      <div class="feature">
+        <span class="icn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>
+        <h3>Products</h3>
+        <p>Add a new item once — name, price, category — and it's ready at every till in the shop.</p>
+      </div>
+      <div class="feature">
+        <span class="icn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h0A1.7 1.7 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55h0a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v0a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z"/></svg></span>
+        <h3>Roles &amp; staff</h3>
+        <p>Owners, managers, and cashiers each see exactly what their shift needs — nothing more.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="clerk">
+    <div class="spotlight">
+      <div>
+        <span class="eyebrow">The part people ask about</span>
+        <h2>Point a camera at it. Capy rings it up.</h2>
+        <p class="lede">The AI Clerk watches the counter, recognizes what's in frame, and adds it to the sale — for the stretch of a shift when both your hands are full.</p>
+        <ul>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>No barcode hunting — it recognizes items by sight.</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Unsure items get held for a human glance, never guessed.</li>
+          <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Same cart as the regular till — pick up checkout either way.</li>
+        </ul>
+      </div>
+      <div class="scanner">
+        <div class="capy">🦫</div>
+        <div class="frame"></div>
+        <div class="tag"><span>Kit Kat, 45g</span><span>$1.75</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="provenance">
+    <div class="wrap">
+      <div>
+        <span class="eyebrow">Where Capy POS comes from</span>
+        <h2>Freshmanna Soft builds tools that show up exactly when a shop needs them.</h2>
+        <p>Capy POS is the first tool out of the shop — built, tested, and used behind a real counter before it ever left the building.</p>
+      </div>
+      <div class="chain">
+        <div class="chain-step">
+          <div class="role">The provider</div>
+          <div class="name">Freshmanna Soft</div>
+          <div class="role-desc">Builds the tools.</div>
+        </div>
+        <div class="chain-step">
+          <div class="role">The solution</div>
+          <div class="name">Capy POS</div>
+          <div class="role-desc">Makes it easy.</div>
+        </div>
+        <div class="chain-step">
+          <div class="role">The real world</div>
+          <div class="name">Nuclear Store</div>
+          <div class="role-desc">Proves it works.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="pilot">
+    <div class="pilot">
+      <div class="pilot-copy">
+        <span class="eyebrow">First on the floor</span>
+        <p class="quote">"Small table, big cravings — and now the till keeps up with both."</p>
+        <p class="attrib"><strong>Nuclear Store</strong> — candies &amp; snacks, running Capy POS at the counter every day.</p>
+      </div>
+      <div class="receipt">
+        <div class="rtitle">NUCLEAR STORE</div>
+        <div class="rsub">Small table. Big cravings.</div>
+        <hr>
+        <div class="rline"><span>Kit Kat ×2</span><span>$3.50</span></div>
+        <div class="rline"><span>Takis</span><span>$2.25</span></div>
+        <div class="rline"><span>Cheetos</span><span>$2.00</span></div>
+        <hr>
+        <div class="rline rtotal"><span>Total</span><span>$7.75</span></div>
+        <div class="rline"><span>Rung up by</span><span>Capy POS</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="final-cta">
+      <h2>Your counter's next shift starts here.</h2>
+      <p>Set up your catalogue in minutes and take your first sale today.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="#top">Start free</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>© 2026 Freshmanna Soft. Capy POS is built with care, one counter at a time.</span>
+    <span class="flinks">
+      <a href="#features">Features</a>
+      <a href="#clerk">AI Clerk</a>
+      <a href="#pilot">Pilot</a>
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>
