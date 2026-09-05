@@ -265,8 +265,14 @@ variable "services" {
     # needs_appid_verification is not yet load-bearing: environment.appId.enabled
     # is false everywhere, so no RS256 token reaches this service in practice.
     # It's set now so that flag flip needs no accompanying Terraform change.
+    #
+    # image_tag pinned here for the first time (previously unpinned, riding
+    # the global default): v3 ships Phase 5's roles-fetch-and-cache logic
+    # (#256) — pinning now so this service's own future rebuilds don't force
+    # capy-clerk-agent-relay/capy-pos-api to redeploy too, and vice versa.
     capy-vision-proxy = {
       image_port               = 8787
+      image_tag                = "v3"
       needs_model_key          = true
       needs_session_secret     = true
       needs_appid_verification = true
@@ -276,8 +282,13 @@ variable "services" {
       pins_cors_origins     = true
     }
     # infra/clerk-agent-relay — one agent hop, holding tools that change a cart.
+    #
+    # image_tag pinned for the same reason capy-vision-proxy's own pin is:
+    # v3 ships the identical Phase 5 roles-fetch logic (#256), since the two
+    # services' session-guard.ts stay byte-identical.
     capy-clerk-agent-relay = {
       image_port               = 8789
+      image_tag                = "v3"
       needs_model_key          = true
       needs_session_secret     = true
       needs_appid_verification = true
@@ -289,8 +300,13 @@ variable "services" {
     # ('Access-Control-Allow-Origin: *' in its own server.ts) so it does not set
     # `pins_cors_origins` and needs no `frontend_origins` — a genuine one-pass,
     # deploy-this-alone-first service.
+    #
+    # image_tag pinned for the same reason as its two siblings above: v3
+    # ships the GET /internal/roles route (#255) and reading the shared
+    # roles document in-process (#257).
     capy-pos-api = {
       image_port               = 8790
+      image_tag                = "v3"
       needs_session_secret     = true
       needs_appid_verification = true
       needs_cloudant           = true
