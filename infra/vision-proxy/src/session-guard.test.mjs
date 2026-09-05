@@ -293,10 +293,15 @@ describe('the boundary is wired into the process that spends the key', () => {
     // vanishing under a *running* process is a 503 and not a 401.
     assert.match(server, /SESSION_JWT_SECRET/);
     const exits = server.match(/process\.exit\(1\)/g) ?? [];
-    // Missing secret, missing origins, and (added alongside App ID verification)
-    // a *partial* set of APPID_REGION/APPID_TENANT_ID/APPID_CLIENT_ID — three
+    // Missing secret, missing origins, a *partial* set of
+    // APPID_REGION/APPID_TENANT_ID/APPID_CLIENT_ID, and (Phase 5) a *partial*
+    // set of POS_API_INTERNAL_ROLES_URL/INTERNAL_API_SECRET — four
     // "refuse to guess" exits, not two.
-    assert.equal(exits.length, 3, 'expected the missing-secret, missing-origins and partial-App-ID paths to all exit');
+    assert.equal(
+      exits.length,
+      4,
+      'expected the missing-secret, missing-origins, partial-App-ID and partial-roles-source paths to all exit'
+    );
   });
 });
 
@@ -732,6 +737,143 @@ describe('verifyAppIdAccessToken', () => {
         assert.deepEqual(claims.permissions, []);
       });
     });
+  });
+});
+
+describe('shared roles document (Phase 5)', () => {
+  // `rolesCache` is module-level, exactly like `jwksCache`, and persists across every
+  // test in this file — but unlike the JWKS cache (keyed by `kid`, so a fresh kid per
+  // test guarantees a miss regardless of what earlier tests cached) there is nothing
+  // to key a roles fetch on: it is one document, one cache slot. So these four cases
+  // are written as one deliberate sequence, each depending on the module state the
+  // previous one left behind, in the order they run — not four independent tests that
+  // happen to share a file. `nowSeconds` still advances between them so each is
+  // unambiguous about which side of the 5-minute TTL it lands on.
+  const ROLES_CONFIG = { ...APPID_CONFIG, rolesSource: { url: 'https://pos-api.internal/internal/roles', secret: 's' } };
+
+  /** Answers the JWKS endpoint for real; routes anything else to `rolesResponder`. */
+  async function withRolesFetch(keyPair, kid, rolesResponder, run) {
+    const jwk = { kid, ...keyPair.publicKey.export({ format: 'jwk' }) };
+    const calls = { roles: 0 };
+    const original = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/publickeys')) {
+        return { ok: true, status: 200, json: async () => ({ keys: [jwk] }) };
+      }
+      calls.roles++;
+      return rolesResponder();
+    };
+    try {
+      return await run(calls);
+    } finally {
+      globalThis.fetch = original;
+    }
+  }
+
+  it('1. falls back to the local ROLE_PERMISSIONS table when the fetch fails and nothing has ever been cached', async () => {
+    const keyPair = generateRsaKeyPair();
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      await withRolesFetch(
+        keyPair,
+        'kid-roles-1',
+        () => ({ ok: false, status: 500, json: async () => ({}) }),
+        async () => {
+          const token = mintAppId({ scope: 'openid operator', exp: NOW + 1_000_000 + 3600 }, { kid: 'kid-roles-1', keyPair });
+          const claims = await verifyAppIdAccessToken(token, ROLES_CONFIG, NOW + 1_000_000);
+          // The local fallback table's own value for 'operator' — proves the failed
+          // fetch degraded to it rather than granting nothing.
+          assert.deepEqual(claims.permissions, ['sale:process']);
+        }
+      );
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  it('2. uses the fetched document instead of the local fallback once a fetch succeeds', async () => {
+    const keyPair = generateRsaKeyPair();
+    await withRolesFetch(
+      keyPair,
+      'kid-roles-2',
+      () => ({ ok: true, status: 200, json: async () => ({ roles: { operator: ['custom:permission'] } }) }),
+      async (calls) => {
+        const token = mintAppId({ scope: 'openid operator', exp: NOW + 2_000_100 + 3600 }, { kid: 'kid-roles-2', keyPair });
+        const claims = await verifyAppIdAccessToken(token, ROLES_CONFIG, NOW + 2_000_000);
+        // Not the local fallback's 'sale:process' — this can only be the fetched doc.
+        assert.deepEqual(claims.permissions, ['custom:permission']);
+        assert.equal(calls.roles, 1);
+      }
+    );
+  });
+
+  it('3. keeps serving the cached document within the TTL, without refetching', async () => {
+    const keyPair = generateRsaKeyPair();
+    await withRolesFetch(
+      keyPair,
+      'kid-roles-3',
+      () => {
+        throw new Error('must not be called — the cache from test 2 is still fresh');
+      },
+      async (calls) => {
+        // 60s after test 2's fetch — well inside the 5-minute TTL.
+        const token = mintAppId(
+          { scope: 'openid operator', exp: NOW + 2_000_060 + 3600 },
+          { kid: 'kid-roles-3', keyPair }
+        );
+        const claims = await verifyAppIdAccessToken(token, ROLES_CONFIG, NOW + 2_000_000 + 60);
+        assert.deepEqual(claims.permissions, ['custom:permission']);
+        assert.equal(calls.roles, 0, 'the roles endpoint should not have been hit at all');
+      }
+    );
+  });
+
+  it('4. keeps serving the last good cache, not the local fallback, when a post-TTL refetch fails', async () => {
+    const keyPair = generateRsaKeyPair();
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      await withRolesFetch(
+        keyPair,
+        'kid-roles-4',
+        () => ({ ok: false, status: 503, json: async () => ({}) }),
+        async (calls) => {
+          // 400s after test 2's fetch — past the 5-minute TTL, so this forces a
+          // refetch attempt, which is made to fail here.
+          const token = mintAppId(
+            { scope: 'openid operator', exp: NOW + 2_000_400 + 3600 },
+            { kid: 'kid-roles-4', keyPair }
+          );
+          const claims = await verifyAppIdAccessToken(token, ROLES_CONFIG, NOW + 2_000_000 + 400);
+          // Test 2's cached document, not ROLE_PERMISSIONS' 'sale:process' and not empty.
+          assert.deepEqual(claims.permissions, ['custom:permission']);
+          assert.equal(calls.roles, 1, 'a stale cache should still trigger exactly one refetch attempt');
+        }
+      );
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  it('never touches the roles endpoint at all when rolesSource is not configured', async () => {
+    const keyPair = generateRsaKeyPair();
+    await withRolesFetch(
+      keyPair,
+      'kid-roles-unconfigured',
+      () => {
+        throw new Error('must not be called — APPID_CONFIG has no rolesSource');
+      },
+      async (calls) => {
+        const token = mintAppId(
+          { scope: 'openid operator', exp: NOW + 3_000_000 + 3600 },
+          { kid: 'kid-roles-unconfigured', keyPair }
+        );
+        const claims = await verifyAppIdAccessToken(token, APPID_CONFIG, NOW + 3_000_000);
+        assert.deepEqual(claims.permissions, ['sale:process']);
+        assert.equal(calls.roles, 0);
+      }
+    );
   });
 });
 

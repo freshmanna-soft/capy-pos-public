@@ -55,6 +55,17 @@
  * not 503 — when this deployment has not been given credentials for it; only
  * "neither method configured at all" is a 503.
  *
+ * ## Phase 5: the shared roles document
+ *
+ * `resolveAppIdScopes` no longer trusts only its own `ROLE_PERMISSIONS` table —
+ * when `AppIdVerificationConfig.rolesSource` is set, it fetches (and caches,
+ * same shape as the JWKS cache below) `pos-api`'s `GET /internal/roles`
+ * instead: the single document `pos-api`, `vision-proxy`'s copy of this file,
+ * and `clerk-agent-relay`'s copy now all resolve from, rather than three
+ * hand-copied tables that could silently drift from each other. The literal
+ * table stays as the fallback for an unconfigured deployment or a fetch that
+ * has never once succeeded — see its own doc comment.
+ *
  * ## Why a copy rather than an import
  *
  * This file exists twice. `infra/vision-proxy/src/session-guard.ts` and
@@ -113,12 +124,25 @@ export const Permission = {
 
 export type Permission = (typeof Permission)[keyof typeof Permission];
 
+/**
+ * Where and how to fetch the shared roles document (Phase 5, RBAC
+ * centralization) — `pos-api`'s `GET /internal/roles`, gated by the same
+ * `X-Internal-Secret` header that route checks. Omitted means: this
+ * deployment has not opted in, and `resolveAppIdScopes` below answers from
+ * its own literal `ROLE_PERMISSIONS` table, unchanged from before Phase 5.
+ */
+export interface RolesSourceConfig {
+  readonly url: string;
+  readonly secret: string;
+}
+
 /** What App ID's own token endpoint requires this proxy to know to verify one. */
 export interface AppIdVerificationConfig {
   readonly region: string;
   readonly tenantId: string;
   /** The staff application's client id — the token's `aud` must include this. */
   readonly audience: string;
+  readonly rolesSource?: RolesSourceConfig;
 }
 
 /**
@@ -349,7 +373,7 @@ export async function verifyAppIdAccessToken(
     return null;
   }
 
-  const { roles, permissions } = resolveAppIdScopes(payload['scope']);
+  const { roles, permissions } = await resolveAppIdScopes(payload['scope'], config, nowSeconds);
 
   return {
     operatorId,
@@ -377,14 +401,18 @@ function audienceMatches(aud: unknown, expected: string): boolean {
 /**
  * Map App ID's `scope` claim → this proxy's own permission set.
  *
- * Restricted to the one permission `Permission` above already copies — every
- * built-in role carries it, same as the doc comment at the top of this file already
- * says of `permission.constants.ts`'s hierarchy. Only resolves these three built-in
- * role names — a custom App ID scope beyond operator/manager/admin would need a
- * matching entry here, same limitation `AppIdAuthAdapter`'s own `Role.fromName()`
- * filtering already has client-side. `session-guard.test.mjs` pins this table so a
- * rename on the Angular side that is not mirrored here silently narrows or widens
- * what a role can do, rather than failing a test.
+ * Fallback content for `resolvedRolePermissions` below — this file's own literal
+ * table, unchanged from before Phase 5. It is no longer the source of truth
+ * (`pos-api`'s shared `roles` Cloudant document, fetched over `GET
+ * /internal/roles`, is) but it is still what this proxy answers with whenever
+ * that fetch has never once succeeded, or `rolesSource` is not configured at
+ * all — a network blip or an unfinished rollout must not lock out every
+ * RS256-authenticated caller. Restricted to the one permission `Permission`
+ * above already copies — every built-in role carries it, same as the doc
+ * comment at the top of this file already says of `permission.constants.ts`'s
+ * hierarchy. `session-guard.test.mjs` pins this table so a rename on the
+ * Angular side that is not mirrored here silently narrows or widens what a
+ * role can do, rather than failing a test.
  */
 const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> = {
   operator: [Permission.PROCESS_SALE],
@@ -392,13 +420,94 @@ const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> = {
   admin: [Permission.PROCESS_SALE],
 };
 
-function resolveAppIdScopes(rawScope: unknown): { roles: string[]; permissions: string[] } {
+/**
+ * How long a fetched roles document is trusted before the next resolution
+ * refetches. Roles change rarely — an admin edit through the new
+ * "Roles & Permissions" panel, not a per-request event — so a short TTL
+ * bounds staleness without spending a request on every token verified.
+ * Unlike JWKS's `kid`-keyed cache, there is no rotating identifier to key a
+ * "definitely stale, refetch now" decision off, so time is the signal here.
+ */
+const ROLES_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let rolesCache: { readonly data: Readonly<Record<string, readonly string[]>>; readonly fetchedAtMs: number } | null =
+  null;
+
+/**
+ * Resolve the current role → permission mapping: the shared document when
+ * `rolesSource` is configured and reachable, this file's own `ROLE_PERMISSIONS`
+ * otherwise. `nowMs` is a parameter for the same testability reason
+ * `nowSeconds` is threaded everywhere else in this file — no bare `Date.now()`.
+ */
+async function resolvedRolePermissions(
+  config: AppIdVerificationConfig,
+  nowMs: number
+): Promise<Readonly<Record<string, readonly string[]>>> {
+  if (!config.rolesSource) {
+    return ROLE_PERMISSIONS;
+  }
+  if (rolesCache !== null && nowMs - rolesCache.fetchedAtMs < ROLES_CACHE_TTL_MS) {
+    return rolesCache.data;
+  }
+
+  const fetched = await fetchRoles(config.rolesSource);
+  if (fetched === null) {
+    // A transient blip should not suddenly narrow every caller's permissions
+    // to nothing: keep serving whatever cache exists. Only a deployment that
+    // has *never once* fetched successfully falls all the way back to the
+    // literal table.
+    return rolesCache?.data ?? ROLE_PERMISSIONS;
+  }
+  rolesCache = { data: fetched, fetchedAtMs: nowMs };
+  return fetched;
+}
+
+/** `null` means the fetch itself failed — distinct from a successful fetch of an empty document. */
+async function fetchRoles(
+  source: RolesSourceConfig
+): Promise<Readonly<Record<string, readonly string[]>> | null> {
+  let response: Response;
+  try {
+    response = await fetch(source.url, { headers: { 'X-Internal-Secret': source.secret } });
+  } catch (error) {
+    console.error('[session-guard] shared roles fetch failed', error);
+    return null;
+  }
+  if (!response.ok) {
+    console.error(`[session-guard] shared roles fetch returned ${response.status}`);
+    return null;
+  }
+  try {
+    const data = (await response.json()) as { roles?: unknown };
+    return isRolesShape(data.roles) ? data.roles : null;
+  } catch (error) {
+    console.error('[session-guard] shared roles response was not valid JSON', error);
+    return null;
+  }
+}
+
+/** Every value must be an array of strings — anything else is not a roles document this file trusts. */
+function isRolesShape(value: unknown): value is Readonly<Record<string, readonly string[]>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  return Object.values(value).every(
+    (entry) => Array.isArray(entry) && entry.every((item) => typeof item === 'string')
+  );
+}
+
+async function resolveAppIdScopes(
+  rawScope: unknown,
+  config: AppIdVerificationConfig,
+  nowSeconds: number
+): Promise<{ roles: string[]; permissions: string[] }> {
   const scopes = typeof rawScope === 'string' ? rawScope.split(/\s+/).filter(Boolean) : [];
-  const permissions = new Set<Permission>();
+  const rolePermissions = await resolvedRolePermissions(config, nowSeconds * 1000);
+  const permissions = new Set<string>();
   const roles: string[] = [];
 
   for (const scope of scopes) {
-    const granted = ROLE_PERMISSIONS[scope];
+    const granted = rolePermissions[scope];
     if (!granted) {
       continue; // an App ID framework scope, or an unknown name — not a role
     }

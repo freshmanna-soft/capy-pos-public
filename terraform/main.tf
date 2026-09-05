@@ -91,6 +91,15 @@ locals {
         APPID_TENANT_ID = var.appid_tenant_id
         APPID_CLIENT_ID = var.appid_client_id
       } : {},
+      # Only the two *callers* of pos-api's GET /internal/roles need to know
+      # where it lives — pos-api itself reads the shared roles document
+      # directly out of its own Cloudant store, no HTTP hop. Optional: an
+      # empty pos_api_internal_url means both proxies keep their local
+      # ROLE_PERMISSIONS fallback, unchanged (see readRolesSourceConfig() in
+      # each service's own server.ts).
+      name != "capy-pos-api" && service.needs_internal_secret && var.pos_api_internal_url != "" ? {
+        POS_API_INTERNAL_ROLES_URL = var.pos_api_internal_url
+      } : {},
       service.env,
     )
   }
