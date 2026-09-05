@@ -85,6 +85,16 @@
  * below is this file's own copy of that mapping, restricted to the five
  * permissions `Permission` already copies, the same way `Permission` itself is
  * already a restricted copy of `permission.constants.ts`.
+ *
+ * ## Phase 5: the shared roles document
+ *
+ * `resolveAppIdScopes` no longer trusts only `ROLE_PERMISSIONS` — when
+ * `AppIdVerificationConfig.rolesSource` is set (`api.ts` passes `deps.roles`,
+ * the same `roles` Cloudant store `GET /internal/roles` serves to the two
+ * sibling proxies), it reads that document instead, cached for
+ * `ROLES_CACHE_TTL_MS`. `ROLE_PERMISSIONS` stays as the fallback for an
+ * unconfigured deployment or a read that has never once succeeded — see its
+ * own doc comment below.
  */
 import { createHmac, createPublicKey, timingSafeEqual, verify as verifyRsaSignature } from 'node:crypto';
 
@@ -130,12 +140,36 @@ export const Permission = {
 
 export type Permission = (typeof Permission)[keyof typeof Permission];
 
+/**
+ * The minimal shape `resolveAppIdScopes` needs from the shared `roles`
+ * Cloudant store — `api.ts`'s own `DocumentStore<RolesDocument>.read()`
+ * already satisfies this structurally, so no import is needed in either
+ * direction: `api.ts` already imports from this file, and this file stays
+ * dependency-light (see "Why hand-rolled rather than `jose`" above) rather
+ * than pulling in `StoredDocument`/`DocumentStore` just for one method
+ * signature.
+ */
+export interface RolesReader {
+  read(
+    id: string
+  ): Promise<{ readonly document: { readonly roles: Readonly<Record<string, readonly string[]>> } } | null>;
+}
+
 /** What App ID's own token endpoint requires this API to know to verify one. */
 export interface AppIdVerificationConfig {
   readonly region: string;
   readonly tenantId: string;
   /** The staff application's client id — the token's `aud` must include this. */
   readonly audience: string;
+  /**
+   * The shared `roles` document (Phase 5, RBAC centralization) —
+   * `deps.roles` from `api.ts`, read in-process (no HTTP hop, unlike
+   * `vision-proxy`/`clerk-agent-relay`'s own copies, which fetch this same
+   * document over `GET /internal/roles` instead). Omitted means:
+   * `resolveAppIdScopes` answers from its own literal `ROLE_PERMISSIONS`
+   * table below, unchanged from before Phase 5.
+   */
+  readonly rolesSource?: RolesReader;
 }
 
 /**
@@ -373,7 +407,7 @@ export async function verifyAppIdAccessToken(
     return null;
   }
 
-  const { roles, permissions } = resolveAppIdScopes(payload['scope']);
+  const { roles, permissions } = await resolveAppIdScopes(payload['scope'], config, nowSeconds);
 
   return {
     operatorId,
@@ -438,13 +472,94 @@ export const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> =
   ],
 };
 
-function resolveAppIdScopes(rawScope: unknown): { roles: string[]; permissions: string[] } {
+/**
+ * The one document id the shared `roles` store ever holds — must match
+ * `ROLES_DOC_ID` in `api.ts` exactly (a tiny wire-contract constant,
+ * duplicated the same deliberate way `DEFAULT_TENANT_ID` above is copied
+ * from the Angular app, rather than importing `api.ts` into this
+ * lower-level module and creating a circular import).
+ */
+const ROLES_DOC_ID = 'role-permissions';
+
+/**
+ * How long a value read from the shared roles document is trusted before
+ * the next resolution re-reads it. Roles change rarely — an admin edit
+ * through the "Roles & Permissions" panel, not a per-request event — so a
+ * short TTL bounds staleness without a Cloudant read on every token
+ * verified. Same constant and same reasoning as the two proxies' own copy
+ * of this cache.
+ */
+const ROLES_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let rolesCache: { readonly data: Readonly<Record<string, readonly string[]>>; readonly fetchedAtMs: number } | null =
+  null;
+
+/**
+ * Resolve the current role → permission mapping: the shared document when
+ * `rolesSource` is configured and reachable, this file's own `ROLE_PERMISSIONS`
+ * otherwise. `nowMs` is a parameter for the same testability reason
+ * `nowSeconds` is threaded everywhere else in this file — no bare `Date.now()`.
+ */
+async function resolvedRolePermissions(
+  config: AppIdVerificationConfig,
+  nowMs: number
+): Promise<Readonly<Record<string, readonly string[]>>> {
+  if (!config.rolesSource) {
+    return ROLE_PERMISSIONS;
+  }
+  if (rolesCache !== null && nowMs - rolesCache.fetchedAtMs < ROLES_CACHE_TTL_MS) {
+    return rolesCache.data;
+  }
+
+  const read = await readRolesDocument(config.rolesSource);
+  if (read === null) {
+    // A missing document (fresh database) and a failed read are both handled
+    // the same way here: keep serving whatever cache exists, and only a
+    // deployment that has *never once* resolved successfully falls all the
+    // way back to the literal table. A transient blip must not suddenly
+    // narrow every caller's permissions to nothing.
+    return rolesCache?.data ?? ROLE_PERMISSIONS;
+  }
+  rolesCache = { data: read, fetchedAtMs: nowMs };
+  return read;
+}
+
+/** `null` covers both "no document yet" and "the read itself failed" — same one-null contract as the rest of this file. */
+async function readRolesDocument(source: RolesReader): Promise<Readonly<Record<string, readonly string[]>> | null> {
+  try {
+    const result = await source.read(ROLES_DOC_ID);
+    if (result === null) {
+      return null;
+    }
+    return isRolesShape(result.document.roles) ? result.document.roles : null;
+  } catch (error) {
+    console.error('[pos-api] shared roles read failed', error);
+    return null;
+  }
+}
+
+/** Every value must be an array of strings — anything else is not a roles document this file trusts. */
+function isRolesShape(value: unknown): value is Readonly<Record<string, readonly string[]>> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  return Object.values(value).every(
+    (entry) => Array.isArray(entry) && entry.every((item) => typeof item === 'string')
+  );
+}
+
+async function resolveAppIdScopes(
+  rawScope: unknown,
+  config: AppIdVerificationConfig,
+  nowSeconds: number
+): Promise<{ roles: string[]; permissions: string[] }> {
   const scopes = typeof rawScope === 'string' ? rawScope.split(/\s+/).filter(Boolean) : [];
-  const permissions = new Set<Permission>();
+  const rolePermissions = await resolvedRolePermissions(config, nowSeconds * 1000);
+  const permissions = new Set<string>();
   const roles: string[] = [];
 
   for (const scope of scopes) {
-    const granted = ROLE_PERMISSIONS[scope];
+    const granted = rolePermissions[scope];
     if (!granted) {
       continue; // an App ID framework scope, or an unknown name — not a role
     }

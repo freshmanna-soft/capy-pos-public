@@ -154,10 +154,16 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
     return getRoles(request, deps);
   }
 
+  // `rolesSource: deps.roles` merged in here, not stored on `deps.appId`
+  // itself: `deps.appId` is built once at startup from env vars only
+  // (`server.ts`'s `readAppIdConfig()`), while the roles store is a request
+  // dependency like `deps.products`/`deps.transactions` — merging it at the
+  // one call site that needs it keeps that startup-config/request-dependency
+  // split intact rather than blurring the two.
   const outcome = await authorize(
     request.authorization,
     route.permission,
-    { secret: deps.secret, appId: deps.appId },
+    { secret: deps.secret, appId: deps.appId ? { ...deps.appId, rolesSource: deps.roles } : undefined },
     deps.nowSeconds()
   );
   if (!outcome.ok) {

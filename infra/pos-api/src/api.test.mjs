@@ -13,7 +13,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
+import { createHmac, generateKeyPairSync, sign as signRsa } from 'node:crypto';
 import { handle, matchRoute } from './api.ts';
 import { MemoryStore } from '../../shared/src/document-store.ts';
 import { Permission } from './session-auth.ts';
@@ -59,7 +59,14 @@ function product(overrides = {}) {
 }
 
 /** A fresh set of deps per test, so no test can see another's writes. */
-function deps({ products = [product()], transactions = [], roles = [], productStore, internalSecret = INTERNAL_SECRET } = {}) {
+function deps({
+  products = [product()],
+  transactions = [],
+  roles = [],
+  productStore,
+  internalSecret = INTERNAL_SECRET,
+  appId,
+} = {}) {
   let counter = 0;
   return {
     products: productStore ?? new MemoryStore(products),
@@ -67,10 +74,54 @@ function deps({ products = [product()], transactions = [], roles = [], productSt
     roles: new MemoryStore(roles),
     secret: SECRET,
     internalSecret,
+    appId,
     nowSeconds: () => NOW,
     nowIso: () => ISO,
     newId: () => `txn-${++counter}`,
   };
+}
+
+// ─── App ID (RS256) fixtures, for one wiring test below ────────────────────
+//
+// api.ts's own risk surface, not session-auth.ts's: whether `handle()` really
+// merges `deps.roles` into the `appId` config it hands to `authorize()`
+// (`rolesSource: deps.roles`). session-auth.test.mjs already covers
+// `resolvedRolePermissions`'s own behaviour exhaustively against a fake
+// reader it builds itself — this is the one thing that suite cannot see:
+// whether api.ts's own merge expression is still there.
+
+const APPID_CONFIG = { region: 'us-south', tenantId: 'tenant-1', audience: 'client-1' };
+
+function generateRsaKeyPair() {
+  return generateKeyPairSync('rsa', { modulusLength: 2048 });
+}
+
+function mintAppId(payload, { kid, keyPair, config = APPID_CONFIG }) {
+  const claims = {
+    sub: 'op-1',
+    scope: 'openid appid_default operator',
+    iss: `https://${config.region}.appid.cloud.ibm.com/oauth/v4/${config.tenantId}`,
+    aud: [config.audience],
+    iat: NOW - 60,
+    exp: NOW + 3600,
+    ...payload,
+  };
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const signingInput = `${encode({ alg: 'RS256', typ: 'JWT', kid })}.${encode(claims)}`;
+  const signature = signRsa('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey).toString('base64url');
+  return `${signingInput}.${signature}`;
+}
+
+/** Stub `global.fetch` to answer the JWKS endpoint with exactly one key, for the duration of `run`. */
+async function withJwks(keyPair, kid, run) {
+  const jwk = { kid, ...keyPair.publicKey.export({ format: 'jwk' }) };
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ keys: [jwk] }) });
+  try {
+    return await run();
+  } finally {
+    globalThis.fetch = original;
+  }
 }
 
 /** Issue a request as an authorized admin unless told otherwise. */
@@ -260,6 +311,32 @@ describe('GET /internal/roles', () => {
     // matters, confirming `handle()` truly special-cases this route before `authorize()`.
     const { status } = await call('GET', '/internal/roles', { token: null, authorization: undefined, internalSecret: INTERNAL_SECRET });
     assert.equal(status, 200);
+  });
+
+  it("feeds this same deps.roles document into an RS256 caller's own permission resolution", async () => {
+    // The wiring risk unique to api.ts: `handle()` merges `rolesSource: deps.roles`
+    // into the config it hands `authorize()` (session-auth.ts's own tests only
+    // prove `resolvedRolePermissions` works against a *fake* reader they build
+    // themselves — not that api.ts's merge expression still exists). Proven here
+    // by a permission an operator does NOT have in the literal ROLE_PERMISSIONS
+    // fallback (inventory:manage — POST /api/products) but DOES have once the
+    // stored document grants it.
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-wiring', async () => {
+      const context = deps({
+        appId: APPID_CONFIG,
+        roles: [{ id: 'role-permissions', roles: { operator: ['inventory:manage'] } }],
+      });
+      const token = mintAppId({}, { kid: 'kid-wiring', keyPair });
+
+      const created = await call(
+        'POST',
+        '/api/products',
+        { body: { id: 'p-new', name: 'Kombucha', price: 3.5, category: 'Drinks' }, authorization: `Bearer ${token}` },
+        context
+      );
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+    });
   });
 });
 
