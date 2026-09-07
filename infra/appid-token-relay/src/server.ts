@@ -11,6 +11,14 @@
  * Then set `appId.enabled = true` and `appId.relayUrl =
  * 'http://localhost:8792/appid/token'` in the environment file you are serving.
  *
+ * `APPID_CUSTOMER_CLIENT_ID`/`APPID_CUSTOMER_CLIENT_SECRET` are optional and gate
+ * only `/appid/customer/token` (epic #261's self-checkout customers, a second App
+ * ID *application* in the same tenant — see `customer-token.ts` for why the client
+ * is the whole difference between the two token routes). A deployment without them
+ * signs staff in exactly as before; a customer sign-in attempt gets this service's
+ * own 502 rather than the whole process refusing to start over a route that is not
+ * reachable from the UI yet.
+ *
  * `APPID_MANAGEMENT_APIKEY` is optional and gates only the admin staff-management
  * routes (`/appid/admin/staff*`) — a deployment without it keeps signing people in
  * exactly as before; an admin action against those routes fails with a 502 the
@@ -39,6 +47,11 @@ import {
 } from './management-api.ts';
 import { readAllowedOrigins } from './cors.ts';
 import { createRouter, routeLabel, type Route } from './routes.ts';
+import {
+  CUSTOMER_TOKEN_ROUTE,
+  createCustomerTokenHandler,
+  customerClientConfigured,
+} from './customer-token.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8792);
 
@@ -59,6 +72,8 @@ function requireConfig(): {
   tenantId: string;
   clientId: string;
   clientSecret: string;
+  customerClientId: string;
+  customerClientSecret: string;
   managementApiKey: string;
   origins: readonly string[];
 } {
@@ -74,6 +89,20 @@ function requireConfig(): {
         'every App ID token request, so there is no partial-config mode to fall back to. Refusing to start.'
     );
     process.exit(1);
+  }
+
+  // Optional: gates only `/appid/customer/token` — see this file's own header
+  // comment. Read here rather than in `customer-token.ts` so the whole of this
+  // service's environment is still declared in one place.
+  const customerClientId = process.env['APPID_CUSTOMER_CLIENT_ID'] ?? '';
+  const customerClientSecret = process.env['APPID_CUSTOMER_CLIENT_SECRET'] ?? '';
+  if (!customerClientConfigured({ region, tenantId, customerClientId, customerClientSecret })) {
+    console.warn(
+      '[appid-relay] APPID_CUSTOMER_CLIENT_ID/APPID_CUSTOMER_CLIENT_SECRET are not both set — ' +
+        `staff sign-in works as before, but ${CUSTOMER_TOKEN_ROUTE} answers 502 until the ` +
+        'customer application\'s credentials are deployed. Customer grants are never exchanged ' +
+        "under the staff client."
+    );
   }
 
   // Optional: gates only the admin staff-management routes — see this file's
@@ -99,10 +128,20 @@ function requireConfig(): {
   }
 
   console.log(`[appid-relay] origins: ${origins.join(', ')}`);
-  return { region, tenantId, clientId, clientSecret, managementApiKey, origins };
+  return {
+    region,
+    tenantId,
+    clientId,
+    clientSecret,
+    customerClientId,
+    customerClientSecret,
+    managementApiKey,
+    origins,
+  };
 }
 
-const { region, tenantId, clientId, clientSecret, managementApiKey, origins } = requireConfig();
+const { region, tenantId, clientId, clientSecret, customerClientId, customerClientSecret, managementApiKey, origins } =
+  requireConfig();
 
 const managementConfig: ManagementConfig = { region, tenantId, apiKey: managementApiKey };
 
@@ -114,6 +153,24 @@ const tokenListener = createRequestListener({
   validate,
   handle: (request) => relay(request, { region, tenantId, clientId, clientSecret }),
   unavailable: 'The sign-in service is unavailable.',
+});
+
+/**
+ * The same two grants as `tokenListener`, over the same tenant, exchanged under
+ * the *customer* App ID application instead of the staff one — which is what
+ * decides the scopes the returned token carries. Public and unauthenticated for
+ * the same reason: a customer signing in does not have a session yet either.
+ * `customer-token.ts` holds the credential-selection decision (and the refusal
+ * to fall back to staff's client) so it can be tested without a bound port.
+ */
+const customerTokenListener = createRequestListener({
+  logPrefix: '[appid-relay]',
+  route: CUSTOMER_TOKEN_ROUTE,
+  origins,
+  maxBodyBytes: MAX_BODY_BYTES,
+  validate,
+  handle: createCustomerTokenHandler({ region, tenantId, customerClientId, customerClientSecret }),
+  unavailable: 'The customer sign-in service is unavailable.',
 });
 
 /**
@@ -195,6 +252,7 @@ const adminListener = createAdminRequestListener({
  */
 const ROUTES: readonly Route[] = [
   { match: 'exact', path: TOKEN_ROUTE, methods: TOKEN_METHODS, listener: tokenListener },
+  { match: 'exact', path: CUSTOMER_TOKEN_ROUTE, methods: TOKEN_METHODS, listener: customerTokenListener },
   { match: 'exact', path: FORGOT_PASSWORD_ROUTE, methods: TOKEN_METHODS, listener: forgotPasswordListener },
   // Prefix, not exact: `admin-http.ts` resolves `/staff`, `/roles` and
   // `/staff/{id}/role` itself — including its own 404 for an admin path that is
