@@ -29,7 +29,8 @@ import {
   MAX_BODY_BYTES as FORGOT_PASSWORD_MAX_BODY_BYTES,
 } from './forgot-password-validate.ts';
 import {
-  createStaffUser,
+  createUser,
+  randomThrowawayPassword,
   listStaffUsers,
   listAssignableStaffRoles,
   assignRole,
@@ -157,7 +158,7 @@ const adminListener = createAdminRequestListener({
     //
     // No `triggerForgotPassword` call here, despite the plan's original
     // intent — confirmed live that this tenant's `identityConfirmation` is
-    // required (`accessMode: "FULL"`), so `createStaffUser`'s own `sign_up`
+    // required (`accessMode: "FULL"`), so `createUser`'s own `sign_up`
     // call always leaves a brand-new account `PENDING` and App ID
     // unconditionally 409s a forgot_password request against a
     // not-yet-confirmed account. There is no timing to get right here: it
@@ -165,7 +166,12 @@ const adminListener = createAdminRequestListener({
     // true` on this tenant means `sign_up` already sent its own welcome/
     // confirmation email — the new hire finishes setup through that link,
     // not a second email App ID would refuse to send yet.
-    const user = await createStaffUser(request.email, managementConfig);
+    //
+    // A throwaway password specifically: this admin route never accepts one
+    // from the browser, and the staff member it creates never types it. The
+    // caller-supplied variant exists for customer self-registration, where
+    // the person signing up chooses their own.
+    const user = await createUser(request.email, randomThrowawayPassword(), managementConfig);
     await assignRole(user.id, request.roleId, managementConfig);
     return user;
   },

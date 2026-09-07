@@ -10,7 +10,8 @@ import {
   resolveRoleId,
   listAssignableStaffRoles,
   listStaffUsers,
-  createStaffUser,
+  createUser,
+  randomThrowawayPassword,
   assignRole,
   revokeRoles,
   triggerForgotPassword,
@@ -69,7 +70,7 @@ describe('IAM token exchange', () => {
   });
 
   it('refetches the IAM token once the cached one is past its margin', async () => {
-    // createStaffUser never consults the roles cache, so both calls genuinely
+    // createUser never consults the roles cache, so both calls genuinely
     // reach managementFetch — this isolates the IAM token's own TTL logic from
     // the separate, non-expiring roles cache exercised above.
     stubFetch([
@@ -79,9 +80,9 @@ describe('IAM token exchange', () => {
       },
     ]);
 
-    await createStaffUser('a@capy.test', CONFIG, nowSeconds);
+    await createUser('a@capy.test', 'pw-a', CONFIG, nowSeconds);
     NOW += 3600; // well past the 60s-early refresh margin
-    await createStaffUser('b@capy.test', CONFIG, nowSeconds);
+    await createUser('b@capy.test', 'pw-b', CONFIG, nowSeconds);
 
     const iamCalls = calls.filter((c) => c.url.includes('iam.cloud.ibm.com'));
     assert.equal(iamCalls.length, 2);
@@ -217,13 +218,13 @@ describe('listStaffUsers', () => {
   });
 });
 
-describe('createStaffUser', () => {
+describe('createUser', () => {
   // Confirmed live: `cloud_directory/Users` "does not... create a profile"
   // (its own docs' wording), and role assignment 404s without one. `sign_up
   // ?shouldCreateProfile=true` is the endpoint that actually creates one, and
   // its `profileId` — not its SCIM `id` — is the id every later role
   // operation on this account must use.
-  it('signs up with profile creation, and returns profileId as the account id — a random password never echoed back', async () => {
+  it('signs up with profile creation and returns profileId as the account id', async () => {
     let sentUrl;
     let sentBody;
     stubFetch([
@@ -242,13 +243,51 @@ describe('createStaffUser', () => {
       },
     ]);
 
-    const user = await createStaffUser('new@capy.test', CONFIG, nowSeconds);
+    const user = await createUser('new@capy.test', 'caller-chosen-pw', CONFIG, nowSeconds);
 
     assert.match(sentUrl, /shouldCreateProfile=true/);
     assert.deepEqual(user, { id: 'sub-new-1', email: 'new@capy.test', displayName: 'new@capy.test' });
     assert.equal(sentBody.emails[0].value, 'new@capy.test');
-    assert.equal(typeof sentBody.password, 'string');
-    assert.ok(sentBody.password.length >= 24, 'password should be a real random value, not a placeholder');
+    assert.equal(sentBody.active, true);
+  });
+
+  // The whole point of the generalization: a self-checkout customer types a
+  // password they intend to sign in with again, so it has to reach App ID
+  // exactly as given — not be replaced, trimmed, or re-derived on the way.
+  it('sends the caller-supplied password verbatim', async () => {
+    let sentBody;
+    stubFetch([
+      {
+        match: (url) => url.includes('/cloud_directory/sign_up'),
+        respond: (_url, init) => {
+          sentBody = JSON.parse(init.body);
+          return json(201, { id: 'scim-1', profileId: 'sub-1', displayName: 'c', emails: [] });
+        },
+      },
+    ]);
+
+    await createUser('customer@capy.test', ' Correct horse\u00a0battery ', CONFIG, nowSeconds);
+
+    assert.equal(sentBody.password, ' Correct horse\u00a0battery ');
+  });
+
+  // The password is now the caller's to choose, so the guarantee this function
+  // can still hold is the one that stops an account existing in a state nobody
+  // asked for: no password at all. Policy (length, strength) belongs to the
+  // route validating the customer's input, not here.
+  it('rejects an empty password without creating anything', async () => {
+    stubFetch([
+      {
+        match: () => true,
+        respond: () => json(201, { id: 'scim-1', profileId: 'sub-1', displayName: 'c', emails: [] }),
+      },
+    ]);
+
+    await assert.rejects(
+      () => createUser('new@capy.test', '', CONFIG, nowSeconds),
+      (error) => error instanceof ManagementApiError && error.message.includes('password')
+    );
+    assert.equal(calls.length, 0, 'an empty password must fail before any call reaches IAM or App ID');
   });
 
   it('throws ManagementApiError when sign_up succeeds but returns no profileId, rather than silently using the SCIM id', async () => {
@@ -259,7 +298,7 @@ describe('createStaffUser', () => {
       },
     ]);
     await assert.rejects(
-      () => createStaffUser('new@capy.test', CONFIG, nowSeconds),
+      () => createUser('new@capy.test', 'pw', CONFIG, nowSeconds),
       (error) => error instanceof ManagementApiError && error.message.includes('profileId')
     );
   });
@@ -272,9 +311,24 @@ describe('createStaffUser', () => {
       },
     ]);
     await assert.rejects(
-      () => createStaffUser('dup@capy.test', CONFIG, nowSeconds),
+      () => createUser('dup@capy.test', 'pw', CONFIG, nowSeconds),
       (error) => error instanceof ManagementApiError && error.message.includes('already exists')
     );
+  });
+});
+
+describe('randomThrowawayPassword', () => {
+  // What staff creation used to do inline. Kept as a named export so the one
+  // caller that wants "a password nobody will ever type" asks for it out loud,
+  // instead of it being the silent default for every caller of createUser.
+  it('returns a distinct high-entropy value per call', () => {
+    const first = randomThrowawayPassword();
+    const second = randomThrowawayPassword();
+
+    assert.equal(typeof first, 'string');
+    assert.ok(first.length >= 24, 'password should be a real random value, not a placeholder');
+    assert.notEqual(first, second);
+    assert.match(first, /^[A-Za-z0-9_-]+$/, 'base64url so it survives JSON transport unescaped');
   });
 });
 

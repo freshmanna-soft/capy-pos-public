@@ -284,17 +284,42 @@ async function getUserRoles(
 }
 
 /**
- * Create a Cloud Directory user with a cryptographically random, throwaway
- * password — never logged, never returned, and never sent anywhere. This
- * relay never triggers App ID's `forgot_password` for a freshly created
+ * A cryptographically random password for an account whose owner will never
+ * type it — what staff creation needs, and what `createUser` used to do
+ * unconditionally. Never logged, never returned, never sent anywhere but
+ * App ID itself: a new hire finishes setup through the welcome/confirmation
+ * email `sign_up` already sends (this tenant has `welcomeEnabled: true`), so
+ * nothing here has a "choose your password" secret to protect because nothing
+ * here keeps the one it generated.
+ *
+ * Exported rather than left as `createUser`'s default so the throwaway is
+ * asked for out loud at the one call site that wants it, instead of being the
+ * silent fallback for every caller — including the customer sign-up route,
+ * where silently discarding the password someone just chose would lock them
+ * out of the account they were creating.
+ */
+export function randomThrowawayPassword(): string {
+  return randomBytes(24).toString('base64url');
+}
+
+/**
+ * Create a Cloud Directory user with the caller's password. Staff creation
+ * passes `randomThrowawayPassword()` — nobody ever types that account's
+ * password — while customer self-registration passes the one the customer
+ * chose, which is the whole reason this takes a parameter: a self-checkout
+ * customer has to be able to sign in again with what they just typed.
+ *
+ * Refuses an empty password before touching the network. With the value now
+ * coming from outside, that is the one guarantee left worth keeping here —
+ * it stops an account existing in a state nobody asked for. Real password
+ * *policy* (length, strength) belongs to the route validating the customer's
+ * input, not to this transport-level call.
+ *
+ * This relay never triggers App ID's `forgot_password` for a freshly created
  * account — confirmed live it 409s unconditionally against one still
  * `PENDING` identity confirmation, which every `sign_up` account starts as
- * on a tenant configured to require it (this one is). The new hire finishes
- * setup through the welcome/confirmation email `sign_up` itself already
- * sends (this tenant has `welcomeEnabled: true`) — this relay has no
- * "choose your password" secret to protect because it never chooses one.
+ * on a tenant configured to require it (this one is).
  *
-
  * Uses `/cloud_directory/sign_up?shouldCreateProfile=true`, not the plainer
  * `/cloud_directory/Users` — confirmed live: the latter's own docs say
  * outright it "does not... create a profile," and role assignment 404s
@@ -302,18 +327,22 @@ async function getUserRoles(
  * (`sign_up`'s name for the same `sub` `getUserSub`/`userinfo` resolves for
  * existing users) — the id every later role operation on this account must use.
  */
-export async function createStaffUser(
+export async function createUser(
   email: string,
+  password: string,
   config: ManagementConfig,
   nowSeconds: () => number = defaultNow
 ): Promise<{ id: string; email: string; displayName: string }> {
+  if (password.length === 0) {
+    throw new ManagementApiError('Creating the App ID user requires a password.');
+  }
   const result = await managementFetch('/cloud_directory/sign_up?shouldCreateProfile=true', config, nowSeconds, {
     method: 'POST',
     body: {
       active: true,
       emails: [{ value: email, primary: true }],
       userName: email,
-      password: randomBytes(24).toString('base64url'),
+      password,
     },
   });
   if (result.status !== 201) {
@@ -372,7 +401,7 @@ export async function revokeRoles(
 /**
  * Triggers App ID's own hosted reset-password email for a self-service
  * "Forgot password" request — the legitimate use for this call. (An earlier
- * version of this file called it right after `createStaffUser`, which
+ * version of this file called it right after user creation, which
  * always 409s: a freshly `sign_up`'d account is `PENDING` identity
  * confirmation, and App ID refuses a password reset against one. Removed
  * there for that reason — see #249 — reintroduced here for an
