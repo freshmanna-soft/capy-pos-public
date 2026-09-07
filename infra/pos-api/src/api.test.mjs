@@ -64,6 +64,7 @@ function deps({
   transactions = [],
   roles = [],
   productStore,
+  rolesStore,
   internalSecret = INTERNAL_SECRET,
   appId,
 } = {}) {
@@ -71,7 +72,7 @@ function deps({
   return {
     products: productStore ?? new MemoryStore(products),
     transactions: new MemoryStore(transactions),
-    roles: new MemoryStore(roles),
+    roles: rolesStore ?? new MemoryStore(roles),
     secret: SECRET,
     internalSecret,
     appId,
@@ -417,6 +418,45 @@ describe('GET /internal/roles', () => {
     assert.equal(status, 200);
     assert.equal(body.roles.customer, undefined);
     assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
+  });
+
+  it('serves the fallback, not a 500, when the read itself rejects', async () => {
+    // The shape of what the read returns is guarded above; this is the read
+    // *failing*, which is the same untrusted-boundary risk arriving one step
+    // earlier. `session-auth.ts` already treats a thrown Cloudant read as "no
+    // usable document" (`readRolesDocument` catches and returns null), so the
+    // other consumer of the same document must not instead propagate it and
+    // turn this route into a 500: a Cloudant blip would leave `vision-proxy`
+    // and `clerk-agent-relay` with no mapping at all, gating every route they
+    // have closed, where the fallback would have served a safe one.
+    const errors = [];
+    const originalError = console.error;
+    console.error = (...args) => errors.push(args);
+    let context;
+    let outcome;
+    try {
+      context = deps({
+        rolesStore: {
+          read: async () => {
+            throw new Error('Cloudant unreachable');
+          },
+        },
+      });
+      outcome = await call(
+        'GET',
+        '/internal/roles',
+        { token: null, internalSecret: INTERNAL_SECRET },
+        context
+      );
+    } finally {
+      console.error = originalError;
+    }
+    assert.equal(outcome.status, 200);
+    assert.deepEqual(Object.keys(outcome.body.roles).sort(), ['admin', 'manager', 'operator']);
+    assert.equal(outcome.body.roles.customer, undefined);
+    // Degrading silently would hide a broken RBAC source: the siblings keep
+    // working, so nothing else surfaces the outage.
+    assert.equal(errors.length, 1);
   });
 
   it('never reaches this route through the bearer-token boundary at all', async () => {

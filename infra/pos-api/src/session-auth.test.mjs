@@ -742,19 +742,40 @@ describe('shared roles document (Phase 5)', () => {
     // `customer` backfill) self-checkout the only thing still working. Treated
     // as an unusable document, so the last-good-cache rule from test 4 applies
     // instead.
+    //
+    // Seeds its own cache rather than inheriting test 6's: `rolesCache` is
+    // module-level, so relying on a previous test's read makes the `{}`
+    // assertion vacuous under a focused or affected-test run — the very runs
+    // this repo uses — where the cache starts empty and the last-good value
+    // being asserted is `ROLE_PERMISSIONS` instead. Both reads happen inside
+    // this test so it proves the same thing alone as it does in suite order.
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-roles-7', async () => {
+      let reads = 0;
       const config = {
         ...ROLES_CONFIG_BASE,
-        rolesSource: fakeRolesReader(async () => ({ document: { roles: {} } })),
+        rolesSource: fakeRolesReader(async () => {
+          reads++;
+          // First read seeds a good document; the re-read past the TTL below is
+          // the empty one under test.
+          return reads === 1
+            ? { document: { roles: { customer: ['custom:narrowed'] } } }
+            : { document: { roles: {} } };
+        }),
       };
       const token = mintAppId(
-        { scope: 'openid customer', exp: NOW + 6_000_000 + 3600 },
+        { scope: 'openid customer', exp: NOW + 6_000_400 + 3600 },
         { kid: 'kid-roles-7', keyPair }
       );
-      // Past test 6's TTL, so this forces the re-read that returns `{}`.
-      const claims = await verifyAppIdAccessToken(token, config, NOW + 6_000_000);
-      // Test 6's cached document survived. Had `{}` been accepted, the backfill
+
+      const seeded = await verifyAppIdAccessToken(token, config, NOW + 6_000_000);
+      assert.deepEqual(seeded.permissions, ['custom:narrowed'], 'precondition: the good document is cached');
+
+      // 400s later — past the 5-minute TTL, so this forces the re-read that
+      // returns `{}` rather than answering from the cache.
+      const claims = await verifyAppIdAccessToken(token, config, NOW + 6_000_400);
+      assert.equal(reads, 2, 'the empty document must actually have been read, not skipped as fresh cache');
+      // The seeded document survived. Had `{}` been accepted, the backfill
       // would have made this ROLE_PERMISSIONS' own ['sale:process'] instead.
       assert.deepEqual(claims.permissions, ['custom:narrowed']);
     });

@@ -337,15 +337,24 @@ function health(deps: ApiDeps): ApiResponse {
  * database, before anyone has written to it, answers exactly what today's
  * hand-copied tables already say, not an empty grant.
  *
- * "Usable" is `session-auth.ts`'s own `isRolesShape`, deliberately the same
- * guard rather than a second opinion: `CloudantStore.read` only casts
- * (`stripMeta<T>`), so `RolesDocument.roles` being non-optional in TypeScript
- * does not stop a hand-written or half-migrated document from having no
- * `roles` key at all. Passing that straight into `withoutPosApiOnlyRoles`
- * would throw and turn this route — the RBAC source for both siblings — into
- * a 500, leaving them with no mapping where the fallback would have served a
- * safe one. That guard also rejects `{}`, which is shape-valid but is exactly
- * the empty grant this fallback exists to prevent.
+ * "Does not yield a usable mapping" covers all three ways this untrusted read
+ * can fail, deliberately not just the middle one:
+ *
+ * The read can *reject* — Cloudant unreachable, credentials rotated. Letting
+ * that propagate would turn the RBAC source for both siblings into a 500 and
+ * leave them with no mapping at all, gating every route they have closed over
+ * a transient blip. `session-auth.ts` already resolves a thrown read to "no
+ * usable document" for the very same Cloudant document, so this route matches
+ * it rather than being the one consumer that fails loudly.
+ *
+ * The document can be the wrong shape, which is `session-auth.ts`'s own
+ * `isRolesShape` — the same guard rather than a second opinion.
+ * `CloudantStore.read` only casts (`stripMeta<T>`), so `RolesDocument.roles`
+ * being non-optional in TypeScript does not stop a hand-written or
+ * half-migrated document from having no `roles` key at all, and passing that
+ * into `withoutPosApiOnlyRoles` would throw. That guard also rejects `{}`,
+ * which is shape-valid but is exactly the empty grant this fallback exists to
+ * prevent.
  *
  * Emptiness is then re-checked on what is actually about to be served, not
  * only on what was read: `withoutPosApiOnlyRoles` can itself empty a document
@@ -366,8 +375,8 @@ async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse
     return { status: 401, body: { error: 'Invalid or missing X-Internal-Secret.' } };
   }
 
-  const stored = (await deps.roles.read(ROLES_DOC_ID))?.document.roles;
-  if (!isRolesShape(stored)) {
+  const stored = await readStoredRoles(deps.roles);
+  if (stored === null) {
     return { status: 200, body: { roles: SIBLING_ROLE_FALLBACK } };
   }
   const forSiblings = withoutPosApiOnlyRoles(stored);
@@ -375,6 +384,28 @@ async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse
     status: 200,
     body: { roles: Object.keys(forSiblings).length > 0 ? forSiblings : SIBLING_ROLE_FALLBACK },
   };
+}
+
+/**
+ * `null` means "no mapping worth serving", collapsing a missing document, a
+ * failed read and an unusable one — the same one-null contract
+ * `session-auth.ts`'s `readRolesDocument` uses against this same document, so
+ * the two consumers cannot disagree about which reads count as usable.
+ *
+ * The failure is logged rather than swallowed: the siblings keep working off
+ * the fallback, so a broken RBAC source has nothing else to surface it.
+ */
+async function readStoredRoles(
+  store: DocumentStore<RolesDocument>
+): Promise<Readonly<Record<string, readonly string[]>> | null> {
+  let stored: unknown;
+  try {
+    stored = (await store.read(ROLES_DOC_ID))?.document.roles;
+  } catch (error) {
+    console.error('[pos-api] shared roles read failed', error);
+    return null;
+  }
+  return isRolesShape(stored) ? stored : null;
 }
 
 /**
