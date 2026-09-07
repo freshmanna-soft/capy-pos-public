@@ -331,10 +331,10 @@ function health(deps: ApiDeps): ApiResponse {
  * closed-timing-side-channel comparison `signatureMatches` already uses for
  * the HS256 path, generalized to a plain shared secret.
  *
- * Reads `ROLES_DOC_ID` and falls back to the literal `ROLE_PERMISSIONS`
- * table (`session-auth.ts`) whenever the document does not exist yet — a
- * fresh `roles` database, before anyone has written to it, answers exactly
- * what today's hand-copied tables already say, not an empty grant.
+ * Reads `ROLES_DOC_ID` and falls back to `SIBLING_ROLE_FALLBACK` below
+ * whenever the document does not exist yet — a fresh `roles` database,
+ * before anyone has written to it, answers exactly what today's hand-copied
+ * tables already say, not an empty grant.
  */
 async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (deps.internalSecret.length === 0) {
@@ -348,8 +348,38 @@ async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse
   }
 
   const doc = await deps.roles.read(ROLES_DOC_ID);
-  return { status: 200, body: { roles: doc?.document.roles ?? ROLE_PERMISSIONS } };
+  return { status: 200, body: { roles: doc?.document.roles ?? SIBLING_ROLE_FALLBACK } };
 }
+
+/**
+ * The fallback `getRoles` serves the two sibling proxies: `ROLE_PERMISSIONS`
+ * minus the roles that exist only in this service.
+ *
+ * `customer` (Epic #261 item 6) is one of those: self-checkout authenticates
+ * against its own App ID application and reaches only `pos-api`, and
+ * `vision-proxy`/`clerk-agent-relay` gate every route they have on
+ * `sale:process` alone — the single permission `customer` holds. Serving it in
+ * this fallback would therefore admit any self-registered shopper to the
+ * AI-vision and clerk-agent routes, which is not what adding it to
+ * `ROLE_PERMISSIONS` was meant to do.
+ *
+ * Derived from `ROLE_PERMISSIONS` rather than restated so a new staff role
+ * added there reaches the siblings automatically, the way Phase 5's
+ * centralization intends; only names listed here are held back.
+ *
+ * Known residual gap: this covers the *fallback* only. Once item 9 writes a
+ * real `roles` document containing `customer`, the siblings fetch that
+ * document verbatim and the filtering has to move to their own end (each
+ * proxy refusing roles it does not recognise). Tracked as part of #261's
+ * item 9 verification, not fixed here.
+ */
+const POS_API_ONLY_ROLES: readonly string[] = ['customer'];
+
+const SIBLING_ROLE_FALLBACK: Readonly<Record<string, readonly string[]>> = Object.freeze(
+  Object.fromEntries(
+    Object.entries(ROLE_PERMISSIONS).filter(([role]) => !POS_API_ONLY_ROLES.includes(role))
+  )
+);
 
 async function listProducts(deps: ApiDeps): Promise<{ products: readonly ProductDocument[]; count: number }> {
   const products = await deps.products.list();
