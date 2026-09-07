@@ -591,8 +591,17 @@ function withBackfilledRoles(
   });
 }
 
-/** Every value must be an array of strings — anything else is not a roles document this file trusts. */
-function isRolesShape(value: unknown): value is Readonly<Record<string, readonly string[]>> {
+/**
+ * Every value must be an array of strings — anything else is not a roles
+ * document this service trusts.
+ *
+ * Exported because `api.ts` serves the same untrusted document to the sibling
+ * proxies over `GET /internal/roles`, and the two consumers of one Cloudant
+ * document must not disagree about what counts as a usable one:
+ * `CloudantStore.read` only casts (`stripMeta<T>`), so a non-optional `roles`
+ * field in TypeScript says nothing about what the database actually holds.
+ */
+export function isRolesShape(value: unknown): value is Readonly<Record<string, readonly string[]>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }

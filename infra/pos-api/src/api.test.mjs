@@ -339,6 +339,43 @@ describe('GET /internal/roles', () => {
     assert.deepEqual(body.roles, { operator: ['sale:process'] });
   });
 
+  it('serves the fallback, not a 500, when the stored document has no roles field', async () => {
+    // `CloudantStore.read` casts (`stripMeta<T>`) rather than validating, so
+    // `RolesDocument.roles` being non-optional in TypeScript proves nothing about
+    // what the database actually holds: a `role-permissions` document written by
+    // hand, or half-migrated, can simply have no `roles` key. This route is the
+    // RBAC source for `vision-proxy` and `clerk-agent-relay`, so it must degrade
+    // to the same safe table it serves for a missing document — not fail closed
+    // with a 500 that leaves both siblings with no mapping at all.
+    const context = deps({ roles: [{ id: 'role-permissions' }] });
+    const { status, body } = await call(
+      'GET',
+      '/internal/roles',
+      { token: null, internalSecret: INTERNAL_SECRET },
+      context
+    );
+    assert.equal(status, 200);
+    assert.equal(body.roles.customer, undefined);
+    assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
+  });
+
+  it('serves the fallback when the stored roles field is not a role → permissions map', async () => {
+    // Same untrusted-document reasoning, one step further in: the key exists but
+    // holds the wrong shape. `session-auth.ts` already gates this exact field
+    // through `isRolesShape` before trusting it; this route uses the same check,
+    // so the two consumers of one document cannot disagree about what counts as
+    // a usable one.
+    const context = deps({ roles: [{ id: 'role-permissions', roles: { operator: 'sale:process' } }] });
+    const { status, body } = await call(
+      'GET',
+      '/internal/roles',
+      { token: null, internalSecret: INTERNAL_SECRET },
+      context
+    );
+    assert.equal(status, 200);
+    assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
+  });
+
   it('never reaches this route through the bearer-token boundary at all', async () => {
     // No Authorization header, no App ID/HS256 token — only the internal secret
     // matters, confirming `handle()` truly special-cases this route before `authorize()`.

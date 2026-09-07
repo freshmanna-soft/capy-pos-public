@@ -32,6 +32,7 @@ import {
   ROLE_PERMISSIONS,
   authorize,
   constantTimeStringsEqual,
+  isRolesShape,
   type AppIdVerificationConfig,
 } from './session-auth.ts';
 import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
@@ -332,9 +333,18 @@ function health(deps: ApiDeps): ApiResponse {
  * the HS256 path, generalized to a plain shared secret.
  *
  * Reads `ROLES_DOC_ID` and falls back to `SIBLING_ROLE_FALLBACK` below
- * whenever the document does not exist yet — a fresh `roles` database,
- * before anyone has written to it, answers exactly what today's hand-copied
- * tables already say, not an empty grant.
+ * whenever that document does not yield a usable mapping — a fresh `roles`
+ * database, before anyone has written to it, answers exactly what today's
+ * hand-copied tables already say, not an empty grant.
+ *
+ * "Usable" is `session-auth.ts`'s own `isRolesShape`, deliberately the same
+ * guard rather than a second opinion: `CloudantStore.read` only casts
+ * (`stripMeta<T>`), so `RolesDocument.roles` being non-optional in TypeScript
+ * does not stop a hand-written or half-migrated document from having no
+ * `roles` key at all. Passing that straight into `withoutPosApiOnlyRoles`
+ * would throw and turn this route — the RBAC source for both siblings — into
+ * a 500, leaving them with no mapping where the fallback would have served a
+ * safe one.
  */
 async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (deps.internalSecret.length === 0) {
@@ -347,10 +357,10 @@ async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse
     return { status: 401, body: { error: 'Invalid or missing X-Internal-Secret.' } };
   }
 
-  const doc = await deps.roles.read(ROLES_DOC_ID);
+  const stored = (await deps.roles.read(ROLES_DOC_ID))?.document.roles;
   return {
     status: 200,
-    body: { roles: doc === null ? SIBLING_ROLE_FALLBACK : withoutPosApiOnlyRoles(doc.document.roles) },
+    body: { roles: isRolesShape(stored) ? withoutPosApiOnlyRoles(stored) : SIBLING_ROLE_FALLBACK },
   };
 }
 
