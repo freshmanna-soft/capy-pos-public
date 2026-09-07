@@ -84,6 +84,10 @@ export const environment = {
     customerClientId: '',
     relayUrl:
       'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/token',
+    // Registered on the deployed relay; answers 502 until epic #261 item 25 puts
+    // the customer client's secret in its Code Engine secret.
+    customerRelayUrl:
+      'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/customer/token',
   },
 
   // Payment Gateway (Stripe Live Mode)

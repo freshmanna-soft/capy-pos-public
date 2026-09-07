@@ -63,6 +63,7 @@ export const environment = {
     staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
     customerClientId: '',
     relayUrl: '', // Set once infra/appid-token-relay is deployed for staging
+    customerRelayUrl: '', // Same relay, sibling route — set alongside relayUrl
   },
 
   // Payment Gateway (Stripe Test Mode)

@@ -69,6 +69,8 @@ export const environment = {
     customerClientId: '',
     relayUrl:
       'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/token',
+    customerRelayUrl:
+      'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/customer/token',
   },
 
   stripe: {
