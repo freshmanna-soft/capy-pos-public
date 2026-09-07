@@ -91,8 +91,15 @@ export const environment = {
     region: 'us-south',
     tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
     staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
+    // The customer half of the same tenant (epic #261): a second App ID
+    // *application*, not a second pool. Empty until that registration exists —
+    // `customerClientId` is what a customer token's `aud` will be, which is
+    // exactly what keeps it from satisfying the staff gateway's audience check.
     customerClientId: '',
     relayUrl: 'http://localhost:8792/appid/token',
+    // The relay's sibling customer route. Separately deployable from the staff
+    // one: it 502s until APPID_CUSTOMER_CLIENT_ID/_SECRET are set on the relay.
+    customerRelayUrl: 'http://localhost:8792/appid/customer/token',
   },
 
   // Payment Gateway (Stripe Test Mode)

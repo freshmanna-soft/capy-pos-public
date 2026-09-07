@@ -94,6 +94,7 @@ export const environment = {
     staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
     customerClientId: '',
     relayUrl: 'http://localhost:8792/appid/token',
+    customerRelayUrl: 'http://localhost:8792/appid/customer/token',
   },
 
   // Payment Gateway (Stripe Test Mode)

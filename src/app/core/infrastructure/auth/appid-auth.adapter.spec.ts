@@ -29,6 +29,8 @@ const REGION = 'us-south';
 const TENANT_ID = 'ee0c0740-5252-48a4-9b7c-e2b60712256e';
 const CLIENT_ID = '6a92b580-1e10-4b09-ba3d-854f9fa774a5';
 const RELAY_URL = 'https://relay.test/appid/token';
+const CUSTOMER_CLIENT_ID = 'customer-client-id';
+const CUSTOMER_RELAY_URL = 'https://relay.test/appid/customer/token';
 
 const ISSUER = `https://${REGION}.appid.cloud.ibm.com/oauth/v4/${TENANT_ID}`;
 const JWKS_URI = `${ISSUER}/publickeys`;
@@ -39,8 +41,9 @@ const BASE_CONFIG: AppIdConfig = {
   region: REGION,
   tenantId: TENANT_ID,
   staffClientId: CLIENT_ID,
-  customerClientId: '',
+  customerClientId: CUSTOMER_CLIENT_ID,
   relayUrl: RELAY_URL,
+  customerRelayUrl: CUSTOMER_RELAY_URL,
 };
 
 // Signing key material — generated once for the whole suite.
@@ -348,6 +351,25 @@ describe('AppIdAuthAdapter', () => {
       const adapter = makeAdapter();
 
       expect(await adapter.getActiveSession()).toBeNull();
+    });
+
+    /**
+     * The customer case specifically, not just "some other client" (epic #261):
+     * staff and customers share one App ID *tenant*, so a customer token carries
+     * this same issuer and a valid signature from this same JWKS — the audience
+     * binding is the only thing standing between it and a staff session. Minted
+     * with real staff scopes on purpose: even a customer token that claimed
+     * `admin` must not resolve, so nothing here can start depending on scope
+     * filtering as the boundary.
+     */
+    it('rejects a token minted for the customer application (same tenant, customer audience)', async () => {
+      const accessToken = await mintAccessToken({ audience: [CUSTOMER_CLIENT_ID] });
+      sessionStorage.setItem('capy_pos_access_token', accessToken);
+      installFetch({});
+      const adapter = makeAdapter();
+
+      expect(await adapter.getActiveSession()).toBeNull();
+      expect(sessionStorage.getItem('capy_pos_access_token')).toBeNull();
     });
 
     /**

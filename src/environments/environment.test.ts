@@ -65,6 +65,7 @@ export const environment = {
     staffClientId: 'test-appid-client-id',
     customerClientId: 'test-appid-customer-client-id',
     relayUrl: 'http://localhost:8792/appid/token',
+    customerRelayUrl: 'http://localhost:8792/appid/customer/token',
   },
 
   // Payment Gateway (Mock)
