@@ -14,7 +14,8 @@
  *   SMOKE_APPID_USERNAME=… SMOKE_APPID_PASSWORD=… node smoke.mjs   # another
  */
 const PORT = Number(process.env.PORT ?? 8792);
-const URL = `http://127.0.0.1:${PORT}/appid/token`;
+const BASE = `http://127.0.0.1:${PORT}`;
+const URL = `${BASE}/appid/token`;
 const ORIGIN = (process.env.ALLOWED_ORIGINS ?? '').split(',')[0]?.trim() ?? 'http://localhost:4200';
 
 async function post(body, { origin = ORIGIN } = {}) {
@@ -50,6 +51,18 @@ const notJson = await fetch(URL, {
   body: 'not json',
 });
 console.log(`  non-JSON body: HTTP ${notJson.status}`);
+
+// The route table (`routes.ts`), end to end: an unrouted path must get this
+// service's own 404 rather than falling through to the token listener, and a
+// path that merely *ends* with a real route is not that route.
+for (const path of ['/nope', '/anything/appid/token']) {
+  const unrouted = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
+    body: JSON.stringify({ grant_type: 'password', username: 'a', password: 'b' }),
+  });
+  console.log(`  unrouted ${path}: HTTP ${unrouted.status} — ${JSON.stringify(await unrouted.json())}`);
+}
 
 // ─── Then a real grant, if credentials were given ──────────────────────────────
 

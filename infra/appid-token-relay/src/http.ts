@@ -20,7 +20,11 @@
  *    unlisted origin's reply, the request has already spent a login attempt
  *    against the real App ID tenant. Refusing before the route match closes
  *    that gap regardless of path.
- * 3. Route → 404.
+ * 3. Route → 404 — the path matched exactly, and the method with it.
+ *    `server.ts` dispatches from an explicit table (`routes.ts`) that has
+ *    already matched this path, but this boundary is exercised in tests
+ *    without that table, so it keeps its own check rather than trusting a
+ *    caller to have routed correctly.
  * 4. Body cap → 413, while the body streams. This is the *first* real limit an
  *    unauthenticated caller hits — there is no cheaper header check to put
  *    ahead of it, unlike the sibling services' auth-before-body-cap ordering.
@@ -35,6 +39,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { corsHeaders, originAllowed } from './cors.ts';
+import { requestPath } from './routes.ts';
 
 /** The one route this service serves. `OPTIONS` is the preflight for it. */
 export const ALLOWED_METHODS = 'POST, OPTIONS';
@@ -45,7 +50,12 @@ type Rejection = { readonly error: string };
 export interface BoundaryConfig<TRequest> {
   /** Log prefix, e.g. `[appid-relay]`. Never sent to the caller. */
   readonly logPrefix: string;
-  /** The one path served, e.g. `/appid/token`. Matched with `endsWith`. */
+  /**
+   * The one path served, e.g. `/appid/token`. Matched **exactly**, not with
+   * `endsWith`: `server.ts` now dispatches from an explicit table (`routes.ts`)
+   * that already matched this path exactly, so a looser check here could only
+   * ever disagree with it — and on its own it would serve `/anything/appid/token`.
+   */
   readonly route: string;
   /** Browser origins that may be answered. Never a wildcard. */
   readonly origins: readonly string[];
@@ -88,7 +98,7 @@ export function createRequestListener<TRequest>(
       return;
     }
 
-    if (req.method !== 'POST' || !req.url?.split('?')[0]?.endsWith(config.route)) {
+    if (req.method !== 'POST' || requestPath(req.url) !== config.route) {
       send(404, { error: `POST ${config.route}` });
       return;
     }

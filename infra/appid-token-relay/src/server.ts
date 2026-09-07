@@ -18,11 +18,10 @@
  * whole service refusing to start over a route most deployments won't use yet.
  */
 import { createServer } from 'node:http';
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import { relay } from './relay.ts';
 import { validate, MAX_BODY_BYTES } from './validate.ts';
-import { createRequestListener } from './http.ts';
-import { createAdminRequestListener } from './admin-http.ts';
+import { createRequestListener, ALLOWED_METHODS as TOKEN_METHODS } from './http.ts';
+import { createAdminRequestListener, ALLOWED_METHODS as ADMIN_METHODS } from './admin-http.ts';
 import { validateCreate, validateAssignRole, MAX_BODY_BYTES as ADMIN_MAX_BODY_BYTES } from './admin-validate.ts';
 import {
   validate as validateForgotPassword,
@@ -38,6 +37,7 @@ import {
   type ManagementConfig,
 } from './management-api.ts';
 import { readAllowedOrigins } from './cors.ts';
+import { createRouter, routeLabel, type Route } from './routes.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8792);
 
@@ -177,17 +177,27 @@ const adminListener = createAdminRequestListener({
   unavailable: 'The staff-management service is unavailable.',
 });
 
-createServer((req: IncomingMessage, res: ServerResponse) => {
-  const path = req.url?.split('?')[0] ?? '';
-  if (path.startsWith(ADMIN_ROUTE_PREFIX)) {
-    adminListener(req, res);
-  } else if (path === FORGOT_PASSWORD_ROUTE) {
-    forgotPasswordListener(req, res);
-  } else {
-    tokenListener(req, res);
+/**
+ * The whole of this service's dispatch, declared in one place.
+ *
+ * Every path this process answers is an entry here; anything else gets
+ * `routes.ts`'s own 404. That replaces the previous prefix-match-else-default
+ * chain, which sent every unknown path to `tokenListener` and 404'd only
+ * because that listener re-checked the path itself — see `routes.ts`'s doc
+ * comment for why two checks accidentally agreeing was a bug waiting for the
+ * next route.
+ */
+const ROUTES: readonly Route[] = [
+  { match: 'exact', path: TOKEN_ROUTE, methods: TOKEN_METHODS, listener: tokenListener },
+  { match: 'exact', path: FORGOT_PASSWORD_ROUTE, methods: TOKEN_METHODS, listener: forgotPasswordListener },
+  // Prefix, not exact: `admin-http.ts` resolves `/staff`, `/roles` and
+  // `/staff/{id}/role` itself — including its own 404 for an admin path that is
+  // none of those — because only it knows which of them take a body.
+  { match: 'prefix', path: ADMIN_ROUTE_PREFIX, methods: ADMIN_METHODS, listener: adminListener },
+];
+
+createServer(createRouter({ routes: ROUTES, origins })).listen(PORT, () => {
+  for (const route of ROUTES) {
+    console.log(`[appid-relay] listening on http://localhost:${PORT}${routeLabel(route)}`);
   }
-}).listen(PORT, () => {
-  console.log(`[appid-relay] listening on http://localhost:${PORT}${TOKEN_ROUTE}`);
-  console.log(`[appid-relay] listening on http://localhost:${PORT}${ADMIN_ROUTE_PREFIX}staff`);
-  console.log(`[appid-relay] listening on http://localhost:${PORT}${FORGOT_PASSWORD_ROUTE}`);
 });

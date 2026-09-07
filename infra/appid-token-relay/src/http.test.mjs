@@ -186,6 +186,21 @@ describe('routing, over a socket', () => {
     });
   });
 
+  it('404s a path that merely ends with the route, rather than serving it', async () => {
+    // The route is matched exactly. This boundary used to match with `endsWith`,
+    // which served `/anything/appid/token` — harmless only for as long as
+    // nothing was ever mounted in front of it (`routes.ts`).
+    await withServer({}, async ({ port, handled, validated }) => {
+      for (const path of [`/anything${ROUTE}`, `/${ROUTE}`, `${ROUTE}/`]) {
+        const response = await post(port, { path });
+        assert.equal(response.status, 404, path);
+        assert.deepEqual(response.json, { error: `POST ${ROUTE}` });
+      }
+      assert.deepEqual(handled, []);
+      assert.deepEqual(validated, []);
+    });
+  });
+
   for (const method of ['GET', 'PUT', 'DELETE', 'PATCH', 'HEAD']) {
     it(`404s ${method} on the route`, async () => {
       await withServer({}, async ({ port, handled }) => {
