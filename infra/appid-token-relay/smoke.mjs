@@ -16,11 +16,12 @@
 const PORT = Number(process.env.PORT ?? 8792);
 const BASE = `http://127.0.0.1:${PORT}`;
 const URL = `${BASE}/appid/token`;
+const CUSTOMER_URL = `${BASE}/appid/customer/token`;
 const ORIGIN = (process.env.ALLOWED_ORIGINS ?? '').split(',')[0]?.trim() ?? 'http://localhost:4200';
 
-async function post(body, { origin = ORIGIN } = {}) {
+async function post(body, { origin = ORIGIN, url = URL } = {}) {
   const started = Date.now();
-  const response = await fetch(URL, {
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: origin },
     body: JSON.stringify(body),
@@ -63,6 +64,42 @@ for (const path of ['/nope', '/anything/appid/token']) {
   });
   console.log(`  unrouted ${path}: HTTP ${unrouted.status} — ${JSON.stringify(await unrouted.json())}`);
 }
+
+// ─── The customer route, which is the same shape under a different client ──────
+//
+// Bounds only, and deliberately no real customer grant: this route exists to be
+// exchanged under the *customer* App ID application, so a staff credential would
+// tell us nothing about it. What is worth confirming without an account is that
+// the route is routed at all (not a 404 from `routes.ts`), that it validates the
+// same two grants as the staff route, and that a deployment missing
+// `APPID_CUSTOMER_CLIENT_ID`/`_SECRET` answers a 502 rather than passing App ID's
+// `invalid_client` back as if the person had typed the wrong password.
+
+console.log('\ncustomer route bounds:');
+
+const customerPreflight = await fetch(CUSTOMER_URL, {
+  method: 'OPTIONS',
+  headers: { Origin: ORIGIN, 'Access-Control-Request-Method': 'POST' },
+});
+console.log(`  preflight from allowed origin: HTTP ${customerPreflight.status}`);
+
+const customerBadGrant = await post({ grant_type: 'nonsense' }, { url: CUSTOMER_URL });
+console.log(`  unknown grant_type: HTTP ${customerBadGrant.status} — ${JSON.stringify(customerBadGrant.body)}`);
+
+const customerWrongOrigin = await post(
+  { grant_type: 'password', username: 'a', password: 'b' },
+  { origin: 'https://not-listed.example', url: CUSTOMER_URL }
+);
+console.log(`  unlisted origin: HTTP ${customerWrongOrigin.status} — ${JSON.stringify(customerWrongOrigin.body)}`);
+
+// 502 when the customer client is not deployed yet; a real App ID answer (400
+// invalid_grant for this made-up account) once it is. Either is a pass — what
+// would not be is a 404, or an `invalid_client` reaching the caller.
+const customerGrant = await post(
+  { grant_type: 'password', username: 'nobody@example.com', password: 'nope' },
+  { url: CUSTOMER_URL }
+);
+console.log(`  password grant: HTTP ${customerGrant.status} — ${JSON.stringify(customerGrant.body)}`);
 
 // ─── Then a real grant, if credentials were given ──────────────────────────────
 
