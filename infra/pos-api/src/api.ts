@@ -32,6 +32,7 @@ import {
   ROLE_PERMISSIONS,
   authorize,
   constantTimeStringsEqual,
+  isRolesShape,
   type AppIdVerificationConfig,
 } from './session-auth.ts';
 import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
@@ -332,9 +333,36 @@ function health(deps: ApiDeps): ApiResponse {
  * the HS256 path, generalized to a plain shared secret.
  *
  * Reads `ROLES_DOC_ID` and falls back to `SIBLING_ROLE_FALLBACK` below
- * whenever the document does not exist yet — a fresh `roles` database,
- * before anyone has written to it, answers exactly what today's hand-copied
- * tables already say, not an empty grant.
+ * whenever that document does not yield a usable mapping — a fresh `roles`
+ * database, before anyone has written to it, answers exactly what today's
+ * hand-copied tables already say, not an empty grant.
+ *
+ * "Does not yield a usable mapping" covers all three ways this untrusted read
+ * can fail, deliberately not just the middle one:
+ *
+ * The read can *reject* — Cloudant unreachable, credentials rotated. Letting
+ * that propagate would turn the RBAC source for both siblings into a 500 and
+ * leave them with no mapping at all, gating every route they have closed over
+ * a transient blip. `session-auth.ts` already resolves a thrown read to "no
+ * usable document" for the very same Cloudant document, so this route matches
+ * it rather than being the one consumer that fails loudly.
+ *
+ * The document can be the wrong shape, which is `session-auth.ts`'s own
+ * `isRolesShape` — the same guard rather than a second opinion.
+ * `CloudantStore.read` only casts (`stripMeta<T>`), so `RolesDocument.roles`
+ * being non-optional in TypeScript does not stop a hand-written or
+ * half-migrated document from having no `roles` key at all, and passing that
+ * into `withoutPosApiOnlyRoles` would throw. That guard also rejects `{}`,
+ * which is shape-valid but is exactly the empty grant this fallback exists to
+ * prevent.
+ *
+ * Emptiness is then re-checked on what is actually about to be served, not
+ * only on what was read: `withoutPosApiOnlyRoles` can itself empty a document
+ * that passed the guard — a `roles` document whose only entry is `customer`
+ * (an admin narrowing self-checkout's grant, which is a supported edit) leaves
+ * nothing behind once `customer` is held back. The siblings must get a real
+ * table or the fallback; never a mapping in which every role they look up
+ * resolves to no permissions.
  */
 async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (deps.internalSecret.length === 0) {
@@ -347,8 +375,37 @@ async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse
     return { status: 401, body: { error: 'Invalid or missing X-Internal-Secret.' } };
   }
 
-  const doc = await deps.roles.read(ROLES_DOC_ID);
-  return { status: 200, body: { roles: doc?.document.roles ?? SIBLING_ROLE_FALLBACK } };
+  const stored = await readStoredRoles(deps.roles);
+  if (stored === null) {
+    return { status: 200, body: { roles: SIBLING_ROLE_FALLBACK } };
+  }
+  const forSiblings = withoutPosApiOnlyRoles(stored);
+  return {
+    status: 200,
+    body: { roles: Object.keys(forSiblings).length > 0 ? forSiblings : SIBLING_ROLE_FALLBACK },
+  };
+}
+
+/**
+ * `null` means "no mapping worth serving", collapsing a missing document, a
+ * failed read and an unusable one — the same one-null contract
+ * `session-auth.ts`'s `readRolesDocument` uses against this same document, so
+ * the two consumers cannot disagree about which reads count as usable.
+ *
+ * The failure is logged rather than swallowed: the siblings keep working off
+ * the fallback, so a broken RBAC source has nothing else to surface it.
+ */
+async function readStoredRoles(
+  store: DocumentStore<RolesDocument>
+): Promise<Readonly<Record<string, readonly string[]>> | null> {
+  let stored: unknown;
+  try {
+    stored = (await store.read(ROLES_DOC_ID))?.document.roles;
+  } catch (error) {
+    console.error('[pos-api] shared roles read failed', error);
+    return null;
+  }
+  return isRolesShape(stored) ? stored : null;
 }
 
 /**
@@ -367,19 +424,27 @@ async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse
  * added there reaches the siblings automatically, the way Phase 5's
  * centralization intends; only names listed here are held back.
  *
- * Known residual gap: this covers the *fallback* only. Once item 9 writes a
- * real `roles` document containing `customer`, the siblings fetch that
- * document verbatim and the filtering has to move to their own end (each
- * proxy refusing roles it does not recognise). Tracked as part of #261's
- * item 9 verification, not fixed here.
+ * Applied to the *stored document* too, not just this fallback (Epic #261
+ * item 9): a live `roles` document that carries `customer` — because someone
+ * added it there so `pos-api` keeps granting self-checkout its one permission
+ * — must not reach the siblings either, or the document's existence would
+ * quietly do the very thing the fallback filter exists to prevent. Filtering
+ * here, at the one route that serves them, keeps the rule in a single place
+ * instead of requiring each proxy to learn to refuse role names it does not
+ * recognise.
  */
 const POS_API_ONLY_ROLES: readonly string[] = ['customer'];
 
-const SIBLING_ROLE_FALLBACK: Readonly<Record<string, readonly string[]>> = Object.freeze(
-  Object.fromEntries(
-    Object.entries(ROLE_PERMISSIONS).filter(([role]) => !POS_API_ONLY_ROLES.includes(role))
-  )
-);
+function withoutPosApiOnlyRoles(
+  roles: Readonly<Record<string, readonly string[]>>
+): Readonly<Record<string, readonly string[]>> {
+  return Object.freeze(
+    Object.fromEntries(Object.entries(roles).filter(([role]) => !POS_API_ONLY_ROLES.includes(role)))
+  );
+}
+
+const SIBLING_ROLE_FALLBACK: Readonly<Record<string, readonly string[]>> =
+  withoutPosApiOnlyRoles(ROLE_PERMISSIONS);
 
 async function listProducts(deps: ApiDeps): Promise<{ products: readonly ProductDocument[]; count: number }> {
   const products = await deps.products.list();

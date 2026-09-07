@@ -692,6 +692,95 @@ describe('shared roles document (Phase 5)', () => {
     }
   });
 
+  it('5. backfills customer from ROLE_PERMISSIONS when the live document omits it', async () => {
+    // Epic #261 item 9: a `roles` document written before item 6 landed — or by
+    // an admin editing the staff ladder through the "Roles & Permissions" panel,
+    // which cannot express `customer` at all — has no `customer` entry. Without
+    // the backfill its mere existence bypasses the literal table and revokes
+    // sale:process from every self-checkout session.
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-roles-5', async () => {
+      const config = {
+        ...ROLES_CONFIG_BASE,
+        rolesSource: fakeRolesReader(async () => ({
+          document: { roles: { operator: ['sale:process'], manager: ['inventory:manage'] } },
+        })),
+      };
+      const token = mintAppId(
+        { scope: 'openid customer', exp: NOW + 4_000_000 + 3600 },
+        { kid: 'kid-roles-5', keyPair }
+      );
+      const claims = await verifyAppIdAccessToken(token, config, NOW + 4_000_000);
+      assert.deepEqual(claims.roles, ['customer']);
+      assert.deepEqual(claims.permissions, ['sale:process']);
+    });
+  });
+
+  it('6. lets a document that does define customer win over the backfill', async () => {
+    // The backfill is a floor, not an override: an admin who deliberately
+    // narrows `customer` later must still be honoured.
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-roles-6', async () => {
+      const config = {
+        ...ROLES_CONFIG_BASE,
+        rolesSource: fakeRolesReader(async () => ({ document: { roles: { customer: ['custom:narrowed'] } } })),
+      };
+      const token = mintAppId(
+        { scope: 'openid customer', exp: NOW + 5_000_000 + 3600 },
+        { kid: 'kid-roles-6', keyPair }
+      );
+      const claims = await verifyAppIdAccessToken(token, config, NOW + 5_000_000);
+      assert.deepEqual(claims.permissions, ['custom:narrowed']);
+    });
+  });
+
+  it('7. refuses an empty document rather than caching it as a table that grants nothing', async () => {
+    // `roles: {}` passes a values-only shape check vacuously, but accepting it
+    // is worse than a failed read: it would replace the cache with a table in
+    // which every role resolves to no permissions, and hold that for the full
+    // TTL — every staff session silently unauthorized, and (through the
+    // `customer` backfill) self-checkout the only thing still working. Treated
+    // as an unusable document, so the last-good-cache rule from test 4 applies
+    // instead.
+    //
+    // Seeds its own cache rather than inheriting test 6's: `rolesCache` is
+    // module-level, so relying on a previous test's read makes the `{}`
+    // assertion vacuous under a focused or affected-test run — the very runs
+    // this repo uses — where the cache starts empty and the last-good value
+    // being asserted is `ROLE_PERMISSIONS` instead. Both reads happen inside
+    // this test so it proves the same thing alone as it does in suite order.
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-roles-7', async () => {
+      let reads = 0;
+      const config = {
+        ...ROLES_CONFIG_BASE,
+        rolesSource: fakeRolesReader(async () => {
+          reads++;
+          // First read seeds a good document; the re-read past the TTL below is
+          // the empty one under test.
+          return reads === 1
+            ? { document: { roles: { customer: ['custom:narrowed'] } } }
+            : { document: { roles: {} } };
+        }),
+      };
+      const token = mintAppId(
+        { scope: 'openid customer', exp: NOW + 6_000_400 + 3600 },
+        { kid: 'kid-roles-7', keyPair }
+      );
+
+      const seeded = await verifyAppIdAccessToken(token, config, NOW + 6_000_000);
+      assert.deepEqual(seeded.permissions, ['custom:narrowed'], 'precondition: the good document is cached');
+
+      // 400s later — past the 5-minute TTL, so this forces the re-read that
+      // returns `{}` rather than answering from the cache.
+      const claims = await verifyAppIdAccessToken(token, config, NOW + 6_000_400);
+      assert.equal(reads, 2, 'the empty document must actually have been read, not skipped as fresh cache');
+      // The seeded document survived. Had `{}` been accepted, the backfill
+      // would have made this ROLE_PERMISSIONS' own ['sale:process'] instead.
+      assert.deepEqual(claims.permissions, ['custom:narrowed']);
+    });
+  });
+
   it('never touches the roles source at all when rolesSource is not configured', async () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-roles-unconfigured', async () => {
