@@ -348,7 +348,10 @@ async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse
   }
 
   const doc = await deps.roles.read(ROLES_DOC_ID);
-  return { status: 200, body: { roles: doc?.document.roles ?? SIBLING_ROLE_FALLBACK } };
+  return {
+    status: 200,
+    body: { roles: doc === null ? SIBLING_ROLE_FALLBACK : withoutPosApiOnlyRoles(doc.document.roles) },
+  };
 }
 
 /**
@@ -367,19 +370,27 @@ async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse
  * added there reaches the siblings automatically, the way Phase 5's
  * centralization intends; only names listed here are held back.
  *
- * Known residual gap: this covers the *fallback* only. Once item 9 writes a
- * real `roles` document containing `customer`, the siblings fetch that
- * document verbatim and the filtering has to move to their own end (each
- * proxy refusing roles it does not recognise). Tracked as part of #261's
- * item 9 verification, not fixed here.
+ * Applied to the *stored document* too, not just this fallback (Epic #261
+ * item 9): a live `roles` document that carries `customer` — because someone
+ * added it there so `pos-api` keeps granting self-checkout its one permission
+ * — must not reach the siblings either, or the document's existence would
+ * quietly do the very thing the fallback filter exists to prevent. Filtering
+ * here, at the one route that serves them, keeps the rule in a single place
+ * instead of requiring each proxy to learn to refuse role names it does not
+ * recognise.
  */
 const POS_API_ONLY_ROLES: readonly string[] = ['customer'];
 
-const SIBLING_ROLE_FALLBACK: Readonly<Record<string, readonly string[]>> = Object.freeze(
-  Object.fromEntries(
-    Object.entries(ROLE_PERMISSIONS).filter(([role]) => !POS_API_ONLY_ROLES.includes(role))
-  )
-);
+function withoutPosApiOnlyRoles(
+  roles: Readonly<Record<string, readonly string[]>>
+): Readonly<Record<string, readonly string[]>> {
+  return Object.freeze(
+    Object.fromEntries(Object.entries(roles).filter(([role]) => !POS_API_ONLY_ROLES.includes(role)))
+  );
+}
+
+const SIBLING_ROLE_FALLBACK: Readonly<Record<string, readonly string[]>> =
+  withoutPosApiOnlyRoles(ROLE_PERMISSIONS);
 
 async function listProducts(deps: ApiDeps): Promise<{ products: readonly ProductDocument[]; count: number }> {
   const products = await deps.products.list();

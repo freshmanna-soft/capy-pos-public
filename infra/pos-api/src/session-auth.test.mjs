@@ -692,6 +692,48 @@ describe('shared roles document (Phase 5)', () => {
     }
   });
 
+  it('5. backfills customer from ROLE_PERMISSIONS when the live document omits it', async () => {
+    // Epic #261 item 9: a `roles` document written before item 6 landed — or by
+    // an admin editing the staff ladder through the "Roles & Permissions" panel,
+    // which cannot express `customer` at all — has no `customer` entry. Without
+    // the backfill its mere existence bypasses the literal table and revokes
+    // sale:process from every self-checkout session.
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-roles-5', async () => {
+      const config = {
+        ...ROLES_CONFIG_BASE,
+        rolesSource: fakeRolesReader(async () => ({
+          document: { roles: { operator: ['sale:process'], manager: ['inventory:manage'] } },
+        })),
+      };
+      const token = mintAppId(
+        { scope: 'openid customer', exp: NOW + 4_000_000 + 3600 },
+        { kid: 'kid-roles-5', keyPair }
+      );
+      const claims = await verifyAppIdAccessToken(token, config, NOW + 4_000_000);
+      assert.deepEqual(claims.roles, ['customer']);
+      assert.deepEqual(claims.permissions, ['sale:process']);
+    });
+  });
+
+  it('6. lets a document that does define customer win over the backfill', async () => {
+    // The backfill is a floor, not an override: an admin who deliberately
+    // narrows `customer` later must still be honoured.
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-roles-6', async () => {
+      const config = {
+        ...ROLES_CONFIG_BASE,
+        rolesSource: fakeRolesReader(async () => ({ document: { roles: { customer: ['custom:narrowed'] } } })),
+      };
+      const token = mintAppId(
+        { scope: 'openid customer', exp: NOW + 5_000_000 + 3600 },
+        { kid: 'kid-roles-6', keyPair }
+      );
+      const claims = await verifyAppIdAccessToken(token, config, NOW + 5_000_000);
+      assert.deepEqual(claims.permissions, ['custom:narrowed']);
+    });
+  });
+
   it('never touches the roles source at all when rolesSource is not configured', async () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-roles-unconfigured', async () => {

@@ -549,11 +549,46 @@ async function readRolesDocument(source: RolesReader): Promise<Readonly<Record<s
     if (result === null) {
       return null;
     }
-    return isRolesShape(result.document.roles) ? result.document.roles : null;
+    return isRolesShape(result.document.roles) ? withBackfilledRoles(result.document.roles) : null;
   } catch (error) {
     console.error('[pos-api] shared roles read failed', error);
     return null;
   }
+}
+
+/**
+ * Role names this service keeps granting from its own `ROLE_PERMISSIONS` even
+ * when a live `roles` document exists that does not mention them (Epic #261
+ * item 9).
+ *
+ * Only `customer` qualifies, and only because it is the one role in
+ * `ROLE_PERMISSIONS` that no one can add through the "Roles & Permissions"
+ * admin panel: that panel edits the staff ladder (operator/manager/admin),
+ * while `customer` is a separate App ID application self-checkout owns. So a
+ * document written before item 6 landed — or written by an admin editing a
+ * staff role — omits `customer` for the same reason every time: nobody chose
+ * to remove it, the writer simply never knew about it. Without this backfill
+ * the mere existence of such a document bypasses the literal table and
+ * revokes `sale:process` from every self-checkout session, which is a
+ * silent outage rather than a policy decision.
+ *
+ * A name listed here is a floor, not an override: a document that *does* carry
+ * the role wins outright, so an admin who deliberately narrows `customer`
+ * later is still honoured.
+ */
+const DOCUMENT_BACKFILLED_ROLES: readonly string[] = ['customer'];
+
+function withBackfilledRoles(
+  document: Readonly<Record<string, readonly string[]>>
+): Readonly<Record<string, readonly string[]>> {
+  const missing = DOCUMENT_BACKFILLED_ROLES.filter((role) => document[role] === undefined);
+  if (missing.length === 0) {
+    return document;
+  }
+  return Object.freeze({
+    ...document,
+    ...Object.fromEntries(missing.map((role) => [role, ROLE_PERMISSIONS[role] ?? []])),
+  });
 }
 
 /** Every value must be an array of strings — anything else is not a roles document this file trusts. */

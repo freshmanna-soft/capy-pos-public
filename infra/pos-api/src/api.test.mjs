@@ -307,6 +307,25 @@ describe('GET /internal/roles', () => {
 
   it('serves the stored document once one exists, not the fallback', async () => {
     const context = deps({
+      roles: [{ id: 'role-permissions', roles: { operator: ['sale:process'], manager: ['inventory:manage'] } }],
+    });
+    const { status, body } = await call(
+      'GET',
+      '/internal/roles',
+      { token: null, internalSecret: INTERNAL_SECRET },
+      context
+    );
+    assert.equal(status, 200);
+    assert.deepEqual(body.roles, { operator: ['sale:process'], manager: ['inventory:manage'] });
+  });
+
+  it('strips customer from the stored document too, not only from the fallback', async () => {
+    // Epic #261 item 9: once a live `roles` document carries `customer` (added
+    // there so pos-api keeps granting self-checkout sale:process), serving it
+    // verbatim would admit any shopper to the vision/clerk-agent routes — the
+    // exact thing the fallback filter exists to prevent. The document's mere
+    // existence must not bypass the rule.
+    const context = deps({
       roles: [{ id: 'role-permissions', roles: { operator: ['sale:process'], customer: ['sale:process'] } }],
     });
     const { status, body } = await call(
@@ -316,7 +335,8 @@ describe('GET /internal/roles', () => {
       context
     );
     assert.equal(status, 200);
-    assert.deepEqual(body.roles, { operator: ['sale:process'], customer: ['sale:process'] });
+    assert.equal(body.roles.customer, undefined);
+    assert.deepEqual(body.roles, { operator: ['sale:process'] });
   });
 
   it('never reaches this route through the bearer-token boundary at all', async () => {
