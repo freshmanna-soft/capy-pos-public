@@ -292,6 +292,19 @@ describe('GET /internal/roles', () => {
     assert.ok(body.roles.admin.includes('inventory:delete'));
   });
 
+  it('omits the customer role from the fallback — the sibling proxies gate on sale:process alone', async () => {
+    // `customer` exists in `pos-api`'s own ROLE_PERMISSIONS (Epic #261 item 6)
+    // but not in `vision-proxy`/`clerk-agent-relay`'s copies, and their only
+    // permission gate *is* sale:process. Serving it in the fallback would
+    // silently admit any self-registered shopper to the AI-vision routes.
+    const { body } = await call('GET', '/internal/roles', {
+      token: null,
+      internalSecret: INTERNAL_SECRET,
+    });
+    assert.equal(body.roles.customer, undefined);
+    assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
+  });
+
   it('serves the stored document once one exists, not the fallback', async () => {
     const context = deps({
       roles: [{ id: 'role-permissions', roles: { operator: ['sale:process'], customer: ['sale:process'] } }],
