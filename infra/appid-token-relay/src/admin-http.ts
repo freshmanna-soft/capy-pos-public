@@ -9,6 +9,11 @@
  * codebase doesn't otherwise need — a handful of similar branches read more
  * honestly than a route table built to hold them.
  *
+ * `routes.ts`'s table dispatches every `/appid/admin/` path here as one entry
+ * and stops there: which of these five a path is — including the `{id}` segment,
+ * and the 404 for an admin path that is none of them — stays this file's own
+ * business, because only it knows which of them take a body.
+ *
  * `GET /appid/admin/roles` exists so the browser never invents an App ID role
  * id itself: `AppIdOperatorAdminAdapter.listAssignableRoles()` calls it to get
  * the three built-in role names' *real* App ID role ids, then sends one of
@@ -18,6 +23,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { authorize, type AuthConfig } from './admin-auth.ts';
 import { corsHeaders, originAllowed } from './cors.ts';
+import { requestPath } from './routes.ts';
 
 export const ALLOWED_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
 const STAFF_ROUTE = '/appid/admin/staff';
@@ -77,7 +83,10 @@ export function createAdminRequestListener(
       return;
     }
 
-    const path = req.url?.split('?')[0] ?? '';
+    // One definition of "the path, without the query string", shared with
+    // `routes.ts`'s table and `http.ts` — three copies of the same split is
+    // exactly the drift this service's other shared helpers exist to avoid.
+    const path = requestPath(req.url);
     const userId = matchRoleRoutePath(path);
     const isStaffRoute = path === STAFF_ROUTE;
     const isRolesRoute = path === ROLES_ROUTE;

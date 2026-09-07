@@ -91,6 +91,12 @@ jobs:
         run: |
           npm ci --ignore-scripts --prefix infra/clerk-agent-relay
           npm test --prefix infra/clerk-agent-relay
+      # No `npm ci`: this service has no runtime dependency at all, and its suite
+      # needs nothing but Node. It had no step here, so its 100-plus tests — the
+      # only thing standing behind the sign-in boundary, its CORS pinning and now
+      # its route table — never ran on a pull request.
+      - name: App ID token relay service tests
+        run: npm test --prefix infra/appid-token-relay
       - name: Upload coverage artifact
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
