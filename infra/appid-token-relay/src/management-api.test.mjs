@@ -290,6 +290,44 @@ describe('createUser', () => {
     assert.equal(calls.length, 0, 'an empty password must fail before any call reaches IAM or App ID');
   });
 
+  // The same guarantee from the other side. `email` is this account's only
+  // login identity — it lands in both `userName` and the primary `emails`
+  // entry — so a blank one creates an account nobody can ever sign in as, the
+  // exact "state nobody asked for" the password guard exists to prevent.
+  it('rejects an empty email without creating anything', async () => {
+    stubFetch([
+      {
+        match: () => true,
+        respond: () => json(201, { id: 'scim-1', profileId: 'sub-1', displayName: 'c', emails: [] }),
+      },
+    ]);
+
+    await assert.rejects(
+      () => createUser('', 'caller-chosen-pw', CONFIG, nowSeconds),
+      (error) => error instanceof ManagementApiError && error.message.includes('email')
+    );
+    assert.equal(calls.length, 0, 'an empty email must fail before any call reaches IAM or App ID');
+  });
+
+  // Not symmetric with the password on purpose, and for the same reason
+  // `validate.ts` trims `username` but never `password`: whitespace is a
+  // legitimate part of a passphrase, and never part of an address. A
+  // spaces-only email is the empty case wearing a disguise.
+  it('rejects a whitespace-only email without creating anything', async () => {
+    stubFetch([
+      {
+        match: () => true,
+        respond: () => json(201, { id: 'scim-1', profileId: 'sub-1', displayName: 'c', emails: [] }),
+      },
+    ]);
+
+    await assert.rejects(
+      () => createUser('   ', 'caller-chosen-pw', CONFIG, nowSeconds),
+      (error) => error instanceof ManagementApiError && error.message.includes('email')
+    );
+    assert.equal(calls.length, 0, 'a whitespace-only email must fail before any call reaches IAM or App ID');
+  });
+
   it('throws ManagementApiError when sign_up succeeds but returns no profileId, rather than silently using the SCIM id', async () => {
     stubFetch([
       {
