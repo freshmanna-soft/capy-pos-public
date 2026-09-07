@@ -592,20 +592,36 @@ function withBackfilledRoles(
 }
 
 /**
- * Every value must be an array of strings — anything else is not a roles
- * document this service trusts.
+ * Every value must be an array of strings, and there must be at least one —
+ * anything else is not a roles document this service trusts.
  *
  * Exported because `api.ts` serves the same untrusted document to the sibling
  * proxies over `GET /internal/roles`, and the two consumers of one Cloudant
  * document must not disagree about what counts as a usable one:
  * `CloudantStore.read` only casts (`stripMeta<T>`), so a non-optional `roles`
  * field in TypeScript says nothing about what the database actually holds.
+ *
+ * The emptiness check is not pedantry about a degenerate case: a values-only
+ * test passes `{}` vacuously, and `{}` is the single most dangerous document
+ * either consumer can be handed. It is a complete role table in which every
+ * role name resolves to no permissions, so trusting it authorizes nobody —
+ * `getRoles` would serve the siblings the empty grant its fallback exists to
+ * prevent, and `resolvedRolePermissions` would cache it for the full TTL,
+ * revoking every staff permission until it expired. Nor can it be a policy
+ * decision: the "Roles & Permissions" panel edits the staff ladder, and a
+ * table with no `admin` locks out the only people who could write a new one.
+ * A half-written or half-migrated document must degrade the same way a
+ * missing one does.
  */
 export function isRolesShape(value: unknown): value is Readonly<Record<string, readonly string[]>> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
-  return Object.values(value).every(
+  const entries = Object.values(value);
+  if (entries.length === 0) {
+    return false;
+  }
+  return entries.every(
     (entry) => Array.isArray(entry) && entry.every((item) => typeof item === 'string')
   );
 }

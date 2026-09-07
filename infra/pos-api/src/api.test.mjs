@@ -359,6 +359,29 @@ describe('GET /internal/roles', () => {
     assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
   });
 
+  it('serves the fallback when the stored roles field is an empty object', async () => {
+    // The boundary between the two cases above: `roles: {}` is *shape*-valid
+    // — every one of its zero values is an array of strings — yet it is the
+    // one thing this route must never serve. An empty mapping means every role
+    // name the siblings look up resolves to no permissions, so both proxies
+    // gate every route closed: the empty grant the fallback exists to prevent,
+    // arriving through a document instead of through a missing one. Nobody can
+    // author it deliberately either — the "Roles & Permissions" panel edits
+    // the staff ladder, and a table with no `admin` locks out the only people
+    // who could put one back — so it is a half-written or half-migrated
+    // document every time.
+    const context = deps({ roles: [{ id: 'role-permissions', roles: {} }] });
+    const { status, body } = await call(
+      'GET',
+      '/internal/roles',
+      { token: null, internalSecret: INTERNAL_SECRET },
+      context
+    );
+    assert.equal(status, 200);
+    assert.equal(body.roles.customer, undefined);
+    assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
+  });
+
   it('serves the fallback when the stored roles field is not a role → permissions map', async () => {
     // Same untrusted-document reasoning, one step further in: the key exists but
     // holds the wrong shape. `session-auth.ts` already gates this exact field
@@ -373,6 +396,26 @@ describe('GET /internal/roles', () => {
       context
     );
     assert.equal(status, 200);
+    assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
+  });
+
+  it('serves the fallback when holding customer back is what empties the stored document', async () => {
+    // The other way to arrive at an empty grant, and the one this route creates
+    // itself: a document whose only entry is `customer` is shape-valid and
+    // non-empty, so it passes the guard — but stripping `customer` leaves `{}`
+    // behind, and serving that gates every sibling route closed. A
+    // customer-only document is a supported edit, not a corrupt one (an admin
+    // narrowing self-checkout's single permission), so the siblings must simply
+    // keep the fallback: it holds nothing about `customer` either way.
+    const context = deps({ roles: [{ id: 'role-permissions', roles: { customer: ['sale:narrowed'] } }] });
+    const { status, body } = await call(
+      'GET',
+      '/internal/roles',
+      { token: null, internalSecret: INTERNAL_SECRET },
+      context
+    );
+    assert.equal(status, 200);
+    assert.equal(body.roles.customer, undefined);
     assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
   });
 

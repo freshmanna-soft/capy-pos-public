@@ -344,7 +344,16 @@ function health(deps: ApiDeps): ApiResponse {
  * `roles` key at all. Passing that straight into `withoutPosApiOnlyRoles`
  * would throw and turn this route — the RBAC source for both siblings — into
  * a 500, leaving them with no mapping where the fallback would have served a
- * safe one.
+ * safe one. That guard also rejects `{}`, which is shape-valid but is exactly
+ * the empty grant this fallback exists to prevent.
+ *
+ * Emptiness is then re-checked on what is actually about to be served, not
+ * only on what was read: `withoutPosApiOnlyRoles` can itself empty a document
+ * that passed the guard — a `roles` document whose only entry is `customer`
+ * (an admin narrowing self-checkout's grant, which is a supported edit) leaves
+ * nothing behind once `customer` is held back. The siblings must get a real
+ * table or the fallback; never a mapping in which every role they look up
+ * resolves to no permissions.
  */
 async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
   if (deps.internalSecret.length === 0) {
@@ -358,9 +367,13 @@ async function getRoles(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse
   }
 
   const stored = (await deps.roles.read(ROLES_DOC_ID))?.document.roles;
+  if (!isRolesShape(stored)) {
+    return { status: 200, body: { roles: SIBLING_ROLE_FALLBACK } };
+  }
+  const forSiblings = withoutPosApiOnlyRoles(stored);
   return {
     status: 200,
-    body: { roles: isRolesShape(stored) ? withoutPosApiOnlyRoles(stored) : SIBLING_ROLE_FALLBACK },
+    body: { roles: Object.keys(forSiblings).length > 0 ? forSiblings : SIBLING_ROLE_FALLBACK },
   };
 }
 

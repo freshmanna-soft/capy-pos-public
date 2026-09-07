@@ -734,6 +734,32 @@ describe('shared roles document (Phase 5)', () => {
     });
   });
 
+  it('7. refuses an empty document rather than caching it as a table that grants nothing', async () => {
+    // `roles: {}` passes a values-only shape check vacuously, but accepting it
+    // is worse than a failed read: it would replace the cache with a table in
+    // which every role resolves to no permissions, and hold that for the full
+    // TTL — every staff session silently unauthorized, and (through the
+    // `customer` backfill) self-checkout the only thing still working. Treated
+    // as an unusable document, so the last-good-cache rule from test 4 applies
+    // instead.
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-roles-7', async () => {
+      const config = {
+        ...ROLES_CONFIG_BASE,
+        rolesSource: fakeRolesReader(async () => ({ document: { roles: {} } })),
+      };
+      const token = mintAppId(
+        { scope: 'openid customer', exp: NOW + 6_000_000 + 3600 },
+        { kid: 'kid-roles-7', keyPair }
+      );
+      // Past test 6's TTL, so this forces the re-read that returns `{}`.
+      const claims = await verifyAppIdAccessToken(token, config, NOW + 6_000_000);
+      // Test 6's cached document survived. Had `{}` been accepted, the backfill
+      // would have made this ROLE_PERMISSIONS' own ['sale:process'] instead.
+      assert.deepEqual(claims.permissions, ['custom:narrowed']);
+    });
+  });
+
   it('never touches the roles source at all when rolesSource is not configured', async () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-roles-unconfigured', async () => {
