@@ -309,11 +309,17 @@ export function randomThrowawayPassword(): string {
  * chose, which is the whole reason this takes a parameter: a self-checkout
  * customer has to be able to sign in again with what they just typed.
  *
- * Refuses an empty password before touching the network. With the value now
- * coming from outside, that is the one guarantee left worth keeping here —
- * it stops an account existing in a state nobody asked for. Real password
- * *policy* (length, strength) belongs to the route validating the customer's
- * input, not to this transport-level call.
+ * Refuses an empty email or password before touching the network. With both
+ * values now coming from outside, that is the one guarantee left worth keeping
+ * here — it stops an account existing in a state nobody asked for. Real
+ * password *policy* (length, strength) and address *format* belong to the
+ * route validating the customer's input, not to this transport-level call.
+ *
+ * The email is checked trimmed but sent as given — exactly how `validate()`
+ * treats `username` versus `password`. Whitespace can be a real part of a
+ * passphrase and never part of an address, so a spaces-only email is the
+ * empty case in disguise; normalizing it, on the other hand, is the input
+ * route's job, not this one's.
  *
  * This relay never triggers App ID's `forgot_password` for a freshly created
  * account — confirmed live it 409s unconditionally against one still
@@ -333,6 +339,9 @@ export async function createUser(
   config: ManagementConfig,
   nowSeconds: () => number = defaultNow
 ): Promise<{ id: string; email: string; displayName: string }> {
+  if (email.trim().length === 0) {
+    throw new ManagementApiError('Creating the App ID user requires an email address.');
+  }
   if (password.length === 0) {
     throw new ManagementApiError('Creating the App ID user requires a password.');
   }
