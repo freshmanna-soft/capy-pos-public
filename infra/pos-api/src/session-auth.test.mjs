@@ -560,6 +560,19 @@ describe('verifyAppIdAccessToken', () => {
       });
     });
 
+    it('grants a customer scope exactly sale:process and nothing else', async () => {
+      const keyPair = generateRsaKeyPair();
+      await withJwks(keyPair, 'kid-customer', async () => {
+        const token = mintAppId({ scope: 'openid appid_default customer' }, { kid: 'kid-customer', keyPair });
+        const claims = await verifyAppIdAccessToken(token, APPID_CONFIG, NOW);
+        assert.deepEqual(claims.roles, ['customer']);
+        // Exact, not a superset check: self-checkout must not read the till's
+        // transaction history or the inventory catalogue just because it can
+        // complete its own sale.
+        assert.deepEqual(claims.permissions, ['sale:process']);
+      });
+    });
+
     it('grants nothing for a scope with no recognisable role', async () => {
       const keyPair = generateRsaKeyPair();
       await withJwks(keyPair, 'kid-norole', async () => {
@@ -752,6 +765,27 @@ describe('authorize — App ID dispatch', () => {
       assert.equal(outcome.ok, false);
       assert.equal(outcome.status, 403);
       assert.equal(outcome.error, 'Requires inventory:delete.');
+    });
+  });
+
+  it('403s an RS256 customer token reaching a route beyond sale:process', async () => {
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-authz-customer', async () => {
+      const token = mintAppId({ scope: 'customer' }, { kid: 'kid-authz-customer', keyPair });
+      const outcome = await authorize(bearer(token), Permission.VIEW_INVENTORY, { secret: SECRET, appId: APPID_CONFIG }, NOW);
+      assert.equal(outcome.ok, false);
+      assert.equal(outcome.status, 403);
+      assert.equal(outcome.error, 'Requires inventory:view.');
+    });
+  });
+
+  it('admits an RS256 customer token on the sale route it does have', async () => {
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-authz-customer-ok', async () => {
+      const token = mintAppId({ scope: 'customer' }, { kid: 'kid-authz-customer-ok', keyPair });
+      const outcome = await authorize(bearer(token), Permission.PROCESS_SALE, { secret: SECRET, appId: APPID_CONFIG }, NOW);
+      assert.equal(outcome.ok, true);
+      assert.deepEqual(outcome.claims.roles, ['customer']);
     });
   });
 

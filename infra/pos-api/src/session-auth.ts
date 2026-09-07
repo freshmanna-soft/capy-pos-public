@@ -438,9 +438,11 @@ function audienceMatches(aud: unknown, expected: string): boolean {
  * Restricted to the five permissions `Permission` above already copies —
  * additive by role level, mirroring `permission.constants.ts`'s
  * `OPERATOR_PERMISSIONS`/`MANAGER_PERMISSIONS`/`ADMIN_PERMISSIONS`,
- * hand-restricted the same way `Permission` itself already is. Only resolves
- * these three built-in role names — a custom App ID scope beyond
- * operator/manager/admin would need a matching entry here, same limitation
+ * hand-restricted the same way `Permission` itself already is, plus the
+ * non-hierarchical `customer` tier self-checkout uses (see its own comment on
+ * the entry below). Only resolves these four role names — a custom App ID
+ * scope beyond customer/operator/manager/admin would need a matching entry
+ * here, same limitation
  * `AppIdAuthAdapter`'s own `Role.fromName()` filtering already has
  * client-side. `session-auth.test.mjs` pins this table so a rename on the
  * Angular side that is not mirrored here silently narrows or widens what a
@@ -456,6 +458,22 @@ function audienceMatches(aud: unknown, expected: string): boolean {
  * granting zero permissions to every RS256-authenticated caller.
  */
 export const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> = {
+  /**
+   * Customer self-checkout (Epic #261) — deliberately *not* part of the
+   * additive operator ⊂ manager ⊂ admin ladder below, and the only entry in
+   * this table with no counterpart in `permission.constants.ts`'s role tiers:
+   * a customer is not a staff member with fewer permissions, it is a separate
+   * App ID application whose one scope lets it complete its own sale and
+   * nothing else. No `VIEW_TRANSACTIONS` (the till's sales history is not a
+   * shopper's to read) and no `VIEW_INVENTORY` (the self-checkout UI reads
+   * products through its own path, not an authenticated catalogue route), so
+   * widening this list is a security decision, not a convenience one.
+   *
+   * Listed here only — `vision-proxy` and `clerk-agent-relay` keep their own
+   * copies of this table without a `customer` entry, because self-checkout
+   * never calls either service.
+   */
+  customer: [Permission.PROCESS_SALE],
   operator: [Permission.PROCESS_SALE, Permission.VIEW_TRANSACTIONS, Permission.VIEW_INVENTORY],
   manager: [
     Permission.PROCESS_SALE,
