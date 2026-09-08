@@ -10,6 +10,8 @@ import { ToastService, type Toast } from '@shared/ui/toast/toast.service';
  * currently holds. Each story pins a fixed set of toasts through a stubbed
  * service so a variant stays on screen instead of auto-dismissing mid-look.
  */
+const TOAST_CONTAINER_TEMPLATE = '<app-toast-container />';
+
 const toastServiceStub = (toasts: Toast[]) => ({
   toasts: signal(toasts),
   dismiss: () => undefined,
@@ -44,7 +46,7 @@ type Story = StoryObj<ToastContainerComponent>;
  */
 export const Success: Story = {
   decorators: [withToasts([toast(1, 'Transaction completed', 'success')])],
-  render: () => ({ template: '<app-toast-container />' }),
+  render: () => ({ template: TOAST_CONTAINER_TEMPLATE }),
 };
 
 /**
@@ -52,7 +54,7 @@ export const Success: Story = {
  */
 export const Error: Story = {
   decorators: [withToasts([toast(1, 'Payment declined — try another card', 'error')])],
-  render: () => ({ template: '<app-toast-container />' }),
+  render: () => ({ template: TOAST_CONTAINER_TEMPLATE }),
 };
 
 /**
@@ -60,7 +62,7 @@ export const Error: Story = {
  */
 export const Warning: Story = {
   decorators: [withToasts([toast(1, 'Offline — queuing transactions locally', 'warning')])],
-  render: () => ({ template: '<app-toast-container />' }),
+  render: () => ({ template: TOAST_CONTAINER_TEMPLATE }),
 };
 
 /**
@@ -68,7 +70,7 @@ export const Warning: Story = {
  */
 export const Info: Story = {
   decorators: [withToasts([toast(1, 'Catalogue synced', 'info')])],
-  render: () => ({ template: '<app-toast-container />' }),
+  render: () => ({ template: TOAST_CONTAINER_TEMPLATE }),
 };
 
 /**
@@ -83,7 +85,7 @@ export const Stacked: Story = {
       toast(4, 'Payment declined — try another card', 'error'),
     ]),
   ],
-  render: () => ({ template: '<app-toast-container />' }),
+  render: () => ({ template: TOAST_CONTAINER_TEMPLATE }),
 };
 
 /**
@@ -91,5 +93,5 @@ export const Stacked: Story = {
  */
 export const Empty: Story = {
   decorators: [withToasts([])],
-  render: () => ({ template: '<app-toast-container />' }),
+  render: () => ({ template: TOAST_CONTAINER_TEMPLATE }),
 };

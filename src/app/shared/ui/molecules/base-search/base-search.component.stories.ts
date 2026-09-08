@@ -45,6 +45,7 @@ const CATALOGUE: DemoItem[] = [
         placeholder="Search products (min 2 characters)"
         role="combobox"
         aria-label="Search products"
+        aria-controls="demo-search-listbox"
         [attr.aria-expanded]="searchResults().length > 0"
         [value]="searchQuery()"
         (input)="onSearchInput($event)"
@@ -59,7 +60,11 @@ const CATALOGUE: DemoItem[] = [
       }
 
       @if (searchResults().length > 0) {
-        <ul class="mt-2 list-none p-0 m-0 border border-gray-200 rounded-lg overflow-hidden">
+        <ul
+          id="demo-search-listbox"
+          role="listbox"
+          class="mt-2 list-none p-0 m-0 border border-gray-200 rounded-lg overflow-hidden"
+        >
           @for (item of searchResults(); track item.id; let i = $index) {
             <li
               class="px-3 py-2 text-sm cursor-pointer"
