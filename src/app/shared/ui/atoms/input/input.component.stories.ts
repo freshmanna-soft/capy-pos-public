@@ -84,8 +84,7 @@ export const WithError: Story = {
   },
   render: (args) => ({
     props: args,
-    template:
-      '<app-input [label]="label" [type]="type" [error]="error" [required]="required" />',
+    template: '<app-input [label]="label" [type]="type" [error]="error" [required]="required" />',
   }),
 };
 
