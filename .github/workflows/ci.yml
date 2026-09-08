@@ -139,6 +139,52 @@ jobs:
       - name: Verify build output
         run: test -d ./dist/capy-pos/browser && echo "✅ build output present"
 
+  storybook:
+    name: 📚 Storybook Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Storybook had no CI gate at all (#285): a story that no longer compiles —
+    # a renamed input, a deleted component, a broken `.storybook/` config — only
+    # ever surfaced when someone ran `npm run storybook` locally. The production
+    # `build` job does NOT cover it: stories are outside the app's entry graph,
+    # and the compodoc pass that feeds the docs addon never runs there either.
+    #
+    # Deliberately a peer of `build` rather than a step appended to it: it is a
+    # second, independent compile of the same sources (~minutes), and folding it
+    # in would serialize it behind the production build and delay the e2e jobs
+    # that gate on `build` succeeding.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+      - name: Build Storybook
+        # Non-zero exit here fails the job, and with it the PR.
+        run: npm run build-storybook
+      - name: Verify Storybook output
+        run: test -f ./storybook-static/index.html && echo "✅ storybook build output present"
+      - name: Upload Storybook build log
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: storybook-build-log
+          path: |
+            *storybook.log
+            storybook-static/
+          retention-days: 7
+
   e2e:
     name: 🎭 Affected Playwright
     runs-on: ubuntu-latest
