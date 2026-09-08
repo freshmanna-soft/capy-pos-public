@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { corsHeaders, originAllowed, readAllowedOrigins } from './cors.ts';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 const ORIGINS = ['https://till.example.com', 'http://localhost:4200'];
 
@@ -79,5 +84,78 @@ describe('corsHeaders', () => {
     const headers = corsHeaders('https://till.example.com', ORIGINS, 'POST, OPTIONS');
     assert.equal(headers['Access-Control-Allow-Headers'], 'Content-Type, Authorization');
     assert.equal(headers['Access-Control-Allow-Methods'], 'POST, OPTIONS');
+  });
+});
+
+/**
+ * Epic #261 item 23: confirm the deployed allow-list covers whatever origin
+ * `/self-checkout` is served from.
+ *
+ * It does, and the reason is structural rather than lucky: `/self-checkout` is a
+ * route inside the same Angular app as `/pos` and `/clerk` (item 15 scaffolds it
+ * as a sibling route, not a separately-deployed site), and an `Origin` header
+ * carries scheme://host[:port] and never a path. So the browser on
+ * `https://…/self-checkout` sends byte-for-byte the same `Origin` as the one on
+ * `https://…/pos` — an origin that must already be listed for `/clerk` to work
+ * today. Adding an SPA route can therefore never need a new allow-list entry.
+ *
+ * Verified against the live relay while writing this (`OPTIONS
+ * /appid/customer/token`): both origins below were echoed back in
+ * `Access-Control-Allow-Origin`, an unlisted one got no allow header at all.
+ * These assertions are what keep that true — the two ways it could quietly stop
+ * being true are an entry growing a path (`https://host/self-checkout`), which
+ * would then match no `Origin` at all, and the real frontends dropping out of
+ * the list Terraform joins into `ALLOWED_ORIGINS`.
+ */
+describe('the deployed allow-list, against every route of the SPA', () => {
+  // Terraform's `frontend_origins` default is the deployed estate's value —
+  // `local.allowed_origins` in main.tf is just this list comma-joined, which is
+  // exactly what `readAllowedOrigins` parses back out at boot.
+  const variables = readFileSync(join(HERE, '..', '..', '..', 'terraform', 'variables.tf'), 'utf8');
+  const block = variables.match(/variable "frontend_origins"[\s\S]*?\n\}\n/)?.[0];
+  const declared = [...(block ?? '').matchAll(/"(https?:\/\/[^"]+)"/g)].map(([, origin]) => origin);
+  const origins = readAllowedOrigins(declared.join(','));
+
+  it('parses back out of the value Terraform joins, with both real frontends intact', () => {
+    assert.ok(block, 'terraform/variables.tf declares no frontend_origins variable');
+    assert.deepEqual(origins, [
+      'https://freshmanna-soft.github.io',
+      'https://capy-pos-app.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud',
+    ]);
+  });
+
+  it('lists origins only, which is what makes a new SPA route a no-op here', () => {
+    for (const origin of declared) {
+      assert.match(
+        origin,
+        /^https?:\/\/[^/]+$/,
+        `${origin} carries a path — an Origin header never does, so it would match nothing`
+      );
+    }
+  });
+
+  it('admits the Origin a browser on /self-checkout sends, from either frontend', () => {
+    // One case per frontend, spelled out as the header the browser actually
+    // sends from each of these routes: no path, so all four are one value.
+    for (const origin of origins) {
+      for (const route of ['/self-checkout', '/pos', '/clerk', '/']) {
+        assert.equal(
+          originAllowed(origin, origins),
+          true,
+          `${origin} refused for a browser on ${route}`
+        );
+        assert.equal(corsHeaders(origin, origins, 'POST, OPTIONS')['Access-Control-Allow-Origin'], origin);
+      }
+    }
+  });
+
+  it('still refuses an origin that only looks like a frontend, path or not', () => {
+    for (const origin of [
+      'https://freshmanna-soft.github.io.evil.com',
+      'http://freshmanna-soft.github.io',
+      'https://capy-pos-app.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud.evil.com',
+    ]) {
+      assert.equal(originAllowed(origin, origins), false, origin);
+    }
   });
 });
