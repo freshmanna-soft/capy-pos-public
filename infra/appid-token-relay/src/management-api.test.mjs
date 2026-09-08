@@ -14,6 +14,7 @@ import {
   randomThrowawayPassword,
   assignRole,
   revokeRoles,
+  deleteUserAndProfile,
   triggerForgotPassword,
   ManagementApiError,
   resetCachesForTest,
@@ -52,6 +53,11 @@ function stubFetch(handlers) {
   };
 }
 
+/** How many times `/roles` was actually read — the roles cache's whole observable behaviour. */
+function rolesCalls() {
+  return calls.filter((c) => c.url.endsWith('/roles')).length;
+}
+
 function json(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
@@ -59,11 +65,18 @@ function json(status, body) {
 describe('IAM token exchange', () => {
   it('exchanges the api key exactly once per call and caches the result', async () => {
     stubFetch([
-      { match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [{ id: 'r1', name: 'admin' }] }) },
+      {
+        match: (url) => url.endsWith('/roles'),
+        // A role that really grants `admin`, so the second lookup is a cache
+        // *hit*: a cached miss deliberately re-reads `/roles` (see
+        // `resolveRoleId`'s own suite), which would spend a second call here
+        // and stop isolating the IAM token's cache from the roles cache.
+        respond: () => json(200, { roles: [{ id: 'r1', name: 'Admin', access: [{ scopes: ['admin'] }] }] }),
+      },
     ]);
 
     await resolveRoleId('admin', CONFIG, nowSeconds);
-    await resolveRoleId('admin', CONFIG, nowSeconds); // roles cache hit — no second /roles call, but IAM would be re-checked only if roles cache missed
+    await resolveRoleId('admin', CONFIG, nowSeconds); // roles cache hit — no second /roles call
 
     const iamCalls = calls.filter((c) => c.url.includes('iam.cloud.ibm.com'));
     assert.equal(iamCalls.length, 1, 'the cached IAM token should not be re-fetched inside its TTL');
@@ -72,7 +85,7 @@ describe('IAM token exchange', () => {
   it('refetches the IAM token once the cached one is past its margin', async () => {
     // createUser never consults the roles cache, so both calls genuinely
     // reach managementFetch — this isolates the IAM token's own TTL logic from
-    // the separate, non-expiring roles cache exercised above.
+    // the separate roles cache exercised above.
     stubFetch([
       {
         match: (url) => url.includes('/cloud_directory/sign_up'),
@@ -140,11 +153,55 @@ describe('resolveRoleId / listAssignableStaffRoles', () => {
     assert.deepEqual(roles, [{ id: 'role-admin', name: 'Admin' }]);
   });
 
-  it('caches the roles list — one /roles call across repeated lookups', async () => {
-    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [] }) }]);
+  it('caches a resolved role — one /roles call across repeated lookups', async () => {
+    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) }]);
     await resolveRoleId('admin', CONFIG, nowSeconds);
-    await resolveRoleId('manager', CONFIG, nowSeconds);
-    assert.equal(calls.filter((c) => c.url.endsWith('/roles')).length, 1);
+    await resolveRoleId('admin', CONFIG, nowSeconds);
+    assert.equal(rolesCalls(), 1);
+  });
+
+  it('spends exactly one /roles call answering that nothing grants a scope, on a cold cache', async () => {
+    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [] }) }]);
+    assert.equal(await resolveRoleId('customer', CONFIG, nowSeconds), null);
+    assert.equal(rolesCalls(), 1, 'a cold miss is already a fresh list — nothing to re-read');
+  });
+
+  // The bug this exists to prevent: one customer sign-up attempted before epic
+  // #261's item 2 configured the `customer` role used to cache that empty
+  // answer forever, so `customer-signup.ts`'s "configure the role" 502
+  // outlived the configuring — every later request failed on a correctly
+  // configured tenant until the process restarted.
+  it('re-reads /roles before answering null, so a role configured since the list was cached is found', async () => {
+    let configured = [];
+    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: configured }) }]);
+
+    assert.equal(await resolveRoleId('customer', CONFIG, nowSeconds), null);
+    configured = [{ id: 'role-customer', name: 'Customer', access: [{ scopes: ['customer'] }] }];
+
+    assert.equal(
+      await resolveRoleId('customer', CONFIG, nowSeconds),
+      'role-customer',
+      'a cached miss must not outlive the tenant fix'
+    );
+    assert.equal(rolesCalls(), 2, 'exactly one re-read — a fresh list with no match really is null');
+  });
+
+  // `listAssignableStaffRoles` omits an unconfigured scope by design, so it
+  // cannot tell a stale list from a correct one and never forces a re-read.
+  // The TTL is what keeps its answer from being permanently stale instead.
+  it('tolerates a missing scope in a cached list rather than re-reading on every staff-roles lookup', async () => {
+    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) }]);
+    await listAssignableStaffRoles(CONFIG, nowSeconds);
+    await listAssignableStaffRoles(CONFIG, nowSeconds);
+    assert.equal(rolesCalls(), 1);
+  });
+
+  it('expires the cached list, so a role added in the console lands without a restart', async () => {
+    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) }]);
+    await listAssignableStaffRoles(CONFIG, nowSeconds);
+    NOW += 301;
+    await listAssignableStaffRoles(CONFIG, nowSeconds);
+    assert.equal(rolesCalls(), 2);
   });
 });
 
@@ -246,7 +303,15 @@ describe('createUser', () => {
     const user = await createUser('new@capy.test', 'caller-chosen-pw', CONFIG, nowSeconds);
 
     assert.match(sentUrl, /shouldCreateProfile=true/);
-    assert.deepEqual(user, { id: 'sub-new-1', email: 'new@capy.test', displayName: 'new@capy.test' });
+    // `scimId` alongside it, not instead of it: role operations key off the
+    // profile id, while deleting the account again keys off the Cloud
+    // Directory id — a caller that has to undo this creation needs both.
+    assert.deepEqual(user, {
+      id: 'sub-new-1',
+      scimId: 'scim-new-1',
+      email: 'new@capy.test',
+      displayName: 'new@capy.test',
+    });
     assert.equal(sentBody.emails[0].value, 'new@capy.test');
     assert.equal(sentBody.active, true);
   });
@@ -404,6 +469,58 @@ describe('assignRole / revokeRoles', () => {
   it('throws ManagementApiError on a non-200 response', async () => {
     stubFetch([{ match: (url) => url.endsWith('/users/u1/roles'), respond: () => json(404, {}) }]);
     await assert.rejects(() => assignRole('u1', 'role-x', CONFIG, nowSeconds), ManagementApiError);
+  });
+});
+
+describe('deleteUserAndProfile', () => {
+  // The compensating action for a sign-up that created an account it could not
+  // finish configuring — never a routine operation. `remove/{userId}` rather
+  // than `Users/{userId}`: everything this file creates is created with
+  // `shouldCreateProfile=true`, and the latter deletes the record "without
+  // removing the associated profile" (its own spec's wording), which would
+  // leave behind exactly the half role operations key off.
+  it('deletes through remove/{scimId} so the profile goes with the account', async () => {
+    let sentUrl;
+    let sentMethod;
+    stubFetch([
+      {
+        match: (url) => url.includes('/cloud_directory/remove/'),
+        respond: (url, init) => {
+          sentUrl = url;
+          sentMethod = init.method;
+          return json(204, {});
+        },
+      },
+    ]);
+
+    await deleteUserAndProfile('scim-new-1', CONFIG, nowSeconds);
+
+    assert.equal(sentMethod, 'DELETE');
+    assert.match(sentUrl, /\/cloud_directory\/remove\/scim-new-1$/);
+    assert.ok(!sentUrl.includes('/cloud_directory/Users/'), 'Users/{id} would leave the profile behind');
+  });
+
+  it('escapes the id rather than pasting it into the path', async () => {
+    let sentUrl;
+    stubFetch([
+      {
+        match: (url) => url.includes('/cloud_directory/remove/'),
+        respond: (url) => {
+          sentUrl = url;
+          return json(204, {});
+        },
+      },
+    ]);
+    await deleteUserAndProfile('scim/../roles', CONFIG, nowSeconds);
+    assert.match(sentUrl, /remove\/scim%2F..%2Froles$/);
+  });
+
+  it('throws ManagementApiError when App ID refuses the delete, so the caller can report the account it left behind', async () => {
+    stubFetch([{ match: (url) => url.includes('/cloud_directory/remove/'), respond: () => json(403, {}) }]);
+    await assert.rejects(
+      () => deleteUserAndProfile('scim-new-1', CONFIG, nowSeconds),
+      (error) => error instanceof ManagementApiError && error.message.includes('403')
+    );
   });
 });
 

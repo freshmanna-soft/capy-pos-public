@@ -187,15 +187,6 @@ const customerTokenListener = createRequestListener({
 });
 
 /**
- * Public, unauthenticated — a person asking to reset their own password does
- * not have a session yet either, same reasoning as `tokenListener`. Never
- * reveals whether the email has an account: `triggerForgotPassword` itself
- * swallows App ID's 404 (no such user) and this always answers `200 {}`
- * either way, so the response can't be used to enumerate real accounts. A
- * genuine failure (management API down, bad key) still surfaces as this
- * boundary's own generic 502 — see `http.ts`'s own contract.
- */
-/**
  * Public and unauthenticated, like both token routes and for the same reason: a
  * customer registering does not have a session yet, and requiring one would make
  * registering impossible. Unlike them it holds no OAuth client — App ID only
@@ -219,6 +210,15 @@ const customerSignupListener = createRequestListener({
   unavailable: 'The customer sign-up service is unavailable.',
 });
 
+/**
+ * Public, unauthenticated — a person asking to reset their own password does
+ * not have a session yet either, same reasoning as `tokenListener`. Never
+ * reveals whether the email has an account: `triggerForgotPassword` itself
+ * swallows App ID's 404 (no such user) and this always answers `200 {}`
+ * either way, so the response can't be used to enumerate real accounts. A
+ * genuine failure (management API down, bad key) still surfaces as this
+ * boundary's own generic 502 — see `http.ts`'s own contract.
+ */
 const forgotPasswordListener = createRequestListener({
   logPrefix: '[appid-relay]',
   route: FORGOT_PASSWORD_ROUTE,
@@ -265,9 +265,12 @@ const adminListener = createAdminRequestListener({
     // from the browser, and the staff member it creates never types it. The
     // caller-supplied variant exists for customer self-registration, where
     // the person signing up chooses their own.
-    const user = await createUser(request.email, randomThrowawayPassword(), managementConfig);
-    await assignRole(user.id, request.roleId, managementConfig);
-    return user;
+    const created = await createUser(request.email, randomThrowawayPassword(), managementConfig);
+    await assignRole(created.id, request.roleId, managementConfig);
+    // Spelled out rather than returned whole: `createUser` also reports the SCIM
+    // id, which exists for `customer-signup.ts`'s rollback and has no business in
+    // a response the browser reads.
+    return { id: created.id, email: created.email, displayName: created.displayName };
   },
   reassignRole: async (userId, request) => {
     await assignRole(userId, request.roleId, managementConfig);

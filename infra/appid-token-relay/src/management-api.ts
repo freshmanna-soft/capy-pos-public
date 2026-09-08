@@ -148,34 +148,76 @@ interface AppIdRoleWire {
   readonly access?: readonly { readonly scopes?: readonly string[] }[];
 }
 
-/** JWKS-cache-style: roles rarely change, so the scope→id table is cached after the first fetch. */
-let rolesCache: readonly AppIdRoleWire[] | null = null;
+/**
+ * JWKS-cache-style: roles rarely change, so the scope→id table is cached after
+ * the first fetch — but a **hit** is the only part of that worth keeping
+ * indefinitely. A miss is not an answer about the tenant, it is an answer about
+ * this snapshot of it, and `customer-signup.ts` turns "no role grants
+ * `customer`" into a 502 telling the operator to go configure that role. Cached
+ * permanently, that 502 would outlive the configuring: a single sign-up
+ * attempted before epic #261's item 2 landed would keep every later request
+ * failing on a correctly configured tenant until the process restarted. So
+ * `resolveRoleId` re-reads once before it will answer `null`, and the list
+ * expires anyway for the caller that legitimately tolerates a missing scope
+ * (`listAssignableStaffRoles`, which omits an unconfigured one by design and so
+ * cannot tell a stale list from a correct one).
+ */
+interface CachedRoles {
+  readonly roles: readonly AppIdRoleWire[];
+  /** Epoch seconds this snapshot stops being trusted — same shape as `CachedIamToken`. */
+  readonly expiresAt: number;
+}
 
-async function listRoles(config: ManagementConfig, nowSeconds: () => number): Promise<readonly AppIdRoleWire[]> {
-  if (rolesCache) {
-    return rolesCache;
-  }
+let rolesCache: CachedRoles | null = null;
+
+/** Long next to a single request, short next to how often an admin adds a role in the App ID console. */
+const ROLES_CACHE_TTL_SECONDS = 300;
+
+/** The cached list while it is still trusted, or `null` — never a fetch. */
+function cachedRoles(nowSeconds: () => number): readonly AppIdRoleWire[] | null {
+  const cached = rolesCache;
+  return cached !== null && cached.expiresAt > nowSeconds() ? cached.roles : null;
+}
+
+/** Read `/roles` for real and re-arm the cache. */
+async function fetchRoles(config: ManagementConfig, nowSeconds: () => number): Promise<readonly AppIdRoleWire[]> {
   const result = await managementFetch('/roles', config, nowSeconds);
   if (result.status !== 200) {
     throw new ManagementApiError(`Listing App ID roles returned ${result.status}.`);
   }
   const roles = (result.body as { roles?: AppIdRoleWire[] }).roles ?? [];
-  rolesCache = roles;
+  rolesCache = { roles, expiresAt: nowSeconds() + ROLES_CACHE_TTL_SECONDS };
   return roles;
 }
 
+async function listRoles(config: ManagementConfig, nowSeconds: () => number): Promise<readonly AppIdRoleWire[]> {
+  return cachedRoles(nowSeconds) ?? (await fetchRoles(config, nowSeconds));
+}
+
+/** Matches by `access[].scopes`, never by the role's display `name` — see `AppIdRoleWire`. */
+function roleGranting(roles: readonly AppIdRoleWire[], scope: string): string | null {
+  return roles.find((role) => role.access?.some((entry) => entry.scopes?.includes(scope)))?.id ?? null;
+}
+
 /**
- * `null` means no App ID role grants this scope — a 400 to the caller, not a
+ * `null` means no App ID role grants this scope — a refusal upstream, not a
  * crash. Matches by `access[].scopes`, never by the role's display `name` —
  * see `AppIdRoleWire`'s own doc comment for why that distinction is load-bearing.
+ *
+ * A cached list that does not know about this scope is re-read once before that
+ * `null` is returned, so the answer is always about the tenant as it is now and
+ * not as it was when some earlier request happened to warm the cache — see
+ * `CachedRoles`. Exactly one re-read: a freshly fetched list with no match
+ * really is `null`.
  */
 export async function resolveRoleId(
   scope: string,
   config: ManagementConfig,
   nowSeconds: () => number = defaultNow
 ): Promise<string | null> {
-  const roles = await listRoles(config, nowSeconds);
-  return roles.find((role) => role.access?.some((entry) => entry.scopes?.includes(scope)))?.id ?? null;
+  const cached = cachedRoles(nowSeconds);
+  const hit = cached === null ? null : roleGranting(cached, scope);
+  return hit ?? roleGranting(await fetchRoles(config, nowSeconds), scope);
 }
 
 /**
@@ -193,7 +235,10 @@ const ASSIGNABLE_SCOPES = ['operator', 'manager', 'admin'] as const;
  * name an admin actually configured in the App ID console, not the internal
  * scope string used to find it). A scope with no role configured yet is
  * silently omitted, not an error — see Phase 3d's own prerequisite note
- * (Phase 0 only ever confirmed `admin`).
+ * (Phase 0 only ever confirmed `admin`). Because a missing scope is a legal
+ * answer here, this cannot tell a stale list from a correct one and so never
+ * forces the re-read `resolveRoleId` does; `CachedRoles`'s TTL is what bounds
+ * how long a role added in the console stays missing from this list.
  */
 export async function listAssignableStaffRoles(
   config: ManagementConfig,
@@ -332,13 +377,19 @@ export function randomThrowawayPassword(): string {
  * (`"Profile not found"`) without one. The returned `id` is `profileId`
  * (`sign_up`'s name for the same `sub` `getUserSub`/`userinfo` resolves for
  * existing users) — the id every later role operation on this account must use.
+ *
+ * The SCIM `id` is returned alongside it as `scimId`, not instead of it: the two
+ * halves of this account are addressed by different ids, and a caller that has
+ * to *undo* this creation needs the other one — see `deleteUserAndProfile`.
+ * Absent (`''`) rather than fatal if App ID ever omits it: the account exists by
+ * then, so refusing the whole call over a missing id would only hide it.
  */
 export async function createUser(
   email: string,
   password: string,
   config: ManagementConfig,
   nowSeconds: () => number = defaultNow
-): Promise<{ id: string; email: string; displayName: string }> {
+): Promise<{ id: string; scimId: string; email: string; displayName: string }> {
   if (email.trim().length === 0) {
     throw new ManagementApiError('Creating the App ID user requires an email address.');
   }
@@ -367,9 +418,45 @@ export async function createUser(
   }
   return {
     id: user.profileId,
+    scimId: typeof user.id === 'string' ? user.id : '',
     email: user.emails?.find((e) => e.primary)?.value ?? email,
     displayName: user.displayName ?? user.userName ?? email,
   };
+}
+
+/**
+ * Delete a Cloud Directory account **and** its profile. The compensating action
+ * for a sign-up that created an account it then could not finish configuring
+ * (see `customer-signup.ts`'s rollback) — never a routine operation, and the one
+ * call in this file that cannot be undone.
+ *
+ * `remove/{userId}`, not `Users/{userId}`: everything here is created with
+ * `shouldCreateProfile=true`, and the latter deletes the record "without
+ * removing the associated profile" (its own spec's wording) — which would leave
+ * behind exactly the half every role operation keys off.
+ *
+ * Takes the SCIM id (`createUser`'s `scimId`), not the profile id `assignRole`
+ * uses: this endpoint's `userId` is specified as "The ID assigned to a user when
+ * they sign in by using Cloud Directory" — the same parameter definition as
+ * `cloud_directory/{userId}/userinfo`, which `getUserSub` already calls with the
+ * SCIM id against the real tenant. Answers `204`.
+ */
+export async function deleteUserAndProfile(
+  scimId: string,
+  config: ManagementConfig,
+  nowSeconds: () => number = defaultNow
+): Promise<void> {
+  const result = await managementFetch(
+    `/cloud_directory/remove/${encodeURIComponent(scimId)}`,
+    config,
+    nowSeconds,
+    { method: 'DELETE' }
+  );
+  if (result.status !== 204 && result.status !== 200) {
+    // Never swallowed: the caller's own error message has to be able to name the
+    // account this failed to clean up.
+    throw new ManagementApiError(`Deleting the App ID user returned ${result.status}.`);
+  }
 }
 
 /** Assigns exactly the given role, replacing whatever the user held before — matches `PUT`'s own "set", not "add", semantics. */

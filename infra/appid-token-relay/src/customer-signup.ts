@@ -25,14 +25,29 @@
  * `customer-signup-validate.ts` therefore never parses one, and this module never
  * takes one.
  *
- * ## Why the role is resolved *before* the account is created
+ * ## Why no half-registered account is left behind, either way
  *
  * A customer whose account exists but carries no role can sign in and gets a
  * token with no scope `pos-api` maps to anything — a half-registered account
- * that looks fine until the first request fails. So the deployment problem (no
- * App ID role grants `customer` yet — epic #261's item 2) is discovered before
- * anything is created, and surfaces as this service's own 502 with nothing left
- * behind. That order is asserted in the suite, not just documented.
+ * that looks fine until the first request fails, and one its owner cannot even
+ * retry past, since a second sign-up with the same address collides with the
+ * account they don't know exists. Two different failures produce it, so it takes
+ * two guards:
+ *
+ * - **The role is not configured at all** (no App ID role grants `customer` yet
+ *   — epic #261's item 2). Resolved *first*, so that deployment problem is
+ *   discovered before anything is created and surfaces as this service's own 502
+ *   with nothing left behind. (`resolveRoleId` re-reads `/roles` before it will
+ *   answer "no such role", so this 502 stops the moment the role lands rather
+ *   than outliving it in a cache — see `CachedRoles` in `management-api.ts`.)
+ * - **The assignment itself fails** on a tenant where the role does exist —
+ *   ordering cannot help here, because the role can only be granted to a user
+ *   that already exists. So the creation is rolled back: the account is deleted
+ *   again, profile included, and the original failure is still what propagates.
+ *   A rollback that fails in turn is reported naming the account it left behind,
+ *   never swallowed.
+ *
+ * Both are asserted in the suite, not just documented.
  *
  * ## Why an unconfigured deployment throws
  *
@@ -47,12 +62,14 @@
  * Scope is epic #261's item 8a — the happy path. The duplicate-email and
  * invalid-password answers (8b) and rate limiting (8c) are separate items: a
  * failure from any call below propagates for `http.ts` to turn into its own
- * generic 502 today, rather than being given a bespoke status here that 8b would
- * immediately have to redesign.
+ * generic 502 today (after the rollback above, where there is something to roll
+ * back), rather than being given a bespoke status here that 8b would immediately
+ * have to redesign.
  */
 import {
   assignRole as assignRoleDefault,
   createUser as createUserDefault,
+  deleteUserAndProfile as deleteUserAndProfileDefault,
   resolveRoleId as resolveRoleIdDefault,
   type ManagementConfig,
 } from './management-api.ts';
@@ -87,14 +104,17 @@ export interface CustomerSignupDeps {
     email: string,
     password: string,
     config: ManagementConfig
-  ) => Promise<{ id: string; email: string; displayName: string }>;
+  ) => Promise<{ id: string; scimId: string; email: string; displayName: string }>;
   readonly assignRole: (userId: string, roleId: string, config: ManagementConfig) => Promise<void>;
+  /** The rollback, never a routine call — see this file's header. Keyed by the Cloud Directory id. */
+  readonly deleteUserAndProfile: (scimId: string, config: ManagementConfig) => Promise<void>;
 }
 
 const DEFAULT_DEPS: CustomerSignupDeps = {
   resolveRoleId: (scope, config) => resolveRoleIdDefault(scope, config),
   createUser: (email, password, config) => createUserDefault(email, password, config),
   assignRole: (userId, roleId, config) => assignRoleDefault(userId, roleId, config),
+  deleteUserAndProfile: (scimId, config) => deleteUserAndProfileDefault(scimId, config),
 };
 
 /**
@@ -137,8 +157,72 @@ export function createCustomerSignupHandler(
     }
 
     const user = await deps.createUser(request.email, request.password, config);
-    await deps.assignRole(user.id, roleId, config);
+    try {
+      await deps.assignRole(user.id, roleId, config);
+    } catch (error) {
+      // The account exists by now and has no role — see this file's header.
+      await rollBackCreation(user, deps, config, error);
+    }
 
     return { status: 201, body: { id: user.id, email: user.email } };
   };
+}
+
+/**
+ * Delete an account whose role assignment failed, then re-throw: never resolves.
+ * The customer asked for an account that works, and one without its role is not
+ * it — so the failure is still the answer, and the account does not survive it.
+ *
+ * Deleting is safe *only* because this account was created by this request, moments
+ * ago: the duplicate-email case never reaches here (`createUser` itself throws, and
+ * that existing account is someone else's).
+ *
+ * Every outcome throws, and every message says which of the three it was — the
+ * account was deleted again, or it was not and here is the id to go clean up.
+ * `http.ts` logs it and answers its own generic 502 either way, so this is the
+ * only record an operator gets; the original failure stays reachable as `cause`.
+ *
+ * Ids only, never the email: an operator chasing an account left behind needs its
+ * id, not the address of the person who was trying to register.
+ */
+async function rollBackCreation(
+  user: { readonly id: string; readonly scimId: string },
+  deps: CustomerSignupDeps,
+  config: CustomerSignupConfig,
+  cause: unknown
+): Promise<never> {
+  const failed = `Granting new account ${user.id} the "${CUSTOMER_SCOPE}" role failed (${messageOf(cause)})`;
+  const orphaned =
+    'That account now exists with no role and must be deleted or granted one by hand.';
+
+  if (user.scimId.length === 0) {
+    // Nothing to delete *with*: `remove/{userId}` takes the Cloud Directory id,
+    // which is not interchangeable with the profile id. Reported rather than
+    // guessed at — a delete against the wrong id is not a rollback.
+    throw new Error(
+      `${failed}, and App ID returned no Cloud Directory id to undo it with. ${orphaned}`,
+      { cause }
+    );
+  }
+
+  try {
+    await deps.deleteUserAndProfile(user.scimId, config);
+  } catch (rollbackError) {
+    throw new Error(
+      `${failed}, and deleting it again failed too (${messageOf(rollbackError)}). ${orphaned}`,
+      {
+        cause,
+      }
+    );
+  }
+
+  throw new Error(
+    `${failed}, so the account was deleted again — nothing was left half-registered.`,
+    { cause }
+  );
+}
+
+/** Whatever a thrown value has to say for itself, without assuming it was an `Error`. */
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
