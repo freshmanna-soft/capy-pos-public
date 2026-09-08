@@ -183,6 +183,13 @@ variable "frontend_origins" {
     the original GitHub Pages site and the capy-pos-app Code Engine app. Override
     with TF_VAR_frontend_origins for a different estate/project, where the Code
     Engine hostname will differ.
+
+    Origin-only, so this list is per *site*, not per route: every route of the
+    Angular app — /pos, /clerk, /self-checkout — sends one of these exact values
+    as its `Origin`, and adding a route needs nothing here (issue #281 confirmed
+    that against the live relay for /self-checkout). Adding a separately-deployed
+    frontend does. `cors.test.mjs` in infra/appid-token-relay reads this default
+    and asserts both properties.
   EOT
   type        = list(string)
   default = [
