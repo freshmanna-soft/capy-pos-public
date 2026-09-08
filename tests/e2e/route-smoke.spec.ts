@@ -30,8 +30,19 @@ const ROUTES: { path: string; name: string; landmark: string }[] = [
   { path: '/customers', name: 'Customers', landmark: 'main, [data-testid="customers"]' },
   { path: '/reports', name: 'Reports', landmark: 'main, [data-testid="reports"]' },
   { path: '/dashboard', name: 'Agent dashboard', landmark: 'main, [data-testid="agent-monitor"]' },
-  { path: '/history', name: 'Transaction history', landmark: 'main, [data-testid="transaction-history"]' },
+  {
+    path: '/history',
+    name: 'Transaction history',
+    landmark: 'main, [data-testid="transaction-history"]',
+  },
   { path: '/settings', name: 'Settings', landmark: 'main, [data-testid="settings"]' },
+  // Unguarded on purpose (customer lane), but still smoked as a logged-in admin
+  // like the rest — the risk being caught here is a page that throws, not a guard.
+  {
+    path: '/self-checkout',
+    name: 'Self-checkout',
+    landmark: '[data-testid="self-checkout-shell"]',
+  },
   { path: '/admin', name: 'Admin', landmark: 'main, [data-testid="operator-list"]' },
 ];
 
@@ -53,7 +64,9 @@ test.describe('Route smoke — real app renders every page', () => {
             text
           );
         const isBenignNetwork =
-          /Failed to load resource|net::ERR|ERR_|favicon|status of 4\d\d|status of 5\d\d/i.test(text);
+          /Failed to load resource|net::ERR|ERR_|favicon|status of 4\d\d|status of 5\d\d/i.test(
+            text
+          );
         if (isBenignNetwork && !isCodeError) return;
         consoleErrors.push(text);
       });

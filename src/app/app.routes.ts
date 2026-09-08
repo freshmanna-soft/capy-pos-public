@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/presentation/guards/auth.guard';
+import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palette';
 
 export const routes: Routes = [
   {
@@ -21,6 +22,18 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./features/clerk/clerk.component').then((m) => m.ClerkComponent),
     title: 'Capy Clerk · Capy-POS',
+  },
+  {
+    // The customer-facing self-checkout lane. Its own top-level route, like
+    // /clerk, and deliberately WITHOUT `authGuard`: that guard is the staff
+    // session, and the whole point of this lane is a customer identity. Real
+    // customer-session gating arrives with the CUSTOMER_AUTH_GATEWAY adapter.
+    path: 'self-checkout',
+    loadComponent: () =>
+      import('./features/self-checkout/self-checkout.component').then(
+        (m) => m.SelfCheckoutComponent
+      ),
+    title: SELF_CHECKOUT_TITLE,
   },
   {
     path: 'inventory',

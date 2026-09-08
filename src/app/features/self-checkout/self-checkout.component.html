@@ -1,0 +1,29 @@
+<!-- Fixed and above the app nav: this is a mode, not a panel. -->
+<div
+  class="fixed inset-0 z-[60] flex flex-col overflow-hidden bg-onsen-deep text-steam"
+  data-testid="self-checkout-shell"
+>
+  <header class="flex items-center justify-between px-6 py-5 md:px-10">
+    <p class="font-data text-[10px] uppercase tracking-[0.22em] text-kelp">Capy-POS</p>
+    <button
+      type="button"
+      (click)="exit()"
+      class="rounded-full border border-kelp/30 bg-onsen-water/40 px-3 py-2 font-data text-[10px] uppercase tracking-[0.16em] text-kelp backdrop-blur transition-colors hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+      data-testid="self-checkout-exit"
+    >
+      Back to till
+    </button>
+  </header>
+
+  <main class="grid flex-1 place-items-center px-6 pb-10 text-center">
+    <div class="max-w-md">
+      <h1 class="font-display text-4xl font-extrabold text-steam">Self-checkout</h1>
+      <!-- Placeholder copy. The sign-up / sign-in / scan panels replace this
+           block; the shell around it is what this item delivers. -->
+      <p class="mt-4 text-[15px] leading-relaxed text-steam/80">
+        This lane is being set up. Please use a staffed till for now.
+      </p>
+      <p class="mt-6 font-data text-[10px] uppercase tracking-[0.22em] text-yuzu">Coming soon</p>
+    </div>
+  </main>
+</div>
