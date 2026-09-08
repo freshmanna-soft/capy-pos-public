@@ -17,6 +17,7 @@ const PORT = Number(process.env.PORT ?? 8792);
 const BASE = `http://127.0.0.1:${PORT}`;
 const URL = `${BASE}/appid/token`;
 const CUSTOMER_URL = `${BASE}/appid/customer/token`;
+const CUSTOMER_SIGNUP_URL = `${BASE}/appid/customer/sign-up`;
 const ORIGIN = (process.env.ALLOWED_ORIGINS ?? '').split(',')[0]?.trim() ?? 'http://localhost:4200';
 
 async function post(body, { origin = ORIGIN, url = URL } = {}) {
@@ -100,6 +101,41 @@ const customerGrant = await post(
   { url: CUSTOMER_URL }
 );
 console.log(`  password grant: HTTP ${customerGrant.status} — ${JSON.stringify(customerGrant.body)}`);
+
+// ─── Customer sign-up, bounds only and deliberately never a valid body ─────────
+//
+// Every other check in this script can be run against a real deployment as often
+// as you like; this one cannot. A *well-formed* sign-up on a configured
+// deployment succeeds — it creates a real Cloud Directory account in the real
+// tenant, which is not something a smoke script gets to do on every run. So the
+// probes below are all ones the route must refuse: they confirm it is routed at
+// all (a 400 from its own validator, not a 404 from `routes.ts`), that it
+// narrows the body the same way its siblings do, and that an unlisted origin is
+// refused before anything reaches the Management API. Creating a real customer
+// is `npm test`'s job with the API stubbed, and item 8b's job for the
+// duplicate/invalid answers.
+
+console.log('\ncustomer sign-up bounds:');
+
+const signupPreflight = await fetch(CUSTOMER_SIGNUP_URL, {
+  method: 'OPTIONS',
+  headers: { Origin: ORIGIN, 'Access-Control-Request-Method': 'POST' },
+});
+console.log(`  preflight from allowed origin: HTTP ${signupPreflight.status}`);
+
+// 400 from the route's own validator — the proof it is routed. A 404 here would
+// mean the route table never claimed the path.
+const signupNoPassword = await post({ email: 'nobody@example.com' }, { url: CUSTOMER_SIGNUP_URL });
+console.log(`  no password: HTTP ${signupNoPassword.status} — ${JSON.stringify(signupNoPassword.body)}`);
+
+const signupBadEmail = await post({ email: 'not-an-email', password: 'x' }, { url: CUSTOMER_SIGNUP_URL });
+console.log(`  malformed email: HTTP ${signupBadEmail.status} — ${JSON.stringify(signupBadEmail.body)}`);
+
+const signupWrongOrigin = await post(
+  { email: 'nobody@example.com', password: 'x' },
+  { origin: 'https://not-listed.example', url: CUSTOMER_SIGNUP_URL }
+);
+console.log(`  unlisted origin: HTTP ${signupWrongOrigin.status} — ${JSON.stringify(signupWrongOrigin.body)}`);
 
 // ─── Then a real grant, if credentials were given ──────────────────────────────
 

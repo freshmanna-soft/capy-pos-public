@@ -19,11 +19,14 @@
  * own 502 rather than the whole process refusing to start over a route that is not
  * reachable from the UI yet.
  *
- * `APPID_MANAGEMENT_APIKEY` is optional and gates only the admin staff-management
- * routes (`/appid/admin/staff*`) — a deployment without it keeps signing people in
- * exactly as before; an admin action against those routes fails with a 502 the
- * moment it actually calls the Management API with no real key, rather than this
- * whole service refusing to start over a route most deployments won't use yet.
+ * `APPID_MANAGEMENT_APIKEY` is optional and gates the admin staff-management
+ * routes (`/appid/admin/staff*`) and customer self-registration
+ * (`/appid/customer/sign-up`) — every route that creates or changes a Cloud
+ * Directory account, which App ID only allows through its Management API. A
+ * deployment without it keeps signing people in exactly as before; a call against
+ * those routes fails with a 502 the moment it actually reaches the Management API
+ * with no real key, rather than this whole service refusing to start over a route
+ * most deployments won't use yet.
  */
 import { createServer } from 'node:http';
 import { relay } from './relay.ts';
@@ -52,6 +55,15 @@ import {
   createCustomerTokenHandler,
   customerClientConfigured,
 } from './customer-token.ts';
+import {
+  CUSTOMER_SIGNUP_ROUTE,
+  createCustomerSignupHandler,
+  customerSignupConfigured,
+} from './customer-signup.ts';
+import {
+  validate as validateCustomerSignup,
+  MAX_BODY_BYTES as CUSTOMER_SIGNUP_MAX_BODY_BYTES,
+} from './customer-signup-validate.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8792);
 
@@ -105,13 +117,14 @@ function requireConfig(): {
     );
   }
 
-  // Optional: gates only the admin staff-management routes — see this file's
-  // own header comment.
+  // Optional: gates the admin staff-management routes and customer sign-up —
+  // every route that creates or changes a Cloud Directory account. See this
+  // file's own header comment.
   const managementApiKey = process.env['APPID_MANAGEMENT_APIKEY'] ?? '';
-  if (managementApiKey.length === 0) {
+  if (!customerSignupConfigured({ region, tenantId, apiKey: managementApiKey })) {
     console.warn(
       '[appid-relay] APPID_MANAGEMENT_APIKEY is not set — sign-in works as before, but ' +
-        '/appid/admin/staff* will fail once an authorized caller actually reaches the ' +
+        `/appid/admin/staff* and ${CUSTOMER_SIGNUP_ROUTE} will fail once a caller actually reaches the ` +
         'Management API.'
     );
   }
@@ -174,6 +187,30 @@ const customerTokenListener = createRequestListener({
 });
 
 /**
+ * Public and unauthenticated, like both token routes and for the same reason: a
+ * customer registering does not have a session yet, and requiring one would make
+ * registering impossible. Unlike them it holds no OAuth client — App ID only
+ * creates Cloud Directory accounts through the Management API — so it is gated on
+ * `APPID_MANAGEMENT_APIKEY` and shares that credential with the admin routes
+ * rather than with its own sibling. `customer-signup.ts` holds the role decision
+ * (the `customer` scope is a constant here, never a request field) so it can be
+ * tested without a bound port.
+ *
+ * Epic #261 item 8a — the happy path. A duplicate email or a password App ID's own
+ * policy refuses currently surfaces as this boundary's generic 502; giving each its
+ * own status is item 8b.
+ */
+const customerSignupListener = createRequestListener({
+  logPrefix: '[appid-relay]',
+  route: CUSTOMER_SIGNUP_ROUTE,
+  origins,
+  maxBodyBytes: CUSTOMER_SIGNUP_MAX_BODY_BYTES,
+  validate: validateCustomerSignup,
+  handle: createCustomerSignupHandler(managementConfig),
+  unavailable: 'The customer sign-up service is unavailable.',
+});
+
+/**
  * Public, unauthenticated — a person asking to reset their own password does
  * not have a session yet either, same reasoning as `tokenListener`. Never
  * reveals whether the email has an account: `triggerForgotPassword` itself
@@ -228,9 +265,12 @@ const adminListener = createAdminRequestListener({
     // from the browser, and the staff member it creates never types it. The
     // caller-supplied variant exists for customer self-registration, where
     // the person signing up chooses their own.
-    const user = await createUser(request.email, randomThrowawayPassword(), managementConfig);
-    await assignRole(user.id, request.roleId, managementConfig);
-    return user;
+    const created = await createUser(request.email, randomThrowawayPassword(), managementConfig);
+    await assignRole(created.id, request.roleId, managementConfig);
+    // Spelled out rather than returned whole: `createUser` also reports the SCIM
+    // id, which exists for `customer-signup.ts`'s rollback and has no business in
+    // a response the browser reads.
+    return { id: created.id, email: created.email, displayName: created.displayName };
   },
   reassignRole: async (userId, request) => {
     await assignRole(userId, request.roleId, managementConfig);
@@ -253,6 +293,7 @@ const adminListener = createAdminRequestListener({
 const ROUTES: readonly Route[] = [
   { match: 'exact', path: TOKEN_ROUTE, methods: TOKEN_METHODS, listener: tokenListener },
   { match: 'exact', path: CUSTOMER_TOKEN_ROUTE, methods: TOKEN_METHODS, listener: customerTokenListener },
+  { match: 'exact', path: CUSTOMER_SIGNUP_ROUTE, methods: TOKEN_METHODS, listener: customerSignupListener },
   { match: 'exact', path: FORGOT_PASSWORD_ROUTE, methods: TOKEN_METHODS, listener: forgotPasswordListener },
   // Prefix, not exact: `admin-http.ts` resolves `/staff`, `/roles` and
   // `/staff/{id}/role` itself — including its own 404 for an admin path that is
