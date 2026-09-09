@@ -1,7 +1,10 @@
 import {
+  CUSTOMER_EXIT_LABEL,
   CUSTOMER_EXIT_PATH,
+  STAFF_EXIT_LABEL,
   STAFF_EXIT_PATH,
   clerkCheckoutTarget,
+  clerkExitLabel,
   clerkExitPath,
 } from './clerk-exit-destination';
 
@@ -34,5 +37,32 @@ describe('clerkCheckoutTarget', () => {
 
   it('never targets a guarded route without a staff session', () => {
     expect(clerkCheckoutTarget(false).path).not.toBe(STAFF_EXIT_PATH);
+  });
+});
+
+describe('clerkExitLabel', () => {
+  it('names the till for a cashier', () => {
+    expect(clerkExitLabel(true)).toBe(STAFF_EXIT_LABEL);
+  });
+
+  it('does not tell an anonymous customer they are going back to the POS', () => {
+    // The regression this guards: the destination became session-aware while the
+    // button kept saying "Back to POS", so the one state this story adds got a
+    // control naming a till the customer has no access to and is not going to.
+    expect(clerkExitLabel(false)).toBe(CUSTOMER_EXIT_LABEL);
+    expect(clerkExitLabel(false)).not.toContain('POS');
+  });
+});
+
+describe('the label and the destination', () => {
+  // Paired on purpose. Either one alone can be individually correct while the
+  // button as a whole lies, and that mismatch is invisible to a routing-only
+  // test — which is exactly how it survived the first round.
+  it.each([true, false])('agree about where the button goes (staff: %s)', (isStaff) => {
+    const path = clerkExitPath(isStaff);
+    const label = clerkExitLabel(isStaff);
+
+    const named = label.includes('POS') ? STAFF_EXIT_PATH : CUSTOMER_EXIT_PATH;
+    expect(named, `"${label}" should describe ${path}`).toBe(path);
   });
 });

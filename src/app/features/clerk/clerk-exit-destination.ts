@@ -18,6 +18,17 @@ export const STAFF_EXIT_PATH = '/pos';
 /** The customer lane. Unguarded, so an anonymous visitor actually arrives. */
 export const CUSTOMER_EXIT_PATH = '/self-checkout';
 
+/** What the way out is called when it leads to the till. */
+export const STAFF_EXIT_LABEL = 'Back to POS';
+
+/**
+ * What the way out is called when it leads to the customer lane.
+ *
+ * Named after the destination screen's own heading ("Self-checkout") rather than
+ * the route, so the button and the page a customer lands on agree.
+ */
+export const CUSTOMER_EXIT_LABEL = 'Back to self-checkout';
+
 /**
  * Resolve the route to leave `/clerk` for.
  *
@@ -25,6 +36,22 @@ export const CUSTOMER_EXIT_PATH = '/self-checkout';
  */
 export function clerkExitPath(isStaffAuthenticated: boolean): string {
   return isStaffAuthenticated ? STAFF_EXIT_PATH : CUSTOMER_EXIT_PATH;
+}
+
+/**
+ * Resolve the label for the way out, so the button names where it actually goes.
+ *
+ * Deliberately derived from the same argument as `clerkExitPath` and living
+ * beside it: the two were briefly out of step — the destination became
+ * session-aware while the button kept reading "Back to POS" — which told a
+ * customer the one thing the un-gating exists to stop them believing, that this
+ * lane belongs to the till and they are on their way to it. A label is not
+ * decoration when it is the only description of where a control leads.
+ *
+ * @param isStaffAuthenticated whether an operator session is active.
+ */
+export function clerkExitLabel(isStaffAuthenticated: boolean): string {
+  return isStaffAuthenticated ? STAFF_EXIT_LABEL : CUSTOMER_EXIT_LABEL;
 }
 
 /**

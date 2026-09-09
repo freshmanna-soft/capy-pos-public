@@ -5,6 +5,7 @@ import {
   ElementRef,
   OnDestroy,
   ViewChild,
+  computed,
   effect,
   inject,
   signal,
@@ -13,7 +14,11 @@ import { Router } from '@angular/router';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { ClerkFacade } from '@core/application/facades/clerk.facade';
 import { CameraService } from '@core/infrastructure/media/camera.service';
-import { clerkCheckoutTarget, clerkExitPath } from '@features/clerk/clerk-exit-destination';
+import {
+  clerkCheckoutTarget,
+  clerkExitLabel,
+  clerkExitPath,
+} from '@features/clerk/clerk-exit-destination';
 import { CapybaraStageComponent } from '@features/clerk/components/capybara-stage.component';
 import { ClerkHudComponent } from '@features/clerk/components/clerk-hud.component';
 import { environment } from '../../../environments/environment';
@@ -31,8 +36,8 @@ const CONSENT_KEY = 'capy-clerk-camera-consent';
  *
  * It renders `fixed inset-0` and covers the app's navigation on purpose: this is
  * a mode, not a screen you glance at, and a nav bar under a live camera invites
- * the misclick that ends a scan mid-item. "Back to POS" is the only way out, plus
- * Escape.
+ * the misclick that ends a scan mid-item. The one exit button is the only way out,
+ * plus Escape — and it names its destination, which differs by session (#219).
  *
  * Every voice command has a key (listed in the footer). Voice is the fast path,
  * not the only path — the mic can be off, unsupported, or in a room too loud to
@@ -66,6 +71,15 @@ export class ClerkComponent implements AfterViewInit, OnDestroy {
   protected readonly needsConsent = signal(
     environment.features.aiVision && readConsent() === false
   );
+
+  /**
+   * What the way out is called, which depends on where it goes.
+   *
+   * A `computed` off the session signal rather than a value read once at
+   * construction: a session can end while this page is open (an expiry mid-scan),
+   * and the button has to stop offering a till the operator no longer has.
+   */
+  protected readonly exitLabel = computed(() => clerkExitLabel(this.currentUser.isAuthenticated()));
 
   /** "Clear the glass" — drop the atmospheric treatment on the main feed. */
   protected readonly clearGlass = signal(false);

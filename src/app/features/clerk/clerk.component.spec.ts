@@ -7,7 +7,12 @@ import { PosFacade } from '@core/application/facades/pos.facade';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import { CapybaraRenderer, ClerkMood } from '@features/clerk/canvas/capybara-renderer';
 import { ClerkComponent } from './clerk.component';
-import { CUSTOMER_EXIT_PATH, STAFF_EXIT_PATH } from './clerk-exit-destination';
+import {
+  CUSTOMER_EXIT_LABEL,
+  CUSTOMER_EXIT_PATH,
+  STAFF_EXIT_LABEL,
+  STAFF_EXIT_PATH,
+} from './clerk-exit-destination';
 
 /**
  * `/clerk` is reachable without a staff session (#219), which turns the two ways
@@ -16,7 +21,9 @@ import { CUSTOMER_EXIT_PATH, STAFF_EXIT_PATH } from './clerk-exit-destination';
  * decision itself is unit-tested in `clerk-exit-destination.spec.ts`; what these
  * tests cover is the wiring — that the component asks about the *session* rather
  * than assuming a cashier, and that every exit path (the HUD button, Escape, the
- * checkout hand-off, the voice checkout) goes through it.
+ * checkout hand-off, the voice checkout) goes through it — and that the button
+ * says where it goes, since a correct destination under a label reading "Back to
+ * POS" still tells a customer this lane is the till's.
  *
  * Without this, `clerkExitPath` could be perfectly correct and unused: every
  * `/clerk` e2e signs in as an admin, so a hard-coded `/pos` would still be green
@@ -158,6 +165,12 @@ describe('ClerkComponent', () => {
     return fixture;
   }
 
+  function text(mounted: ComponentFixture<ClerkComponent>, selector: string): string {
+    const el: HTMLElement | null = mounted.nativeElement.querySelector(selector);
+    expect(el, `missing ${selector}`).not.toBeNull();
+    return (el?.textContent ?? '').trim();
+  }
+
   function click(mounted: ComponentFixture<ClerkComponent>, testId: string): void {
     const button: HTMLButtonElement | null = mounted.nativeElement.querySelector(
       `[data-testid="${testId}"]`
@@ -207,8 +220,8 @@ describe('ClerkComponent', () => {
     });
 
     it('applies the same split to the blocked-camera way out', () => {
-      // Terminal state: the only control on screen is "Back to POS", and a
-      // customer stuck here must not be handed to the staff login instead.
+      // Terminal state: the exit is the only control on screen, and a customer
+      // stuck here must not be handed to the staff login instead.
       phase.set('blocked');
       const mounted = mount();
       const escape: HTMLButtonElement | null = mounted.nativeElement.querySelector(
@@ -219,6 +232,44 @@ describe('ClerkComponent', () => {
       escape?.click();
 
       expect(navigate).toHaveBeenCalledWith([CUSTOMER_EXIT_PATH]);
+    });
+  });
+
+  describe('naming the way out', () => {
+    it('offers a cashier the till by name', () => {
+      authenticated.set(true);
+      const mounted = mount();
+
+      expect(text(mounted, '[data-testid="clerk-exit"]')).toContain(STAFF_EXIT_LABEL);
+    });
+
+    it('does not offer an anonymous customer a POS they cannot reach', () => {
+      const mounted = mount();
+
+      expect(text(mounted, '[data-testid="clerk-exit"]')).toContain(CUSTOMER_EXIT_LABEL);
+      expect(text(mounted, '[data-testid="clerk-exit"]')).not.toContain('POS');
+    });
+
+    it('renames the way out when the staff session ends mid-scan', () => {
+      // Expiry while the page is open: the button keeps working, but it stops
+      // naming a till the operator no longer has a session for.
+      authenticated.set(true);
+      const mounted = mount();
+      expect(text(mounted, '[data-testid="clerk-exit"]')).toContain(STAFF_EXIT_LABEL);
+
+      authenticated.set(false);
+      mounted.detectChanges();
+
+      expect(text(mounted, '[data-testid="clerk-exit"]')).toContain(CUSTOMER_EXIT_LABEL);
+    });
+
+    it('names the same destination on the blocked-camera dead end', () => {
+      // The one screen where the exit is the only control, so a label naming the
+      // wrong place is the customer's only instruction.
+      phase.set('blocked');
+      const mounted = mount();
+
+      expect(text(mounted, '[data-testid="clerk-blocked"]')).toContain(CUSTOMER_EXIT_LABEL);
     });
   });
 

@@ -6,6 +6,7 @@ import {
   ViewChild,
   computed,
   inject,
+  input,
   output,
 } from '@angular/core';
 import { CurrencyPipe } from '@angular/common';
@@ -43,7 +44,7 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
         data-testid="clerk-exit"
       >
         <span aria-hidden="true">←</span>
-        Back to POS
+        {{ exitLabel() }}
       </button>
 
       <p class="hidden font-data text-[10px] uppercase tracking-[0.22em] text-kelp sm:block">
@@ -470,6 +471,14 @@ export class ClerkHudComponent implements AfterViewInit {
 
   protected readonly clerk = inject(ClerkFacade);
   protected readonly pos = inject(PosFacade);
+
+  /**
+   * What to call the way out.
+   *
+   * Passed in rather than decided here: the HUD is the layer that renders, and
+   * which destination this lane exits to is a session question the shell owns.
+   */
+  readonly exitLabel = input.required<string>();
 
   /** Leave the clerk. */
   readonly exit = output<void>();
