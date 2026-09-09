@@ -526,6 +526,58 @@ test.describe('Capy Clerk', () => {
   });
 });
 
+/**
+ * The clerk lane is not staff-only (#219): a customer with no operator session has
+ * to be able to walk up to it, use it, and leave it.
+ *
+ * Every other block in this file signs in as an admin first, so none of them can
+ * tell a `/clerk` that works for anyone from a `/clerk` that only works for a
+ * cashier — which is what it was while the guard was on, and what a hard-coded
+ * `/pos` on the way out would quietly restore: the exit would bounce off
+ * `authGuard` and land a customer on the staff login page.
+ */
+test.describe('Capy Clerk without a staff session', () => {
+  test.skip(({ browserName }) => browserName !== 'chromium', 'Chromium-only APIs');
+
+  // Deliberately no `loginAsAdmin`: the whole point of this block is the visitor
+  // who has no operator session and no way to get one.
+  test.beforeEach(async ({ page, context }) => {
+    await context.grantPermissions(['camera']);
+    await installFakeMedia(page);
+  });
+
+  test('opens the stage for an anonymous customer instead of the login page', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+
+    await expect(clerk.stage).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe('/clerk');
+    // Not just reachable: the session actually starts and she says something, so
+    // this fails on a lane that renders a dead stage for anyone but staff.
+    await expect(clerk.caption).toContainText('Hold something up', { timeout: 15000 });
+  });
+
+  test('leaves to the customer lane rather than the staff till', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+
+    await clerk.exitButton.click();
+
+    await expect(page.getByTestId('self-checkout-shell')).toBeVisible();
+    expect(new URL(page.url()).pathname).not.toContain('/login');
+  });
+
+  test('leaves to the customer lane from the keyboard too', async ({ page }) => {
+    const clerk = new ClerkPage(page);
+    await clerk.open();
+
+    await page.keyboard.press('Escape');
+
+    await expect(page.getByTestId('self-checkout-shell')).toBeVisible();
+    expect(new URL(page.url()).pathname).not.toContain('/login');
+  });
+});
+
 test.describe('Capy Clerk reading barcodes', () => {
   test.skip(({ browserName }) => browserName !== 'chromium', 'Chromium-only APIs');
 
