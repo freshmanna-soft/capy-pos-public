@@ -27,7 +27,12 @@
   <app-capybara-stage class="pointer-events-none absolute inset-0" />
 
   <!-- Layer 3: everything readable. -->
-  <app-clerk-hud class="absolute inset-0" (exit)="exit()" (checkout)="goToCheckout()" />
+  <app-clerk-hud
+    class="absolute inset-0"
+    [exitLabel]="exitLabel()"
+    (exit)="exit()"
+    (checkout)="goToCheckout()"
+  />
 
   <!-- Glass toggle. The treatment is a deliberate risk; this is the way out of it. -->
   <button
@@ -109,7 +114,7 @@
           (click)="exit()"
           class="mt-6 min-h-[44px] rounded-full bg-yuzu px-6 font-display text-sm font-bold text-onsen-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-steam"
         >
-          Back to POS
+          {{ exitLabel() }}
         </button>
       </div>
     </div>
