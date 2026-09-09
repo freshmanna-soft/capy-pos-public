@@ -10,8 +10,10 @@ import {
   signal,
 } from '@angular/core';
 import { Router } from '@angular/router';
+import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { ClerkFacade } from '@core/application/facades/clerk.facade';
 import { CameraService } from '@core/infrastructure/media/camera.service';
+import { clerkCheckoutTarget, clerkExitPath } from '@features/clerk/clerk-exit-destination';
 import { CapybaraStageComponent } from '@features/clerk/components/capybara-stage.component';
 import { ClerkHudComponent } from '@features/clerk/components/clerk-hud.component';
 import { environment } from '../../../environments/environment';
@@ -51,6 +53,9 @@ export class ClerkComponent implements AfterViewInit, OnDestroy {
   protected readonly clerk = inject(ClerkFacade);
   protected readonly camera = inject(CameraService);
   private readonly router = inject(Router);
+  // Read-only, and only to pick a destination: the lane itself is unguarded
+  // (#219) and works identically with or without a staff session.
+  private readonly currentUser = inject(CurrentUserService);
 
   /**
    * Whether the operator still has to agree to frames leaving the device.
@@ -100,17 +105,21 @@ export class ClerkComponent implements AfterViewInit, OnDestroy {
   }
 
   protected exit(): void {
-    void this.router.navigate(['/pos']);
+    void this.router.navigate([clerkExitPath(this.currentUser.isAuthenticated())]);
   }
 
   /**
    * Hand off to the terminal's checkout overlay.
    *
    * Checkout lives in `/pos` as an overlay rather than a route, so the clerk asks
-   * for it with a query parameter instead of duplicating the payment flow.
+   * for it with a query parameter instead of duplicating the payment flow. That
+   * only works for a cashier — `/pos` is guarded — so an anonymous customer is
+   * handed to the customer lane instead of bounced into the staff login. See
+   * `clerkCheckoutTarget`.
    */
   protected goToCheckout(): void {
-    void this.router.navigate(['/pos'], { queryParams: { checkout: 1 } });
+    const target = clerkCheckoutTarget(this.currentUser.isAuthenticated());
+    void this.router.navigate([target.path], { queryParams: target.queryParams });
   }
 
   protected toggleGlass(): void {

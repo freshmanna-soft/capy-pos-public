@@ -18,8 +18,15 @@ export const routes: Routes = [
   {
     // Full-screen AI clerk. Shares the cart with /pos through PosFacade, so
     // scanning here and paying there is one transaction.
+    //
+    // Deliberately WITHOUT `authGuard` (#219): the clerk is the lane where a
+    // customer checks themselves out with the capybara's help, so requiring a
+    // staff session to reach it was an accident of it having been built for the
+    // till first. Nothing behind it needs an operator — ClerkFacade and
+    // clerk-agent-tools carry no operatorId, and transactions record no cashier
+    // — so the gate was the only thing standing in the way. Customer identity
+    // (and the customer-side payment step) layer on top via #218.
     path: 'clerk',
-    canActivate: [authGuard],
     loadComponent: () => import('./features/clerk/clerk.component').then((m) => m.ClerkComponent),
     title: 'Capy Clerk · Capy-POS',
   },

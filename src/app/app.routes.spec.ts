@@ -34,8 +34,21 @@ describe('routes', () => {
     expect((loaded as { name?: string })?.name).toBe('SelfCheckoutComponent');
   });
 
-  it('keeps the staff clerk lane guarded, for contrast', () => {
+  it('leaves /clerk unguarded so an anonymous customer can reach the capybara', () => {
+    // #219: the clerk lane was gated by the STAFF session purely because it was
+    // built for the till first. Nothing behind it needs an operator, and a
+    // customer holding a basket has no login — so re-adding the guard here would
+    // put the whole self-checkout journey back behind a screen they cannot pass.
     const clerk = routes.find((r) => r.path === 'clerk');
-    expect(clerk?.canActivate).toContain(authGuard);
+    expect(clerk).toBeDefined();
+    expect(clerk?.canActivate ?? []).not.toContain(authGuard);
+    expect(clerk?.canActivate).toBeUndefined();
+  });
+
+  it('still guards the staff-only routes, for contrast', () => {
+    for (const path of ['pos', 'inventory', 'reports', 'dashboard']) {
+      const route = routes.find((r) => r.path === path);
+      expect(route?.canActivate, `/${path} should stay staff-guarded`).toContain(authGuard);
+    }
   });
 });

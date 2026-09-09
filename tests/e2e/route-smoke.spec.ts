@@ -43,6 +43,11 @@ const ROUTES: { path: string; name: string; landmark: string }[] = [
     name: 'Self-checkout',
     landmark: '[data-testid="self-checkout-shell"]',
   },
+  // Also unguarded on purpose (#219) — the customer checks themselves out here.
+  // Smoked as a logged-in admin like the rest; the anonymous reachability of this
+  // one is its own test below, because that is the property the guard removal
+  // actually bought.
+  { path: '/clerk', name: 'Capy Clerk', landmark: '[data-testid="clerk-stage"]' },
   { path: '/admin', name: 'Admin', landmark: 'main, [data-testid="operator-list"]' },
 ];
 
@@ -93,6 +98,26 @@ test.describe('Route smoke — real app renders every page', () => {
         consoleErrors,
         `console.error(s) on ${route.path}:\n${consoleErrors.join('\n')}`
       ).toEqual([]);
+    });
+  }
+
+  /**
+   * The point of un-gating /clerk (#219): a customer with no operator session
+   * reaches the capybara instead of the staff login page. The logged-in smoke
+   * above cannot see this — authGuard only redirects when there is no session —
+   * so the anonymous case needs its own pass.
+   */
+  for (const route of ['/clerk', '/self-checkout']) {
+    test(`${route} renders without runtime errors for an anonymous visitor`, async ({ page }) => {
+      const pageErrors: string[] = [];
+      page.on('pageerror', (err) => pageErrors.push(err.message));
+
+      await page.goto(route);
+
+      // Did NOT bounce to /login — the guard is genuinely off this route.
+      await expect.poll(() => new URL(page.url()).pathname, { timeout: 15000 }).toContain(route);
+      expect(new URL(page.url()).pathname).not.toContain('/login');
+      expect(pageErrors, `uncaught error(s) on ${route}:\n${pageErrors.join('\n')}`).toEqual([]);
     });
   }
 
