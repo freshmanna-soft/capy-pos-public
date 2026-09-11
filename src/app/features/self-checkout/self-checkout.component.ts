@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { SELF_CHECKOUT_TITLE } from './self-checkout-palette';
+import { SelfCheckoutScanComponent } from './self-checkout-scan.component';
 
 /**
  * SelfCheckoutComponent
@@ -15,14 +16,17 @@ import { SELF_CHECKOUT_TITLE } from './self-checkout-palette';
  * Inventory or Reports in front of a customer is an invitation to wander into
  * staff screens.
  *
- * This is the shell only. The lane is deliberately unguarded for now — the staff
+ * The shell owns the takeover and the way out; the scan-to-cart panel inside it is
+ * its own component so the lane's hardware lifecycle and cart mechanics do not
+ * live in the chrome. The lane is deliberately unguarded for now — the staff
  * `authGuard` is the wrong gate here, and real customer-session gating arrives
- * with the `CUSTOMER_AUTH_GATEWAY` adapter. Sign-up, sign-in and scan-to-cart
- * are separate items and land inside this shell.
+ * with the `CUSTOMER_AUTH_GATEWAY` adapter. Sign-up, sign-in and the pay step are
+ * separate items and land inside this shell.
  */
 @Component({
   selector: 'app-self-checkout',
   standalone: true,
+  imports: [SelfCheckoutScanComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './self-checkout.component.html',
 })

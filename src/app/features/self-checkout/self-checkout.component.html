@@ -15,15 +15,7 @@
     </button>
   </header>
 
-  <main class="grid flex-1 place-items-center px-6 pb-10 text-center">
-    <div class="max-w-md">
-      <h1 class="font-display text-4xl font-extrabold text-steam">Self-checkout</h1>
-      <!-- Placeholder copy. The sign-up / sign-in / scan panels replace this
-           block; the shell around it is what this item delivers. -->
-      <p class="mt-4 text-[15px] leading-relaxed text-steam/80">
-        This lane is being set up. Please use a staffed till for now.
-      </p>
-      <p class="mt-6 font-data text-[10px] uppercase tracking-[0.22em] text-yuzu">Coming soon</p>
-    </div>
+  <main class="flex-1 overflow-y-auto px-6 pb-10">
+    <app-self-checkout-scan />
   </main>
 </div>

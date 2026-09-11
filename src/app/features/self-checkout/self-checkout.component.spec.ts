@@ -1,5 +1,10 @@
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
+import { PosFacade } from '@core/application/facades/pos.facade';
+import { ProductService } from '@core/application/services/product.service';
+import { CartService } from '@core/application/services/cart.service';
+import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
+import { CameraService } from '@core/infrastructure/media/camera.service';
 import { SelfCheckoutComponent } from './self-checkout.component';
 
 /**
@@ -16,9 +21,48 @@ describe('SelfCheckoutComponent', () => {
 
     TestBed.configureTestingModule({
       imports: [SelfCheckoutComponent],
-      providers: [{ provide: Router, useValue: { navigate } }],
+      providers: [
+        { provide: Router, useValue: { navigate } },
+        // The scan panel renders inside the shell, so its collaborators have to be
+        // satisfied here too. Stood in for rather than real: the real `PosFacade`
+        // drags the whole sale graph into a spec about chrome.
+        { provide: PosFacade, useValue: cartOnlyFacade() },
+        { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
+        {
+          provide: BarcodeScannerService,
+          useValue: {
+            prepare: vi.fn().mockResolvedValue(false),
+            detect: vi.fn().mockResolvedValue(null),
+            supported: vi.fn().mockReturnValue(false),
+          },
+        },
+        {
+          provide: CameraService,
+          useValue: {
+            start: vi.fn().mockResolvedValue(false),
+            stop: vi.fn(),
+            attach: vi.fn(),
+            detectionSource: vi.fn().mockReturnValue(null),
+          },
+        },
+      ],
     });
   });
+
+  /** Just enough of `PosFacade` for the scan panel to paint an empty basket. */
+  function cartOnlyFacade() {
+    const cart = new CartService();
+    return {
+      cartItems: cart.items,
+      totalItems: cart.totalItems,
+      subtotal: cart.subtotal,
+      tax: cart.tax,
+      total: cart.total,
+      isCartEmpty: cart.isEmpty,
+      tryAddToCart: () => ({ added: true }),
+      removeFromCart: () => undefined,
+    };
+  }
 
   function render() {
     const fixture = TestBed.createComponent(SelfCheckoutComponent);
