@@ -14,6 +14,17 @@
         >
           We can't reach the product list right now. Please use a staffed till.
         </p>
+      } @else if (!catalogueReady()) {
+        <!-- The catalogue is a promise, and a scanner gun fires faster than it
+             settles. Saying so beats a silent field, and a code scanned right now is
+             held rather than refused — see `pendingCode`. -->
+        <p
+          class="mt-4 text-[13px] text-steam/70"
+          role="status"
+          data-testid="self-checkout-catalogue-loading"
+        >
+          Getting today's items ready…
+        </p>
       }
 
       <div class="mt-5 flex flex-wrap items-end gap-3">
@@ -91,6 +102,16 @@
           >
             We don't recognise <span class="font-data">{{ notFoundCode() }}</span
             >. Try scanning again, or ask a member of staff.
+          </p>
+        }
+        @case ('waiting') {
+          <p
+            class="mt-4 rounded-xl border border-kelp/40 bg-onsen-deep/60 px-4 py-3 text-[13px] text-steam"
+            role="status"
+            data-testid="self-checkout-waiting"
+          >
+            One moment — still getting today's items. We'll add
+            <span class="font-data">{{ waitingCode() }}</span> as soon as they're here.
           </p>
         }
         @case ('unavailable') {

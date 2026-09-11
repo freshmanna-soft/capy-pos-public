@@ -36,6 +36,7 @@ type ScanFeedback =
   | { kind: 'none' }
   | { kind: 'added'; product: Product }
   | { kind: 'not-found'; code: string }
+  | { kind: 'waiting'; code: string }
   | { kind: 'unavailable'; product: Product; reason: 'out-of-stock' | 'max-stock-reached' };
 
 /**
@@ -92,6 +93,22 @@ export class SelfCheckoutScanComponent {
    */
   private readonly index = signal<ScanIndex>(new Map());
 
+  /**
+   * A code that arrived before the catalogue did.
+   *
+   * The catalogue load is a promise started in the constructor, and a hardware
+   * scanner gun fires the moment a customer reaches the lane — well inside that
+   * window. Resolving a scan against the empty index would report a stocked item as
+   * "we don't recognise 036000291452", which sends the customer to a staffed till
+   * over a race they cannot see; dropping it silently is no better. So the code is
+   * held and answered as soon as there is something to answer it against.
+   *
+   * One slot, not a queue: it holds the item in the customer's hand. Replaying a
+   * burst would empty a backlog into the basket at once, and a customer who scanned
+   * twice while nothing happened is owed one of that article, not two.
+   */
+  private pendingCode: string | null = null;
+
   private readonly _catalogueReady = signal(false);
   private readonly _catalogueError = signal(false);
   private readonly _detectorReady = signal(false);
@@ -121,6 +138,10 @@ export class SelfCheckoutScanComponent {
   protected readonly notFoundCode = computed(() => {
     const feedback = this._feedback();
     return feedback.kind === 'not-found' ? feedback.code : '';
+  });
+  protected readonly waitingCode = computed(() => {
+    const feedback = this._feedback();
+    return feedback.kind === 'waiting' ? feedback.code : '';
   });
   protected readonly unavailableName = computed(() => {
     const feedback = this._feedback();
@@ -217,6 +238,16 @@ export class SelfCheckoutScanComponent {
    * two would put one article in the cart on two lines.
    */
   private accept(raw: string): void {
+    if (!this._catalogueReady()) {
+      // Nothing to resolve against yet. The error banner already speaks for the
+      // failed-catalogue case, so only a load still in flight is worth holding for.
+      if (!this._catalogueError()) {
+        this.pendingCode = raw;
+        this._feedback.set({ kind: 'waiting', code: raw.trim() });
+      }
+      return;
+    }
+
     const product = resolveScannedCode(this.index(), raw);
     if (product === null) {
       this._feedback.set({ kind: 'not-found', code: raw.trim() });
@@ -235,11 +266,25 @@ export class SelfCheckoutScanComponent {
     try {
       this.index.set(buildScanIndex(await this.products.getActiveProducts()));
       this._catalogueReady.set(true);
+      this.acceptPending();
     } catch {
       // A lane that cannot read the catalogue can only mislead the customer, so it
       // says so rather than reporting every scan as an unknown code.
       this._catalogueError.set(true);
+      // Whoever is holding that item is being sent to a staffed till; keeping the
+      // code would ring it up if the panel ever gained a retry.
+      this.pendingCode = null;
     }
+  }
+
+  /** Answer the scan that beat the catalogue, now that there is an index. */
+  private acceptPending(): void {
+    const held = this.pendingCode;
+    if (held === null) {
+      return;
+    }
+    this.pendingCode = null;
+    this.accept(held);
   }
 
   /**

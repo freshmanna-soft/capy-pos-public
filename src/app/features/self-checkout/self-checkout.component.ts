@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
+import { PosFacade } from '@core/application/facades/pos.facade';
+import { CartService } from '@core/application/services/cart.service';
 import { SELF_CHECKOUT_TITLE } from './self-checkout-palette';
 import { SelfCheckoutScanComponent } from './self-checkout-scan.component';
 
@@ -22,12 +24,32 @@ import { SelfCheckoutScanComponent } from './self-checkout-scan.component';
  * `authGuard` is the wrong gate here, and real customer-session gating arrives
  * with the `CUSTOMER_AUTH_GATEWAY` adapter. Sign-up, sign-in and the pay step are
  * separate items and land inside this shell.
+ *
+ * **The lane owns its own cart.** `CartService` and `PosFacade` are provided here
+ * rather than taken from the root injector, because the root cart is the one `/pos`
+ * is ringing a sale into. Sharing it points both ways and both are wrong: a
+ * cashier's in-progress basket would render as the customer's items and totals on
+ * an unguarded route, and an abandoned customer basket would become the cashier's
+ * next sale the moment "Back to till" navigated away. Scoping the pair to this
+ * element injector is what keeps the two baskets apart — a `clearCart()` on entry
+ * would instead destroy whatever the cashier had already scanned, and one on exit
+ * still leaves the two carts sharing state in between. The lane's cart lives
+ * exactly as long as the takeover does, so nothing has to remember to clear it.
+ *
+ * `PosFacade` has to be in that list alongside `CartService`: it is a root
+ * singleton, and a root singleton resolves its own `inject(CartService)` from the
+ * root injector no matter which component asked for it. Provided here, the facade
+ * is built by this element injector and finds the lane's cart.
  */
 @Component({
   selector: 'app-self-checkout',
   standalone: true,
   imports: [SelfCheckoutScanComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // The lane's cart boundary — see the class comment. Order is irrelevant, but
+  // both are required: `CartService` alone would leave the root facade writing the
+  // root cart.
+  providers: [CartService, PosFacade],
   templateUrl: './self-checkout.component.html',
 })
 export class SelfCheckoutComponent {

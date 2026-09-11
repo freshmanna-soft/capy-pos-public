@@ -23,10 +23,6 @@ describe('SelfCheckoutComponent', () => {
       imports: [SelfCheckoutComponent],
       providers: [
         { provide: Router, useValue: { navigate } },
-        // The scan panel renders inside the shell, so its collaborators have to be
-        // satisfied here too. Stood in for rather than real: the real `PosFacade`
-        // drags the whole sale graph into a spec about chrome.
-        { provide: PosFacade, useValue: cartOnlyFacade() },
         { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
         {
           provide: BarcodeScannerService,
@@ -46,6 +42,16 @@ describe('SelfCheckoutComponent', () => {
           },
         },
       ],
+    });
+
+    // The shell provides `CartService` and `PosFacade` itself — that is the lane's
+    // cart boundary, and component providers win over the module's, so the stand-in
+    // has to be installed at the component level or the real facade (and the whole
+    // sale graph behind it) gets built. `CartService` stays in the list: the
+    // boundary itself is asserted below, and `self-checkout-cart-boundary.spec.ts`
+    // covers the facade half against the real thing.
+    TestBed.overrideComponent(SelfCheckoutComponent, {
+      set: { providers: [CartService, { provide: PosFacade, useValue: cartOnlyFacade() }] },
     });
   });
 
@@ -91,6 +97,14 @@ describe('SelfCheckoutComponent', () => {
 
     expect(shell?.className).toContain('bg-onsen-deep');
     expect(shell?.className).toContain('text-steam');
+  });
+
+  it("keeps the lane on a cart of its own, not the till's", () => {
+    const fixture = render();
+
+    // Two instances, not one: the root cart is what `/pos` rings a sale into, and
+    // `/self-checkout` is an unguarded route. See the component's class comment.
+    expect(fixture.debugElement.injector.get(CartService)).not.toBe(TestBed.inject(CartService));
   });
 
   it('navigates back to the till when the exit control is used', () => {
