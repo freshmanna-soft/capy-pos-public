@@ -64,6 +64,7 @@ import {
   validate as validateCustomerSignup,
   MAX_BODY_BYTES as CUSTOMER_SIGNUP_MAX_BODY_BYTES,
 } from './customer-signup-validate.ts';
+import { createRateLimiter } from './rate-limit.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8792);
 
@@ -196,6 +197,14 @@ const customerTokenListener = createRequestListener({
  * (the `customer` scope is a constant here, never a request field) so it can be
  * tested without a bound port.
  *
+ * The **one** route on this service with a rate limiter (epic #261 item 8c). It is
+ * also the only one that creates state for an unauthenticated caller, which is
+ * exactly the asymmetry: a refused sign-in costs App ID one rejected grant, a
+ * flood of sign-ups costs a Cloud Directory full of accounts. Neither token route
+ * gets one deliberately — see `rate-limit.ts`, and `rate-limit.test.mjs` asserts
+ * it through this very table. The counters are per-instance, so the real ceiling
+ * is `instances × limit`; `rate-limit.ts` documents why that is still worth having.
+ *
  * Epic #261 item 8a — the happy path. A duplicate email or a password App ID's own
  * policy refuses currently surfaces as this boundary's generic 502; giving each its
  * own status is item 8b.
@@ -208,6 +217,11 @@ const customerSignupListener = createRequestListener({
   validate: validateCustomerSignup,
   handle: createCustomerSignupHandler(managementConfig),
   unavailable: 'The customer sign-up service is unavailable.',
+  rateLimit: createRateLimiter(),
+  // Deliberately says nothing about the email: this is answered before the body
+  // is even read, and #253's anti-enumeration behaviour on the password-reset
+  // path is not something this route gets to undo.
+  tooManyRequests: 'Too many sign-up attempts. Please try again later.',
 });
 
 /**
