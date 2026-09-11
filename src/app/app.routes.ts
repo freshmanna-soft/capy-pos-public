@@ -51,6 +51,18 @@ export const routes: Routes = [
     // positive and the negative case.
     //
     // `InMemoryCustomerAuthAdapter` is untouched and still what specs provide.
+    //
+    // Bundle note (item 11's review finding, verified against the built output,
+    // not assumed): the self-checkout lazy chunk contains neither App ID adapter
+    // — zero hits for the staff adapter's `capy_pos_access_token` key in it.
+    // `APPID_CONFIG` moving to `appid-config.ts` is what makes that hold as the
+    // customer adapter grows; while it was imported from `appid-auth.adapter.ts`
+    // anything reaching the customer adapter dragged the whole staff adapter
+    // along. Both adapters resolve into the initial bundle rather than the chunk,
+    // because a route-level `providers` array in this eagerly-loaded root route
+    // table is by definition a static import — the staff adapter is already there
+    // via `auth.providers.ts`, and pushing the customer one into the chunk would
+    // mean `loadChildren`, which `app.routes.spec.ts` deliberately forbids here.
     providers: [{ provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter }],
     title: SELF_CHECKOUT_TITLE,
   },
