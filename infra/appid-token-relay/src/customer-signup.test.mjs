@@ -19,9 +19,13 @@ import assert from 'node:assert/strict';
 import {
   CUSTOMER_SCOPE,
   CUSTOMER_SIGNUP_ROUTE,
+  DUPLICATE_EMAIL_MESSAGE,
+  PASSWORD_POLICY_MESSAGE,
   createCustomerSignupHandler,
   customerSignupConfigured,
+  signupRefusal,
 } from './customer-signup.ts';
+import { ManagementApiError } from './management-api.ts';
 
 const CONFIG = { region: 'us-south', tenantId: 'tenant-1', apiKey: 'iam-key-1' };
 const REQUEST = { email: 'shopper@capy.test', password: 'chosen passphrase' };
@@ -280,5 +284,170 @@ describe('createCustomerSignupHandler — a failing role assignment', () => {
       })
     );
     await assert.rejects(() => handle(REQUEST), (error) => !error.message.includes(REQUEST.email));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Item 8b: the two rejected sign-ups
+// ---------------------------------------------------------------------------
+
+/** How App ID reports the failure, as `createUser` now packages it. */
+function upstream(status, detail) {
+  return new ManagementApiError(`Creating the App ID user failed: ${detail ?? `status ${status}`}`, {
+    status,
+    detail,
+  });
+}
+
+/** A `createUser` that fails the way App ID would, for a handler-level assertion. */
+function createUserFails(error) {
+  return {
+    createUser: async (email, password, config) => {
+      calls.push({ call: 'createUser', email, password, config });
+      throw error;
+    },
+  };
+}
+
+describe('signupRefusal — duplicate email', () => {
+  // This is the decision, pinned. Changing any of these three assertions is
+  // changing what this route tells an unauthenticated caller about who has an
+  // account here, which is a security decision and has to be made on purpose —
+  // see `customer-signup.ts`'s header for the argument this pins.
+  it('answers 409 with one fixed message, and #253\'s uniform-outcome path is deliberately NOT what this route does', () => {
+    const refusal = signupRefusal(upstream(409, 'The email address already exists.'), REQUEST.email);
+
+    assert.equal(refusal.status, 409, 'a duplicate is answered distinguishably, on purpose');
+    assert.equal(refusal.body.error, DUPLICATE_EMAIL_MESSAGE);
+  });
+
+  it('never quotes the address, the existing account, or App ID back at the caller', () => {
+    const refusal = signupRefusal(
+      upstream(409, `A user with email ${REQUEST.email} already exists (profileId 9c1f).`),
+      REQUEST.email
+    );
+
+    assert.equal(refusal.body.error.includes(REQUEST.email), false);
+    assert.equal(/9c1f/.test(refusal.body.error), false);
+    assert.equal(/App ID|profileId/i.test(refusal.body.error), false);
+  });
+
+  it('recognises a conflict a tenant reported as a 400 by its wording too', () => {
+    for (const detail of [
+      'The email address already exists',
+      'That email is already registered',
+      'Email already taken',
+    ]) {
+      assert.equal(signupRefusal(upstream(400, detail), REQUEST.email).status, 409, detail);
+    }
+  });
+
+  it('says to *try* signing in — a fresh account is PENDING and a session is never implied', () => {
+    assert.match(DUPLICATE_EMAIL_MESSAGE, /try signing in/i);
+    assert.equal(/token|signed in|logged in|session/i.test(DUPLICATE_EMAIL_MESSAGE), false);
+  });
+});
+
+describe('signupRefusal — password policy', () => {
+  it('answers 400 with the tenant policy\'s own words appended to a usable lead', () => {
+    const refusal = signupRefusal(
+      upstream(400, 'Password must be at least 12 characters and contain a digit'),
+      REQUEST.email
+    );
+
+    assert.equal(refusal.status, 400);
+    assert.equal(
+      refusal.body.error,
+      `${PASSWORD_POLICY_MESSAGE} Password must be at least 12 characters and contain a digit.`
+    );
+  });
+
+  it('falls back to the fixed lead rather than forwarding a raw upstream blob', () => {
+    for (const detail of [
+      '{"scimType":"invalidValue","detail":"password too weak"}',
+      `password rejected: ${'x'.repeat(400)}`,
+      '<html>password error</html>',
+    ]) {
+      assert.equal(
+        signupRefusal(upstream(400, detail), REQUEST.email).body.error,
+        PASSWORD_POLICY_MESSAGE,
+        detail.slice(0, 40)
+      );
+    }
+  });
+
+  it('drops an explanation that quotes the caller\'s own address back', () => {
+    const refusal = signupRefusal(
+      upstream(400, `password for ${REQUEST.email} is too weak`),
+      REQUEST.email
+    );
+    assert.equal(refusal.body.error, PASSWORD_POLICY_MESSAGE);
+  });
+
+  it('collapses a multi-line explanation into one readable line', () => {
+    const refusal = signupRefusal(upstream(400, 'Password too short.\n\n  Minimum is 10.'), REQUEST.email);
+    assert.equal(refusal.body.error, `${PASSWORD_POLICY_MESSAGE} Password too short. Minimum is 10.`);
+  });
+});
+
+describe('signupRefusal — everything else is still an outage', () => {
+  it('does not answer for a 500, a transport failure, or a non-Management error', () => {
+    assert.equal(signupRefusal(upstream(500, 'Internal error'), REQUEST.email), null);
+    assert.equal(signupRefusal(new ManagementApiError('App ID request failed: socket hang up'), REQUEST.email), null);
+    assert.equal(signupRefusal(new Error('boom'), REQUEST.email), null);
+  });
+
+  it('does not turn an unrelated 400 into a password answer', () => {
+    assert.equal(signupRefusal(upstream(400, 'userName is required'), REQUEST.email), null);
+  });
+});
+
+describe('createCustomerSignupHandler — rejected sign-ups', () => {
+  it('resolves the duplicate answer instead of throwing, and creates nothing to roll back', async () => {
+    const handle = createCustomerSignupHandler(
+      CONFIG,
+      deps(createUserFails(upstream(409, 'The email address already exists.')))
+    );
+
+    const response = await handle(REQUEST);
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error, DUPLICATE_EMAIL_MESSAGE);
+    assert.deepEqual(
+      calls.map((c) => c.call),
+      ['resolveRoleId', 'createUser'],
+      'no role is granted and no rollback is attempted — nothing was created'
+    );
+  });
+
+  it('resolves the password answer instead of throwing', async () => {
+    const handle = createCustomerSignupHandler(
+      CONFIG,
+      deps(createUserFails(upstream(400, 'Password does not meet the policy')))
+    );
+
+    const response = await handle(REQUEST);
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /password policy/i);
+    assert.equal(
+      calls.some((c) => c.call === 'deleteUserAndProfile'),
+      false
+    );
+  });
+
+  it('still throws for a failure that is this service\'s problem, so http.ts answers its generic 502', async () => {
+    const handle = createCustomerSignupHandler(CONFIG, deps(createUserFails(upstream(500, 'Internal error'))));
+
+    await assert.rejects(() => handle(REQUEST), /Creating the App ID user failed/);
+  });
+
+  it('leaves the happy path\'s contract exactly as item 8a shipped it', async () => {
+    const handle = createCustomerSignupHandler(CONFIG, deps());
+
+    assert.deepEqual(await handle(REQUEST), {
+      status: 201,
+      body: { id: 'profile-1', email: REQUEST.email },
+    });
   });
 });

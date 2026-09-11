@@ -23,11 +23,54 @@ export interface ManagementConfig {
   readonly apiKey: string;
 }
 
+/**
+ * A Management API call that failed.
+ *
+ * Carries the upstream status and App ID's own wording alongside the human
+ * sentence, because not every failure here is *this service's* problem: a
+ * duplicate email, or a password the tenant's policy refuses, are answers a
+ * caller asked for and has to be told about, while a 500 or a dropped socket
+ * are outages nothing outside this service may see. `customer-signup.ts` can
+ * only tell the two apart by what App ID actually said, and a message string it
+ * would have to pattern-match is not that. Both fields are optional — a
+ * transport failure never got a status, and App ID does not always explain
+ * itself.
+ *
+ * `detail` is App ID's own `message`/`detail` string, unwrapped — never the raw
+ * body. A caller-facing message is built from it deliberately (see
+ * `customer-signup.ts`), never by forwarding it as-is.
+ */
 export class ManagementApiError extends Error {
-  constructor(message: string) {
+  /** The upstream HTTP status, when the call got far enough to have one. */
+  readonly status?: number;
+  /** App ID's own explanation, unwrapped from its body. */
+  readonly detail?: string;
+
+  constructor(message: string, options: { status?: number; detail?: string } = {}) {
     super(message);
     this.name = 'ManagementApiError';
+    this.status = options.status;
+    this.detail = options.detail;
   }
+}
+
+/**
+ * App ID's own explanation for a non-2xx body, or `undefined` if it did not give
+ * one. `message` is what the Management API uses; `detail` is what its SCIM-shaped
+ * errors use (Cloud Directory `sign_up` answers with both shapes depending on
+ * which layer refused). Only ever a string it actually sent — never the body.
+ */
+export function upstreamDetail(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null) {
+    return undefined;
+  }
+  for (const key of ['message', 'detail'] as const) {
+    const value = (body as Record<string, unknown>)[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return undefined;
 }
 
 /** A role the admin can assign — the ones this codebase actually resolves permissions for. */
@@ -406,11 +449,16 @@ export async function createUser(
     },
   });
   if (result.status !== 201) {
-    const description =
-      typeof result.body === 'object' && result.body !== null && 'message' in result.body
-        ? String((result.body as { message: unknown }).message)
-        : `status ${result.status}`;
-    throw new ManagementApiError(`Creating the App ID user failed: ${description}`);
+    // The status and App ID's own wording travel with the error, not just inside
+    // the sentence: the customer sign-up route has to be able to tell a duplicate
+    // email or a refused password (the caller's problem, and answerable) from a
+    // tenant that is down (this service's problem, and a 502) — see
+    // `ManagementApiError`.
+    const detail = upstreamDetail(result.body);
+    throw new ManagementApiError(
+      `Creating the App ID user failed: ${detail ?? `status ${result.status}`}`,
+      { status: result.status, detail }
+    );
   }
   const user = result.body as ScimUser;
   if (typeof user.profileId !== 'string' || user.profileId.length === 0) {
