@@ -1,5 +1,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/presentation/guards/auth.guard';
+import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
+import { AppIdCustomerAuthAdapter } from '@core/infrastructure/auth/appid-customer-auth.adapter';
 import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palette';
 
 export const routes: Routes = [
@@ -33,13 +35,23 @@ export const routes: Routes = [
   {
     // The customer-facing self-checkout lane. Its own top-level route, like
     // /clerk, and deliberately WITHOUT `authGuard`: that guard is the staff
-    // session, and the whole point of this lane is a customer identity. Real
-    // customer-session gating arrives with the CUSTOMER_AUTH_GATEWAY adapter.
+    // session, and the whole point of this lane is a customer identity.
     path: 'self-checkout',
     loadComponent: () =>
       import('./features/self-checkout/self-checkout.component').then(
         (m) => m.SelfCheckoutComponent
       ),
+    // The customer identity seam (epic #261 item 13), bound HERE and nowhere
+    // else. Not in `auth.providers.ts` beside the staff `AUTH_GATEWAY`, and not
+    // root-provided: a route-level `providers` array creates an environment
+    // injector for this route subtree only, so `CUSTOMER_AUTH_GATEWAY` is
+    // unresolvable from the root injector and nothing outside /self-checkout can
+    // resolve a customer identity by accident. `customer-auth-gateway.port.ts`'s
+    // own header states that requirement; `app.routes.spec.ts` asserts both the
+    // positive and the negative case.
+    //
+    // `InMemoryCustomerAuthAdapter` is untouched and still what specs provide.
+    providers: [{ provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter }],
     title: SELF_CHECKOUT_TITLE,
   },
   {
