@@ -5,13 +5,18 @@ import { environment } from '../../../../environments/environment';
  * Shared IBM App ID configuration surface.
  *
  * Extracted from {@link AppIdAuthAdapter} for epic #261 item 13, mirroring what
- * item 11 did for the shared JWKS logic (`appid-jwks.ts`). The reason is a
- * bundle boundary, not tidiness: `CUSTOMER_AUTH_GATEWAY` is bound on the
- * self-checkout route's own `providers`, and while `AppIdCustomerAuthAdapter`
- * imported `APPID_CONFIG` from `appid-auth.adapter.ts` every module that
- * reached the customer adapter also dragged in the entire *staff* adapter —
- * a route-scoped binding whose import graph was not scoped at all. Config is
- * the only thing the two adapters actually share here, so config is what moves.
+ * item 11 did for the shared JWKS logic (`appid-jwks.ts`). The reason is an
+ * import edge: while `AppIdCustomerAuthAdapter` read `APPID_CONFIG` from
+ * `appid-auth.adapter.ts`, anything reaching the customer adapter dragged in the
+ * entire *staff* adapter, so the route-scoped `CUSTOMER_AUTH_GATEWAY` binding had
+ * an import graph that was not scoped at all. Config is the only thing the two
+ * adapters actually share here, so config is what moves.
+ *
+ * It buys no bytes today and is not claimed to — both adapters land in the
+ * initial bundle either way, see the measured note in `app.routes.ts`. It buys
+ * the customer half of App ID a graph that does not include the staff half,
+ * which is what makes a later lazy boundary or customer-only build possible;
+ * `appid-customer-auth.import-graph.spec.ts` keeps the edge from returning.
  *
  * The token identity and its `providedIn: 'root'` factory are deliberately
  * unchanged, and `appid-auth.adapter.ts` re-exports both names, so every

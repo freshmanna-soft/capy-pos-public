@@ -43,26 +43,31 @@ export const routes: Routes = [
       ),
     // The customer identity seam (epic #261 item 13), bound HERE and nowhere
     // else. Not in `auth.providers.ts` beside the staff `AUTH_GATEWAY`, and not
-    // root-provided: a route-level `providers` array creates an environment
-    // injector for this route subtree only, so `CUSTOMER_AUTH_GATEWAY` is
-    // unresolvable from the root injector and nothing outside /self-checkout can
+    // root-provided: a route-level `providers` array gives this route subtree its
+    // own environment injector, so `CUSTOMER_AUTH_GATEWAY` is unresolvable from
+    // the application's root injector and nothing outside /self-checkout can
     // resolve a customer identity by accident. `customer-auth-gateway.port.ts`'s
-    // own header states that requirement; `app.routes.spec.ts` asserts both the
-    // positive and the negative case.
+    // own header states that requirement; `app.routes.spec.ts` asserts it against
+    // an injector built from the real `appConfig.providers`, because a bare
+    // TestBed injector would report the token absent either way.
     //
     // `InMemoryCustomerAuthAdapter` is untouched and still what specs provide.
     //
-    // Bundle note (item 11's review finding, verified against the built output,
-    // not assumed): the self-checkout lazy chunk contains neither App ID adapter
-    // — zero hits for the staff adapter's `capy_pos_access_token` key in it.
-    // `APPID_CONFIG` moving to `appid-config.ts` is what makes that hold as the
-    // customer adapter grows; while it was imported from `appid-auth.adapter.ts`
-    // anything reaching the customer adapter dragged the whole staff adapter
-    // along. Both adapters resolve into the initial bundle rather than the chunk,
-    // because a route-level `providers` array in this eagerly-loaded root route
-    // table is by definition a static import — the staff adapter is already there
-    // via `auth.providers.ts`, and pushing the customer one into the chunk would
-    // mean `loadChildren`, which `app.routes.spec.ts` deliberately forbids here.
+    // What it does NOT buy is a smaller self-checkout download. Measured, not
+    // assumed (`npm run build`, then grepping the emitted chunks for each
+    // adapter's `sessionStorage` key): both App ID adapters sit in the *initial*
+    // bundle — the customer one because of the static import right below. That is
+    // inherent to binding a class in the eagerly-evaluated root route table;
+    // getting it into the lazy chunk would take `loadChildren`, which the spec
+    // above deliberately forbids here. The self-checkout chunk and its whole
+    // transitive closure contain neither adapter and no `jose`, which is what
+    // item 11's review asked to confirm — but they never did contain them, so
+    // extracting `APPID_CONFIG` into `appid-config.ts` moves no bytes today.
+    // What it does remove is the customer→staff-adapter import edge, so this
+    // route's graph stops depending on the staff adapter before that coupling can
+    // start costing anything (a `loadChildren` boundary here, a customer-only
+    // build, a customer adapter that outgrows one file).
+    // `appid-customer-auth.import-graph.spec.ts` is what keeps the edge gone.
     providers: [{ provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter }],
     title: SELF_CHECKOUT_TITLE,
   },
