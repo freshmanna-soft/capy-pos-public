@@ -167,11 +167,21 @@ re-scope, to be applied to the epic when this lands:
 in the repo and asserts what this decision concluded, so the next person editing a `FROM` line has
 to agree with it or change it deliberately:
 
-- no `FROM` may float (bare image name, or `:latest`/`:latest-dev`/`:edge`) — this is the finding
-  above turned into a rule, and it is the one that would have caught a well-meaning
-  `FROM cgr.dev/chainguard/node:latest`;
-- every `FROM` carries an explicit version tag or an immutable digest;
-- if a `cgr.dev/…` base ever appears, it must be digest-pinned, since a tag there cannot be.
+- `unpinned` — every `FROM` carries a tag or a complete 64-character digest; a bare image name, or a
+  truncated digest that would not pull, is a violation;
+- `floating-tag` — `latest`, `edge`, `main`, `stable` and the whole `latest-*` family (`latest-dev`,
+  `latest-alpine`, `latest-22`) are rejected. This is the finding above turned into a rule, and it
+  is the one that catches a well-meaning `FROM cgr.dev/chainguard/node:latest` — asserted directly,
+  by name, in _requires a cgr.dev base to be digest-pinned_;
+- `unversioned-tag` — the tag must identify a release: a digit, or a known distro codename
+  (`bookworm`, `noble`, …), since `debian:bookworm` is as precise a pin as `node:22`. The one
+  exception is the recorded `VARIANT_TAG_ALLOWLIST`;
+- `unpinned-cgr-dev` — if a `cgr.dev/…` base ever appears it must be digest-pinned, since a version
+  tag there cannot be pulled at all on the free tier.
+
+Tags are compared case-insensitively. `FROM`, `AS` and filename matching already were, and reading
+tags exact-case while reading everything else case-insensitively left a hole shaped exactly like
+`node:LATEST-22` — which the floating rule missed on case and the digit rule missed on the `22`.
 
 The spec deliberately does not hardcode `node:22-alpine`: items that legitimately bump the Node
 major should not have to edit a policy test to do it.
@@ -180,14 +190,30 @@ Discovery is a basename match (`Dockerfile`, `Dockerfile.<suffix>`, `<name>.dock
 `Containerfile`), not a `git ls-files -- '*Dockerfile'` pathspec. A pathspec only matches paths that
 _end_ in `Dockerfile`, so a `Dockerfile.dev` added next to an existing service would be built by CI
 and skipped by the policy — a floating base could then land in the one file nobody was checking.
-`.dockerignore` and `docker-compose.yml` are not build files and are excluded.
+`.dockerignore` and `docker-compose.yml` are not build files and are excluded, and so is a
+`Dockerfile.<suffix>` whose suffix makes it prose or config (`Dockerfile.md`, `Dockerfile.yml`) —
+otherwise a design note one character away from `Dockerfile.dev` gets scanned for `FROM` lines and
+reported as a policy violation.
 
-The spec has two layers, because the repo-scan layer alone cannot exercise its own parser: no
-Dockerfile here uses `FROM --platform=…`, a digest pin, a `host:port/` registry or `FROM <stage>`
-today, so every branch handling those shapes would be deletable with the scan still green. Synthetic
-inputs cover each one, plus the discovery predicate. Verified by mutation — removing any one of the
-six guards (the `@sha256:` short-circuit, the registry-port check, the `--flag` filter, the
-stage-name filter, the digest-length anchor, the basename pattern) turns a test red.
+The spec has two layers, because **the repo cannot prove the policy it complies with.** Every rule
+written only as `expect(scan.filter(…)).toEqual([])` is a rule you can delete with the suite still
+green: the repo's bases are `node:22-alpine`, `nginx:alpine` and `pgvector/pgvector:pg16`, so
+nothing in it floats, nothing is bare, and nothing comes from `cgr.dev`. Same for the parser — no
+Dockerfile here uses `FROM --platform=…`, a digest pin, a `host:port/` registry or `FROM <stage>`.
+
+So the rules are named predicates in a `POLICY_RULES` table, applied by `policyViolations()`, and
+each one is proven by synthetic references that _do_ violate it. The repo scan then asserts one
+thing: today's Dockerfiles produce no violations.
+
+Verified by mutation, 22 mutants, all killed: emptying `FLOATING_TAGS`, `RELEASE_CODENAME_TAGS` or
+`VARIANT_TAG_ALLOWLIST`; dropping any one of the four rules; dropping the `latest-*` prefix match,
+any tag case-normalization, the codename allowance, the allowlist check, or the Docker Hub prefix
+normalization; and dropping any parser or discovery guard (the digest split, the registry-port
+check, the `--flag` filter, the stage-name filter, the empty-token guard, the digest-length anchor,
+the basename pattern, the non-build-suffix rejection). One caveat worth recording, because it bit
+this spec twice: a test that loops over the constant it is checking
+(`for (const tag of FLOATING_TAGS) …`) passes vacuously the moment the constant is emptied, which is
+the exact mutation it was written to catch. The tag literals are spelled out for that reason.
 
 One thing writing the guard surfaced: **`nginx:alpine` floats too.** It carries no version, so the
 root `Dockerfile`'s serve stage already takes whatever nginx Docker Hub last built on Alpine — the
