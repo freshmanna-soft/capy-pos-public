@@ -1,6 +1,6 @@
-import { Injectable, InjectionToken, inject } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { decodeProtectedHeader, jwtVerify, type JWTPayload } from 'jose';
-import { environment } from '../../../../environments/environment';
+import { APPID_CONFIG, type AppIdConfig } from './appid-config';
 import { AuthGateway } from '@core/application/auth/ports/auth-gateway.port';
 import { CredentialsDto } from '@core/application/auth/dtos/credentials.dto';
 import { AuthSessionDto, TenantMembershipDto } from '@core/application/auth/dtos/auth-session.dto';
@@ -63,53 +63,17 @@ export { AppIdAuthError };
  */
 
 // ---------------------------------------------------------------------------
-// Configuration
+// Configuration — re-exported, not declared here.
+//
+// `AppIdConfig`/`APPID_CONFIG` moved to `appid-config.ts` (epic #261 item 13)
+// so `AppIdCustomerAuthAdapter` can read the shared config without importing
+// this file, which would have pulled the whole staff adapter into the
+// self-checkout lazy route's import graph. Same token identity, same
+// `providedIn: 'root'` factory; the re-export keeps every existing
+// `from './appid-auth.adapter'` call site working.
 // ---------------------------------------------------------------------------
 
-export interface AppIdConfig {
-  readonly enabled: boolean;
-  readonly region: string;
-  readonly tenantId: string;
-  readonly staffClientId: string;
-  /**
-   * The customer application's client id (epic #261). Staff and customers share
-   * one App ID *tenant* — there is no second pool — and are separated by being
-   * two distinct App ID *applications*, because the client a grant is exchanged
-   * under is what decides the scopes the resulting token carries (see
-   * `infra/appid-token-relay/src/customer-token.ts`).
-   *
-   * Not read by this adapter, and deliberately not a fallback for
-   * `staffClientId`: what keeps a customer token out of the staff gateway is
-   * `verifyAccessToken`'s audience binding — a customer token's `aud` is this
-   * id, the staff check demands `staffClientId`, so verification fails. It is
-   * carried here so the customer half of the config lives beside the staff half
-   * rather than in a second, drifting place, and so
-   * `AppIdCustomerAuthAdapter` (item 11) has it to bind its own audience against.
-   */
-  readonly customerClientId?: string;
-  /** `infra/appid-token-relay` — holds the client secret App ID's token
-   *  endpoint requires, which cannot live in this browser bundle. */
-  readonly relayUrl: string;
-  /**
-   * The relay's customer sign-in route (`/appid/customer/token`) — a sibling of
-   * `relayUrl`, not a variant of it. Its own field rather than something derived
-   * from `relayUrl` by string surgery: the two are separately deployable (a
-   * deployment can serve staff sign-in before the customer client's secret
-   * lands, which is why the relay answers 502 rather than 404 there), and an
-   * empty value states that plainly instead of pointing at a route that will
-   * reject every grant.
-   */
-  readonly customerRelayUrl?: string;
-}
-
-/**
- * App ID configuration seam. Defaults to `environment.appId`; specs and
- * alternate deployments override it via the DI container.
- */
-export const APPID_CONFIG = new InjectionToken<AppIdConfig>('APPID_CONFIG', {
-  providedIn: 'root',
-  factory: () => environment.appId as AppIdConfig,
-});
+export { APPID_CONFIG, type AppIdConfig };
 
 // ---------------------------------------------------------------------------
 // Token storage — same keys/strategy as the other two gateways, so the three

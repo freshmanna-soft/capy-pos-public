@@ -1,5 +1,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/presentation/guards/auth.guard';
+import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
+import { AppIdCustomerAuthAdapter } from '@core/infrastructure/auth/appid-customer-auth.adapter';
 import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palette';
 
 export const routes: Routes = [
@@ -33,13 +35,40 @@ export const routes: Routes = [
   {
     // The customer-facing self-checkout lane. Its own top-level route, like
     // /clerk, and deliberately WITHOUT `authGuard`: that guard is the staff
-    // session, and the whole point of this lane is a customer identity. Real
-    // customer-session gating arrives with the CUSTOMER_AUTH_GATEWAY adapter.
+    // session, and the whole point of this lane is a customer identity.
     path: 'self-checkout',
     loadComponent: () =>
       import('./features/self-checkout/self-checkout.component').then(
         (m) => m.SelfCheckoutComponent
       ),
+    // The customer identity seam (epic #261 item 13), bound HERE and nowhere
+    // else. Not in `auth.providers.ts` beside the staff `AUTH_GATEWAY`, and not
+    // root-provided: a route-level `providers` array gives this route subtree its
+    // own environment injector, so `CUSTOMER_AUTH_GATEWAY` is unresolvable from
+    // the application's root injector and nothing outside /self-checkout can
+    // resolve a customer identity by accident. `customer-auth-gateway.port.ts`'s
+    // own header states that requirement; `app.routes.spec.ts` asserts it against
+    // an injector built from the real `appConfig.providers`, because a bare
+    // TestBed injector would report the token absent either way.
+    //
+    // `InMemoryCustomerAuthAdapter` is untouched and still what specs provide.
+    //
+    // What it does NOT buy is a smaller self-checkout download. Measured, not
+    // assumed (`npm run build`, then grepping the emitted chunks for each
+    // adapter's `sessionStorage` key): both App ID adapters sit in the *initial*
+    // bundle — the customer one because of the static import right below. That is
+    // inherent to binding a class in the eagerly-evaluated root route table;
+    // getting it into the lazy chunk would take `loadChildren`, which the spec
+    // above deliberately forbids here. The self-checkout chunk and its whole
+    // transitive closure contain neither adapter and no `jose`, which is what
+    // item 11's review asked to confirm — but they never did contain them, so
+    // extracting `APPID_CONFIG` into `appid-config.ts` moves no bytes today.
+    // What it does remove is the customer→staff-adapter import edge, so this
+    // route's graph stops depending on the staff adapter before that coupling can
+    // start costing anything (a `loadChildren` boundary here, a customer-only
+    // build, a customer adapter that outgrows one file).
+    // `appid-customer-auth.import-graph.spec.ts` is what keeps the edge gone.
+    providers: [{ provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter }],
     title: SELF_CHECKOUT_TITLE,
   },
   {

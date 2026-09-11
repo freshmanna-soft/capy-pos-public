@@ -6,7 +6,7 @@ import { CustomerSessionDto } from '@core/application/auth/dtos/customer-session
 import { DEFAULT_TENANT_ID } from '@core/infrastructure/database/dexie-database.service';
 import { Permission } from '@core/domain/auth';
 import { InvalidCredentialsError } from './local-credential-auth.adapter';
-import { APPID_CONFIG, type AppIdConfig } from './appid-auth.adapter';
+import { APPID_CONFIG, type AppIdConfig } from './appid-config';
 import { AppIdAuthError, AppIdJwksKeyResolver } from './appid-jwks';
 
 /**
