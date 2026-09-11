@@ -163,9 +163,9 @@ re-scope, to be applied to the epic when this lands:
 
 ## Guard landed with this decision
 
-`src/app/core/infrastructure/deployment/base-image-policy.spec.ts` reads every `Dockerfile` in the
-repo and asserts what this decision concluded, so the next person editing a `FROM` line has to agree
-with it or change it deliberately:
+`src/app/core/infrastructure/deployment/base-image-policy.spec.ts` reads every container build file
+in the repo and asserts what this decision concluded, so the next person editing a `FROM` line has
+to agree with it or change it deliberately:
 
 - no `FROM` may float (bare image name, or `:latest`/`:latest-dev`/`:edge`) — this is the finding
   above turned into a rule, and it is the one that would have caught a well-meaning
@@ -175,6 +175,19 @@ with it or change it deliberately:
 
 The spec deliberately does not hardcode `node:22-alpine`: items that legitimately bump the Node
 major should not have to edit a policy test to do it.
+
+Discovery is a basename match (`Dockerfile`, `Dockerfile.<suffix>`, `<name>.dockerfile`,
+`Containerfile`), not a `git ls-files -- '*Dockerfile'` pathspec. A pathspec only matches paths that
+_end_ in `Dockerfile`, so a `Dockerfile.dev` added next to an existing service would be built by CI
+and skipped by the policy — a floating base could then land in the one file nobody was checking.
+`.dockerignore` and `docker-compose.yml` are not build files and are excluded.
+
+The spec has two layers, because the repo-scan layer alone cannot exercise its own parser: no
+Dockerfile here uses `FROM --platform=…`, a digest pin, a `host:port/` registry or `FROM <stage>`
+today, so every branch handling those shapes would be deletable with the scan still green. Synthetic
+inputs cover each one, plus the discovery predicate. Verified by mutation — removing any one of the
+six guards (the `@sha256:` short-circuit, the registry-port check, the `--flag` filter, the
+stage-name filter, the digest-length anchor, the basename pattern) turns a test red.
 
 One thing writing the guard surfaced: **`nginx:alpine` floats too.** It carries no version, so the
 root `Dockerfile`'s serve stage already takes whatever nginx Docker Hub last built on Alpine — the
