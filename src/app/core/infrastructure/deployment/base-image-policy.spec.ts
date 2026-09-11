@@ -185,8 +185,24 @@ function parseReference(reference: string): ParsedReference {
   const lastColon = name.lastIndexOf(':');
   const tagged = lastColon > name.lastIndexOf('/');
 
+  // The repository is normalised to lower case HERE, at the parse boundary, rather than
+  // at each comparison. Docker's reference grammar makes the registry host a DNS name and
+  // therefore case-insensitive, so `CGR.DEV/chainguard/node` and `cgr.dev/chainguard/node`
+  // pull the same image — but a raw `startsWith('cgr.dev/')` sees only the second, and a
+  // policy guard with a bypass is worse than no guard. Normalising once also fixes the
+  // prefix strip below (`DOCKER.IO/library/nginx`) and every comparison added later,
+  // instead of leaving each new call site to remember.
+  //
+  // The TAG is deliberately NOT normalised: Docker tags are case-sensitive, so `node:LTS`
+  // and `node:lts` are genuinely different images and flattening them here would be wrong.
+  // The helpers that compare tags lower-case their own copy for comparison and leave this
+  // value intact for reporting.
+  const repository = (tagged ? name.slice(0, lastColon) : name)
+    .toLowerCase()
+    .replace(IMPLICIT_DOCKER_HUB_PREFIX, '');
+
   return {
-    repository: (tagged ? name.slice(0, lastColon) : name).replace(IMPLICIT_DOCKER_HUB_PREFIX, ''),
+    repository,
     tag: tagged ? name.slice(lastColon + 1) : undefined,
     digest,
   };
@@ -322,6 +338,37 @@ describe('Docker base-image policy — the rules (#288 item 1)', () => {
     expect(rulesFor('node:LATEST-22')).toEqual(['floating-tag']);
     expect(rulesFor('node:Stable')).toContain('floating-tag');
     expect(rulesFor('redis:ALPINE')).toContain('unversioned-tag');
+  });
+
+  it('reads the REGISTRY HOST case-insensitively too, which the tag rules already did', () => {
+    // The asymmetry this closes: `floating-tag` and `unversioned-tag` both normalised
+    // their input, while `unpinned-cgr-dev` compared `repository` raw — so an uppercase
+    // registry host walked straight past the one rule aimed at Chainguard. A DNS host is
+    // case-insensitive in Docker's reference grammar, so both spellings pull the same
+    // image and a guard that sees only one of them has a bypass.
+    expect(rulesFor('cgr.dev/chainguard/node:22')).toContain('unpinned-cgr-dev');
+    expect(rulesFor('CGR.DEV/chainguard/node:22')).toContain('unpinned-cgr-dev');
+    expect(rulesFor('Cgr.Dev/chainguard/node:latest')).toContain('unpinned-cgr-dev');
+    // And a digest-pinned Chainguard image is still fine either way — the rule is about
+    // pinning, not about the vendor.
+    expect(rulesFor(`CGR.DEV/chainguard/node@sha256:${DIGEST}`)).toEqual([]);
+  });
+
+  it('strips an uppercase implicit Docker Hub prefix, so the allowlist still matches', () => {
+    // The same raw-comparison bug one layer along: `isAllowlistedVariant` lower-cased the
+    // tag but compared `repository` raw, and the prefix strip was case-sensitive. Both are
+    // fixed by normalising once at the parse boundary.
+    expect(rulesFor('nginx:alpine')).toEqual([]);
+    expect(rulesFor('DOCKER.IO/library/nginx:alpine')).toEqual([]);
+    expect(rulesFor('docker.io/library/NGINX:alpine'.toLowerCase())).toEqual([]);
+  });
+
+  it('does not flatten tag case, because Docker tags are genuinely case-sensitive', () => {
+    // The limit of the normalisation above: `node:LTS` and `node:lts` are different
+    // images, so the parsed tag must survive verbatim for reporting even though the
+    // comparisons lower-case their own copy.
+    expect(parseReference('node:LTS').tag).toBe('LTS');
+    expect(parseReference('CGR.DEV/chainguard/node:22').repository).toBe('cgr.dev/chainguard/node');
   });
 
   it('rejects a tag with no version, and does not confuse `stable-alpine` with `stable`', () => {
