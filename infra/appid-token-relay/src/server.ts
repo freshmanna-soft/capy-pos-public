@@ -205,9 +205,12 @@ const customerTokenListener = createRequestListener({
  * it through this very table. The counters are per-instance, so the real ceiling
  * is `instances × limit`; `rate-limit.ts` documents why that is still worth having.
  *
- * Epic #261 item 8a — the happy path. A duplicate email or a password App ID's own
- * policy refuses currently surfaces as this boundary's generic 502; giving each its
- * own status is item 8b.
+ * Epic #261 items 8a and 8b. A duplicate email now answers `409` and a password the
+ * tenant's own policy refuses answers `400`, both resolved by the handler rather
+ * than thrown, so they never reach this boundary's generic 502 — see
+ * `signupRefusal` in `customer-signup.ts`, which also argues why a duplicate is
+ * answered distinguishably here and not uniformly as on the password-reset path.
+ * Anything this handler does *not* classify still throws and still becomes a 502.
  */
 const customerSignupListener = createRequestListener({
   logPrefix: '[appid-relay]',

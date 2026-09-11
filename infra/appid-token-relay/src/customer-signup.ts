@@ -63,16 +63,19 @@
  *
  * Item 8a shipped the happy path and let every failure fall through to `http.ts`'s
  * generic 502. Two of them are not outages at all but answers the caller asked
- * for, and they are the two this module now classifies — from the status and
- * wording App ID itself returned (`ManagementApiError.status`/`.detail`), never
- * from pattern-matching a sentence:
+ * for, and they are the two this module now classifies — from the status App ID
+ * itself returned (`ManagementApiError.status`), with its wording
+ * (`.detail`) only ever as a second signal *within* a status that already means
+ * "this request was refused":
  *
  * - **The address already has an account** → `409` with `DUPLICATE_EMAIL_MESSAGE`.
  * - **The tenant's password policy refused the password** → `400` with a message
  *   built from App ID's own explanation, so the caller learns what to change.
  *
  * Anything else still throws and still becomes a 502: an unrecognised failure is
- * an outage until proven otherwise, not a 4xx guess.
+ * an outage until proven otherwise, not a 4xx guess. That is why no wording alone
+ * can classify anything — a tenant outage whose text happens to say "already
+ * exists" has to stay a 502, not become "that email is taken".
  *
  * ## Why 409 for a duplicate, and not #253's one-identical-outcome
  *
@@ -158,6 +161,20 @@ export const PASSWORD_POLICY_MESSAGE = 'That password does not meet the password
 /** `400`: the caller can fix this by sending a different password. */
 export const PASSWORD_POLICY_STATUS = 400;
 
+/**
+ * The one upstream status under which a *wording* signal is read at all: App ID
+ * saying the request itself was refused. Not to be confused with the two answer
+ * statuses above — those are what this route replies, this is what App ID sent,
+ * and `PASSWORD_POLICY_STATUS` sharing its value is a coincidence of both sides
+ * calling a bad request a bad request.
+ *
+ * Both classifications below are gated on it, for the same reason: a 500, a 503 or
+ * a gateway timeout is an outage even when its text happens to mention an account
+ * or a password, and an outage answered as "that email is taken" is both a lie to
+ * the shopper and an enumeration answer nothing asked for.
+ */
+const REFUSED_REQUEST_STATUS = 400;
+
 /** Longest upstream explanation forwarded. Past this it is not a message to a person. */
 const MAX_DETAIL_LENGTH = 200;
 
@@ -175,13 +192,19 @@ export function signupRefusal(error: unknown, email: string): RelayResponse | nu
   if (!(error instanceof ManagementApiError)) {
     return null;
   }
-  const detail = error.detail;
+  const { status, detail } = error;
 
-  if (error.status === DUPLICATE_EMAIL_STATUS || mentionsExistingAccount(detail)) {
+  // A 409 *is* the conflict, whatever it says. Every other classification below is
+  // deliberately the same shape — `REFUSED_REQUEST_STATUS` **and** the wording, in
+  // that order — so no wording on its own can turn an outage into an answer.
+  if (
+    status === DUPLICATE_EMAIL_STATUS ||
+    (status === REFUSED_REQUEST_STATUS && mentionsExistingAccount(detail))
+  ) {
     return { status: DUPLICATE_EMAIL_STATUS, body: { error: DUPLICATE_EMAIL_MESSAGE } };
   }
 
-  if (error.status === PASSWORD_POLICY_STATUS && /password/i.test(detail ?? '')) {
+  if (status === REFUSED_REQUEST_STATUS && /password/i.test(detail ?? '')) {
     const usable = usableDetail(detail, email);
     return {
       status: PASSWORD_POLICY_STATUS,
@@ -194,8 +217,9 @@ export function signupRefusal(error: unknown, email: string): RelayResponse | nu
 
 /**
  * Whether App ID said the account already exists, for the tenants that answer a
- * conflict with a 400 rather than a 409. Wording-based and therefore a *second*
- * signal, never the only one — the status is checked first.
+ * conflict with a 400 rather than a 409. Wording-based and therefore never
+ * sufficient on its own: its caller reads it only under `REFUSED_REQUEST_STATUS`,
+ * so a 5xx that mentions an existing account stays an outage.
  */
 function mentionsExistingAccount(detail: string | undefined): boolean {
   return /already (?:exists|registered|taken|in use)|email .*(?:exists|taken)/i.test(detail ?? '');

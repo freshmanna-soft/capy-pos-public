@@ -400,6 +400,46 @@ describe('signupRefusal — everything else is still an outage', () => {
   it('does not turn an unrelated 400 into a password answer', () => {
     assert.equal(signupRefusal(upstream(400, 'userName is required'), REQUEST.email), null);
   });
+
+  // Both wording signals are read under exactly one upstream status, and for the
+  // same reason: an outage that happens to *mention* an account or a password is
+  // still an outage, and telling a shopper "that email is taken" while the tenant
+  // is down is both a lie and an enumeration answer nothing asked for.
+  it('does not read a duplicate out of an outage that merely mentions an existing account', () => {
+    for (const status of [500, 502, 503, 504]) {
+      assert.equal(
+        signupRefusal(upstream(status, 'backend error: email already exists in cache'), REQUEST.email),
+        null,
+        `status ${status}`
+      );
+    }
+  });
+
+  it('does not read a password refusal out of an outage that merely mentions a password', () => {
+    for (const status of [500, 502, 503, 504]) {
+      assert.equal(
+        signupRefusal(upstream(status, 'password service unavailable'), REQUEST.email),
+        null,
+        `status ${status}`
+      );
+    }
+  });
+
+  it('reads neither wording signal when App ID never got far enough to have a status', () => {
+    assert.equal(
+      signupRefusal(new ManagementApiError('boom', { detail: 'email already exists' }), REQUEST.email),
+      null
+    );
+    assert.equal(
+      signupRefusal(new ManagementApiError('boom', { detail: 'password too weak' }), REQUEST.email),
+      null
+    );
+  });
+
+  it('still answers a 409 whatever it says — that status *is* the conflict, not a wording guess', () => {
+    assert.equal(signupRefusal(upstream(409, undefined), REQUEST.email).status, 409);
+    assert.equal(signupRefusal(upstream(409, 'conflict'), REQUEST.email).body.error, DUPLICATE_EMAIL_MESSAGE);
+  });
 });
 
 describe('createCustomerSignupHandler — rejected sign-ups', () => {
