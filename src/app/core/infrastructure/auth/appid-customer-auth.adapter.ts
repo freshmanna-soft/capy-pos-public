@@ -149,10 +149,13 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
    */
   async signUp(creds: CredentialsDto): Promise<CustomerSessionDto> {
     const email = normalizeEmail(creds.email);
+    // Resolved before the try: a config failure is not a transport failure and
+    // must not be re-worded as one by the catch below.
+    const url = this.signUpUrl();
 
     let response: Response;
     try {
-      response = await fetch(this.signUpUrl(), {
+      response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password: creds.password }),
@@ -228,7 +231,19 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
   // -------------------------------------------------------------------------
 
   private signUpUrl(): string {
-    return new URL(CUSTOMER_SIGN_UP_ROUTE, this.relayUrl).toString();
+    try {
+      return new URL(CUSTOMER_SIGN_UP_ROUTE, this.relayUrl).toString();
+    } catch (err) {
+      // `customerRelayUrl` is deployment config this adapter never validates
+      // elsewhere, and `URL` answers an unparseable base with a raw
+      // `TypeError`. `relayCall`'s own `fetch` failure already surfaces as an
+      // `AppIdAuthError`; this path must match it, since that is the only error
+      // type callers handle.
+      if (err instanceof AppIdAuthError) throw err;
+      throw new AppIdAuthError(
+        `Invalid customerRelayUrl (${this.config.customerRelayUrl}): ${(err as Error).message}`
+      );
+    }
   }
 
   private async relayCall(body: Record<string, string>): Promise<RelayTokenResponse> {

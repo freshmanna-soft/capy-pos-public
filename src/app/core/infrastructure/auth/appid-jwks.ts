@@ -48,6 +48,7 @@ export class AppIdJwksKeyResolver {
 
     const jwk = await this.findJwk(kid);
     if (!jwk) throw new AppIdAuthError(`No JWKS key matches kid ${kid}`);
+    assertRsaShape(jwk, kid);
 
     // IBM App ID's real JWKS encodes the RSA modulus with a non-minimal
     // leading zero byte when its high bit is set — the ASN.1
@@ -59,8 +60,17 @@ export class AppIdJwksKeyResolver {
     // bytes (`infra/pos-api/src/session-auth.ts`'s RS256 path uses it as-is,
     // unmodified); `jose` is not, so the browser has to strip the padding
     // itself before `importJWK` ever sees it.
-    const normalized = { ...jwk, n: stripLeadingZeroPadding(jwk.n) };
-    return (await importJWK(normalized, jwk.alg ?? 'RS256')) as CryptoKey;
+    try {
+      const normalized = { ...jwk, n: stripLeadingZeroPadding(jwk.n) };
+      return (await importJWK(normalized, jwk.alg ?? 'RS256')) as CryptoKey;
+    } catch (err) {
+      // `n`/`e` passed the shape guard but are still not usable bytes (bad
+      // base64url, a modulus of the wrong length, an unsupported `kty`).
+      // `atob` raises `InvalidCharacterError` and `jose`/WebCrypto raise their
+      // own `DataError`/`JOSENotSupported`; neither is an `AppIdAuthError`, and
+      // callers only handle that one.
+      throw new AppIdAuthError(`JWKS key ${kid} could not be imported: ${(err as Error).message}`);
+    }
   }
 
   private async findJwk(kid: string): Promise<Jwk | undefined> {
@@ -87,6 +97,22 @@ export class AppIdJwksKeyResolver {
     }
     const data = (await response.json()) as { keys?: Jwk[] };
     return data.keys ?? [];
+  }
+}
+
+/**
+ * The JWKS document is unvalidated external JSON — `fetchJwks` reads
+ * `data.keys` and nothing more — so an entry may be missing the very fields
+ * key resolution consumes. Guard them together: `resolveSigningKey` already
+ * tolerated a missing `alg` (`jwk.alg ?? 'RS256'`) while reading `jwk.n`
+ * unguarded one line above, so a `{ kid }`-only entry escaped as a raw
+ * `TypeError` from `stripLeadingZeroPadding` instead of the `AppIdAuthError`
+ * every other App ID failure here raises.
+ */
+function assertRsaShape(jwk: Jwk, kid: string): void {
+  const missing = (['kty', 'n', 'e'] as const).filter((field) => !jwk[field]);
+  if (missing.length > 0) {
+    throw new AppIdAuthError(`JWKS key ${kid} is malformed — missing ${missing.join(', ')}`);
   }
 }
 

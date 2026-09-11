@@ -61,6 +61,8 @@ interface MintOptions {
   sub?: string;
   email?: string;
   expiresInSec?: number;
+  /** Mint with no `kid` in the protected header — nothing for the resolver to look up. */
+  omitKid?: boolean;
 }
 
 /**
@@ -75,7 +77,7 @@ async function mintCustomerToken(opts: MintOptions = {}): Promise<string> {
     email: opts.email ?? 'shopper@capy.test',
     tenant: TENANT_ID, // App ID's own instance id — deliberately NOT Capy-POS's tenantId
   })
-    .setProtectedHeader({ alg: 'RS256', kid: KID })
+    .setProtectedHeader(opts.omitKid ? { alg: 'RS256' } : { alg: 'RS256', kid: KID })
     .setIssuedAt(now)
     .setIssuer(opts.issuer ?? ISSUER)
     .setAudience(opts.audience ?? [CUSTOMER_CLIENT_ID])
@@ -555,6 +557,87 @@ describe('AppIdCustomerAuthAdapter', () => {
         new RegExp(`No JWKS key matches kid ${KID}`)
       );
       expect(fetchMock.mock.calls.filter((c) => String(c[0]) === JWKS_URI)).toHaveLength(2);
+    });
+
+    it('rejects a token whose header carries no kid — nothing to resolve against', async () => {
+      const accessToken = await mintCustomerToken({ omitKid: true });
+      const fetchMock = installFetch({ tokenResult: { access_token: accessToken } });
+      const adapter = makeAdapter();
+
+      await expect(adapter.authenticate({ email: 'a@b.com', password: 'pw' })).rejects.toThrow(
+        /no key id \(kid\)/
+      );
+      // Nothing is knowable from a kid-less header, so the JWKS is never pulled.
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]) === JWKS_URI)).toHaveLength(0);
+    });
+
+    /**
+     * The JWKS document is unvalidated external JSON — `fetchJwks` reads
+     * `data.keys` and trusts the rest — so a kid-matching entry may still be
+     * missing the fields key resolution consumes. `n` used to be read unguarded
+     * one line above the already-guarded `jwk.alg ?? 'RS256'`, so this escaped
+     * as a raw `TypeError` from `stripLeadingZeroPadding`. The distinction is
+     * behavioural, not cosmetic: `AppIdAuthError` is the only error type callers
+     * handle, so anything else reads to them as a bug in the adapter.
+     */
+    it('rejects a malformed JWKS entry as AppIdAuthError, not a raw TypeError', async () => {
+      const accessToken = await mintCustomerToken();
+      installFetch({
+        tokenResult: { access_token: accessToken },
+        jwksBody: { keys: [{ kid: KID, kty: 'RSA', e: 'AQAB' }] }, // no `n`
+      });
+      const adapter = makeAdapter();
+
+      const error = await adapter
+        .authenticate({ email: 'a@b.com', password: 'pw' })
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(AppIdAuthError);
+      expect((error as Error).message).toMatch(new RegExp(`JWKS key ${KID} is malformed`));
+      expect((error as Error).message).toMatch(/missing n/);
+    });
+
+    it('rejects a JWKS entry whose modulus is present but undecodable', async () => {
+      const accessToken = await mintCustomerToken();
+      installFetch({
+        tokenResult: { access_token: accessToken },
+        jwksBody: { keys: [{ ...publicJwk, n: '!!! not base64url !!!' }] },
+      });
+      const adapter = makeAdapter();
+
+      const error = await adapter
+        .authenticate({ email: 'a@b.com', password: 'pw' })
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(AppIdAuthError);
+      expect((error as Error).message).toMatch(/could not be imported/);
+    });
+
+    it('surfaces a customerRelayUrl that URL cannot parse as AppIdAuthError', async () => {
+      // Origin-less, so resolving the sign-up route against it raises a raw
+      // `TypeError` from `new URL`.
+      const fetchMock = installFetch({});
+      const adapter = makeAdapter({ customerRelayUrl: 'relay.test/appid/customer/token' });
+
+      const error = await adapter
+        .signUp({ email: 'a@b.com', password: 'pw' })
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(AppIdAuthError);
+      expect((error as Error).message).toMatch(/Invalid customerRelayUrl/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses to sign up when customerRelayUrl is unset, keeping the config error verbatim', async () => {
+      const fetchMock = installFetch({});
+      const adapter = makeAdapter({ customerRelayUrl: undefined });
+
+      // Not re-worded as a transport failure: the URL is resolved before
+      // `signUp`'s `fetch` try/catch precisely so this message survives.
+      await expect(adapter.signUp({ email: 'a@b.com', password: 'pw' })).rejects.toThrow(
+        /No customerRelayUrl configured/
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it('verifies against a JWKS whose modulus carries a non-minimal leading zero byte', async () => {
