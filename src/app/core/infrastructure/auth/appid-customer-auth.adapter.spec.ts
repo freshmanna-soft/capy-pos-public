@@ -118,12 +118,18 @@ interface FetchScenario {
   signUpStatus?: number;
   signUpThrow?: boolean;
   jwksKeys?: JWK[];
+  jwksThrow?: boolean;
+  jwksStatus?: number;
+  jwksBody?: unknown;
 }
 
 function installFetch(scenario: FetchScenario): ReturnType<typeof vi.fn> {
   const mock = vi.fn(async (url: string | URL) => {
     const target = String(url);
     if (target === JWKS_URI) {
+      if (scenario.jwksThrow) throw new Error('jwks network down');
+      if (scenario.jwksStatus) return jsonResponse({}, scenario.jwksStatus);
+      if (scenario.jwksBody !== undefined) return jsonResponse(scenario.jwksBody);
       return jsonResponse({ keys: scenario.jwksKeys ?? [publicJwk] });
     }
     if (target === CUSTOMER_RELAY_URL) {
@@ -516,6 +522,39 @@ describe('AppIdCustomerAuthAdapter', () => {
         /customerRelayUrl/
       );
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a JWKS transport failure as AppIdAuthError', async () => {
+      const accessToken = await mintCustomerToken();
+      installFetch({ tokenResult: { access_token: accessToken }, jwksThrow: true });
+      const adapter = makeAdapter();
+
+      await expect(adapter.authenticate({ email: 'a@b.com', password: 'pw' })).rejects.toThrow(
+        /JWKS fetch failed/
+      );
+    });
+
+    it('surfaces a non-OK JWKS response as AppIdAuthError', async () => {
+      const accessToken = await mintCustomerToken();
+      installFetch({ tokenResult: { access_token: accessToken }, jwksStatus: 503 });
+      const adapter = makeAdapter();
+
+      await expect(adapter.authenticate({ email: 'a@b.com', password: 'pw' })).rejects.toThrow(
+        /JWKS fetch returned 503/
+      );
+    });
+
+    it('rejects when the tenant JWKS holds no key for the token kid', async () => {
+      const accessToken = await mintCustomerToken();
+      // A JWKS document with no `keys` array at all — treated as empty, then
+      // re-fetched once in case a key had just rotated in.
+      const fetchMock = installFetch({ tokenResult: { access_token: accessToken }, jwksBody: {} });
+      const adapter = makeAdapter();
+
+      await expect(adapter.authenticate({ email: 'a@b.com', password: 'pw' })).rejects.toThrow(
+        new RegExp(`No JWKS key matches kid ${KID}`)
+      );
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]) === JWKS_URI)).toHaveLength(2);
     });
 
     it('verifies against a JWKS whose modulus carries a non-minimal leading zero byte', async () => {
