@@ -101,6 +101,12 @@ describe('SelfCheckoutScanComponent', () => {
         if (item.isOutOfStock()) {
           return { added: false, reason: 'out-of-stock' as const };
         }
+        // Both of `PosFacade.tryAddToCart`'s rejections, because the lane words them
+        // differently: nothing on the shelf is a different situation from everything
+        // on the shelf already being in this customer's basket.
+        if (service.getQuantity(item.id) >= item.stock) {
+          return { added: false, reason: 'max-stock-reached' as const };
+        }
         service.addProduct(item);
         return { added: true };
       },
@@ -631,6 +637,140 @@ describe('SelfCheckoutScanComponent', () => {
       // The shell navigating back to the till must not leave a customer-facing
       // camera running on the terminal.
       expect(cameraStop).toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * What the lane says out loud.
+   *
+   * A self-checkout is used unaided by definition, so every reply the panel renders
+   * is inserted asynchronously into a page that has already settled — which means an
+   * assistive technology only ever hears it if the element carries a live-region
+   * role. Silence is the failure mode that matters here: a customer who scans and is
+   * told nothing reads that as "it worked" and walks out with an unpaid item.
+   *
+   * `role` is asserted rather than assumed, because a missing one is invisible in
+   * every other test in this file — the text renders, the DOM query passes, and the
+   * only thing lost is the announcement.
+   */
+  describe('what the lane announces', () => {
+    type Fixture = Awaited<ReturnType<typeof render>>;
+
+    function reply(fixture: Fixture, testId: string): HTMLElement | null {
+      return fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
+    }
+
+    function renderPending() {
+      configure([]);
+      const catalogue = deferredCatalogue();
+      const fixture = TestBed.createComponent(SelfCheckoutScanComponent);
+      fixture.detectChanges();
+      return { fixture, catalogue };
+    }
+
+    it('announces a successful add politely', async () => {
+      const fixture = await render();
+
+      scan(fixture, UPCA);
+
+      expect(reply(fixture, 'self-checkout-added')?.getAttribute('role')).toBe('status');
+    });
+
+    it('announces an unrecognized code politely', async () => {
+      const fixture = await render();
+
+      scan(fixture, '5901234123457');
+
+      expect(reply(fixture, 'self-checkout-not-found')?.getAttribute('role')).toBe('status');
+    });
+
+    it('announces a refused add politely', async () => {
+      const fixture = await render([product({ stock: 0 } as Partial<Product>)]);
+
+      scan(fixture, UPCA);
+
+      expect(reply(fixture, 'self-checkout-unavailable')?.getAttribute('role')).toBe('status');
+    });
+
+    it('announces the wait, and the code being held through it', () => {
+      const { fixture } = renderPending();
+
+      expect(reply(fixture, 'self-checkout-catalogue-loading')?.getAttribute('role')).toBe(
+        'status'
+      );
+
+      scan(fixture, EAN13);
+
+      expect(reply(fixture, 'self-checkout-waiting')?.getAttribute('role')).toBe('status');
+    });
+
+    it('interrupts with the catalogue failure rather than waiting to be noticed', async () => {
+      const { fixture, catalogue } = renderPending();
+
+      catalogue.fail(new Error('offline'));
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      // `alert` and not `status`: this one arrives long after the page settled and it
+      // ends the customer's visit at this lane, so it is worth interrupting for.
+      expect(reply(fixture, 'self-checkout-catalogue-error')?.getAttribute('role')).toBe('alert');
+      // And it is the banner alone until something is actually scanned.
+      expect(reply(fixture, 'self-checkout-unreachable')).toBeNull();
+    });
+
+    it('answers a scan made after a failed load instead of going silent', async () => {
+      const { fixture, catalogue } = renderPending();
+      catalogue.fail(new Error('offline'));
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      scan(fixture, UPCA);
+
+      // The banner is rendered once; this is the reply to *this* scan. Without it a
+      // customer who cannot see the banner scans their whole shop into nothing.
+      const answer = reply(fixture, 'self-checkout-unreachable');
+      expect(answer?.getAttribute('role')).toBe('status');
+      expect(answer?.textContent).toContain(UPCA);
+      expect(cart.items().length).toBe(0);
+    });
+
+    it('takes back the promise it made to a code it can no longer look up', async () => {
+      const { fixture, catalogue } = renderPending();
+      scan(fixture, EAN13);
+      expect(reply(fixture, 'self-checkout-waiting')).not.toBeNull();
+
+      catalogue.fail(new Error('offline'));
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      // "We'll add it as soon as they're here" is now false, and leaving it under the
+      // failure banner tells the customer to keep waiting for an item that is coming.
+      expect(reply(fixture, 'self-checkout-waiting')).toBeNull();
+      expect(reply(fixture, 'self-checkout-unreachable')?.textContent).toContain(EAN13);
+    });
+
+    it('says the basket already holds all the stock, rather than "unavailable"', async () => {
+      const fixture = await render([product({ stock: 1 } as Partial<Product>)]);
+
+      scan(fixture, UPCA);
+      scan(fixture, EAN13);
+
+      // The two rejections are different situations: this customer should look in
+      // their own basket, not walk to a staffed till for an item nobody is holding.
+      expect(cart.items()[0]?.quantity).toBe(1);
+      expect(reply(fixture, 'self-checkout-unavailable')?.textContent).toContain(
+        'already in your basket'
+      );
+    });
+
+    it('says nothing about the basket when there is simply none left', async () => {
+      const fixture = await render([product({ stock: 0 } as Partial<Product>)]);
+
+      scan(fixture, UPCA);
+
+      const answer = reply(fixture, 'self-checkout-unavailable');
+      expect(answer?.textContent).toContain("isn't available right now");
+      expect(answer?.textContent).not.toContain('already in your basket');
     });
   });
 });

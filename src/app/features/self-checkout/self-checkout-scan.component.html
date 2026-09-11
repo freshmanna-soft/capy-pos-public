@@ -8,8 +8,12 @@
       </p>
 
       @if (catalogueError()) {
+        <!-- `role="alert"` rather than `status`: this arrives after the page has
+             settled and it ends the customer's visit at this lane, so it interrupts.
+             Its five siblings below are per-scan replies and stay polite. -->
         <p
           class="mt-4 rounded-xl border border-tsuba/40 bg-tsuba/10 px-4 py-3 text-[13px] text-steam"
+          role="alert"
           data-testid="self-checkout-catalogue-error"
         >
           We can't reach the product list right now. Please use a staffed till.
@@ -114,13 +118,29 @@
             <span class="font-data">{{ waitingCode() }}</span> as soon as they're here.
           </p>
         }
+        @case ('unreachable') {
+          <p
+            class="mt-4 rounded-xl border border-tsuba/50 bg-tsuba/10 px-4 py-3 text-[13px] text-steam"
+            role="status"
+            data-testid="self-checkout-unreachable"
+          >
+            Nothing was added for <span class="font-data">{{ unreachableCode() }}</span
+            >. Please use a staffed till.
+          </p>
+        }
         @case ('unavailable') {
           <p
             class="mt-4 rounded-xl border border-tsuba/50 bg-tsuba/10 px-4 py-3 text-[13px] text-steam"
             role="status"
             data-testid="self-checkout-unavailable"
           >
-            {{ unavailableName() }} isn't available right now.
+            @if (unavailableReason() === 'max-stock-reached') {
+              <!-- All the stock there is, already scanned. Sending this customer to a
+                   staffed till would waste both their trips. -->
+              All the {{ unavailableName() }} we have is already in your basket.
+            } @else {
+              {{ unavailableName() }} isn't available right now.
+            }
           </p>
         }
       }

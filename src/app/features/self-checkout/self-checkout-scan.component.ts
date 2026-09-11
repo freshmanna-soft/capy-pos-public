@@ -10,7 +10,7 @@ import {
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { PosFacade } from '@core/application/facades/pos.facade';
+import { AddToCartRejection, PosFacade } from '@core/application/facades/pos.facade';
 import { ProductService } from '@core/application/services/product.service';
 import { Product } from '@core/domain/entities/product.entity';
 import {
@@ -37,7 +37,8 @@ type ScanFeedback =
   | { kind: 'added'; product: Product }
   | { kind: 'not-found'; code: string }
   | { kind: 'waiting'; code: string }
-  | { kind: 'unavailable'; product: Product; reason: 'out-of-stock' | 'max-stock-reached' };
+  | { kind: 'unreachable'; code: string }
+  | { kind: 'unavailable'; product: Product; reason: AddToCartRejection };
 
 /**
  * SelfCheckoutScanComponent
@@ -143,9 +144,25 @@ export class SelfCheckoutScanComponent {
     const feedback = this._feedback();
     return feedback.kind === 'waiting' ? feedback.code : '';
   });
+  protected readonly unreachableCode = computed(() => {
+    const feedback = this._feedback();
+    return feedback.kind === 'unreachable' ? feedback.code : '';
+  });
   protected readonly unavailableName = computed(() => {
     const feedback = this._feedback();
     return feedback.kind === 'unavailable' ? feedback.product.name : '';
+  });
+  /**
+   * Why an add was refused.
+   *
+   * Read, not merely carried: "we have none" and "you already have all of them" are
+   * different situations for the person holding the item — the first ends in putting
+   * it back, the second in looking in their own basket — and answering both with the
+   * same sentence sends half of them to a staffed till for nothing.
+   */
+  protected readonly unavailableReason = computed<AddToCartRejection | null>(() => {
+    const feedback = this._feedback();
+    return feedback.kind === 'unavailable' ? feedback.reason : null;
   });
 
   protected readonly items = this.pos.cartItems;
@@ -238,13 +255,19 @@ export class SelfCheckoutScanComponent {
    * two would put one article in the cart on two lines.
    */
   private accept(raw: string): void {
+    if (this._catalogueError()) {
+      // The banner above says the lane is out of action, but a banner rendered once
+      // is not an answer to the scan just made. A customer who cannot see it — or who
+      // simply keeps scanning past it — gets nothing back, and silence at a
+      // self-checkout reads as "it worked". So every scan is answered, even here.
+      this._feedback.set({ kind: 'unreachable', code: raw.trim() });
+      return;
+    }
+
     if (!this._catalogueReady()) {
-      // Nothing to resolve against yet. The error banner already speaks for the
-      // failed-catalogue case, so only a load still in flight is worth holding for.
-      if (!this._catalogueError()) {
-        this.pendingCode = raw;
-        this._feedback.set({ kind: 'waiting', code: raw.trim() });
-      }
+      // Nothing to resolve against yet, so the code is held rather than refused.
+      this.pendingCode = raw;
+      this._feedback.set({ kind: 'waiting', code: raw.trim() });
       return;
     }
 
@@ -258,7 +281,7 @@ export class SelfCheckoutScanComponent {
     this._feedback.set(
       result.added
         ? { kind: 'added', product }
-        : { kind: 'unavailable', product, reason: result.reason ?? 'out-of-stock' }
+        : { kind: 'unavailable', product, reason: result.reason }
     );
   }
 
@@ -274,6 +297,11 @@ export class SelfCheckoutScanComponent {
       // Whoever is holding that item is being sent to a staffed till; keeping the
       // code would ring it up if the panel ever gained a retry.
       this.pendingCode = null;
+      // And "we'll add it as soon as they're here" is now a promise the lane cannot
+      // keep, so it is replaced rather than left standing under the failure banner.
+      this._feedback.update((current) =>
+        current.kind === 'waiting' ? { kind: 'unreachable', code: current.code } : current
+      );
     }
   }
 
