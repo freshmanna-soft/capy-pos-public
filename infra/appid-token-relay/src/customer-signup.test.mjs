@@ -283,7 +283,7 @@ describe('createCustomerSignupHandler — a failing role assignment', () => {
         },
       })
     );
-    await assert.rejects(() => handle(REQUEST), (error) => !error.message.includes(REQUEST.email));
+    await assert.rejects(() => handle(REQUEST), (error) => !error.message.includes(REQUEST.email, REQUEST.password));
   });
 });
 
@@ -315,7 +315,7 @@ describe('signupRefusal — duplicate email', () => {
   // account here, which is a security decision and has to be made on purpose —
   // see `customer-signup.ts`'s header for the argument this pins.
   it('answers 409 with one fixed message, and #253\'s uniform-outcome path is deliberately NOT what this route does', () => {
-    const refusal = signupRefusal(upstream(409, 'The email address already exists.'), REQUEST.email);
+    const refusal = signupRefusal(upstream(409, 'The email address already exists.'), REQUEST.email, REQUEST.password);
 
     assert.equal(refusal.status, 409, 'a duplicate is answered distinguishably, on purpose');
     assert.equal(refusal.body.error, DUPLICATE_EMAIL_MESSAGE);
@@ -324,10 +324,10 @@ describe('signupRefusal — duplicate email', () => {
   it('never quotes the address, the existing account, or App ID back at the caller', () => {
     const refusal = signupRefusal(
       upstream(409, `A user with email ${REQUEST.email} already exists (profileId 9c1f).`),
-      REQUEST.email
+      REQUEST.email, REQUEST.password
     );
 
-    assert.equal(refusal.body.error.includes(REQUEST.email), false);
+    assert.equal(refusal.body.error.includes(REQUEST.email, REQUEST.password), false);
     assert.equal(/9c1f/.test(refusal.body.error), false);
     assert.equal(/App ID|profileId/i.test(refusal.body.error), false);
   });
@@ -338,7 +338,7 @@ describe('signupRefusal — duplicate email', () => {
       'That email is already registered',
       'Email already taken',
     ]) {
-      assert.equal(signupRefusal(upstream(400, detail), REQUEST.email).status, 409, detail);
+      assert.equal(signupRefusal(upstream(400, detail), REQUEST.email, REQUEST.password).status, 409, detail);
     }
   });
 
@@ -352,7 +352,7 @@ describe('signupRefusal — password policy', () => {
   it('answers 400 with the tenant policy\'s own words appended to a usable lead', () => {
     const refusal = signupRefusal(
       upstream(400, 'Password must be at least 12 characters and contain a digit'),
-      REQUEST.email
+      REQUEST.email, REQUEST.password
     );
 
     assert.equal(refusal.status, 400);
@@ -369,7 +369,7 @@ describe('signupRefusal — password policy', () => {
       '<html>password error</html>',
     ]) {
       assert.equal(
-        signupRefusal(upstream(400, detail), REQUEST.email).body.error,
+        signupRefusal(upstream(400, detail), REQUEST.email, REQUEST.password).body.error,
         PASSWORD_POLICY_MESSAGE,
         detail.slice(0, 40)
       );
@@ -379,26 +379,67 @@ describe('signupRefusal — password policy', () => {
   it('drops an explanation that quotes the caller\'s own address back', () => {
     const refusal = signupRefusal(
       upstream(400, `password for ${REQUEST.email} is too weak`),
-      REQUEST.email
+      REQUEST.email, REQUEST.password
     );
     assert.equal(refusal.body.error, PASSWORD_POLICY_MESSAGE);
   });
 
+  it('never forwards an explanation that quotes the caller\'s own password back', () => {
+    // The sibling of the email guard above, and the more serious of the two. This
+    // branch is the ONLY path that forwards upstream text into a response body, and it
+    // is reached exactly when the upstream is complaining about the password — so a
+    // validator that echoes the offending value would send a credential to the caller.
+    for (const detail of [
+      `The password "${REQUEST.password}" is too common`,
+      `password ${REQUEST.password} appears in a breach list`,
+      // Upper-cased, because the guard has to compare case-insensitively. It still has
+      // to say "password" — a 400 that does not is not classified as a policy refusal
+      // at all and stays a 502, which forwards nothing and is safe by a different route.
+      `Rejected password ${REQUEST.password.toUpperCase()} is not permitted`,
+    ]) {
+      const refusal = signupRefusal(upstream(400, detail), REQUEST.email, REQUEST.password);
+      assert.equal(refusal.status, 400);
+      assert.equal(refusal.body.error, PASSWORD_POLICY_MESSAGE, detail);
+      assert.ok(
+        !refusal.body.error.toLowerCase().includes(REQUEST.password.toLowerCase()),
+        'the response body must never contain the submitted password'
+      );
+    }
+  });
+
+  it('prefers the fixed message over a useful one when a short password is a substring', () => {
+    // The deliberate cost of having no length threshold on that guard: a password
+    // short enough to appear inside ordinary words loses the more helpful wording.
+    // That is the safe direction to fail — the alternative is a leak-sized gap.
+    const refusal = signupRefusal(upstream(400, 'Password must be at least 12 characters'), REQUEST.email, 'pass');
+    assert.equal(refusal.body.error, PASSWORD_POLICY_MESSAGE);
+  });
+
+  it('still forwards a genuine policy explanation that mentions neither credential', () => {
+    // Guards that reject everything are easy; this one has to keep item 8b's point.
+    const refusal = signupRefusal(
+      upstream(400, 'Password must contain at least one digit'),
+      REQUEST.email,
+      REQUEST.password
+    );
+    assert.equal(refusal.body.error, `${PASSWORD_POLICY_MESSAGE} Password must contain at least one digit.`);
+  });
+
   it('collapses a multi-line explanation into one readable line', () => {
-    const refusal = signupRefusal(upstream(400, 'Password too short.\n\n  Minimum is 10.'), REQUEST.email);
+    const refusal = signupRefusal(upstream(400, 'Password too short.\n\n  Minimum is 10.'), REQUEST.email, REQUEST.password);
     assert.equal(refusal.body.error, `${PASSWORD_POLICY_MESSAGE} Password too short. Minimum is 10.`);
   });
 });
 
 describe('signupRefusal — everything else is still an outage', () => {
   it('does not answer for a 500, a transport failure, or a non-Management error', () => {
-    assert.equal(signupRefusal(upstream(500, 'Internal error'), REQUEST.email), null);
-    assert.equal(signupRefusal(new ManagementApiError('App ID request failed: socket hang up'), REQUEST.email), null);
-    assert.equal(signupRefusal(new Error('boom'), REQUEST.email), null);
+    assert.equal(signupRefusal(upstream(500, 'Internal error'), REQUEST.email, REQUEST.password), null);
+    assert.equal(signupRefusal(new ManagementApiError('App ID request failed: socket hang up'), REQUEST.email, REQUEST.password), null);
+    assert.equal(signupRefusal(new Error('boom'), REQUEST.email, REQUEST.password), null);
   });
 
   it('does not turn an unrelated 400 into a password answer', () => {
-    assert.equal(signupRefusal(upstream(400, 'userName is required'), REQUEST.email), null);
+    assert.equal(signupRefusal(upstream(400, 'userName is required'), REQUEST.email, REQUEST.password), null);
   });
 
   // Both wording signals are read under exactly one upstream status, and for the
@@ -408,7 +449,7 @@ describe('signupRefusal — everything else is still an outage', () => {
   it('does not read a duplicate out of an outage that merely mentions an existing account', () => {
     for (const status of [500, 502, 503, 504]) {
       assert.equal(
-        signupRefusal(upstream(status, 'backend error: email already exists in cache'), REQUEST.email),
+        signupRefusal(upstream(status, 'backend error: email already exists in cache'), REQUEST.email, REQUEST.password),
         null,
         `status ${status}`
       );
@@ -418,7 +459,7 @@ describe('signupRefusal — everything else is still an outage', () => {
   it('does not read a password refusal out of an outage that merely mentions a password', () => {
     for (const status of [500, 502, 503, 504]) {
       assert.equal(
-        signupRefusal(upstream(status, 'password service unavailable'), REQUEST.email),
+        signupRefusal(upstream(status, 'password service unavailable'), REQUEST.email, REQUEST.password),
         null,
         `status ${status}`
       );
@@ -427,18 +468,18 @@ describe('signupRefusal — everything else is still an outage', () => {
 
   it('reads neither wording signal when App ID never got far enough to have a status', () => {
     assert.equal(
-      signupRefusal(new ManagementApiError('boom', { detail: 'email already exists' }), REQUEST.email),
+      signupRefusal(new ManagementApiError('boom', { detail: 'email already exists' }), REQUEST.email, REQUEST.password),
       null
     );
     assert.equal(
-      signupRefusal(new ManagementApiError('boom', { detail: 'password too weak' }), REQUEST.email),
+      signupRefusal(new ManagementApiError('boom', { detail: 'password too weak' }), REQUEST.email, REQUEST.password),
       null
     );
   });
 
   it('still answers a 409 whatever it says — that status *is* the conflict, not a wording guess', () => {
-    assert.equal(signupRefusal(upstream(409, undefined), REQUEST.email).status, 409);
-    assert.equal(signupRefusal(upstream(409, 'conflict'), REQUEST.email).body.error, DUPLICATE_EMAIL_MESSAGE);
+    assert.equal(signupRefusal(upstream(409, undefined), REQUEST.email, REQUEST.password).status, 409);
+    assert.equal(signupRefusal(upstream(409, 'conflict'), REQUEST.email, REQUEST.password).body.error, DUPLICATE_EMAIL_MESSAGE);
   });
 });
 

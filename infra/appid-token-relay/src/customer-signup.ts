@@ -188,7 +188,7 @@ const MAX_DETAIL_LENGTH = 200;
  * kept *out* of the answer: an upstream explanation that quotes the address back is
  * not forwarded.
  */
-export function signupRefusal(error: unknown, email: string): RelayResponse | null {
+export function signupRefusal(error: unknown, email: string, password: string): RelayResponse | null {
   if (!(error instanceof ManagementApiError)) {
     return null;
   }
@@ -205,7 +205,7 @@ export function signupRefusal(error: unknown, email: string): RelayResponse | nu
   }
 
   if (status === REFUSED_REQUEST_STATUS && /password/i.test(detail ?? '')) {
-    const usable = usableDetail(detail, email);
+    const usable = usableDetail(detail, email, password);
     return {
       status: PASSWORD_POLICY_STATUS,
       body: { error: usable === null ? PASSWORD_POLICY_MESSAGE : `${PASSWORD_POLICY_MESSAGE} ${usable}` },
@@ -231,7 +231,7 @@ function mentionsExistingAccount(detail: string | undefined): boolean {
  * them. `null` for anything else — the fixed message is used instead, which is the
  * difference between a usable rejection and a forwarded blob.
  */
-function usableDetail(detail: string | undefined, email: string): string | null {
+function usableDetail(detail: string | undefined, email: string, password: string): string | null {
   if (detail === undefined) {
     return null;
   }
@@ -244,6 +244,22 @@ function usableDetail(detail: string | undefined, email: string): string | null 
     return null;
   }
   if (email.length > 0 && collapsed.toLowerCase().includes(email.toLowerCase())) {
+    return null;
+  }
+  // The same guard for the password, and it is the more important of the two.
+  //
+  // This branch is the ONLY path that forwards upstream text into a response body,
+  // and it is reached precisely when the upstream is complaining about the password —
+  // so it is exactly where a validator that quotes the offending value back
+  // ("the password 'hunter2' is too common") would send a credential to the caller.
+  //
+  // The two failure directions are deliberately not symmetric in cost, so the check
+  // is not symmetric in caution: a false positive means a short password happens to
+  // appear inside ordinary words ("pass" inside "Password must…") and the caller gets
+  // the fixed message instead of a slightly more useful one — harmless. A false
+  // negative echoes a credential. So this drops the whole detail on any containment,
+  // with no length threshold to widen the gap a leak could fit through.
+  if (password.length > 0 && collapsed.toLowerCase().includes(password.toLowerCase())) {
     return null;
   }
   return collapsed.endsWith('.') ? collapsed : `${collapsed}.`;
@@ -326,7 +342,7 @@ export function createCustomerSignupHandler(
     } catch (error) {
       // Nothing was created, so there is nothing to roll back — the only question
       // is whether this is the caller's answer or this service's outage.
-      const refusal = signupRefusal(error, request.email);
+      const refusal = signupRefusal(error, request.email, request.password);
       if (refusal === null) {
         throw error;
       }
