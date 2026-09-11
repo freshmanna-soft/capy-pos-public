@@ -314,3 +314,114 @@ jobs:
           name: smoke-report
           path: playwright-report/
           retention-days: 7
+
+  container-scan:
+    name: 🛡️ Container CVE scan (reporting only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Epic #288 item 8 — the other half of the spike's decision
+    # (`docs/spikes/2026-09-11-chainguard-base-image-decision.md`): keep the Alpine
+    # bases, pin them, and scan them, rather than adopting Chainguard's free tier.
+    #
+    # ## Which of the three shapes this is, and why
+    #
+    # Shape (2) + (3) of issue #307: `trivy image` on the two DISTINCT base images the
+    # deployed Dockerfiles build on, plus one `trivy fs` pass over the repo. Deliberately
+    # NOT shape (1) — building the five service images here — because CI has no docker
+    # step at all today (verified: zero across lint, test, build, storybook, e2e, smoke),
+    # so (1) means introducing five `docker buildx build --platform linux/amd64` builds
+    # onto every PR for signal that is, right now, almost entirely the base layer: our
+    # own layers are `npm ci --omit=dev` plus a COPY. (1) earns its keep once those
+    # layers carry something of their own.
+    #
+    # `trivy fs` is here because (2) alone is blind to CVEs our dependency layers add;
+    # (2) is here because (3) alone reports NO OS-level CVE, which is the entire class
+    # this epic exists for. Landing only (3) would look green and miss the point.
+    #
+    # ## Reporting only — on purpose, for now
+    #
+    # `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 0`: findings are printed
+    # and summarized, never fatal. Observed baseline on 2026-09-11 (trivy 0.74.0 DB):
+    # node:22-alpine 2 HIGH in alpine os-pkgs + 10 HIGH / 1 CRITICAL in the npm packages
+    # Node ships; nginx:alpine 7 HIGH, 0 CRITICAL. A gate switched on at that floor fails
+    # every PR on day one and gets deleted rather than fixed, so the floor gets measured
+    # first and a follow-up item can then gate on "no NEW criticals". `--ignore-unfixed`
+    # because an Alpine CVE with no upstream fix is not actionable by us.
+    #
+    # `continue-on-error` covers the other way a reporting-only job can start blocking
+    # merges: a registry or DB-download flake. It surfaces as a warning annotation.
+    #
+    # No `needs:` and nothing needs it — it runs in parallel with the fast checks and
+    # adds no PR wall-clock: ~1-2 min of pulling two small base images against an e2e
+    # job that already takes ~7.
+    #
+    # This does NOT re-check what `base-image-policy.spec.ts` checks. That spec asserts
+    # the SHAPE of every `FROM` line (pinned, non-floating, versioned) and fails when a
+    # bad reference is introduced. This job says when a reference we already trust has
+    # gone stale. `container-cve-scan.spec.ts` is what keeps the two in step: it parses
+    # BASE_IMAGES below and fails if it stops matching the deployed Dockerfiles.
+    continue-on-error: true
+    env:
+      # Floating scanner versions change findings under you between runs; a version
+      # bump here should be a visible diff, like a base-image bump.
+      TRIVY_VERSION: '0.74.0'
+      # The distinct base images of the DEPLOYED Dockerfiles, one per line. Asserted
+      # against the Dockerfiles themselves by container-cve-scan.spec.ts, so a new base
+      # image cannot arrive unscanned. infra/graphrag's pgvector base is deliberately
+      # absent: it is local indexing tooling, never deployed.
+      BASE_IMAGES: |
+        node:22-alpine
+        nginx:alpine
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache Trivy vulnerability DB
+        uses: actions/cache@v4
+        with:
+          path: /tmp/trivy-cache
+          key: ${{ runner.os }}-trivy-db-${{ env.TRIVY_VERSION }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-trivy-db-${{ env.TRIVY_VERSION }}-
+      - name: Scan base images for OS + bundled-package CVEs
+        # Run the pinned official CLI image directly rather than a scanning action:
+        # the flags that make this non-blocking are then visible in the diff instead of
+        # living in an action's default inputs.
+        run: |
+          mkdir -p trivy-reports /tmp/trivy-cache
+          printf '## Container CVE scan (reporting only)\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| target | CRITICAL | HIGH |\n| --- | --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
+          for image in $BASE_IMAGES; do
+            slug="$(printf '%s' "$image" | tr ':/' '__')"
+            echo "::group::trivy image $image"
+            docker run --rm -v /tmp/trivy-cache:/root/.cache \
+              "aquasec/trivy:${TRIVY_VERSION}" image \
+              --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --exit-code 0 \
+              "$image"
+            docker run --rm -v /tmp/trivy-cache:/root/.cache \
+              "aquasec/trivy:${TRIVY_VERSION}" image \
+              --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --exit-code 0 \
+              --format json --quiet "$image" > "trivy-reports/image-${slug}.json"
+            echo "::endgroup::"
+            TARGET="image ${image}" ./scripts/ci/trivy-summary.sh "trivy-reports/image-${slug}.json" \
+              >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Scan the repo for dependency CVEs
+        run: |
+          echo "::group::trivy fs ."
+          docker run --rm -v /tmp/trivy-cache:/root/.cache -v "$PWD":/repo \
+            "aquasec/trivy:${TRIVY_VERSION}" fs \
+            --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --exit-code 0 \
+            /repo
+          docker run --rm -v /tmp/trivy-cache:/root/.cache -v "$PWD":/repo \
+            "aquasec/trivy:${TRIVY_VERSION}" fs \
+            --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --exit-code 0 \
+            --format json --quiet /repo > trivy-reports/fs-repo.json
+          echo "::endgroup::"
+          TARGET='fs repo' ./scripts/ci/trivy-summary.sh trivy-reports/fs-repo.json \
+            >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Trivy reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-reports
+          path: trivy-reports/
+          retention-days: 7
