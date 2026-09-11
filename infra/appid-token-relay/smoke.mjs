@@ -114,6 +114,14 @@ console.log(`  password grant: HTTP ${customerGrant.status} — ${JSON.stringify
 // refused before anything reaches the Management API. Creating a real customer
 // is `npm test`'s job with the API stubbed, and item 8b's job for the
 // duplicate/invalid answers.
+//
+// One thing to know before re-running this against a real deployment: since item
+// 8c this route is rate limited per client IP (5 requests / 15 minutes — see
+// `src/rate-limit.ts`), and the limiter runs *before* the body is read, so the two
+// 400 probes below each consume a slot. The unlisted-origin probe does not — a 403
+// is answered ahead of the limiter. So roughly every third run inside one window
+// will report `HTTP 429` here instead of `400`. That is the limiter working, not a
+// broken route; wait out the window or run from another address.
 
 console.log('\ncustomer sign-up bounds:');
 

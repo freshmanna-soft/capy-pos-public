@@ -25,11 +25,24 @@
  *    already matched this path, but this boundary is exercised in tests
  *    without that table, so it keeps its own check rather than trusting a
  *    caller to have routed correctly.
- * 4. Body cap → 413, while the body streams. This is the *first* real limit an
- *    unauthenticated caller hits — there is no cheaper header check to put
- *    ahead of it, unlike the sibling services' auth-before-body-cap ordering.
- * 5. JSON → 400, `validate` → 400, then the App ID call itself.
- * 6. The App ID call's result is passed through **verbatim** — status and
+ * 4. `rateLimit` → 429 with `Retry-After`, for the boundaries that configure one
+ *    (`/appid/customer/sign-up` only — see `rate-limit.ts`). *After* the route
+ *    match, so a caller cannot spend someone's budget by hammering a path this
+ *    boundary does not serve; *before* the body is read, so a refused caller
+ *    costs a header check rather than a body, a parse and an App ID call. Which
+ *    also means the counter cannot depend on the body: the decision is taken
+ *    before the email is even known, so a 429 looks identical whether that
+ *    address has an account or not (#253's anti-enumeration property, which the
+ *    generic `tooManyRequests` string keeps). It is the third of the three
+ *    refusals answered before the body is read (403, 404, 429), and all three go
+ *    out through the same `send`, so none of them can quietly grow handling that
+ *    the other two lack.
+ * 5. Body cap → 413, while the body streams. The first real limit an
+ *    unauthenticated caller hits on a route with no limiter — there is no cheaper
+ *    header check to put ahead of it, unlike the sibling services'
+ *    auth-before-body-cap ordering.
+ * 6. JSON → 400, `validate` → 400, then the App ID call itself.
+ * 7. The App ID call's result is passed through **verbatim** — status and
  *    body alike — not folded into a fixed 200/502 pair. `relay()`'s contract
  *    (see its own doc comment) is to resolve with whatever App ID actually
  *    answered, success or a well-formed OAuth error alike, and only *throw*
@@ -43,6 +56,12 @@ import { requestPath } from './routes.ts';
 
 /** The one route this service serves. `OPTIONS` is the preflight for it. */
 export const ALLOWED_METHODS = 'POST, OPTIONS';
+
+/**
+ * The 429 body when a boundary configures `rateLimit` but no message. Names the
+ * limit and nothing about the request — see `tooManyRequests`.
+ */
+export const DEFAULT_TOO_MANY_REQUESTS = 'Too many requests. Please try again later.';
 
 /** What a validator returned when it refused the body. */
 type Rejection = { readonly error: string };
@@ -67,6 +86,22 @@ export interface BoundaryConfig<TRequest> {
   readonly handle: (request: TRequest) => Promise<{ readonly status: number; readonly body: unknown }>;
   /** The 502 body for a genuine transport failure. Says nothing about why. */
   readonly unavailable: string;
+  /**
+   * Optional per-client limiter, consulted once per real request. Omitted by
+   * every boundary but customer sign-up — see `rate-limit.ts` for why the token
+   * routes deliberately have none.
+   */
+  readonly rateLimit?: (req: IncomingMessage) => {
+    readonly allowed: boolean;
+    readonly retryAfterSeconds: number;
+  };
+  /**
+   * The 429 body, for a boundary that configures `rateLimit`. Must stay generic:
+   * it is sent before the body is parsed, and saying anything about the request
+   * would be the one place this route could leak whether an email is already
+   * registered.
+   */
+  readonly tooManyRequests?: string;
 }
 
 /**
@@ -83,8 +118,11 @@ export function createRequestListener<TRequest>(
     const origin = req.headers.origin;
     const cors = corsHeaders(origin, config.origins, ALLOWED_METHODS);
 
-    const send = (status: number, body: unknown): void => {
-      res.writeHead(status, { ...cors, 'Content-Type': 'application/json' });
+    // `extraHeaders` exists for exactly one caller (the 429's `Retry-After`), so
+    // that refusal is the same two lines as the 403 and 404 rather than a
+    // hand-rolled `writeHead`/`end` pair that can drift from them.
+    const send = (status: number, body: unknown, extraHeaders: Record<string, string> = {}): void => {
+      res.writeHead(status, { ...cors, 'Content-Type': 'application/json', ...extraHeaders });
       res.end(JSON.stringify(body));
     };
 
@@ -100,6 +138,22 @@ export function createRequestListener<TRequest>(
 
     if (req.method !== 'POST' || requestPath(req.url) !== config.route) {
       send(404, { error: `POST ${config.route}` });
+      return;
+    }
+
+    const limit = config.rateLimit?.(req);
+    if (limit !== undefined && !limit.allowed) {
+      // Structurally identical to the 403 and 404 above, deliberately: all three
+      // answer before the body is read, and none of them drains it. Node's server
+      // discards an unconsumed request body once the response finishes, so there
+      // is nothing left in flight to stall the socket — asserted rather than
+      // assumed, with a body far larger than any socket buffer, at all three
+      // refusals (`http.test.mjs`, `rate-limit.test.mjs`). The 413 below is the
+      // one that destroys instead, because there the body is being read and the
+      // point is to stop reading it.
+      send(429, { error: config.tooManyRequests ?? DEFAULT_TOO_MANY_REQUESTS }, {
+        'Retry-After': String(limit.retryAfterSeconds),
+      });
       return;
     }
 
