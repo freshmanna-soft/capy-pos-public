@@ -603,6 +603,64 @@ describe('SelfCheckoutScanComponent', () => {
       ).not.toBeNull();
     });
 
+    it('keeps looking through frames it examined and found empty', async () => {
+      // The sibling of the null case above, and a different answer to the gate: an
+      // examined frame holding nothing is a real absence, so the gate is told `null`
+      // rather than skipped. Skipping would leave it believing whatever it last saw
+      // was still in front of the lens.
+      const fixture = await openLane({ frame: [] });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(1000);
+      fixture.detectChanges();
+
+      expect(detect.mock.calls.length).toBeGreaterThan(1);
+      expect(cart.items().length).toBe(0);
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-preview"]')
+      ).not.toBeNull();
+    });
+
+    it('ignores a code too small in frame to have been presented', async () => {
+      // A barcode caught on a shelf behind the customer decodes perfectly well. Width
+      // is what separates "in the picture" from "being handed to the till", so a box
+      // under the gate's minimum reaches it as an absence, not as that code.
+      const fixture = await openLane({
+        frame: [
+          { value: EAN13, format: 'ean_13', box: { x: 0.1, y: 0.1, width: 0.02, height: 0.01 } },
+        ],
+      });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(1000);
+      fixture.detectChanges();
+
+      expect(detect.mock.calls.length).toBeGreaterThan(1);
+      expect(cart.items().length).toBe(0);
+    });
+
+    it('rings the same jar up again once it has been taken away and brought back', async () => {
+      // Why the empty frame must reach the gate at all: absence is what retires the
+      // code in hand. Without it the gate would still hold the first sighting and a
+      // customer buying two identical sodas could only ever scan one.
+      const fixture = await openLane({ frame: [seen(UPCA)] });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(300);
+      fixture.detectChanges();
+      expect(cart.items().length).toBe(1);
+
+      // Taken out of frame for longer than a flicker, then presented again.
+      detect.mockResolvedValue([]);
+      await vi.advanceTimersByTimeAsync(2000);
+      detect.mockResolvedValue([seen(UPCA)]);
+      await vi.advanceTimersByTimeAsync(300);
+      fixture.detectChanges();
+
+      expect(cart.items().length).toBe(1);
+      expect(cart.items()[0]?.quantity).toBe(2);
+    });
+
     it('asks the decoder nothing until there is a picture', async () => {
       const fixture = await openLane({ picture: false });
 
