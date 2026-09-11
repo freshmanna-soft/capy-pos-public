@@ -1,0 +1,208 @@
+<section class="mx-auto w-full max-w-5xl text-left" data-testid="self-checkout-scan">
+  <div class="grid gap-6 md:grid-cols-[1fr_20rem]">
+    <!-- Scan side -->
+    <div class="rounded-2xl border border-kelp/25 bg-onsen-water/40 p-5">
+      <h2 class="font-display text-2xl font-bold text-steam">Scan your items</h2>
+      <p class="mt-1 text-[13px] leading-relaxed text-steam/70">
+        Hold a barcode up to the camera, or type the numbers under it.
+      </p>
+
+      @if (catalogueError()) {
+        <!-- `role="alert"` rather than `status`: this arrives after the page has
+             settled and it ends the customer's visit at this lane, so it interrupts.
+             Its five siblings below are per-scan replies and stay polite. -->
+        <p
+          class="mt-4 rounded-xl border border-tsuba/40 bg-tsuba/10 px-4 py-3 text-[13px] text-steam"
+          role="alert"
+          data-testid="self-checkout-catalogue-error"
+        >
+          We can't reach the product list right now. Please use a staffed till.
+        </p>
+      } @else if (!catalogueReady()) {
+        <!-- The catalogue is a promise, and a scanner gun fires faster than it
+             settles. Saying so beats a silent field, and a code scanned right now is
+             held rather than refused — see `pendingCode`. -->
+        <p
+          class="mt-4 text-[13px] text-steam/70"
+          role="status"
+          data-testid="self-checkout-catalogue-loading"
+        >
+          Getting today's items ready…
+        </p>
+      }
+
+      <div class="mt-5 flex flex-wrap items-end gap-3">
+        <label class="flex-1">
+          <span class="font-data text-[10px] uppercase tracking-[0.18em] text-kelp">Barcode</span>
+          <input
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            [ngModel]="typed()"
+            (ngModelChange)="onTyped($event)"
+            (keydown.enter)="submitTyped()"
+            placeholder="e.g. 036000291452"
+            class="mt-1 w-full rounded-xl border border-kelp/30 bg-onsen-deep px-4 py-3 font-data text-base text-steam placeholder:text-kelp/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+            data-testid="self-checkout-code-input"
+          />
+        </label>
+        <button
+          type="button"
+          (click)="submitTyped()"
+          class="rounded-xl bg-yuzu px-5 py-3 font-data text-[11px] font-bold uppercase tracking-[0.16em] text-onsen-deep transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          data-testid="self-checkout-add"
+        >
+          Add item
+        </button>
+      </div>
+
+      @if (canScan()) {
+        <div class="mt-4">
+          @if (scanning()) {
+            <video
+              #preview
+              muted
+              playsinline
+              class="w-full rounded-xl border border-kelp/30 bg-black/60"
+              data-testid="self-checkout-preview"
+            ></video>
+            <button
+              type="button"
+              (click)="stopScanning()"
+              class="mt-3 rounded-full border border-kelp/40 px-4 py-2 font-data text-[10px] uppercase tracking-[0.16em] text-kelp hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+              data-testid="self-checkout-stop-camera"
+            >
+              Stop camera
+            </button>
+          } @else {
+            <button
+              type="button"
+              (click)="startScanning()"
+              class="rounded-full border border-kelp/40 px-4 py-2 font-data text-[10px] uppercase tracking-[0.16em] text-kelp hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+              data-testid="self-checkout-start-camera"
+            >
+              Use the camera
+            </button>
+          }
+        </div>
+      }
+
+      <!-- One feedback slot: "added" and "not found" are mutually exclusive. -->
+      @switch (feedbackKind()) {
+        @case ('added') {
+          <p
+            class="mt-4 rounded-xl border border-kelp/40 bg-onsen-deep/60 px-4 py-3 text-[13px] text-steam"
+            role="status"
+            data-testid="self-checkout-added"
+          >
+            Added {{ addedName() }}
+          </p>
+        }
+        @case ('not-found') {
+          <p
+            class="mt-4 rounded-xl border border-tsuba/50 bg-tsuba/10 px-4 py-3 text-[13px] text-steam"
+            role="status"
+            data-testid="self-checkout-not-found"
+          >
+            We don't recognise <span class="font-data">{{ notFoundCode() }}</span
+            >. Try scanning again, or ask a member of staff.
+          </p>
+        }
+        @case ('waiting') {
+          <p
+            class="mt-4 rounded-xl border border-kelp/40 bg-onsen-deep/60 px-4 py-3 text-[13px] text-steam"
+            role="status"
+            data-testid="self-checkout-waiting"
+          >
+            One moment — still getting today's items. We'll add
+            <span class="font-data">{{ waitingCode() }}</span> as soon as they're here.
+          </p>
+        }
+        @case ('unreachable') {
+          <p
+            class="mt-4 rounded-xl border border-tsuba/50 bg-tsuba/10 px-4 py-3 text-[13px] text-steam"
+            role="status"
+            data-testid="self-checkout-unreachable"
+          >
+            Nothing was added for <span class="font-data">{{ unreachableCode() }}</span
+            >. Please use a staffed till.
+          </p>
+        }
+        @case ('unavailable') {
+          <p
+            class="mt-4 rounded-xl border border-tsuba/50 bg-tsuba/10 px-4 py-3 text-[13px] text-steam"
+            role="status"
+            data-testid="self-checkout-unavailable"
+          >
+            @if (unavailableReason() === 'max-stock-reached') {
+              <!-- All the stock there is, already scanned. Sending this customer to a
+                   staffed till would waste both their trips. -->
+              All the {{ unavailableName() }} we have is already in your basket.
+            } @else {
+              {{ unavailableName() }} isn't available right now.
+            }
+          </p>
+        }
+      }
+    </div>
+
+    <!-- Cart side -->
+    <aside
+      class="rounded-2xl border border-kelp/25 bg-onsen-water/40 p-5"
+      data-testid="self-checkout-cart"
+    >
+      <h2 class="font-display text-xl font-bold text-steam">Your basket</h2>
+      @if (isCartEmpty()) {
+        <p class="mt-3 text-[13px] text-steam/70" data-testid="self-checkout-cart-empty">
+          Nothing scanned yet.
+        </p>
+      } @else {
+        <ul class="mt-3 space-y-2">
+          @for (item of items(); track item.product.id) {
+            <li
+              class="flex items-baseline justify-between gap-2 text-[13px] text-steam"
+              data-testid="self-checkout-cart-line"
+            >
+              <span class="flex-1">
+                {{ item.product.name }}
+                <span class="font-data text-kelp">x{{ item.quantity }}</span>
+              </span>
+              <span class="font-data">{{
+                item.product.price * item.quantity | number: '1.2-2'
+              }}</span>
+              <button
+                type="button"
+                (click)="removeItem(item.product.id)"
+                class="font-data text-[10px] uppercase tracking-[0.16em] text-kelp hover:text-tsuba focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+                [attr.aria-label]="'Remove ' + item.product.name"
+              >
+                Remove
+              </button>
+            </li>
+          }
+        </ul>
+        <dl class="mt-4 space-y-1 border-t border-kelp/25 pt-3 font-data text-[12px] text-steam/80">
+          <div class="flex justify-between">
+            <dt>Items</dt>
+            <dd data-testid="self-checkout-total-items">{{ totalItems() }}</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt>Subtotal</dt>
+            <dd>{{ subtotal() | number: '1.2-2' }}</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt>Tax</dt>
+            <dd>{{ tax() | number: '1.2-2' }}</dd>
+          </div>
+          <div class="flex justify-between text-[14px] font-bold text-steam">
+            <dt>Total</dt>
+            <dd data-testid="self-checkout-total">{{ total() | number: '1.2-2' }}</dd>
+          </div>
+        </dl>
+        <!-- No pay control here on purpose: the payment seam and the sale
+             submission are separate items, and a button that looks like it pays
+             but does not is worse than no button. -->
+      }
+    </aside>
+  </div>
+</section>
