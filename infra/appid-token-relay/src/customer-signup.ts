@@ -59,14 +59,66 @@
  * exist), which would be a lie the moment the secret lands. Same reasoning, and
  * the same shape, as `customerClientConfigured`.
  *
- * Scope is epic #261's item 8a — the happy path. The duplicate-email and
- * invalid-password answers (8b) and rate limiting (8c) are separate items: a
- * failure from any call below propagates for `http.ts` to turn into its own
- * generic 502 today (after the rollback above, where there is something to roll
- * back), rather than being given a bespoke status here that 8b would immediately
- * have to redesign.
+ * ## What a rejected sign-up answers (item 8b)
+ *
+ * Item 8a shipped the happy path and let every failure fall through to `http.ts`'s
+ * generic 502. Two of them are not outages at all but answers the caller asked
+ * for, and they are the two this module now classifies — from the status App ID
+ * itself returned (`ManagementApiError.status`), with its wording
+ * (`.detail`) only ever as a second signal *within* a status that already means
+ * "this request was refused":
+ *
+ * - **The address already has an account** → `409` with `DUPLICATE_EMAIL_MESSAGE`.
+ * - **The tenant's password policy refused the password** → `400` with a message
+ *   built from App ID's own explanation, so the caller learns what to change.
+ *
+ * Anything else still throws and still becomes a 502: an unrecognised failure is
+ * an outage until proven otherwise, not a 4xx guess. That is why no wording alone
+ * can classify anything — a tenant outage whose text happens to say "already
+ * exists" has to stay a 502, not become "that email is taken".
+ *
+ * ## Why 409 for a duplicate, and not #253's one-identical-outcome
+ *
+ * This is a deliberate, argued decision, and `customer-signup.test.mjs` pins it so
+ * changing it again has to be deliberate too.
+ *
+ * A distinguishable duplicate answer *is* an account-enumeration oracle on a
+ * public, unauthenticated route, and #253's `forgot-password` path deliberately
+ * refuses to be one — it answers identically whether or not the address exists.
+ * The difference is what the route is *for*. `forgot-password` has no legitimate
+ * reason to tell a caller anything about an address: the person who owns it learns
+ * the outcome by email, so a uniform answer costs a real user nothing. Sign-up
+ * cannot borrow that: the caller is mid-form and the only useful thing to say
+ * about an address that is already taken is that it is taken. A uniform answer
+ * would mean either silently not creating the account (and telling someone their
+ * sign-up worked when it did not), or making success itself say nothing — which
+ * means dropping the created account's id from the response, i.e. changing the
+ * happy path's contract, explicitly out of scope for this item.
+ *
+ * So the oracle is accepted here rather than pretended away, and bounded instead:
+ * item 8c's per-IP limiter (`rate-limit.ts`) caps how fast it can be queried, the
+ * 429 it answers with is deliberately body-independent so it leaks nothing itself,
+ * and the message below is worded to be useful to the person who owns the address
+ * without volunteering anything a probe could not already infer from the status.
+ * The information disclosed — "this store has a customer with this email" — is
+ * also what any store's sign-up form discloses; a shopper's membership is not the
+ * secret a password-reset probe is after.
+ *
+ * ## What a sign-up still does not give you
+ *
+ * Neither the `201` nor the `409` implies a usable session, and neither may start
+ * to. Item 3 established empirically (2026-09-11) that an account this route just
+ * created is `PENDING` and cannot complete a password grant until it is confirmed
+ * by email — App ID answers `403 "Pending user verification"`. That is the fact
+ * item 17's interstitial is built on, which is why the `201` carries an id and an
+ * address and no token, and why the duplicate message says to *try* signing in
+ * rather than promising it will work.
+ *
+ * Rate limiting is item 8c (already landed, see `rate-limit.ts`) and no UI is
+ * here: the sign-up form is item 16, the interstitial item 17.
  */
 import {
+  ManagementApiError,
   assignRole as assignRoleDefault,
   createUser as createUserDefault,
   deleteUserAndProfile as deleteUserAndProfileDefault,
@@ -84,6 +136,134 @@ export const CUSTOMER_SIGNUP_ROUTE = '/appid/customer/sign-up';
  * see this file's header.
  */
 export const CUSTOMER_SCOPE = 'customer';
+
+/**
+ * The answer to a sign-up for an address that already has an account. A fixed
+ * string: it never quotes the address back, never says which account, and reads
+ * the same for a shopper who forgot they had signed up as for anything else. See
+ * this file's header for why this route answers a distinguishable 409 at all.
+ */
+export const DUPLICATE_EMAIL_MESSAGE =
+  'That email address cannot be used to sign up. If the account is yours, try signing in instead, ' +
+  'or reset your password if you have forgotten it.';
+
+/** `409`: the request was well-formed and the conflict is with existing state. */
+export const DUPLICATE_EMAIL_STATUS = 409;
+
+/**
+ * The lead sentence for a password the tenant's policy refused. App ID's own
+ * explanation is appended when it gave a usable one — this alone is what the
+ * caller gets when it did not, because "invalid password" with no upstream text
+ * is still better than a blob.
+ */
+export const PASSWORD_POLICY_MESSAGE = 'That password does not meet the password policy for this store.';
+
+/** `400`: the caller can fix this by sending a different password. */
+export const PASSWORD_POLICY_STATUS = 400;
+
+/**
+ * The one upstream status under which a *wording* signal is read at all: App ID
+ * saying the request itself was refused. Not to be confused with the two answer
+ * statuses above — those are what this route replies, this is what App ID sent,
+ * and `PASSWORD_POLICY_STATUS` sharing its value is a coincidence of both sides
+ * calling a bad request a bad request.
+ *
+ * Both classifications below are gated on it, for the same reason: a 500, a 503 or
+ * a gateway timeout is an outage even when its text happens to mention an account
+ * or a password, and an outage answered as "that email is taken" is both a lie to
+ * the shopper and an enumeration answer nothing asked for.
+ */
+const REFUSED_REQUEST_STATUS = 400;
+
+/** Longest upstream explanation forwarded. Past this it is not a message to a person. */
+const MAX_DETAIL_LENGTH = 200;
+
+/**
+ * The caller-facing answer for a `createUser` failure that is really the caller's
+ * to know about, or `null` when it is not — in which case the failure is an outage
+ * as far as this route is concerned and has to keep propagating to `http.ts`'s 502.
+ *
+ * Exported because it is the whole decision this item makes, and a pure function of
+ * what App ID returned is the honest way to test it. `email` is passed only to be
+ * kept *out* of the answer: an upstream explanation that quotes the address back is
+ * not forwarded.
+ */
+export function signupRefusal(error: unknown, email: string, password: string): RelayResponse | null {
+  if (!(error instanceof ManagementApiError)) {
+    return null;
+  }
+  const { status, detail } = error;
+
+  // A 409 *is* the conflict, whatever it says. Every other classification below is
+  // deliberately the same shape — `REFUSED_REQUEST_STATUS` **and** the wording, in
+  // that order — so no wording on its own can turn an outage into an answer.
+  if (
+    status === DUPLICATE_EMAIL_STATUS ||
+    (status === REFUSED_REQUEST_STATUS && mentionsExistingAccount(detail))
+  ) {
+    return { status: DUPLICATE_EMAIL_STATUS, body: { error: DUPLICATE_EMAIL_MESSAGE } };
+  }
+
+  if (status === REFUSED_REQUEST_STATUS && /password/i.test(detail ?? '')) {
+    const usable = usableDetail(detail, email, password);
+    return {
+      status: PASSWORD_POLICY_STATUS,
+      body: { error: usable === null ? PASSWORD_POLICY_MESSAGE : `${PASSWORD_POLICY_MESSAGE} ${usable}` },
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Whether App ID said the account already exists, for the tenants that answer a
+ * conflict with a 400 rather than a 409. Wording-based and therefore never
+ * sufficient on its own: its caller reads it only under `REFUSED_REQUEST_STATUS`,
+ * so a 5xx that mentions an existing account stays an outage.
+ */
+function mentionsExistingAccount(detail: string | undefined): boolean {
+  return /already (?:exists|registered|taken|in use)|email .*(?:exists|taken)/i.test(detail ?? '');
+}
+
+/**
+ * App ID's explanation, if it is fit to show a person: one line, short enough to
+ * read, not a serialized body, and not quoting the caller's own address back at
+ * them. `null` for anything else — the fixed message is used instead, which is the
+ * difference between a usable rejection and a forwarded blob.
+ */
+function usableDetail(detail: string | undefined, email: string, password: string): string | null {
+  if (detail === undefined) {
+    return null;
+  }
+  const collapsed = detail.replace(/\s+/g, ' ').trim();
+  if (collapsed.length === 0 || collapsed.length > MAX_DETAIL_LENGTH) {
+    return null;
+  }
+  if (/[{}<>]/.test(collapsed)) {
+    // A JSON or markup fragment, not a sentence someone wrote to be read.
+    return null;
+  }
+  if (email.length > 0 && collapsed.toLowerCase().includes(email.toLowerCase())) {
+    return null;
+  }
+  // The same guard for the password, and it is the more important of the two.
+  //
+  // This branch is the ONLY path that forwards upstream text into a response body,
+  // and it is reached precisely when the upstream is complaining about the password —
+  // so it is exactly where a validator that quotes the offending value back
+  // ("the password 'hunter2' is too common") would send a credential to the caller.
+  //
+  // The two failure directions are deliberately not symmetric in cost, so the check
+  // is not symmetric in caution: a false positive means a short password happens to
+  // appear inside ordinary words ("pass" inside "Password must…") and the caller gets
+  // the fixed message instead of a slightly more useful one — harmless. A false
+  // negative echoes a credential. So this drops the whole detail on any containment,
+  // with no length threshold to widen the gap a leak could fit through.
+  if (password.length > 0 && collapsed.toLowerCase().includes(password.toLowerCase())) {
+    return null;
+  }
+  return collapsed.endsWith('.') ? collapsed : `${collapsed}.`;
+}
 
 /**
  * The Management API half of the App ID config. Deliberately does *not* name any
@@ -156,7 +336,19 @@ export function createCustomerSignupHandler(
       );
     }
 
-    const user = await deps.createUser(request.email, request.password, config);
+    let user: Awaited<ReturnType<CustomerSignupDeps['createUser']>>;
+    try {
+      user = await deps.createUser(request.email, request.password, config);
+    } catch (error) {
+      // Nothing was created, so there is nothing to roll back — the only question
+      // is whether this is the caller's answer or this service's outage.
+      const refusal = signupRefusal(error, request.email, request.password);
+      if (refusal === null) {
+        throw error;
+      }
+      return refusal;
+    }
+
     try {
       await deps.assignRole(user.id, roleId, config);
     } catch (error) {

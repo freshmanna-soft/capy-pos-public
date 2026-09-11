@@ -17,6 +17,7 @@ import {
   deleteUserAndProfile,
   triggerForgotPassword,
   ManagementApiError,
+  upstreamDetail,
   resetCachesForTest,
 } from './management-api.ts';
 
@@ -406,7 +407,11 @@ describe('createUser', () => {
     );
   });
 
-  it('throws ManagementApiError on a non-201 response, without leaking the request body', async () => {
+  // The seam item 8b's whole answer rests on. `customer-signup.ts` classifies a
+  // refused sign-up from `error.status`/`error.detail`, never from the sentence —
+  // so asserting only the message would leave both fields free to disappear while
+  // the suite stayed green and every duplicate silently became a 502.
+  it('carries the upstream status and App ID\'s own wording on the error, not just inside the sentence', async () => {
     stubFetch([
       {
         match: (url) => url.includes('/cloud_directory/sign_up'),
@@ -415,8 +420,116 @@ describe('createUser', () => {
     ]);
     await assert.rejects(
       () => createUser('dup@capy.test', 'pw', CONFIG, nowSeconds),
-      (error) => error instanceof ManagementApiError && error.message.includes('already exists')
+      (error) => {
+        assert.ok(error instanceof ManagementApiError);
+        assert.equal(error.status, 409, 'the status customer-signup.ts classifies from');
+        assert.equal(error.detail, 'already exists', "App ID's own wording, unwrapped");
+        assert.ok(error.message.includes('already exists'));
+        return true;
+      }
     );
+  });
+
+  // `sign_up` answers with both body shapes depending on which layer refused, and
+  // a password-policy refusal is the SCIM-shaped one. Fixtures that only ever send
+  // `message` would let `detail` be dropped from `upstreamDetail` while staying
+  // green — and a policy refusal with no `detail` cannot be classified at all.
+  it('unwraps a SCIM-shaped refusal from its `detail` key, the shape a policy rejection arrives in', async () => {
+    stubFetch([
+      {
+        match: (url) => url.includes('/cloud_directory/sign_up'),
+        respond: () =>
+          json(400, {
+            scimType: 'invalidValue',
+            detail: 'Password must be at least 12 characters',
+          }),
+      },
+    ]);
+    await assert.rejects(
+      () => createUser('new@capy.test', 'weak', CONFIG, nowSeconds),
+      (error) => {
+        assert.equal(error.status, 400);
+        assert.equal(error.detail, 'Password must be at least 12 characters');
+        return true;
+      }
+    );
+  });
+
+  it('leaves both fields unset when the call never got far enough to have a status', async () => {
+    globalThis.fetch = async (url) => {
+      if (String(url) === 'https://iam.cloud.ibm.com/identity/token') {
+        return { ok: true, status: 200, json: async () => ({ access_token: 'iam-token-1', expires_in: 3600 }) };
+      }
+      throw new Error('socket hang up');
+    };
+    await assert.rejects(
+      () => createUser('new@capy.test', 'pw', CONFIG, nowSeconds),
+      (error) => {
+        assert.ok(error instanceof ManagementApiError);
+        assert.equal(error.status, undefined, 'a transport failure has no upstream status to classify from');
+        assert.equal(error.detail, undefined);
+        return true;
+      }
+    );
+  });
+
+  it('does not put the request body — the caller\'s password above all — into the error', async () => {
+    stubFetch([
+      {
+        match: (url) => url.includes('/cloud_directory/sign_up'),
+        respond: () => json(409, { message: 'already exists' }),
+      },
+    ]);
+    await assert.rejects(
+      () => createUser('dup@capy.test', 'caller-chosen-pw', CONFIG, nowSeconds),
+      (error) => !error.message.includes('caller-chosen-pw') && !(error.detail ?? '').includes('caller-chosen-pw')
+    );
+  });
+});
+
+/**
+ * The unwrapper both refusal classifications depend on. Tested directly because
+ * its two accepted keys are not interchangeable in practice: the Management API
+ * uses `message`, Cloud Directory's SCIM-shaped errors use `detail`, and `sign_up`
+ * can answer with either depending on which layer refused. A body shape it fails
+ * to read is a refusal `customer-signup.ts` cannot classify, i.e. a 502.
+ */
+describe('upstreamDetail', () => {
+  it("reads the Management API's `message`", () => {
+    assert.equal(upstreamDetail({ message: 'already exists' }), 'already exists');
+  });
+
+  it("reads a SCIM-shaped error's `detail`", () => {
+    assert.equal(upstreamDetail({ scimType: 'invalidValue', detail: 'password too weak' }), 'password too weak');
+  });
+
+  it('prefers `message` when App ID sends both, so one body never yields two answers', () => {
+    assert.equal(upstreamDetail({ message: 'from message', detail: 'from detail' }), 'from message');
+  });
+
+  it('trims, so a padded string is not treated as a different sentence', () => {
+    assert.equal(upstreamDetail({ detail: '  password too weak\n' }), 'password too weak');
+  });
+
+  it('is undefined when App ID did not explain itself in either key', () => {
+    for (const body of [
+      {},
+      { error: 'nope' },
+      { message: '' },
+      { message: '   ' },
+      { detail: '' },
+      { message: 42 },
+      { detail: { nested: 'no' } },
+      { message: null },
+    ]) {
+      assert.equal(upstreamDetail(body), undefined, JSON.stringify(body));
+    }
+  });
+
+  it('is undefined for a body that is not an object at all', () => {
+    for (const body of [undefined, null, 'already exists', 42, true]) {
+      assert.equal(upstreamDetail(body), undefined, String(body));
+    }
   });
 });
 
