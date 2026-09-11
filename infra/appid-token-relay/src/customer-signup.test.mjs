@@ -14,7 +14,7 @@
  * role-less because the *assignment* failed, which is rolled back rather than
  * abandoned.
  */
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CUSTOMER_SCOPE,
@@ -25,7 +25,7 @@ import {
   customerSignupConfigured,
   signupRefusal,
 } from './customer-signup.ts';
-import { ManagementApiError } from './management-api.ts';
+import { ManagementApiError, resetCachesForTest } from './management-api.ts';
 
 const CONFIG = { region: 'us-south', tenantId: 'tenant-1', apiKey: 'iam-key-1' };
 const REQUEST = { email: 'shopper@capy.test', password: 'chosen passphrase' };
@@ -489,5 +489,108 @@ describe('createCustomerSignupHandler — rejected sign-ups', () => {
       status: 201,
       body: { id: 'profile-1', email: REQUEST.email },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The same two refusals, over the *real* Management API calls
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything above stubs `deps`, which is right for asserting what this route is
+ * allowed to do — but it means the classifier is fed errors this file builds
+ * itself (`upstream()`), and an error `createUser` never actually produced proves
+ * nothing about a real refusal. The link the whole item rests on is `createUser`
+ * attaching App ID's status and wording to what it throws: drop that and every
+ * assertion above still passes while every real duplicate becomes a 502.
+ *
+ * So these go through the handler's *default* deps — the real
+ * `resolveRoleId`/`createUser` — with only `fetch` stubbed, answering the body
+ * shapes App ID actually sends. They are the only tests in this file that fail if
+ * the seam is removed, which is exactly why they exist.
+ */
+describe('createCustomerSignupHandler — rejected sign-ups, end to end over the real Management API calls', () => {
+  let originalFetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    // The IAM token and `/roles` are both cached process-wide.
+    resetCachesForTest();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /** IAM's token endpoint, a `/roles` list that really grants `customer`, and one `sign_up` answer. */
+  function stubAppId(signUpStatus, signUpBody) {
+    globalThis.fetch = async (url, init) => {
+      const href = String(url);
+      if (href === 'https://iam.cloud.ibm.com/identity/token') {
+        return { ok: true, status: 200, json: async () => ({ access_token: 'iam-token-1', expires_in: 3600 }) };
+      }
+      if (href.endsWith('/roles')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            // Matched by `access[].scopes`, never the display name — see `AppIdRoleWire`.
+            roles: [{ id: 'customer-role-1', name: 'customer', access: [{ scopes: [CUSTOMER_SCOPE] }] }],
+          }),
+        };
+      }
+      if (href.includes('/cloud_directory/sign_up')) {
+        calls.push({ call: 'sign_up', body: JSON.parse(init.body) });
+        return { ok: false, status: signUpStatus, json: async () => signUpBody };
+      }
+      throw new Error(`Unhandled fetch: ${href}`);
+    };
+  }
+
+  it("answers 409 for App ID's own duplicate body, so the classification survives a real refusal", async () => {
+    stubAppId(409, { message: 'The email address already exists.' });
+
+    const response = await createCustomerSignupHandler(CONFIG)(REQUEST);
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error, DUPLICATE_EMAIL_MESSAGE);
+    assert.equal(
+      calls.filter((c) => c.call === 'sign_up').length,
+      1,
+      'one attempt — nothing was created, so nothing is retried or rolled back'
+    );
+  });
+
+  it("answers 400 with the tenant's own words for App ID's SCIM-shaped policy refusal", async () => {
+    // The `detail` key rather than `message`: the shape a Cloud Directory policy
+    // rejection actually arrives in (see `upstreamDetail`).
+    stubAppId(400, { scimType: 'invalidValue', detail: 'Password must be at least 12 characters' });
+
+    const response = await createCustomerSignupHandler(CONFIG)(REQUEST);
+
+    assert.equal(response.status, 400);
+    assert.equal(
+      response.body.error,
+      `${PASSWORD_POLICY_MESSAGE} Password must be at least 12 characters.`
+    );
+  });
+
+  it('still throws for a tenant outage, so http.ts answers its generic 502 rather than a 4xx guess', async () => {
+    stubAppId(503, { message: 'Service unavailable' });
+
+    await assert.rejects(() => createCustomerSignupHandler(CONFIG)(REQUEST), ManagementApiError);
+  });
+
+  it('never sends the caller-chosen password anywhere but the sign_up body', async () => {
+    stubAppId(409, { message: 'The email address already exists.' });
+
+    const response = await createCustomerSignupHandler(CONFIG)(REQUEST);
+
+    assert.equal(response.body.error.includes(REQUEST.password), false);
+    assert.deepEqual(
+      calls.filter((c) => c.call === 'sign_up').map((c) => c.body.password),
+      [REQUEST.password],
+      'byte-for-byte, and only there'
+    );
   });
 });
