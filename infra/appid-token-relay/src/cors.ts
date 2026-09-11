@@ -73,10 +73,19 @@ export function corsHeaders(
   // beyond `Content-Type`, but allowing both unconditionally is harmless for
   // it and required for the other, same convention as `session-guard.ts`'s
   // own `corsHeaders` in the sibling proxies.
+  //
+  // `Retry-After` is exposed for the same reason and on the same terms. It is not
+  // one of the seven CORS-safelisted *response* headers, so without this a browser
+  // hides it from the page even on an allow-listed origin — and the only status
+  // that carries it is the sign-up route's 429 (`rate-limit.ts`), whose whole
+  // point is telling the customer when to try again. Nothing here is rewritten by
+  // a gateway on the way out: Code Engine routes to this container directly, so
+  // the header this file sets is the header the browser sees.
   const headers: Record<string, string> = {
     Vary: 'Origin',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': methods,
+    'Access-Control-Expose-Headers': 'Retry-After',
     'Access-Control-Max-Age': '600',
   };
   if (typeof origin === 'string' && origin.length > 0 && originAllowed(origin, allowed)) {

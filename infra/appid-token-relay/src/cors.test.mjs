@@ -76,6 +76,16 @@ describe('corsHeaders', () => {
     assert.equal('Access-Control-Allow-Origin' in headers, false);
   });
 
+  it('exposes Retry-After, which a browser otherwise hides from the page', () => {
+    // Not one of the seven CORS-safelisted *response* headers, so JS on an
+    // allow-listed origin cannot read it without this — and the sign-up route's
+    // 429 (`rate-limit.ts`) is the only status that carries one, whose entire
+    // point is telling the customer when to try again. Sent on every response for
+    // the same reason `Authorization` is allowed on every route.
+    const headers = corsHeaders('https://till.example.com', ORIGINS, 'POST, OPTIONS');
+    assert.equal(headers['Access-Control-Expose-Headers'], 'Retry-After');
+  });
+
   it('advertises both Content-Type and Authorization allow-headers', () => {
     // The token route (`http.ts`) never sends Authorization; the admin
     // staff-management routes (`admin-http.ts`) always do. One shared

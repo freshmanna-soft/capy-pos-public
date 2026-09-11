@@ -35,6 +35,24 @@
  * requests can land across two adjacent windows. For account creation, at these
  * limits, that is an acceptable and bounded overshoot.
  *
+ * ## The key map is bounded by eviction, and that costs something
+ *
+ * `maxKeys` is a hard ceiling on the number of windows held, enforced on every
+ * insertion — not a sweep threshold that a map full of *live* windows sails
+ * straight past. Elapsed windows go first because losing one costs nothing; only
+ * if that frees no room is the oldest live window evicted.
+ *
+ * Evicting a live window loses real limiting, so it is worth being exact about
+ * what that trade is. It takes `maxKeys` distinct addresses inside one window to
+ * reach, and a caller who has that many already had a strictly better attack:
+ * every fresh address gets a fresh window anyway, without evicting anybody. What
+ * eviction does to whoever is dropped is *loosen* their limit — never refuse
+ * them — which is the right direction: the other way to hold a ceiling is to
+ * refuse every new key while the map is full, and that hands the same attacker a
+ * way to stop real customers registering at all. The alternative to both is an
+ * unbounded map, i.e. the limiter becoming the resource-exhaustion path it exists
+ * to close.
+ *
  * ## The state is per-instance, and that is not a global guarantee
  *
  * The counters live in this process's memory. Code Engine scales this service to
@@ -66,9 +84,12 @@ export const DEFAULT_WINDOW_SECONDS = 900;
 export const DEFAULT_TRUSTED_PROXY_HOPS = 1;
 
 /**
- * Distinct keys held before expired ones are swept. A ceiling on this map's
- * memory, not a tuning knob: without it, a caller cycling source addresses could
- * grow it without bound, which turns a rate limiter into a memory leak.
+ * The hard ceiling on how many windows are held at once — see `makeRoom`, which
+ * enforces it on every insertion. A caller cycling source addresses therefore
+ * cannot grow this map at all, which is what would turn a rate limiter into the
+ * memory leak it exists to prevent. At this size the map is a few hundred
+ * kilobytes of short strings and two-field objects, and the bound doubles as a
+ * bound on the sweep: nothing in here can ever walk more entries than this.
  */
 export const DEFAULT_MAX_KEYS = 10_000;
 
@@ -79,7 +100,7 @@ export interface RateLimitConfig {
   readonly windowSeconds?: number;
   /** Trusted proxy hops in front of this process. See `clientIp`. */
   readonly trustedProxyHops?: number;
-  /** Sweep threshold for the key map. See `DEFAULT_MAX_KEYS`. */
+  /** Hard ceiling on held keys. See `DEFAULT_MAX_KEYS`. */
   readonly maxKeys?: number;
 }
 
@@ -150,58 +171,120 @@ export function clientIp(req: IncomingMessage, trustedProxyHops = DEFAULT_TRUSTE
 }
 
 /**
+ * The hook `http.ts` takes, with one introspection seam on it.
+ *
+ * Callable, so `http.ts` keeps taking a plain function and never learns anything
+ * about this module. `size` is here because `maxKeys` is an invariant and not a
+ * hint: `rate-limit.test.mjs` asserts the held-key count directly rather than
+ * inferring it from counting behaviour, which is how a ceiling can be documented,
+ * commented and unenforced without one test failing.
+ */
+export interface RateLimiter {
+  (req: IncomingMessage): RateLimitDecision;
+  /** Windows held right now. Never more than the configured `maxKeys`. */
+  readonly size: () => number;
+}
+
+/**
  * Build the `rateLimit` hook `http.ts` takes. One limiter per limited route, so
  * two routes can never share a counter by accident.
  *
  * The clock is injected for the same reason `management-api.ts` injects it: the
  * suite proves the window resets by moving the clock, not by sleeping for it.
+ *
+ * ## The ordering invariant the map carries
+ *
+ * A `Map` iterates in insertion order, and a window is only ever *inserted* when
+ * it starts — a key whose window elapsed is deleted before its replacement is
+ * set, rather than overwritten in place. So the map stays ordered by window
+ * start, oldest first, and two things fall out of that: `makeRoom` can stop
+ * sweeping at the first live window instead of walking the whole map, and the
+ * front of the map is the cheapest entry to evict.
+ *
+ * A clock that jumped backwards would cost some sweeping (the scan stops early)
+ * and nothing else — the ceiling is held by `makeRoom` on size alone.
  */
 export function createRateLimiter(
   config: RateLimitConfig = {},
   nowSeconds: () => number = defaultNow
-): (req: IncomingMessage) => RateLimitDecision {
+): RateLimiter {
   const limit = config.limit ?? DEFAULT_LIMIT;
   const windowSeconds = config.windowSeconds ?? DEFAULT_WINDOW_SECONDS;
   const hops = config.trustedProxyHops ?? DEFAULT_TRUSTED_PROXY_HOPS;
-  const maxKeys = config.maxKeys ?? DEFAULT_MAX_KEYS;
+  const maxKeys = Math.max(1, Math.floor(config.maxKeys ?? DEFAULT_MAX_KEYS));
   const windows = new Map<string, Window>();
 
-  return (req) => {
+  const limiter = (req: IncomingMessage): RateLimitDecision => {
     const now = nowSeconds();
     const key = clientIp(req, hops);
 
-    if (windows.size >= maxKeys) {
-      sweepExpired(windows, now, windowSeconds);
-    }
-
     const existing = windows.get(key);
-    const current: Window =
-      existing !== undefined && now - existing.startedAt < windowSeconds
-        ? existing
-        : { startedAt: now, count: 0 };
-
-    current.count += 1;
-    windows.set(key, current);
-
-    if (current.count <= limit) {
-      return { allowed: true, retryAfterSeconds: 0 };
+    if (existing !== undefined && now - existing.startedAt < windowSeconds) {
+      // The common path, and the only one a caller inside their window takes: one
+      // `Map` lookup and an increment. No scan, no insertion, so nothing here can
+      // grow the map or walk it.
+      existing.count += 1;
+      return decide(existing, now, limit, windowSeconds);
     }
 
-    const remaining = current.startedAt + windowSeconds - now;
-    return { allowed: false, retryAfterSeconds: Math.max(1, remaining) };
+    // A window is starting — either this key is new, or its previous one elapsed.
+    // Deleted before being re-inserted, rather than overwritten in place, so the
+    // new window lands at the *end* of the map and iteration order stays equal to
+    // window-start order. `makeRoom`'s sweep below would normally have removed the
+    // elapsed entry as part of the prefix anyway; doing it here as well is what
+    // makes the ordering hold without depending on the sweep having reached it —
+    // e.g. after a clock step backwards, when the prefix scan stops early.
+    windows.delete(key);
+    makeRoom(windows, now, windowSeconds, maxKeys);
+
+    const started: Window = { startedAt: now, count: 1 };
+    windows.set(key, started);
+    return decide(started, now, limit, windowSeconds);
   };
+
+  return Object.assign(limiter, { size: () => windows.size });
+}
+
+/** The verdict for a window that has just counted the request in hand. */
+function decide(window: Window, now: number, limit: number, windowSeconds: number): RateLimitDecision {
+  if (window.count <= limit) {
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  return { allowed: false, retryAfterSeconds: Math.max(1, window.startedAt + windowSeconds - now) };
 }
 
 /**
- * Drop every window that has already elapsed. Called only when the map reaches
- * `maxKeys`, so the common path stays a single `Map` lookup — and a sweep that
- * frees nothing (every key active) simply leaves the map full, which is a bounded
- * map, not a leak.
+ * Bring the map below `maxKeys` so one more window fits. Called only on
+ * insertion, because insertion is the only thing that can grow it.
+ *
+ * Two steps, in this order because only the second one forfeits anything:
+ *
+ * 1. **Sweep the elapsed prefix.** Elapsed windows are exactly the front of the
+ *    map (see `createRateLimiter`'s ordering note), so this stops at the first
+ *    live one: the cost is the number of entries actually freed, not the size of
+ *    the map. Losing an elapsed window costs nothing — the next request from that
+ *    key would have opened a fresh one regardless.
+ * 2. **Evict the oldest live window**, repeatedly, until there is room. The front
+ *    of the map is the live window closest to resetting on its own, so it is the
+ *    entry whose eviction forfeits the least limiting. Why evicting at all is the
+ *    least-bad of the three available behaviours is argued in this file's header.
+ *
+ * Both steps are bounded by `maxKeys`, so no request can trigger a scan that
+ * grows with traffic — which is the other half of the ceiling's job.
  */
-function sweepExpired(windows: Map<string, Window>, now: number, windowSeconds: number): void {
+function makeRoom(windows: Map<string, Window>, now: number, windowSeconds: number, maxKeys: number): void {
   for (const [key, window] of windows) {
-    if (now - window.startedAt >= windowSeconds) {
-      windows.delete(key);
+    if (now - window.startedAt < windowSeconds) {
+      break;
     }
+    windows.delete(key);
+  }
+
+  while (windows.size >= maxKeys) {
+    const oldest = windows.keys().next();
+    if (oldest.done === true) {
+      break;
+    }
+    windows.delete(oldest.value);
   }
 }

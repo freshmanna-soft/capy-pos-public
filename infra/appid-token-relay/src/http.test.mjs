@@ -212,6 +212,50 @@ describe('routing, over a socket', () => {
   }
 });
 
+/**
+ * The two refusals that answer *before* the body is read — 403 and 404 — with the
+ * 429 (`rate-limit.test.mjs`) as the third. All three write a reply while the
+ * caller may still be uploading, so all three depend on the same property: Node's
+ * server discards an unconsumed request body once the response finishes, leaving
+ * nothing in flight to stall the socket.
+ *
+ * That property was previously assumed at one of the three and ignored at the
+ * other two, with no fixture at any of them. These post a body far larger than
+ * any socket buffer, so the assumption is measured instead.
+ */
+describe('refusing before the body is read, over a socket', () => {
+  // Well past both the 2 KB boundary cap and any plausible socket buffer, so the
+  // client is certainly still writing when the reply is written.
+  const OVERSIZED = JSON.stringify({ pad: 'x'.repeat(4 * 1024 * 1024) });
+
+  it('403s an unlisted origin without stalling on the body it never reads', { timeout: 15_000 }, async () => {
+    await withServer({}, async ({ port, handled, validated }) => {
+      const response = await send(port, {
+        headers: { Origin: 'https://evil.example.com', 'Content-Type': 'application/json' },
+        body: OVERSIZED,
+      });
+      assert.equal(response.status, 403);
+      assert.deepEqual(response.json, { error: 'Origin is not allowed.' });
+      assert.deepEqual(handled, []);
+      assert.deepEqual(validated, []);
+    });
+  });
+
+  it('404s an unknown path without stalling on the body it never reads', { timeout: 15_000 }, async () => {
+    await withServer({}, async ({ port, handled, validated }) => {
+      const response = await send(port, {
+        path: '/nope',
+        headers: { Origin: ALLOWED, 'Content-Type': 'application/json' },
+        body: OVERSIZED,
+      });
+      assert.equal(response.status, 404);
+      assert.deepEqual(response.json, { error: `POST ${ROUTE}` });
+      assert.deepEqual(handled, []);
+      assert.deepEqual(validated, []);
+    });
+  });
+});
+
 describe('the body cap, over a socket', () => {
   it('413s a body over the cap without buffering it or calling App ID', async () => {
     await withServer({}, async ({ port, handled, validated }) => {
