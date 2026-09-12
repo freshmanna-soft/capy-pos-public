@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { PosFacade } from '@core/application/facades/pos.facade';
 import { CartService } from '@core/application/services/cart.service';
+import { SIGN_UP_ROUTE } from './self-checkout-routes';
 import { SELF_CHECKOUT_TITLE } from './self-checkout-palette';
 import { SelfCheckoutScanComponent } from './self-checkout-scan.component';
 
@@ -72,7 +73,7 @@ export class SelfCheckoutComponent {
    * context, and a link would make every one of those specs need one.
    */
   protected goToSignUp(): void {
-    void this.router.navigate(['/self-checkout/sign-up']);
+    void this.router.navigate([SIGN_UP_ROUTE]);
   }
 
   protected exit(): void {

@@ -1,42 +1,85 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { Route } from '@angular/router';
-import { createEnvironmentInjector, EnvironmentInjector } from '@angular/core';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  ActivatedRouteSnapshot,
+  Router,
+  RouterStateSnapshot,
+  UrlTree,
+  type CanActivateFn,
+  type Route,
+} from '@angular/router';
+import {
+  createEnvironmentInjector,
+  EnvironmentInjector,
+  runInInjectionContext,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { authGuard } from '@core/presentation/guards/auth.guard';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
+import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
 import { AppIdCustomerAuthAdapter } from '@core/infrastructure/auth/appid-customer-auth.adapter';
 import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palette';
+import {
+  CHECK_EMAIL_ROUTE,
+  LANE_ROUTE,
+  SIGN_UP_ROUTE,
+} from '@features/self-checkout/self-checkout-routes';
+import { Permission } from '@core/domain/auth';
 import { appConfig } from './app.config';
 import { routes } from './app.routes';
 
 /**
  * Structural tests for the root route table.
  *
- * The self-checkout lane is asserted here rather than only in the component spec
- * because its two defining properties are route-level: it is a top-level route
- * (not a child of /pos, whose chrome and staff guard it would inherit), and it
+ * The self-checkout family is asserted here rather than only in the component
+ * specs because its defining properties are all route-level: it is a top-level
+ * route (not a child of /pos, whose chrome and staff guard it would inherit), it
  * carries no `authGuard` — the staff session is the wrong gate for a customer
- * lane. Both are the kind of thing a well-meaning "add the guard back" edit
+ * lane — and, since items 16/17 added the sign-up form and the interstitial, the
+ * lane and its two side paths share ONE injector. Each is the kind of thing a
+ * well-meaning edit ("add the guard back", "give the form its own providers")
  * would silently break.
  */
 describe('routes', () => {
   const selfCheckout = routes.find((r) => r.path === 'self-checkout');
+  const children = selfCheckout?.children ?? [];
+  const lane = children.find((c) => c.path === '');
+  const signUp = children.find((c) => c.path === 'sign-up');
+  const checkEmail = children.find((c) => c.path === 'check-email');
 
-  it('registers /self-checkout as a top-level route', () => {
+  it('registers /self-checkout as a top-level route whose lane is its empty child', () => {
     expect(selfCheckout).toBeDefined();
-    expect(selfCheckout?.children).toBeUndefined();
+    // Inline `children`, never `loadChildren`: the guard on the sign-up child and
+    // the providers on this parent have to be in the same eagerly-evaluated
+    // table (see the route's own comment for the bundle measurements).
     expect(selfCheckout?.loadChildren).toBeUndefined();
-    expect(selfCheckout?.title).toBe(SELF_CHECKOUT_TITLE);
+    expect(lane).toBeDefined();
+    // `pathMatch: 'full'`, so /self-checkout/sign-up cannot resolve to the lane
+    // by accident of child ordering.
+    expect(lane?.pathMatch).toBe('full');
+    expect(lane?.title).toBe(SELF_CHECKOUT_TITLE);
   });
 
-  it('leaves /self-checkout unguarded by the staff authGuard', () => {
-    expect(selfCheckout?.canActivate ?? []).not.toContain(authGuard);
+  it('exposes the sign-up form and the check-email interstitial under that parent', () => {
+    // The paths the shared constants promise (`self-checkout-routes.ts`), which
+    // is what the components navigate with — assert the table actually answers
+    // them rather than trusting two copies of the same string.
+    expect(`/self-checkout/${signUp?.path}`).toBe(SIGN_UP_ROUTE);
+    expect(`/self-checkout/${checkEmail?.path}`).toBe(CHECK_EMAIL_ROUTE);
+    expect(`/${selfCheckout?.path}`).toBe(LANE_ROUTE);
+  });
+
+  it('leaves /self-checkout and every child unguarded by the staff authGuard', () => {
     expect(selfCheckout?.canActivate).toBeUndefined();
+    for (const child of children) {
+      expect(child.canActivate ?? [], `/${child.path} should not be staff-guarded`).not.toContain(
+        authGuard
+      );
+    }
   });
 
   it('lazily loads the SelfCheckoutComponent', async () => {
-    expect(selfCheckout?.loadComponent).toBeInstanceOf(Function);
-    const loaded = await selfCheckout?.loadComponent?.();
+    expect(lane?.loadComponent).toBeInstanceOf(Function);
+    const loaded = await lane?.loadComponent?.();
     expect((loaded as { name?: string })?.name).toBe('SelfCheckoutComponent');
   });
 
@@ -67,7 +110,7 @@ describe('routes', () => {
    * The route injector is then a child of that root, the same construction the
    * router performs for a route that declares `providers`.
    */
-  describe('CUSTOMER_AUTH_GATEWAY scoping', () => {
+  describe('customer identity scoping', () => {
     let appRoot: EnvironmentInjector;
     let selfCheckoutRoute: EnvironmentInjector;
 
@@ -90,32 +133,103 @@ describe('routes', () => {
       // carrying no `providedIn` factory must be absent, not merely angry.
       expect(appRoot.get(CUSTOMER_AUTH_GATEWAY, null)).toBeNull();
       expect(() => appRoot.get(CUSTOMER_AUTH_GATEWAY)).toThrow();
+      expect(appRoot.get(CurrentCustomerService, null)).toBeNull();
     });
 
-    it('is bound on the self-checkout route and on no other route', () => {
-      // Recursive, because Angular flattens provider arrays: `providers:
-      // [CUSTOMER_AUTH_PROVIDERS]` — an array included without spreading it — is
-      // a legal binding that a one-level scan would wave through.
-      const bindsCustomerGateway = (provider: unknown): boolean =>
-        Array.isArray(provider)
-          ? provider.some(bindsCustomerGateway)
-          : typeof provider === 'object' &&
-            provider !== null &&
-            (provider as { provide?: unknown }).provide === CUSTOMER_AUTH_GATEWAY;
+    it('binds the gateway on the self-checkout route and on no other route', () => {
+      expect(routesProviding(CUSTOMER_AUTH_GATEWAY)).toEqual(['self-checkout']);
+    });
 
-      const routesBindingIt = routes.filter((route: Route) =>
-        bindsCustomerGateway(route.providers ?? [])
+    it('provides CurrentCustomerService exactly once, on the parent the whole family shares', () => {
+      // The regression this pins: as three sibling routes each carrying their own
+      // `CurrentCustomerService`, the form wrote a session into one instance, the
+      // next screen read a second, and the guard resolved a third that was
+      // permanently signed out. Angular gives a route subtree one environment
+      // injector, so "provided once, on the parent" is the whole fix — and the
+      // only shape in which the guard, the form and the lane can agree on who is
+      // signed in. A second copy anywhere below re-creates the bug in silence.
+      expect(routesProviding(CurrentCustomerService)).toEqual(['self-checkout']);
+      for (const child of children) {
+        expect(
+          child.providers,
+          `/${child.path} must inherit the customer identity, not re-provide it`
+        ).toBeUndefined();
+      }
+    });
+
+    /**
+     * `redirectIfAuthenticatedGuard`, run for real out of the route table.
+     *
+     * Deliberately not `redirectIfAuthenticatedGuard(CurrentCustomerService, …)`
+     * called afresh: that tests the factory (which
+     * `redirect-if-authenticated.guard.spec.ts` already does) and would pass
+     * whether or not the route wires it at all. This reaches into the sign-up
+     * child's own `canActivate[0]` and runs it inside an injector built from the
+     * *parent's* providers, so what it proves is the thing that was broken — the
+     * guard sees the very `CurrentCustomerService` the rest of the family writes
+     * to. Delete the `canActivate` line and these two fail.
+     */
+    describe('the sign-up route guard', () => {
+      const createUrlTree = vi.fn(
+        (commands: string[]) => ({ __url: commands.join('/') }) as unknown as UrlTree
       );
 
-      // The lane plus its two side paths (epic #261 items 16/17), which are
-      // siblings rather than children and so carry their own copy of the binding.
-      // The invariant is unchanged and still what this asserts: nothing OUTSIDE
-      // the `self-checkout` family binds a customer identity.
-      expect(routesBindingIt.map((route) => route.path)).toEqual([
-        'self-checkout/sign-up',
-        'self-checkout/check-email',
-        'self-checkout',
-      ]);
+      function guardInjector(): EnvironmentInjector {
+        return createEnvironmentInjector(
+          [...(selfCheckout?.providers ?? []), { provide: Router, useValue: { createUrlTree } }],
+          appRoot
+        );
+      }
+
+      function runGuard(injector: EnvironmentInjector) {
+        const guard = signUp?.canActivate?.[0] as CanActivateFn;
+        expect(guard, 'the sign-up child must carry a canActivate guard').toBeInstanceOf(Function);
+        return runInInjectionContext(injector, () =>
+          guard({} as ActivatedRouteSnapshot, {} as RouterStateSnapshot)
+        );
+      }
+
+      beforeEach(() => {
+        // Braced on purpose: `mockClear()` returns the mock, and an arrow that
+        // returns a *function* is taken by vitest as this hook's teardown — it
+        // would then call the guard's own Router stub with no arguments.
+        createUrlTree.mockClear();
+      });
+
+      it('lets a signed-out customer reach the form', () => {
+        const injector = guardInjector();
+        try {
+          expect(runGuard(injector)).toBe(true);
+          expect(createUrlTree).not.toHaveBeenCalled();
+        } finally {
+          injector.destroy();
+        }
+      });
+
+      it('redirects a customer who is already signed in back to the lane', () => {
+        vi.useFakeTimers();
+        const injector = guardInjector();
+        try {
+          // The session is published through the SAME instance the guard will
+          // resolve, because both come from this one injector — which only holds
+          // because the providers above are the parent's.
+          injector.get(CurrentCustomerService).setSession({
+            customerId: 'customer-abc',
+            email: 'shopper@capy.test',
+            tenantId: 'store-a',
+            roles: ['customer'],
+            permissions: [Permission.PROCESS_SALE],
+            accessToken: 'token',
+            expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+          });
+
+          expect(runGuard(injector)).not.toBe(true);
+          expect(createUrlTree).toHaveBeenCalledWith([LANE_ROUTE]);
+        } finally {
+          injector.destroy();
+          vi.useRealTimers();
+        }
+      });
     });
   });
 
@@ -126,3 +240,33 @@ describe('routes', () => {
     }
   });
 });
+
+/**
+ * Every route path (children included) whose `providers` bind `token`.
+ *
+ * Recursive on both axes, and both matter. Angular flattens provider arrays, so
+ * `providers: [CUSTOMER_AUTH_PROVIDERS]` — an array included without spreading
+ * it — is a legal binding a one-level scan would wave through; and the family is
+ * now a parent with children, so a scan of top-level routes alone could not see
+ * a second copy re-appearing on a child.
+ */
+function routesProviding(token: unknown): string[] {
+  const binds = (provider: unknown): boolean =>
+    Array.isArray(provider)
+      ? provider.some(binds)
+      : provider === token ||
+        (typeof provider === 'object' &&
+          provider !== null &&
+          (provider as { provide?: unknown }).provide === token);
+
+  const found: string[] = [];
+  const walk = (table: readonly Route[], prefix: string): void => {
+    for (const route of table) {
+      const path = [prefix, route.path].filter(Boolean).join('/');
+      if (binds(route.providers ?? [])) found.push(path);
+      if (route.children) walk(route.children, path);
+    }
+  };
+  walk(routes, '');
+  return found;
+}

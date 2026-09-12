@@ -5,33 +5,39 @@ import {
   CUSTOMER_AUTH_GATEWAY,
   CustomerAuthGateway,
 } from '@core/application/auth/ports/customer-auth-gateway.port';
-import { CustomerSessionDto } from '@core/application/auth/dtos/customer-session.dto';
-import { redirectIfAuthenticatedGuard } from '@core/presentation/guards/redirect-if-authenticated.guard';
+import { CustomerRegistrationDto } from '@core/application/auth/dtos/customer-registration.dto';
+import { CHECK_EMAIL_ROUTE, LANE_ROUTE } from './self-checkout-routes';
 import { SelfCheckoutSignUpComponent } from './self-checkout-signup.component';
 
 /**
  * What is actually load-bearing here, and therefore asserted by mutation rather
  * than by coverage:
  *
- * - the form calls the GATEWAY and then tells the SERVICE — dropping
- *   `setSession()` leaves the service's signals stale and nothing downstream
- *   sees the sign-in, so a session assertion on the *service* is the check, not
- *   a spy on the gateway alone;
- * - success routes to the interstitial and never to a signed-in lane state,
- *   because a fresh account is `PENDING` (item 3, 2026-09-11);
+ * - success routes to the interstitial and invents no session on the way,
+ *   because a fresh account is `PENDING` (item 3, 2026-09-11): the gateway
+ *   answers with a `CustomerRegistrationDto` and there is no session to publish.
+ *   `CurrentCustomerService` is provided here even though the component never
+ *   injects it, so "still signed out afterwards" is asserted on the service
+ *   rather than inferred from the absence of a call;
+ * - the address carried to the interstitial is the one the GATEWAY registered,
+ *   not the raw field, so the customer is told the inbox the mail went to;
+ * - the guard on this route is asserted in `app.routes.spec.ts` instead, against
+ *   the route table's own `canActivate` and the injector the family shares —
+ *   calling the factory again here proved only that the factory works;
  * - 409 / 400 / 429 each produce their own copy, from the relay's real bodies;
  * - "continue without an account" is present and works — registration is
  *   optional by product decision, not by omission.
  */
 describe('SelfCheckoutSignUpComponent', () => {
-  const session: CustomerSessionDto = {
+  /**
+   * What `signUp` actually resolves with: an account and nothing to sign in
+   * with. The email is the gateway's normalized one, deliberately differing in
+   * case from what the form below types, so a test that reads the raw field
+   * instead of this cannot pass by coincidence.
+   */
+  const registration: CustomerRegistrationDto = {
     customerId: 'cust-1',
     email: 'yuzu@example.com',
-    tenantId: 'store-1',
-    roles: ['customer'],
-    permissions: ['sale:process'],
-    accessToken: 'token',
-    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
   };
 
   /** The relay's real 409 body (`DUPLICATE_EMAIL_MESSAGE`), verbatim. */
@@ -74,7 +80,7 @@ describe('SelfCheckoutSignUpComponent', () => {
 
   function fill(fixture: { componentInstance: SelfCheckoutSignUpComponent }): void {
     fixture.componentInstance.form.setValue({
-      email: 'yuzu@example.com',
+      email: 'Yuzu@Example.com',
       password: 'sup3rsecret',
     });
   }
@@ -93,29 +99,51 @@ describe('SelfCheckoutSignUpComponent', () => {
   }
 
   describe('success', () => {
-    it('publishes the session on CurrentCustomerService and routes to the interstitial', async () => {
-      const gateway = makeGateway(vi.fn().mockResolvedValue(session));
+    it('routes to the interstitial with the address the gateway registered', async () => {
+      const gateway = makeGateway(vi.fn().mockResolvedValue(registration));
       const fixture = await createComponent(gateway);
-      const router = TestBed.inject(Router);
-      const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(true);
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+
+      fill(fixture);
+      await submit(fixture);
+
+      // Raw field value out: normalizing the address is the adapter's job, and
+      // duplicating it here would be a second, drifting implementation of it.
+      expect(gateway.signUp).toHaveBeenCalledWith({
+        email: 'Yuzu@Example.com',
+        password: 'sup3rsecret',
+      });
+      // ...and the *registered* address back in, lowercased by the gateway. The
+      // typed casing differs, so reading `form.value.email` instead fails here.
+      expect(navigate).toHaveBeenCalledWith([CHECK_EMAIL_ROUTE], {
+        queryParams: { email: 'yuzu@example.com' },
+      });
+    });
+
+    it('leaves the customer signed OUT — no session is invented', async () => {
+      // The rule item 3 established (a just-created account is `PENDING` and
+      // cannot complete a password grant), enforced at this layer: there is no
+      // session in a `CustomerRegistrationDto`, and assembling one locally would
+      // flip `isAuthenticated()` true for an account that cannot authenticate.
+      // Re-adding a `setSession(...)` call fails this test.
+      const gateway = makeGateway(vi.fn().mockResolvedValue(registration));
+      const fixture = await createComponent(gateway);
+      vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
       const customer = TestBed.inject(CurrentCustomerService);
 
       fill(fixture);
       await submit(fixture);
 
-      expect(gateway.signUp).toHaveBeenCalledWith({
-        email: 'yuzu@example.com',
-        password: 'sup3rsecret',
-      });
-      // The SERVICE, not just the gateway — a missing setSession() is the bug.
-      expect(customer.session()).toEqual(session);
-      expect(navigate).toHaveBeenCalledWith(['/self-checkout/check-email'], {
-        queryParams: { email: 'yuzu@example.com' },
-      });
+      expect(customer.session()).toBeNull();
+      expect(customer.isAuthenticated()).toBe(false);
+      // And no sign-in attempt behind the customer's back either — the grant
+      // that would make is the one App ID answers `403 "Pending user
+      // verification"` to.
+      expect(gateway.authenticate).not.toHaveBeenCalled();
     });
 
     it('never routes to the lane as if the customer were signed in', async () => {
-      const gateway = makeGateway(vi.fn().mockResolvedValue(session));
+      const gateway = makeGateway(vi.fn().mockResolvedValue(registration));
       const fixture = await createComponent(gateway);
       const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
 
@@ -123,11 +151,11 @@ describe('SelfCheckoutSignUpComponent', () => {
       await submit(fixture);
 
       expect(navigate).toHaveBeenCalledTimes(1);
-      expect(navigate.mock.calls[0][0]).toEqual(['/self-checkout/check-email']);
+      expect(navigate.mock.calls[0][0]).toEqual([CHECK_EMAIL_ROUTE]);
     });
 
     it('does not call the gateway while the form is invalid', async () => {
-      const gateway = makeGateway(vi.fn().mockResolvedValue(session));
+      const gateway = makeGateway(vi.fn().mockResolvedValue(registration));
       const fixture = await createComponent(gateway);
 
       await submit(fixture);
@@ -212,40 +240,7 @@ describe('SelfCheckoutSignUpComponent', () => {
         ) as HTMLButtonElement
       ).click();
 
-      expect(navigate).toHaveBeenCalledWith(['/self-checkout']);
-    });
-  });
-
-  describe('the guard on this route', () => {
-    it('redirects a customer who already has a session', () => {
-      TestBed.configureTestingModule({
-        providers: [
-          provideRouter([]),
-          { provide: CUSTOMER_AUTH_GATEWAY, useValue: makeGateway(vi.fn()) },
-          CurrentCustomerService,
-        ],
-      });
-      TestBed.inject(CurrentCustomerService).setSession(session);
-
-      const guard = redirectIfAuthenticatedGuard(CurrentCustomerService, '/self-checkout');
-      const result = TestBed.runInInjectionContext(() => guard(null as never, null as never));
-
-      expect(String(result)).toBe('/self-checkout');
-    });
-
-    it('lets a customer with no session through', () => {
-      TestBed.configureTestingModule({
-        providers: [
-          provideRouter([]),
-          { provide: CUSTOMER_AUTH_GATEWAY, useValue: makeGateway(vi.fn()) },
-          CurrentCustomerService,
-        ],
-      });
-
-      const guard = redirectIfAuthenticatedGuard(CurrentCustomerService, '/self-checkout');
-      const result = TestBed.runInInjectionContext(() => guard(null as never, null as never));
-
-      expect(result).toBe(true);
+      expect(navigate).toHaveBeenCalledWith([LANE_ROUTE]);
     });
   });
 });

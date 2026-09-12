@@ -79,6 +79,26 @@ function mentionsExistingAccount(message: string): boolean {
 }
 
 /**
+ * The relay's own policy wording (`PASSWORD_POLICY_MESSAGE`: "does not meet the
+ * password policy for this store"), matched as a phrase rather than on the bare
+ * word "password".
+ *
+ * That looseness is what let `403 "Invalid email or password"` — the refusal a
+ * `PENDING` account's password grant produced — be read here as a rejected
+ * password, telling the customer to change something that was never wrong. The
+ * grant is gone (`AppIdCustomerAuthAdapter.signUp` no longer chases the `201`),
+ * so nothing sends that message today; the narrow phrase is what stops the *next*
+ * stray error mentioning a password from acquiring policy copy by accident.
+ *
+ * Needed at all because a real `400` usually carries no readable status: the
+ * relay's body is the policy sentence itself, not `... returned 400`, so
+ * {@link statusOf} finds nothing to parse and the wording is all there is.
+ */
+function mentionsPasswordPolicy(message: string): boolean {
+  return /password (?:policy|rules|requirements)/i.test(message);
+}
+
+/**
  * Classify a failed `signUp` into the copy the form shows.
  *
  * Deliberately total: an unrecognised failure (transport, missing relay config)
@@ -96,7 +116,7 @@ export function describeSignUpRefusal(error: unknown): SignUpRefusalCopy {
     return { message: RATE_LIMITED_COPY, detail: null, alreadyRegistered: false };
   }
 
-  if (status === 400 || /password/i.test(message)) {
+  if (status === 400 || (status === null && mentionsPasswordPolicy(message))) {
     return { message: POLICY_COPY, detail: policyDetail(message), alreadyRegistered: false };
   }
 

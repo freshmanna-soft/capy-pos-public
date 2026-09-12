@@ -1,36 +1,39 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
-import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
+import { CHECK_EMAIL_ROUTE, LANE_ROUTE } from './self-checkout-routes';
 import { describeSignUpRefusal, SignUpRefusalCopy } from './self-checkout-signup-errors';
-
-/** Where a created-but-unverified account is sent (Epic #261 item 17, issue #311). */
-export const CHECK_EMAIL_ROUTE = '/self-checkout/check-email';
-
-/** The lane itself — the "keep shopping without an account" destination. */
-export const LANE_ROUTE = '/self-checkout';
 
 /**
  * SelfCheckoutSignUpComponent (Epic #261 item 16)
  *
  * The customer's own sign-up form, on the self-checkout lane.
  *
- * **It calls the gateway, then tells the service.** `CUSTOMER_AUTH_GATEWAY` is
- * injected and `signUp()` called here; `CurrentCustomerService.setSession()` is
- * called after it resolves so the service's `session`/`isAuthenticated` signals
- * update. That split is the one `LoginComponent` already uses with
- * `CurrentUserService.setSession()`, and `setSession`'s own doc comment names
- * this form as its caller — the point being that the error handling below stays
- * out of the service. No `signUp`/`authenticate` method is added to the service.
+ * **A successful sign-up does not sign anyone in — and there is no session to
+ * publish.** Item 3 established empirically (2026-09-11) that a freshly created
+ * App ID account is `PENDING` and cannot complete a password grant: App ID
+ * answers `403 "Pending user verification"`. So the relay's `201` carries an id
+ * and an email and no token, and `CUSTOMER_AUTH_GATEWAY.signUp()` now returns a
+ * `CustomerRegistrationDto` to match.
  *
- * **A successful sign-up does not sign anyone in.** Item 3 established
- * empirically (2026-09-11) that a freshly created App ID account is `PENDING`
- * and cannot complete a password grant — App ID answers
- * `403 "Pending user verification"` — so the relay's `201` carries an id and an
- * email and no token. This screen therefore never shows a signed-in state: on
- * success it routes to the "check your email" interstitial and says nothing
- * about a session existing.
+ * That is a deliberate departure from #309's wording, which asked for
+ * `CurrentCustomerService.setSession(session)` on success. There is nothing to
+ * pass it. `signUp` used to satisfy its `Promise<CustomerSessionDto>` by
+ * chasing the `201` with a password grant — the grant item 3 proved always
+ * fails — so this form's success path was unreachable against any real tenant,
+ * and the 403 arrived here wearing the wrong copy ("Invalid email or password"
+ * classified as a password-policy refusal). The alternative, handing
+ * `setSession` a session assembled locally, is worse than useless: it flips
+ * `isAuthenticated()` to true for an account that cannot authenticate, arms the
+ * expiry timer against a made-up `expiresAt`, and is exactly the invented
+ * signed-in state #309 forbids two paragraphs later. So the gateway → service
+ * split #309 is protecting is honoured by the one part of it that is real: this
+ * form owns the error copy and adds no `signUp`/`authenticate` method to
+ * `CurrentCustomerService`. The service is still what guards this route — the
+ * customer identity providers sit on the parent `self-checkout` route so the
+ * guard, the lane and this form share one instance (see `app.routes.ts`) — and
+ * item 18's sign-in form is what will call `setSession`, with a real session.
  *
  * **Registration is optional, and this screen has to say so.** Per the
  * 2026-09-11 product decision (options 1+3) an account is never required to
@@ -52,7 +55,6 @@ export const LANE_ROUTE = '/self-checkout';
 })
 export class SelfCheckoutSignUpComponent {
   private readonly gateway = inject(CUSTOMER_AUTH_GATEWAY);
-  private readonly currentCustomer = inject(CurrentCustomerService);
   private readonly router = inject(Router);
   private readonly fb = inject(FormBuilder);
 
@@ -70,12 +72,11 @@ export class SelfCheckoutSignUpComponent {
   protected readonly offerSignIn = computed(() => this.refusal()?.alreadyRegistered === true);
 
   /**
-   * Create the account.
+   * Create the account, then send the customer to the interstitial.
    *
-   * The tail is deliberately "publish the session, then navigate to the
-   * interstitial": `setSession` is what keeps the service's signals current for
-   * anything downstream, and the interstitial is what the customer sees, because
-   * the account cannot be used until it is verified.
+   * The email carried across is the one the *gateway* normalized and registered,
+   * not the raw field value, so the interstitial names the inbox the
+   * verification mail actually went to.
    */
   protected async submit(): Promise<void> {
     if (this.form.invalid || this.submitting()) {
@@ -88,9 +89,13 @@ export class SelfCheckoutSignUpComponent {
     this.refusal.set(null);
 
     try {
-      const session = await this.gateway.signUp({ email: email ?? '', password: password ?? '' });
-      this.currentCustomer.setSession(session);
-      await this.router.navigate([CHECK_EMAIL_ROUTE], { queryParams: { email: email ?? '' } });
+      const registration = await this.gateway.signUp({
+        email: email ?? '',
+        password: password ?? '',
+      });
+      await this.router.navigate([CHECK_EMAIL_ROUTE], {
+        queryParams: { email: registration.email },
+      });
     } catch (error) {
       this.refusal.set(describeSignUpRefusal(error));
     } finally {

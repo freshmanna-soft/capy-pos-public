@@ -460,25 +460,49 @@ describe('AppIdCustomerAuthAdapter', () => {
   });
 
   describe('signUp', () => {
-    it('registers on the relay sign-up route, then signs the new customer in', async () => {
-      const accessToken = await mintCustomerToken();
+    it('registers on the relay sign-up route and returns the created account', async () => {
       const fetchMock = installFetch({
         signUpResult: { id: 'customer-abc', email: 'shopper@capy.test' },
-        tokenResult: { access_token: accessToken, refresh_token: 'r' },
       });
       const adapter = makeAdapter();
 
-      const session = await adapter.signUp({ email: ' Shopper@Capy.Test ', password: 'pw' });
+      const registration = await adapter.signUp({ email: ' Shopper@Capy.Test ', password: 'pw' });
 
       const urls = fetchMock.mock.calls.map((c) => String(c[0]));
       expect(urls[0]).toBe(CUSTOMER_SIGN_UP_URL);
-      expect(urls).toContain(CUSTOMER_RELAY_URL);
       expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({
         email: 'shopper@capy.test',
         password: 'pw',
       });
-      expect(session.customerId).toBe('customer-abc');
-      expect(adapter.getAccessToken()).toBe(accessToken);
+      expect(registration).toEqual({ customerId: 'customer-abc', email: 'shopper@capy.test' });
+    });
+
+    it('does NOT chase the 201 with a password grant, and stores no token', async () => {
+      // Item 3 (2026-09-11): the account this route just created is `PENDING`,
+      // so a password grant against it is answered `403 "Pending user
+      // verification"` — every time. Attempting it could only turn a successful
+      // registration into a refusal, which is what made item 16's success path
+      // unreachable. Deleting the mutation this pins (re-adding the exchange)
+      // must fail here, not surface as odd copy three layers up.
+      const fetchMock = installFetch({
+        signUpResult: { id: 'customer-abc', email: 'shopper@capy.test' },
+      });
+      const adapter = makeAdapter();
+
+      await adapter.signUp({ email: 'shopper@capy.test', password: 'pw' });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls.map((c) => String(c[0]))).not.toContain(CUSTOMER_RELAY_URL);
+      expect(adapter.getAccessToken()).toBeNull();
+    });
+
+    it('falls back to the address it sent when the relay echoes none back', async () => {
+      installFetch({ signUpResult: { id: 'customer-abc' } });
+      const adapter = makeAdapter();
+
+      const registration = await adapter.signUp({ email: ' Shopper@Capy.Test ', password: 'pw' });
+
+      expect(registration.email).toBe('shopper@capy.test');
     });
 
     it('throws the relay error verbatim — mapping to copy is the form’s job', async () => {
@@ -506,7 +530,7 @@ describe('AppIdCustomerAuthAdapter', () => {
       );
     });
 
-    it('does not attempt sign-in when registration failed', async () => {
+    it('does not reach the token route when registration failed', async () => {
       const fetchMock = installFetch({ signUpResult: { error: 'nope' }, signUpStatus: 400 });
       const adapter = makeAdapter();
 

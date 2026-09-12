@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { LANE_ROUTE } from './self-checkout-signup.component';
+import { LANE_ROUTE } from './self-checkout-routes';
 
 /**
  * SelfCheckoutCheckEmailComponent — placeholder for Epic #261 item 17 (#311).

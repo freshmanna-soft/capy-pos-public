@@ -5,6 +5,7 @@ import { CurrentCustomerService } from '@core/application/auth/current-customer.
 import { redirectIfAuthenticatedGuard } from '@core/presentation/guards/redirect-if-authenticated.guard';
 import { AppIdCustomerAuthAdapter } from '@core/infrastructure/auth/appid-customer-auth.adapter';
 import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palette';
+import { LANE_ROUTE } from '@features/self-checkout/self-checkout-routes';
 
 export const routes: Routes = [
   {
@@ -35,84 +36,98 @@ export const routes: Routes = [
     title: 'Capy Clerk · Capy-POS',
   },
   {
-    // The customer's own sign-up form (epic #261 item 16) and the interstitial it
-    // lands on (item 17's placeholder). Listed BEFORE `self-checkout` on purpose:
-    // that route has no `children`, so relying on prefix-match backtracking to
-    // reach these would work only by accident of ordering. Siblings, not children,
-    // because the lane's shell owns a full-screen takeover and its own cart, and
-    // neither belongs to a form the customer reaches *instead of* scanning.
+    // The customer-facing self-checkout family: the lane, plus the two side
+    // paths epic #261 items 16/17 add. Its own top-level route like /clerk, and
+    // deliberately WITHOUT `authGuard`: that guard is the staff session, and the
+    // whole point of this lane is a customer identity.
     //
-    // Each carries its own copy of the customer identity providers for the same
-    // reason the lane does: a route-level `providers` array is the only scope in
-    // which `CUSTOMER_AUTH_GATEWAY` resolves, and `CurrentCustomerService` is
-    // route-provided too so the session dies with the flow rather than outliving
-    // it in the root injector.
-    path: 'self-checkout/sign-up',
-    canActivate: [redirectIfAuthenticatedGuard(CurrentCustomerService, '/self-checkout')],
-    loadComponent: () =>
-      import('./features/self-checkout/self-checkout-signup.component').then(
-        (m) => m.SelfCheckoutSignUpComponent
-      ),
-    providers: [
-      { provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter },
-      CurrentCustomerService,
-    ],
-    title: 'Create an Account · Capy-POS',
-  },
-  {
-    // Deliberately NOT behind `redirectIfAuthenticatedGuard`: sign-up publishes the
-    // session via `setSession()` before routing here, and a freshly created account
-    // is `PENDING` anyway — bouncing the customer off the one screen that explains
-    // that is the opposite of what item 17 is for.
-    path: 'self-checkout/check-email',
-    loadComponent: () =>
-      import('./features/self-checkout/self-checkout-check-email.component').then(
-        (m) => m.SelfCheckoutCheckEmailComponent
-      ),
-    providers: [
-      { provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter },
-      CurrentCustomerService,
-    ],
-    title: 'Check Your Email · Capy-POS',
-  },
-  {
-    // The customer-facing self-checkout lane. Its own top-level route, like
-    // /clerk, and deliberately WITHOUT `authGuard`: that guard is the staff
-    // session, and the whole point of this lane is a customer identity.
+    // A component-less parent with `children`, not three sibling routes, and
+    // that is the load-bearing part rather than tidiness. A route-level
+    // `providers` array creates ONE environment injector for the route and
+    // everything beneath it, so declaring the customer identity here gives the
+    // guard, the form, the interstitial and the lane the same
+    // `CurrentCustomerService` — one identity, one holder. As siblings each
+    // carried its own copy, which meant three instances: a session published on
+    // one was invisible to the next screen, and `redirectIfAuthenticatedGuard`
+    // resolved a fourth, permanently-null instance and could never fire. The
+    // sibling shape cannot be repaired by ordering; only a shared injector
+    // fixes it, which is what this is.
+    //
+    // `CurrentCustomerService` belongs beside the gateway binding for the reason
+    // its own doc comment gives — it is `@Injectable()` and not
+    // `providedIn: 'root'` precisely so the customer session dies with the route
+    // subtree instead of outliving it in the root injector, and so nothing
+    // outside self-checkout can consult a customer identity for authorization.
     path: 'self-checkout',
-    loadComponent: () =>
-      import('./features/self-checkout/self-checkout.component').then(
-        (m) => m.SelfCheckoutComponent
-      ),
     // The customer identity seam (epic #261 item 13), bound HERE and nowhere
     // else. Not in `auth.providers.ts` beside the staff `AUTH_GATEWAY`, and not
-    // root-provided: a route-level `providers` array gives this route subtree its
-    // own environment injector, so `CUSTOMER_AUTH_GATEWAY` is unresolvable from
-    // the application's root injector and nothing outside /self-checkout can
-    // resolve a customer identity by accident. `customer-auth-gateway.port.ts`'s
-    // own header states that requirement; `app.routes.spec.ts` asserts it against
-    // an injector built from the real `appConfig.providers`, because a bare
-    // TestBed injector would report the token absent either way.
+    // root-provided: `CUSTOMER_AUTH_GATEWAY` is unresolvable from the
+    // application's root injector and nothing outside /self-checkout can resolve
+    // a customer identity by accident. `customer-auth-gateway.port.ts`'s own
+    // header states that requirement; `app.routes.spec.ts` asserts it against an
+    // injector built from the real `appConfig.providers`, because a bare TestBed
+    // injector would report the token absent either way.
     //
     // `InMemoryCustomerAuthAdapter` is untouched and still what specs provide.
     //
     // What it does NOT buy is a smaller self-checkout download. Measured, not
     // assumed (`npm run build`, then grepping the emitted chunks for each
     // adapter's `sessionStorage` key): both App ID adapters sit in the *initial*
-    // bundle — the customer one because of the static import right below. That is
+    // bundle — the customer one because of the static import above. That is
     // inherent to binding a class in the eagerly-evaluated root route table;
-    // getting it into the lazy chunk would take `loadChildren`, which the spec
-    // above deliberately forbids here. The self-checkout chunk and its whole
-    // transitive closure contain neither adapter and no `jose`, which is what
-    // item 11's review asked to confirm — but they never did contain them, so
-    // extracting `APPID_CONFIG` into `appid-config.ts` moves no bytes today.
-    // What it does remove is the customer→staff-adapter import edge, so this
-    // route's graph stops depending on the staff adapter before that coupling can
-    // start costing anything (a `loadChildren` boundary here, a customer-only
-    // build, a customer adapter that outgrows one file).
+    // getting it into a lazy chunk would take `loadChildren`, which the spec
+    // deliberately forbids here (inline `children` below share this injector;
+    // `loadChildren` would not let the guard reach it as directly). The
+    // self-checkout chunks and their whole transitive closure contain neither
+    // adapter and no `jose`, which is what item 11's review asked to confirm —
+    // but they never did contain them, so extracting `APPID_CONFIG` into
+    // `appid-config.ts` moves no bytes today. What it does remove is the
+    // customer→staff-adapter import edge, so this route's graph stops depending
+    // on the staff adapter before that coupling can start costing anything.
     // `appid-customer-auth.import-graph.spec.ts` is what keeps the edge gone.
-    providers: [{ provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter }],
-    title: SELF_CHECKOUT_TITLE,
+    providers: [
+      { provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter },
+      CurrentCustomerService,
+    ],
+    children: [
+      {
+        // The customer's own sign-up form (epic #261 item 16). Guarded so an
+        // already signed-in customer is sent back to the lane instead of a form
+        // they have no use for — reading the very instance the lane writes,
+        // which only holds because the providers above are the parent's.
+        path: 'sign-up',
+        canActivate: [redirectIfAuthenticatedGuard(CurrentCustomerService, LANE_ROUTE)],
+        loadComponent: () =>
+          import('./features/self-checkout/self-checkout-signup.component').then(
+            (m) => m.SelfCheckoutSignUpComponent
+          ),
+        title: 'Create an Account · Capy-POS',
+      },
+      {
+        // Item 17's placeholder (#311). Deliberately NOT behind
+        // `redirectIfAuthenticatedGuard`: the account that lands here is
+        // `PENDING`, and bouncing the customer off the one screen that explains
+        // that is the opposite of what item 17 is for.
+        path: 'check-email',
+        loadComponent: () =>
+          import('./features/self-checkout/self-checkout-check-email.component').then(
+            (m) => m.SelfCheckoutCheckEmailComponent
+          ),
+        title: 'Check Your Email · Capy-POS',
+      },
+      {
+        // The lane. `pathMatch: 'full'` rather than relying on the router
+        // backtracking out of a prefix match, so /self-checkout/sign-up cannot
+        // resolve here by accident of child ordering.
+        path: '',
+        pathMatch: 'full',
+        loadComponent: () =>
+          import('./features/self-checkout/self-checkout.component').then(
+            (m) => m.SelfCheckoutComponent
+          ),
+        title: SELF_CHECKOUT_TITLE,
+      },
+    ],
   },
   {
     path: 'inventory',
