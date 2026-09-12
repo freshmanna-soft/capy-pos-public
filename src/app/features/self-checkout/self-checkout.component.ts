@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { PosFacade } from '@core/application/facades/pos.facade';
 import { CartService } from '@core/application/services/cart.service';
+import { SIGN_UP_ROUTE } from './self-checkout-routes';
 import { SELF_CHECKOUT_TITLE } from './self-checkout-palette';
 import { SelfCheckoutScanComponent } from './self-checkout-scan.component';
 
@@ -64,6 +65,17 @@ export class SelfCheckoutComponent {
    * opens the lane on a shared terminal has no exit but the browser chrome,
    * which a kiosk build does not show.
    */
+  /**
+   * The side path to the sign-up form (epic #261 item 16).
+   *
+   * A `Router.navigate` rather than a `routerLink`, so the shell keeps needing no
+   * `ActivatedRoute` — the lane is smoked and unit-tested outside a router
+   * context, and a link would make every one of those specs need one.
+   */
+  protected goToSignUp(): void {
+    void this.router.navigate([SIGN_UP_ROUTE]);
+  }
+
   protected exit(): void {
     void this.router.navigate(['/pos']);
   }

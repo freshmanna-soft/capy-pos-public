@@ -460,25 +460,67 @@ describe('AppIdCustomerAuthAdapter', () => {
   });
 
   describe('signUp', () => {
-    it('registers on the relay sign-up route, then signs the new customer in', async () => {
-      const accessToken = await mintCustomerToken();
+    it('registers on the relay sign-up route and returns the created account', async () => {
       const fetchMock = installFetch({
         signUpResult: { id: 'customer-abc', email: 'shopper@capy.test' },
-        tokenResult: { access_token: accessToken, refresh_token: 'r' },
       });
       const adapter = makeAdapter();
 
-      const session = await adapter.signUp({ email: ' Shopper@Capy.Test ', password: 'pw' });
+      const registration = await adapter.signUp({ email: ' Shopper@Capy.Test ', password: 'pw' });
 
       const urls = fetchMock.mock.calls.map((c) => String(c[0]));
       expect(urls[0]).toBe(CUSTOMER_SIGN_UP_URL);
-      expect(urls).toContain(CUSTOMER_RELAY_URL);
       expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({
         email: 'shopper@capy.test',
         password: 'pw',
       });
-      expect(session.customerId).toBe('customer-abc');
-      expect(adapter.getAccessToken()).toBe(accessToken);
+      expect(registration).toEqual({ customerId: 'customer-abc', email: 'shopper@capy.test' });
+    });
+
+    it('does NOT chase the 201 with a password grant, and stores no token', async () => {
+      // Item 3 (2026-09-11): the account this route just created is `PENDING`,
+      // so a password grant against it is answered `403 "Pending user
+      // verification"` — every time. Attempting it could only turn a successful
+      // registration into a refusal, which is what made item 16's success path
+      // unreachable. Deleting the mutation this pins (re-adding the exchange)
+      // must fail here, not surface as odd copy three layers up.
+      const fetchMock = installFetch({
+        signUpResult: { id: 'customer-abc', email: 'shopper@capy.test' },
+      });
+      const adapter = makeAdapter();
+
+      await adapter.signUp({ email: 'shopper@capy.test', password: 'pw' });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls.map((c) => String(c[0]))).not.toContain(CUSTOMER_RELAY_URL);
+      expect(adapter.getAccessToken()).toBeNull();
+    });
+
+    it('falls back to the address it sent when the relay echoes none back', async () => {
+      installFetch({ signUpResult: { id: 'customer-abc' } });
+      const adapter = makeAdapter();
+
+      const registration = await adapter.signUp({ email: ' Shopper@Capy.Test ', password: 'pw' });
+
+      expect(registration.email).toBe('shopper@capy.test');
+    });
+
+    it('invents no account id when the relay sends none, and still reports the address', async () => {
+      // The other half of the asymmetry, and the reason it is asymmetric: the
+      // address has a local truth to fall back on (the one this adapter just
+      // normalized and sent), an id has none. It used to be `data.id ?? ''` — an
+      // identity that type-checks like a real `sub` and resolves to nobody, on the
+      // very field the relay calls "the `sub` every later call about this customer
+      // keys off". Absent, not empty; and not thrown either, because the account
+      // exists by the time the relay says `201`.
+      installFetch({ signUpResult: { email: 'shopper@capy.test' } });
+      const adapter = makeAdapter();
+
+      const registration = await adapter.signUp({ email: 'Shopper@Capy.Test', password: 'pw' });
+
+      expect(registration.customerId).toBeUndefined();
+      expect(registration.customerId).not.toBe('');
+      expect(registration.email).toBe('shopper@capy.test');
     });
 
     it('throws the relay error verbatim — mapping to copy is the form’s job', async () => {
@@ -497,6 +539,40 @@ describe('AppIdCustomerAuthAdapter', () => {
       await expect(adapter.signUp({ email: 'a@b.com', password: 'pw' })).rejects.toThrow(/502/);
     });
 
+    /**
+     * The status travels as a number, beside the sentence rather than inside it.
+     *
+     * The sign-up form classifies 409/400/429 into its own copy, and it used to
+     * recover the status by scraping three digits out of the message — which is
+     * unsound the moment the message is App ID's own policy prose, because that
+     * prose quotes bounds ("between 8 and 100 characters"). Dropping this
+     * argument puts the form back on the sentence.
+     */
+    it.each([409, 400, 429])('attaches the relay status %i to what it throws', async (status) => {
+      installFetch({ signUpResult: { error: 'refused' }, signUpStatus: status });
+      const adapter = makeAdapter();
+
+      const error = await adapter
+        .signUp({ email: 'a@b.com', password: 'pw' })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(AppIdAuthError);
+      expect((error as AppIdAuthError).status).toBe(status);
+    });
+
+    it('carries no status for a transport failure — nothing answered', async () => {
+      // A `fetch` that never got a response has no status to report, and `0` or
+      // `500` would both be an invention the form would then classify.
+      installFetch({ signUpThrow: true });
+      const adapter = makeAdapter();
+
+      const error = await adapter
+        .signUp({ email: 'a@b.com', password: 'pw' })
+        .catch((e: unknown) => e);
+
+      expect((error as AppIdAuthError).status).toBeNull();
+    });
+
     it('wraps a sign-up transport failure in AppIdAuthError', async () => {
       installFetch({ signUpThrow: true });
       const adapter = makeAdapter();
@@ -506,7 +582,7 @@ describe('AppIdCustomerAuthAdapter', () => {
       );
     });
 
-    it('does not attempt sign-in when registration failed', async () => {
+    it('does not reach the token route when registration failed', async () => {
       const fetchMock = installFetch({ signUpResult: { error: 'nope' }, signUpStatus: 400 });
       const adapter = makeAdapter();
 

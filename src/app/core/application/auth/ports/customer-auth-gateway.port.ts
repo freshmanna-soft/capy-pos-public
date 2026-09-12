@@ -1,5 +1,6 @@
 import { InjectionToken } from '@angular/core';
 import { CredentialsDto } from '../dtos/credentials.dto';
+import { CustomerRegistrationDto } from '../dtos/customer-registration.dto';
 import { CustomerSessionDto } from '../dtos/customer-session.dto';
 
 /**
@@ -26,11 +27,22 @@ import { CustomerSessionDto } from '../dtos/customer-session.dto';
  */
 export interface CustomerAuthGateway {
   /**
-   * Self-register a new customer and return a signed session for them.
+   * Self-register a new customer and return the account that was created.
+   *
+   * Returns a {@link CustomerRegistrationDto}, **not** a session, and this is
+   * load-bearing rather than a convenience: item 3 proved empirically
+   * (2026-09-11) that an account App ID has just created is `PENDING` and
+   * cannot complete a password grant until it is confirmed by email — App ID
+   * answers `403 "Pending user verification"`. A `signUp` that promised a
+   * session could therefore only ever have delivered one by attempting that
+   * grant, which always fails, making its own success path unreachable. The
+   * caller's job after this resolves is item 17's "check your email"
+   * interstitial, not a signed-in lane.
+   *
    * Throws `CustomerAlreadyExistsError`-style backend errors verbatim — the
    * sign-up form (epic item 16) is what maps them to copy, not this port.
    */
-  signUp(creds: CredentialsDto): Promise<CustomerSessionDto>;
+  signUp(creds: CredentialsDto): Promise<CustomerRegistrationDto>;
 
   /**
    * Validate credentials and return a signed session.
