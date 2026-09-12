@@ -58,10 +58,50 @@ describe('describeSignUpRefusal', () => {
       expect(describeSignUpRefusal(new Error(RELAY_400)).detail).toBeNull();
     });
 
-    it('is classified from an explicitly carried status even when the body is unreadable', () => {
-      const refusal = describeSignUpRefusal(Object.assign(new Error('nope'), { status: 400 }));
+    /**
+     * The regression this file exists for after round 2.
+     *
+     * `statusOf` used to scrape any `\b\d{3}\b` out of the whole message, and App
+     * ID's explanation is forwarded verbatim — so a policy that states its own
+     * bounds ("between 8 and 100 characters", "at least 128 characters") was read
+     * as status 100 or 128. Neither is 400 and neither is null, so the policy
+     * branch was skipped and the customer was told to "try again" on a password
+     * that would be refused identically every time, with the one sentence saying
+     * what to change thrown away. Parameterised over both bound positions because
+     * the old regex took the *first* number in the string either way.
+     */
+    it.each([
+      ['a lower and an upper bound', 'Password must be between 8 and 100 characters.'],
+      ['an upper bound alone', 'Password must be at most 128 characters long.'],
+      ['a three-digit minimum', 'Password must be at least 100 characters.'],
+      ['a bound and a digit rule', 'Must be 8 to 256 characters and contain a digit.'],
+    ])('keeps policy copy and detail when the explanation quotes %s', (_label, explanation) => {
+      const refusal = describeSignUpRefusal(new Error(`${RELAY_400} ${explanation}`));
 
       expect(refusal.message).toContain('password rules');
+      expect(refusal.detail).toBe(explanation);
+      expect(refusal.alreadyRegistered).toBe(false);
+    });
+
+    it('is classified from the status the adapter attached, corroborated by the wording', () => {
+      // Both channels, which is the shape a real refusal arrives in:
+      // `AppIdAuthError` carries `status`, and the body is the policy sentence.
+      const refusal = describeSignUpRefusal(Object.assign(new Error(RELAY_400), { status: 400 }));
+
+      expect(refusal.message).toContain('password rules');
+    });
+
+    it('does NOT put password copy on a 400 that is not about the password', () => {
+      // The relay answers 400 for its own request validation as well
+      // (`customer-signup-validate.ts`), so the status alone cannot mean "policy".
+      // Telling a shopper their password broke a rule sends them to fix the wrong
+      // field — and the address, which is the thing to fix, is never mentioned.
+      const refusal = describeSignUpRefusal(
+        Object.assign(new Error('email must be a valid email address.'), { status: 400 })
+      );
+
+      expect(refusal.message).not.toContain('password rules');
+      expect(refusal.message).toContain('could not create your account');
       expect(refusal.detail).toBeNull();
     });
   });
@@ -83,15 +123,33 @@ describe('describeSignUpRefusal', () => {
     });
   });
 
-  it('says something neutral for the content-free 429, and invents no reason', () => {
-    // Item 8c's limiter answers with an empty body on purpose, so the adapter's
-    // `Customer sign-up returned 429` fallback is all there is to read.
-    const refusal = describeSignUpRefusal(new Error('Customer sign-up returned 429'));
+  describe('the content-free 429', () => {
+    it('says something neutral from the attached status, and invents no reason', () => {
+      const refusal = describeSignUpRefusal(Object.assign(new Error(''), { status: 429 }));
 
-    expect(refusal.message).toContain('try again shortly');
-    expect(refusal.message).not.toContain('429');
-    expect(refusal.message).not.toMatch(/password|email|account/i);
-    expect(refusal.alreadyRegistered).toBe(false);
+      expect(refusal.message).toContain('try again shortly');
+      expect(refusal.message).not.toContain('429');
+      expect(refusal.message).not.toMatch(/password|email|account/i);
+      expect(refusal.alreadyRegistered).toBe(false);
+    });
+
+    it('is still classified from the adapter’s no-body message alone', () => {
+      // Item 8c's limiter answers with an empty body on purpose, so the adapter's
+      // `Customer sign-up returned 429` fallback can be all there is to read —
+      // the one message shape a status is still parsed out of.
+      expect(describeSignUpRefusal(new Error('Customer sign-up returned 429')).message).toContain(
+        'try again shortly'
+      );
+    });
+
+    it('does not read a status out of a sentence that merely contains that wording', () => {
+      // Start-anchored: prose is never a status channel, however it is worded.
+      const refusal = describeSignUpRefusal(
+        new Error('App ID said: Customer sign-up returned 429 to another shopper')
+      );
+
+      expect(refusal.message).toContain('could not create your account');
+    });
   });
 
   describe('is total — nothing raw ever reaches the customer', () => {

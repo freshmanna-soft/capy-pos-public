@@ -8,11 +8,19 @@
  * function is what lets each reason be asserted without a fixture.
  *
  * The gateway (`AppIdCustomerAuthAdapter.signUp`) rethrows the relay's `error`
- * string verbatim, and falls back to `Customer sign-up returned <status>` when
- * the body carries nothing — which is exactly the 429 case, whose body is
- * deliberately content-free. So classification reads, in order: an explicit
- * numeric `status` if the error carries one, the status embedded in that
- * fallback message, then the relay's own wording.
+ * string verbatim and attaches the HTTP status it arrived with, falling back to
+ * `Customer sign-up returned <status>` for a body that carries nothing — which is
+ * exactly the 429 case, whose body is deliberately content-free.
+ *
+ * So classification reads the status first and the wording second, and the two
+ * are combined the way the relay itself combines them (`signupRefusal`: "the
+ * status **and** the wording, in that order — so no wording on its own can turn
+ * an outage into an answer"). Here the same discipline runs in the other
+ * direction: no *status* on its own turns an unrelated refusal into password
+ * copy. The relay answers `400` for its own request validation too
+ * (`customer-signup-validate.ts`: "email must be a valid email address."), and a
+ * shopper told their password broke a rule when their address was the problem
+ * has been sent to fix the wrong field.
  */
 
 /** What a customer is told, and (for 400) what App ID said they must change. */
@@ -45,13 +53,35 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : typeof error === 'string' ? error : '';
 }
 
-/** The status the relay answered with, when it can be known at all. */
+/**
+ * The adapter's own message for a refusal that carried no body, and the ONLY
+ * message a status is read out of. Start-anchored: prose can contain this
+ * sentence's numbers but cannot begin with its wording.
+ */
+const NO_BODY_FALLBACK = /^Customer sign-up returned (\d{3})\b/;
+
+/**
+ * The status the relay answered with, when it can be known at all.
+ *
+ * Two channels, and deliberately only two: the `status` the adapter attaches to
+ * what it throws, then {@link NO_BODY_FALLBACK} for the one message the adapter
+ * composes itself.
+ *
+ * This used to scan the whole message for `\b\d{3}\b`, and that is a bug with a
+ * name. App ID's policy explanation is forwarded verbatim and routinely quotes
+ * its own bounds, so `"… Password must be between 8 and 100 characters."` was
+ * read as status **100** — neither 400 nor null, so the policy branch was skipped
+ * and `policyDetail` (the only part that says what to change) was dropped, on a
+ * password that will be refused again every time it is retried. Every status a
+ * refusal really carries now arrives as a number, so there is nothing left to
+ * scrape out of a sentence written for a person.
+ */
 function statusOf(error: unknown, message: string): number | null {
   const carried = (error as { status?: unknown } | null)?.status;
   if (typeof carried === 'number') {
     return carried;
   }
-  const embedded = /\b(\d{3})\b/.exec(message);
+  const embedded = NO_BODY_FALLBACK.exec(message.trim());
   return embedded ? Number(embedded[1]) : null;
 }
 
@@ -90,13 +120,21 @@ function mentionsExistingAccount(message: string): boolean {
  * so nothing sends that message today; the narrow phrase is what stops the *next*
  * stray error mentioning a password from acquiring policy copy by accident.
  *
- * Needed at all because a real `400` usually carries no readable status: the
- * relay's body is the policy sentence itself, not `... returned 400`, so
- * {@link statusOf} finds nothing to parse and the wording is all there is.
+ * Required for the policy branch even when the status says `400`, because `400`
+ * is not only the policy refusal: the relay answers it for its own request
+ * validation too ("email must be a valid email address.", "password must be at
+ * most 256 characters."). Status alone would put password-rules copy on an
+ * address the shopper mistyped. The relay's policy body always leads with the
+ * phrase above, so requiring it costs the real case nothing.
  */
 function mentionsPasswordPolicy(message: string): boolean {
   return /password (?:policy|rules|requirements)/i.test(message);
 }
+
+/** `400`, the status the relay refuses a password with (`PASSWORD_POLICY_STATUS`). */
+const REFUSED_STATUS = 400;
+const DUPLICATE_STATUS = 409;
+const RATE_LIMITED_STATUS = 429;
 
 /**
  * Classify a failed `signUp` into the copy the form shows.
@@ -108,15 +146,22 @@ export function describeSignUpRefusal(error: unknown): SignUpRefusalCopy {
   const message = messageOf(error);
   const status = statusOf(error, message);
 
-  if (status === 409 || (status === null && mentionsExistingAccount(message))) {
+  // Tested before the policy branch: `DUPLICATE_EMAIL_MESSAGE` ends with "reset
+  // your password", so a duplicate would otherwise read as a rejected password.
+  if (status === DUPLICATE_STATUS || (status === null && mentionsExistingAccount(message))) {
     return { message: DUPLICATE_COPY, detail: null, alreadyRegistered: true };
   }
 
-  if (status === 429) {
+  // Status only. Item 8c's limiter answers with no body on purpose, so there is
+  // no wording to corroborate and none is wanted.
+  if (status === RATE_LIMITED_STATUS) {
     return { message: RATE_LIMITED_COPY, detail: null, alreadyRegistered: false };
   }
 
-  if (status === 400 || (status === null && mentionsPasswordPolicy(message))) {
+  // Status *and* wording — see {@link mentionsPasswordPolicy}. `null` is allowed
+  // for the status because the real body is the policy sentence itself, never
+  // `... returned 400`, so there is often nothing for {@link statusOf} to read.
+  if ((status === REFUSED_STATUS || status === null) && mentionsPasswordPolicy(message)) {
     return { message: POLICY_COPY, detail: policyDetail(message), alreadyRegistered: false };
   }
 

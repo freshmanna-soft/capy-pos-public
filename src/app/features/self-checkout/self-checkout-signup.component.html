@@ -33,9 +33,23 @@
           type="email"
           formControlName="email"
           autocomplete="email"
+          aria-required="true"
+          [attr.aria-invalid]="emailError() ? 'true' : null"
+          [attr.aria-describedby]="emailError() ? 'signup-email-error' : null"
+          [class.border-tsuba]="emailError()"
           class="mt-2 w-full rounded-xl border border-onsen-surface/60 bg-onsen-water/40 px-4 py-3 text-steam placeholder:text-kelp/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
           data-testid="signup-email"
         />
+        @if (emailError(); as problem) {
+          <p
+            id="signup-email-error"
+            role="alert"
+            class="mt-2 text-sm text-tsuba"
+            data-testid="signup-email-error"
+          >
+            {{ problem }}
+          </p>
+        }
       </div>
 
       <div>
@@ -49,9 +63,23 @@
           type="password"
           formControlName="password"
           autocomplete="new-password"
+          aria-required="true"
+          [attr.aria-invalid]="passwordError() ? 'true' : null"
+          [attr.aria-describedby]="passwordError() ? 'signup-password-error' : null"
+          [class.border-tsuba]="passwordError()"
           class="mt-2 w-full rounded-xl border border-onsen-surface/60 bg-onsen-water/40 px-4 py-3 text-steam placeholder:text-kelp/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
           data-testid="signup-password"
         />
+        @if (passwordError(); as problem) {
+          <p
+            id="signup-password-error"
+            role="alert"
+            class="mt-2 text-sm text-tsuba"
+            data-testid="signup-password-error"
+          >
+            {{ problem }}
+          </p>
+        }
       </div>
 
       @if (refusal(); as problem) {
@@ -78,6 +106,11 @@
 
       <!-- Both actions in one row, same weight class: registration is optional. -->
       <div class="flex flex-col gap-3 pt-2 sm:flex-row">
+        <!--
+          Disabled only while a submit is in flight, deliberately NOT on
+          `form.invalid`: the submit is what names what is wrong, and a button that
+          cannot be pressed explains nothing to the shopper standing at the lane.
+        -->
         <button
           type="submit"
           [disabled]="submitting()"

@@ -521,6 +521,40 @@ describe('AppIdCustomerAuthAdapter', () => {
       await expect(adapter.signUp({ email: 'a@b.com', password: 'pw' })).rejects.toThrow(/502/);
     });
 
+    /**
+     * The status travels as a number, beside the sentence rather than inside it.
+     *
+     * The sign-up form classifies 409/400/429 into its own copy, and it used to
+     * recover the status by scraping three digits out of the message — which is
+     * unsound the moment the message is App ID's own policy prose, because that
+     * prose quotes bounds ("between 8 and 100 characters"). Dropping this
+     * argument puts the form back on the sentence.
+     */
+    it.each([409, 400, 429])('attaches the relay status %i to what it throws', async (status) => {
+      installFetch({ signUpResult: { error: 'refused' }, signUpStatus: status });
+      const adapter = makeAdapter();
+
+      const error = await adapter
+        .signUp({ email: 'a@b.com', password: 'pw' })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(AppIdAuthError);
+      expect((error as AppIdAuthError).status).toBe(status);
+    });
+
+    it('carries no status for a transport failure — nothing answered', async () => {
+      // A `fetch` that never got a response has no status to report, and `0` or
+      // `500` would both be an invention the form would then classify.
+      installFetch({ signUpThrow: true });
+      const adapter = makeAdapter();
+
+      const error = await adapter
+        .signUp({ email: 'a@b.com', password: 'pw' })
+        .catch((e: unknown) => e);
+
+      expect((error as AppIdAuthError).status).toBeNull();
+    });
+
     it('wraps a sign-up transport failure in AppIdAuthError', async () => {
       installFetch({ signUpThrow: true });
       const adapter = makeAdapter();

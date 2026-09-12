@@ -26,7 +26,11 @@ import { SelfCheckoutSignUpComponent } from './self-checkout-signup.component';
  *   calling the factory again here proved only that the factory works;
  * - 409 / 400 / 429 each produce their own copy, from the relay's real bodies;
  * - "continue without an account" is present and works — registration is
- *   optional by product decision, not by omission.
+ *   optional by product decision, not by omission;
+ * - an invalid submit *names* what is wrong, in text and through ARIA. The form
+ *   is `novalidate`, so nothing else speaks: before this the only assertion about
+ *   an invalid submit was that the gateway went uncalled, which is the silence
+ *   itself written down as if it were the requirement.
  */
 describe('SelfCheckoutSignUpComponent', () => {
   /**
@@ -87,6 +91,17 @@ describe('SelfCheckoutSignUpComponent', () => {
 
   function errorText(fixture: { nativeElement: HTMLElement }): string {
     return fixture.nativeElement.querySelector('[data-testid="signup-error"]')?.textContent ?? '';
+  }
+
+  function field(fixture: { nativeElement: HTMLElement }, name: 'email' | 'password'): HTMLElement {
+    return fixture.nativeElement.querySelector(`[data-testid="signup-${name}"]`) as HTMLElement;
+  }
+
+  function fieldError(
+    fixture: { nativeElement: HTMLElement },
+    name: 'email' | 'password'
+  ): HTMLElement | null {
+    return fixture.nativeElement.querySelector(`[data-testid="signup-${name}-error"]`);
   }
 
   async function submit(fixture: {
@@ -161,6 +176,100 @@ describe('SelfCheckoutSignUpComponent', () => {
       await submit(fixture);
 
       expect(gateway.signUp).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * WCAG 3.3.1. The form carries `novalidate`, so the browser says nothing about a
+   * mistyped address and this is the only thing that does.
+   *
+   * Asserted against the rendered DOM rather than the component's methods, because
+   * "the message exists" and "a screen reader is told which field it belongs to"
+   * are different claims and the second one is the one that was missing: an
+   * invalid submit used to render nothing, and `markAllAsTouched()` could be
+   * deleted with all tests still green.
+   */
+  describe('an invalid submit says what is wrong', () => {
+    it('names both problems when nothing has been filled in', async () => {
+      const gateway = makeGateway(vi.fn());
+      const fixture = await createComponent(gateway);
+
+      await submit(fixture);
+
+      expect(fieldError(fixture, 'email')?.textContent).toContain('Enter your email address');
+      expect(fieldError(fixture, 'password')?.textContent).toContain('Choose a password');
+      expect(gateway.signUp).not.toHaveBeenCalled();
+    });
+
+    it('links each message to its own field for a screen reader', async () => {
+      const fixture = await createComponent(makeGateway(vi.fn()));
+
+      await submit(fixture);
+
+      for (const name of ['email', 'password'] as const) {
+        expect(field(fixture, name).getAttribute('aria-invalid')).toBe('true');
+        // The id in `aria-describedby` has to be an element that is actually
+        // there — a dangling reference reads as no message at all.
+        const describedBy = field(fixture, name).getAttribute('aria-describedby');
+        expect(describedBy).toBe(`signup-${name}-error`);
+        expect(fieldError(fixture, name)?.id).toBe(describedBy);
+        expect(fieldError(fixture, name)?.getAttribute('role')).toBe('alert');
+      }
+    });
+
+    it('says the address is malformed, not that it is missing', async () => {
+      // Distinct copy per failure: "enter your email" is wrong and unhelpful for
+      // an address that was entered and simply has a typo in it.
+      const fixture = await createComponent(makeGateway(vi.fn()));
+      fixture.componentInstance.form.setValue({ email: 'yuzu@', password: 'sup3rsecret' });
+
+      await submit(fixture);
+
+      expect(fieldError(fixture, 'email')?.textContent).toContain('does not look like an email');
+      expect(fieldError(fixture, 'password')).toBeNull();
+    });
+
+    it('states our own 8-character minimum for a short password', async () => {
+      const fixture = await createComponent(makeGateway(vi.fn()));
+      fixture.componentInstance.form.setValue({ email: 'yuzu@example.com', password: 'short' });
+
+      await submit(fixture);
+
+      expect(fieldError(fixture, 'password')?.textContent).toContain('at least 8 characters');
+      expect(fieldError(fixture, 'email')).toBeNull();
+    });
+
+    it('clears the message once the field is corrected', async () => {
+      // Not sticky: a message that outlives the mistake is a shopper retyping a
+      // field that is already fine.
+      const fixture = await createComponent(makeGateway(vi.fn().mockResolvedValue(registration)));
+      await submit(fixture);
+      expect(fieldError(fixture, 'email')).not.toBeNull();
+
+      fill(fixture);
+      fixture.detectChanges();
+
+      expect(fieldError(fixture, 'email')).toBeNull();
+      expect(fieldError(fixture, 'password')).toBeNull();
+      expect(field(fixture, 'email').hasAttribute('aria-invalid')).toBe(false);
+    });
+
+    it('says nothing before the customer has touched the form', async () => {
+      const fixture = await createComponent(makeGateway(vi.fn()));
+
+      expect(fieldError(fixture, 'email')).toBeNull();
+      expect(fieldError(fixture, 'password')).toBeNull();
+    });
+
+    it('leaves the submit pressable while the form is invalid', async () => {
+      // The submit is what reveals the errors, so disabling it on `form.invalid`
+      // would take away the only way to find out what is wrong.
+      const fixture = await createComponent(makeGateway(vi.fn()));
+
+      const button = fixture.nativeElement.querySelector(
+        '[data-testid="signup-submit"]'
+      ) as HTMLButtonElement;
+      expect(button.disabled).toBe(false);
     });
   });
 

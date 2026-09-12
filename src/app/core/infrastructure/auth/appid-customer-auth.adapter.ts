@@ -178,8 +178,16 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
 
     const data = (await response.json().catch(() => ({}))) as SignUpResponse;
     if (!response.ok) {
-      // Verbatim: whatever the relay said is what the form gets to interpret.
-      throw new AppIdAuthError(data.error ?? `Customer sign-up returned ${response.status}`);
+      // Verbatim: whatever the relay said is what the form gets to interpret —
+      // plus the status, as a number. The form classifies 409/400/429 into its own
+      // copy, and the only alternative to passing the status here is the form
+      // digging it back out of the sentence, which cannot be done safely: the
+      // relay forwards App ID's policy explanation and that prose quotes its own
+      // bounds, so "between 8 and 100 characters" reads as a status.
+      throw new AppIdAuthError(
+        data.error ?? `Customer sign-up returned ${response.status}`,
+        response.status
+      );
     }
 
     // `email` rather than `data.email` as the fallback: the address this

@@ -77,6 +77,34 @@ describe('routes', () => {
     }
   });
 
+  /**
+   * The guarding inside the family is asymmetric on purpose, and the asymmetry is
+   * the part worth pinning — both directions of "make it consistent" break
+   * something a product decision asked for:
+   *
+   * - guarding the **lane** would make an account required to scan or pay, which
+   *   the 2026-09-11 options 1+3 decision exists to forbid, and the lane is also
+   *   this guard's own redirect target, so it would bounce off itself;
+   * - guarding **check-email** would bounce a customer off the one screen that
+   *   explains why they cannot sign in yet. Item 3 proved a just-created account
+   *   is `PENDING`, so nobody arriving there is signed in anyway — but a customer
+   *   who registers a second address while already signed in would be sent away
+   *   from the interstitial naming the inbox they need to open;
+   * - **sign-up** is the only screen a signed-in customer has no use for, so it is
+   *   the only one that redirects.
+   */
+  it('guards only the sign-up child, and deliberately neither the lane nor check-email', () => {
+    expect(signUp?.canActivate).toHaveLength(1);
+    expect(
+      checkEmail?.canActivate,
+      'check-email must stay reachable when signed in'
+    ).toBeUndefined();
+    expect(lane?.canActivate, 'the lane must never require an account').toBeUndefined();
+    expect(children.filter((c) => c.canActivate !== undefined).map((c) => c.path)).toEqual([
+      'sign-up',
+    ]);
+  });
+
   it('lazily loads the SelfCheckoutComponent', async () => {
     expect(lane?.loadComponent).toBeInstanceOf(Function);
     const loaded = await lane?.loadComponent?.();

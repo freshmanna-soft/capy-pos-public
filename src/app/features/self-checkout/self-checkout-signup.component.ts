@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { AbstractControl, FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CHECK_EMAIL_ROUTE, LANE_ROUTE } from './self-checkout-routes';
@@ -43,6 +43,16 @@ import { describeSignUpRefusal, SignUpRefusalCopy } from './self-checkout-signup
  * it. A customer who cannot shop until they register is the exact failure that
  * decision exists to avoid.
  *
+ * **An invalid field says why, and says it where a screen reader will find it.**
+ * The form is `novalidate`, so the browser's own bubbles are off and nothing else
+ * speaks for a mistyped address: without {@link emailError}/{@link passwordError}
+ * a bad email produced a submit that did nothing at all, silently, which is
+ * WCAG 3.3.1 (Error Identification) failed outright and — on a lane where the
+ * shopper is standing at a counter with people behind them — the moment they give
+ * up and walk away from the account. The text renders beside the field *and* is
+ * bound through `aria-invalid`/`aria-describedby`, because a red outline alone is
+ * a perfectly valid-looking field to anyone not looking at it.
+ *
  * Styled with the lane's `ONSEN` tokens (`self-checkout-palette.ts` mirrors them
  * into `tailwind.config.js`); `/clerk`'s canvas mascot is deliberately not here.
  */
@@ -72,6 +82,49 @@ export class SelfCheckoutSignUpComponent {
   protected readonly offerSignIn = computed(() => this.refusal()?.alreadyRegistered === true);
 
   /**
+   * Why the email field is refused, or null while there is nothing to say.
+   *
+   * Gated on `touched`, which is what {@link submit}'s `markAllAsTouched()` sets
+   * and what a blur sets on the way out of a field — so the message arrives when
+   * the customer has finished with the field or has asked to submit, never while
+   * they are still typing the first character of a valid address.
+   *
+   * A method rather than a `computed`: the source of truth is the control's own
+   * validity, which is not a signal. Every path that can change it — typing,
+   * blurring, submitting — is a DOM event from this template, which marks this
+   * `OnPush` view dirty, so the text appears and clears without a subscription.
+   */
+  protected emailError(): string | null {
+    const email = this.form.controls.email;
+    if (!this.shouldReport(email)) {
+      return null;
+    }
+    return email.hasError('required')
+      ? 'Enter your email address.'
+      : 'That does not look like an email address — check for a typo.';
+  }
+
+  /**
+   * Why the password is refused, or null.
+   *
+   * Only ever states *our* minimum. The tenant's real policy is a console setting
+   * this app cannot read (see the relay's `customer-signup-validate.ts` on why it
+   * refuses to copy it), so what it demands beyond 8 characters arrives as the
+   * `400`'s detail after a submit — never guessed at here.
+   */
+  protected passwordError(): string | null {
+    const password = this.form.controls.password;
+    if (!this.shouldReport(password)) {
+      return null;
+    }
+    return password.hasError('required') ? 'Choose a password.' : 'Use at least 8 characters.';
+  }
+
+  private shouldReport(control: AbstractControl): boolean {
+    return control.invalid && control.touched;
+  }
+
+  /**
    * Create the account, then send the customer to the interstitial.
    *
    * The email carried across is the one the *gateway* normalized and registered,
@@ -80,6 +133,9 @@ export class SelfCheckoutSignUpComponent {
    */
   protected async submit(): Promise<void> {
     if (this.form.invalid || this.submitting()) {
+      // Load-bearing, not habit: `touched` is what {@link emailError} and
+      // {@link passwordError} read, so this line is the difference between a
+      // submit that names both problems and one that does nothing visible at all.
       this.form.markAllAsTouched();
       return;
     }
