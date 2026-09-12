@@ -5,14 +5,26 @@
 >
   <header class="flex items-center justify-between px-6 py-5 md:px-10">
     <p class="font-data text-[10px] uppercase tracking-[0.22em] text-kelp">Capy-POS</p>
-    <button
-      type="button"
-      (click)="exit()"
-      class="rounded-full border border-kelp/30 bg-onsen-water/40 px-3 py-2 font-data text-[10px] uppercase tracking-[0.16em] text-kelp backdrop-blur transition-colors hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
-      data-testid="self-checkout-exit"
-    >
-      Back to till
-    </button>
+    <div class="flex items-center gap-2">
+      <!-- The side path to item 16's form. A link, never a gate: an account is
+           never required to scan or to pay (2026-09-11 options 1+3 decision). -->
+      <button
+        type="button"
+        (click)="goToSignUp()"
+        class="rounded-full border border-kelp/30 px-3 py-2 font-data text-[10px] uppercase tracking-[0.16em] text-kelp transition-colors hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+        data-testid="self-checkout-signup-link"
+      >
+        Create an account
+      </button>
+      <button
+        type="button"
+        (click)="exit()"
+        class="rounded-full border border-kelp/30 bg-onsen-water/40 px-3 py-2 font-data text-[10px] uppercase tracking-[0.16em] text-kelp backdrop-blur transition-colors hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+        data-testid="self-checkout-exit"
+      >
+        Back to till
+      </button>
+    </div>
   </header>
 
   <main class="flex-1 overflow-y-auto px-6 pb-10">

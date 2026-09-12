@@ -1,6 +1,8 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/presentation/guards/auth.guard';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
+import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
+import { redirectIfAuthenticatedGuard } from '@core/presentation/guards/redirect-if-authenticated.guard';
 import { AppIdCustomerAuthAdapter } from '@core/infrastructure/auth/appid-customer-auth.adapter';
 import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palette';
 
@@ -31,6 +33,47 @@ export const routes: Routes = [
     path: 'clerk',
     loadComponent: () => import('./features/clerk/clerk.component').then((m) => m.ClerkComponent),
     title: 'Capy Clerk · Capy-POS',
+  },
+  {
+    // The customer's own sign-up form (epic #261 item 16) and the interstitial it
+    // lands on (item 17's placeholder). Listed BEFORE `self-checkout` on purpose:
+    // that route has no `children`, so relying on prefix-match backtracking to
+    // reach these would work only by accident of ordering. Siblings, not children,
+    // because the lane's shell owns a full-screen takeover and its own cart, and
+    // neither belongs to a form the customer reaches *instead of* scanning.
+    //
+    // Each carries its own copy of the customer identity providers for the same
+    // reason the lane does: a route-level `providers` array is the only scope in
+    // which `CUSTOMER_AUTH_GATEWAY` resolves, and `CurrentCustomerService` is
+    // route-provided too so the session dies with the flow rather than outliving
+    // it in the root injector.
+    path: 'self-checkout/sign-up',
+    canActivate: [redirectIfAuthenticatedGuard(CurrentCustomerService, '/self-checkout')],
+    loadComponent: () =>
+      import('./features/self-checkout/self-checkout-signup.component').then(
+        (m) => m.SelfCheckoutSignUpComponent
+      ),
+    providers: [
+      { provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter },
+      CurrentCustomerService,
+    ],
+    title: 'Create an Account · Capy-POS',
+  },
+  {
+    // Deliberately NOT behind `redirectIfAuthenticatedGuard`: sign-up publishes the
+    // session via `setSession()` before routing here, and a freshly created account
+    // is `PENDING` anyway — bouncing the customer off the one screen that explains
+    // that is the opposite of what item 17 is for.
+    path: 'self-checkout/check-email',
+    loadComponent: () =>
+      import('./features/self-checkout/self-checkout-check-email.component').then(
+        (m) => m.SelfCheckoutCheckEmailComponent
+      ),
+    providers: [
+      { provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter },
+      CurrentCustomerService,
+    ],
+    title: 'Check Your Email · Capy-POS',
   },
   {
     // The customer-facing self-checkout lane. Its own top-level route, like

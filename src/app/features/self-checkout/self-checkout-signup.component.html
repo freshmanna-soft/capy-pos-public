@@ -1,0 +1,100 @@
+<!-- Full-screen like the lane itself: the customer is standing at the counter. -->
+<div
+  class="fixed inset-0 z-[60] flex flex-col overflow-y-auto bg-onsen-deep text-steam"
+  data-testid="self-checkout-signup"
+>
+  <header class="flex items-center justify-between px-6 py-5 md:px-10">
+    <p class="font-data text-[10px] uppercase tracking-[0.22em] text-kelp">Capy-POS</p>
+    <button
+      type="button"
+      (click)="continueWithoutAccount()"
+      class="rounded-full border border-kelp/30 bg-onsen-water/40 px-3 py-2 font-data text-[10px] uppercase tracking-[0.16em] text-kelp backdrop-blur transition-colors hover:border-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+      data-testid="signup-back-to-lane"
+    >
+      Back to checkout
+    </button>
+  </header>
+
+  <main class="mx-auto w-full max-w-md flex-1 px-6 pb-12">
+    <h1 class="text-2xl font-semibold tracking-tight">Create an account</h1>
+    <p class="mt-2 text-sm text-kelp">
+      Optional — keep your receipts and rewards in one place. You can scan and pay without one.
+    </p>
+
+    <form [formGroup]="form" (ngSubmit)="submit()" class="mt-8 space-y-5" novalidate>
+      <div>
+        <label
+          for="signup-email"
+          class="font-data text-[10px] uppercase tracking-[0.16em] text-kelp"
+          >Email</label
+        >
+        <input
+          id="signup-email"
+          type="email"
+          formControlName="email"
+          autocomplete="email"
+          class="mt-2 w-full rounded-xl border border-onsen-surface/60 bg-onsen-water/40 px-4 py-3 text-steam placeholder:text-kelp/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          data-testid="signup-email"
+        />
+      </div>
+
+      <div>
+        <label
+          for="signup-password"
+          class="font-data text-[10px] uppercase tracking-[0.16em] text-kelp"
+          >Password</label
+        >
+        <input
+          id="signup-password"
+          type="password"
+          formControlName="password"
+          autocomplete="new-password"
+          class="mt-2 w-full rounded-xl border border-onsen-surface/60 bg-onsen-water/40 px-4 py-3 text-steam placeholder:text-kelp/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          data-testid="signup-password"
+        />
+      </div>
+
+      @if (refusal(); as problem) {
+        <div
+          role="alert"
+          class="rounded-xl border border-tsuba/50 bg-tsuba/10 px-4 py-3 text-sm text-steam"
+          data-testid="signup-error"
+        >
+          <p>{{ problem.message }}</p>
+          @if (problem.detail) {
+            <!-- App ID's own explanation: the part that says what to change. -->
+            <p class="mt-2 text-kelp" data-testid="signup-error-detail">{{ problem.detail }}</p>
+          }
+          @if (offerSignIn()) {
+            <a
+              routerLink="/self-checkout"
+              class="mt-2 inline-block underline decoration-yuzu underline-offset-4"
+              data-testid="signup-try-sign-in"
+              >Try signing in</a
+            >
+          }
+        </div>
+      }
+
+      <!-- Both actions in one row, same weight class: registration is optional. -->
+      <div class="flex flex-col gap-3 pt-2 sm:flex-row">
+        <button
+          type="submit"
+          [disabled]="submitting()"
+          class="flex-1 rounded-xl bg-yuzu px-4 py-3 font-semibold text-onsen-deep transition-opacity disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          data-testid="signup-submit"
+        >
+          {{ submitting() ? 'Creating…' : 'Create account' }}
+        </button>
+        <button
+          type="button"
+          (click)="continueWithoutAccount()"
+          class="flex-1 rounded-xl border border-yuzu/60 px-4 py-3 font-semibold text-yuzu focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          data-testid="signup-continue-anonymous"
+        >
+          Continue without an account
+        </button>
+      </div>
+    </form>
+  </main>
+</div>

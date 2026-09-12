@@ -107,7 +107,15 @@ describe('routes', () => {
         bindsCustomerGateway(route.providers ?? [])
       );
 
-      expect(routesBindingIt.map((route) => route.path)).toEqual(['self-checkout']);
+      // The lane plus its two side paths (epic #261 items 16/17), which are
+      // siblings rather than children and so carry their own copy of the binding.
+      // The invariant is unchanged and still what this asserts: nothing OUTSIDE
+      // the `self-checkout` family binds a customer identity.
+      expect(routesBindingIt.map((route) => route.path)).toEqual([
+        'self-checkout/sign-up',
+        'self-checkout/check-email',
+        'self-checkout',
+      ]);
     });
   });
 

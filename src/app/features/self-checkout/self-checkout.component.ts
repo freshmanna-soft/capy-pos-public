@@ -64,6 +64,17 @@ export class SelfCheckoutComponent {
    * opens the lane on a shared terminal has no exit but the browser chrome,
    * which a kiosk build does not show.
    */
+  /**
+   * The side path to the sign-up form (epic #261 item 16).
+   *
+   * A `Router.navigate` rather than a `routerLink`, so the shell keeps needing no
+   * `ActivatedRoute` — the lane is smoked and unit-tested outside a router
+   * context, and a link would make every one of those specs need one.
+   */
+  protected goToSignUp(): void {
+    void this.router.navigate(['/self-checkout/sign-up']);
+  }
+
   protected exit(): void {
     void this.router.navigate(['/pos']);
   }
