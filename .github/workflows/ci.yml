@@ -314,3 +314,163 @@ jobs:
           name: smoke-report
           path: playwright-report/
           retention-days: 7
+
+  container-scan:
+    name: 🛡️ Container CVE scan (reporting only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Epic #288 item 8 — the other half of the spike's decision
+    # (`docs/spikes/2026-09-11-chainguard-base-image-decision.md`): keep the Alpine
+    # bases, pin them, and scan them, rather than adopting Chainguard's free tier.
+    #
+    # ## Which of the three shapes this is, and why
+    #
+    # Shape (2) + (3) of issue #307: `trivy image` on the two DISTINCT base images the
+    # deployed Dockerfiles build on, plus one `trivy fs` pass over the repo. Deliberately
+    # NOT shape (1) — building the five service images here — because CI has no docker
+    # step at all today (verified: zero across lint, test, build, storybook, e2e, smoke),
+    # so (1) means introducing five `docker buildx build --platform linux/amd64` builds
+    # onto every PR for signal that is, right now, almost entirely the base layer: our
+    # own layers are `npm ci --omit=dev` plus a COPY. (1) earns its keep once those
+    # layers carry something of their own.
+    #
+    # `trivy fs` is here because (2) alone is blind to CVEs our dependency layers add;
+    # (2) is here because (3) alone reports NO OS-level CVE, which is the entire class
+    # this epic exists for. Landing only (3) would look green and miss the point.
+    #
+    # ## Reporting only — on purpose, for now
+    #
+    # `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 0`: findings are printed
+    # and summarized, never fatal. Observed baseline on 2026-09-11 (trivy 0.74.0 DB, all
+    # three targets run end to end): node:22-alpine 1 CRITICAL / 12 HIGH (2 of those HIGH in
+    # alpine os-pkgs, the rest in the npm packages Node ships), nginx:alpine 0 CRITICAL /
+    # 7 HIGH, and `fs` over the repo 0 CRITICAL / 16 HIGH across three lock files (8 of them
+    # in the dormant terraform/aws-demo template). A gate switched on at that floor fails
+    # every PR on day one and gets deleted rather than fixed, so the floor gets measured
+    # first and a follow-up item can then gate on "no NEW criticals". `--ignore-unfixed`
+    # because an Alpine CVE with no upstream fix is not actionable by us.
+    #
+    # That run also settles why (3) alone was not an option: `trivy fs` returned ZERO
+    # `os-pkgs` results over this repo. Every OS-level finding above comes from the image
+    # half, which is the entire class Epic #288 was opened for.
+    #
+    # `continue-on-error` covers the other way a reporting-only job can start blocking
+    # merges: a registry or DB-download flake. It surfaces as a warning annotation. Note
+    # what it does NOT do, though — it marks the JOB non-failing, it does not resume the
+    # remaining STEPS once one has failed. That is why each scan below carries its own
+    # `|| echo ::warning::` and the second one an explicit `if:`: without them a single
+    # flaky pull silently costs us every scan after it, while the job still reports
+    # success having covered half of what it claims to cover.
+    #
+    # No `needs:` and nothing needs it — it runs in parallel with the fast checks and adds
+    # no PR wall-clock: ~2-3 min (one ~112MiB vulnerability-DB download plus two small
+    # base-image pulls) against an e2e job that already takes ~7.
+    #
+    # ## Why there is no actions/cache for the vulnerability DB
+    #
+    # The `-v /tmp/trivy-cache` volume is shared by every invocation below, so the DB is
+    # downloaded ONCE per run rather than six times (measured: a second invocation against
+    # the warm volume logs no download at all). Persisting it ACROSS runs with
+    # actions/cache was tried and removed. The extracted DB is 1,369,268,224 bytes — about
+    # 123MiB once actions/cache compresses it — and it would be written on every run into
+    # the same 10GB repo-wide LRU budget that holds the `node_modules` and `.angular/cache`
+    # entries the other five jobs restore from. It would not even pay for itself: trivy-db
+    # carries a 24h `NextUpdate`, so a restore older than that is re-downloaded anyway,
+    # meaning ~123MiB restored and 112MiB fetched regardless. One download per run, on a
+    # job nothing waits for, is the cheaper side of that trade.
+    #
+    # This does NOT re-check what `base-image-policy.spec.ts` checks. That spec asserts
+    # the SHAPE of every `FROM` line (pinned, non-floating, versioned) and fails when a
+    # bad reference is introduced. This job says when a reference we already trust has
+    # gone stale. `container-cve-scan.spec.ts` is what keeps the two in step: it parses
+    # BASE_IMAGES below and fails if it stops matching the deployed Dockerfiles.
+    continue-on-error: true
+    env:
+      # Floating scanner versions change findings under you between runs; a version
+      # bump here should be a visible diff, like a base-image bump.
+      TRIVY_VERSION: '0.74.0'
+      # The distinct base images of the DEPLOYED Dockerfiles, one per line. Asserted
+      # against the Dockerfiles themselves by container-cve-scan.spec.ts, so a new base
+      # image cannot arrive unscanned. infra/graphrag's pgvector base is deliberately
+      # absent: it is local indexing tooling, never deployed.
+      BASE_IMAGES: |
+        node:22-alpine
+        nginx:alpine
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare the report directory and summary table
+        # Its own step, ahead of anything that can flake: the table's header has to exist
+        # even if every scan below fails, or a run that scanned nothing is indistinguishable
+        # from a run that found nothing. `/tmp/trivy-cache` is created here too so the
+        # shared DB directory belongs to the runner user rather than to docker's root.
+        run: |
+          mkdir -p trivy-reports /tmp/trivy-cache
+          printf '## Container CVE scan (reporting only)\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| target | CRITICAL | HIGH |\n| --- | --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
+      - name: Scan base images for OS + bundled-package CVEs
+        # Run the pinned official CLI image directly rather than a scanning action:
+        # the flags that make this non-blocking are then visible in the diff instead of
+        # living in an action's default inputs.
+        #
+        # Each docker run is `|| echo ::warning::` rather than left to `bash -e`, so a flake
+        # pulling one image costs that image's row and nothing else — not the other image,
+        # and not the dependency scan in the step after this one. The failure is still
+        # visible twice over: a warning annotation on the run, and an `n/a` row from
+        # trivy-summary.sh, which is why the summary always has one row per target.
+        # The trivy-summary.sh call is deliberately NOT guarded: it is local jq over a file
+        # already on disk, so a failure there is a real fault, not a flake to absorb.
+        run: |
+          for image in $BASE_IMAGES; do
+            slug="$(printf '%s' "$image" | tr ':/' '__')"
+            report="trivy-reports/image-${slug}.json"
+            echo "::group::trivy image $image"
+            docker run --rm -v /tmp/trivy-cache:/root/.cache \
+              "aquasec/trivy:${TRIVY_VERSION}" image \
+              --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --exit-code 0 \
+              "$image" \
+              || echo "::warning::trivy could not scan ${image} (table pass) — see the log group"
+            docker run --rm -v /tmp/trivy-cache:/root/.cache \
+              "aquasec/trivy:${TRIVY_VERSION}" image \
+              --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --exit-code 0 \
+              --format json --quiet "$image" > "$report" \
+              || echo "::warning::trivy could not scan ${image} (json pass) — row will read n/a"
+            echo "::endgroup::"
+            TARGET="image ${image}" ./scripts/ci/trivy-summary.sh "$report" \
+              >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Scan the repo for dependency CVEs
+        # `if:` and not plain ordering: job-level `continue-on-error` makes the JOB
+        # non-failing, it does not resume the remaining STEPS after a failure. Without this
+        # condition, anything unexpected in the image step above skips the dependency half
+        # of the scan entirely and the job still reports success — the "green while looking
+        # at nothing" outcome this job is meant to close, arriving through the step graph
+        # instead of the flags. `!cancelled()` rather than `always()` so a cancelled run
+        # stops instead of holding a runner for a report nobody will read.
+        # Asserted by container-cve-scan.spec.ts.
+        if: ${{ !cancelled() }}
+        run: |
+          # Repeated from the prepare step on purpose: `!cancelled()` means this step can
+          # run after that one failed, so it has to stand on its own. `mkdir -p` is a no-op
+          # in the normal case.
+          mkdir -p trivy-reports /tmp/trivy-cache
+          echo "::group::trivy fs ."
+          docker run --rm -v /tmp/trivy-cache:/root/.cache -v "$PWD":/repo \
+            "aquasec/trivy:${TRIVY_VERSION}" fs \
+            --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --exit-code 0 \
+            /repo \
+            || echo "::warning::trivy could not scan the repo (table pass) — see the log group"
+          docker run --rm -v /tmp/trivy-cache:/root/.cache -v "$PWD":/repo \
+            "aquasec/trivy:${TRIVY_VERSION}" fs \
+            --severity HIGH,CRITICAL --ignore-unfixed --scanners vuln --exit-code 0 \
+            --format json --quiet /repo > trivy-reports/fs-repo.json \
+            || echo "::warning::trivy could not scan the repo (json pass) — row will read n/a"
+          echo "::endgroup::"
+          TARGET='fs repo' ./scripts/ci/trivy-summary.sh trivy-reports/fs-repo.json \
+            >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Trivy reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-reports
+          path: trivy-reports/
+          retention-days: 7
