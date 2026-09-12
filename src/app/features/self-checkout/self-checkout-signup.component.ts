@@ -1,10 +1,31 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
+import { customerEmailValidator, MAX_EMAIL_LENGTH } from './customer-email.validator';
 import { PendingRegistrationStore } from './pending-registration.store';
 import { CHECK_EMAIL_ROUTE, LANE_ROUTE } from './self-checkout-routes';
 import { describeSignUpRefusal, SignUpRefusalCopy } from './self-checkout-signup-errors';
+
+/**
+ * Our own floor, and the only password rule this form states before a submit. The
+ * tenant's real policy is a console setting no client can read (see the relay's
+ * `customer-signup-validate.ts`), so anything beyond this arrives as the 400's
+ * detail.
+ */
+const MIN_PASSWORD_LENGTH = 8;
+
+/**
+ * Mirrors the relay's `MAX_PASSWORD_LENGTH`, for the same reason
+ * {@link customerEmailValidator} mirrors its `EMAIL_PATTERN`: a bound the client
+ * does not know about is a submit that comes back a permanent refusal with nothing
+ * to say about which field. A maximum only — the minimum above is ours, the
+ * tenant's is the tenant's.
+ */
+const MAX_PASSWORD_LENGTH = 256;
+
+/** The id of the refusal banner, so a named field can point a screen reader at it. */
+const REFUSAL_ID = 'signup-refusal';
 
 /**
  * SelfCheckoutSignUpComponent (Epic #261 item 16)
@@ -52,7 +73,20 @@ import { describeSignUpRefusal, SignUpRefusalCopy } from './self-checkout-signup
  * shopper is standing at a counter with people behind them — the moment they give
  * up and walk away from the account. The text renders beside the field *and* is
  * bound through `aria-invalid`/`aria-describedby`, because a red outline alone is
- * a perfectly valid-looking field to anyone not looking at it.
+ * a perfectly valid-looking field to anyone not looking at it. A refusal that
+ * comes back from the *relay* marks its field the same way (see
+ * {@link describedBy}) — an address the store would not accept is as much an item
+ * in error as one this form's own rule caught, and it used to be announced as
+ * neither.
+ *
+ * **The client's rules are the relay's rules.** `Validators.email` accepts
+ * `jane@gmail` and the relay's `EMAIL_PATTERN` refuses it, so a missing TLD — one
+ * of the two typos actually made at a kiosk — cost a round trip and came back a
+ * permanent refusal dressed as a transient one. Both of this form's bounds now
+ * mirror the relay's (`customer-email.validator.ts`, {@link MAX_PASSWORD_LENGTH}),
+ * so nothing leaves here that is refused on shape; `describeSignUpRefusal` keeps
+ * its own copy for those refusals as the second line of defence, since a rule
+ * mirrored in two deployables is a rule that can drift.
  *
  * Styled with the lane's `ONSEN` tokens (`self-checkout-palette.ts` mirrors them
  * into `tailwind.config.js`); `/clerk`'s canvas mascot is deliberately not here.
@@ -60,7 +94,7 @@ import { describeSignUpRefusal, SignUpRefusalCopy } from './self-checkout-signup
 @Component({
   selector: 'app-self-checkout-signup',
   standalone: true,
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './self-checkout-signup.component.html',
 })
@@ -70,9 +104,22 @@ export class SelfCheckoutSignUpComponent {
   private readonly fb = inject(FormBuilder);
   private readonly pending = inject(PendingRegistrationStore);
 
+  /**
+   * `customerEmailValidator` rather than `Validators.email`: Angular's accepts
+   * `jane@gmail`, the relay does not, and the gap was a permanent refusal wearing
+   * transient copy (see the validator's own note). Both bounds mirror the relay's
+   * so no submit can be refused on a rule this form never mentioned.
+   */
   readonly form = this.fb.group({
-    email: ['', [Validators.required, Validators.email]],
-    password: ['', [Validators.required, Validators.minLength(8)]],
+    email: ['', [Validators.required, customerEmailValidator]],
+    password: [
+      '',
+      [
+        Validators.required,
+        Validators.minLength(MIN_PASSWORD_LENGTH),
+        Validators.maxLength(MAX_PASSWORD_LENGTH),
+      ],
+    ],
   });
 
   protected readonly submitting = signal(false);
@@ -80,8 +127,48 @@ export class SelfCheckoutSignUpComponent {
   /** The refusal being shown, or null when nothing has failed yet. */
   protected readonly refusal = signal<SignUpRefusalCopy | null>(null);
 
-  /** Whether to offer the sign-in link — only the duplicate-address refusal does. */
-  protected readonly offerSignIn = computed(() => this.refusal()?.alreadyRegistered === true);
+  /**
+   * Whether the refusal on screen blames this field.
+   *
+   * This is what became of the "Try signing in" link the duplicate refusal used to
+   * offer. The link pointed at `/self-checkout`, and no sign-in form exists there
+   * or anywhere else yet — Epic #261 item 18 is unbuilt — so the most common
+   * refusal handed the shopper an action that led back to the lane and lost what
+   * they had typed. The copy still tells them the address is taken and to try
+   * signing in, which is the part #309 asked for and the part that is true; the
+   * refusal now marks the field it blames instead of navigating somewhere that
+   * cannot help. When item 18 lands, the link belongs here again, pointed at a
+   * route that answers.
+   */
+  protected refusalNames(field: 'email' | 'password'): boolean {
+    return this.refusal()?.field === field;
+  }
+
+  /**
+   * The ids describing a field: its own validation message, the refusal banner, or
+   * both — and null rather than an empty string, because `aria-describedby=""` is
+   * a dangling reference.
+   *
+   * A refusal is about a field the customer typed something into, so both messages
+   * can legitimately be on screen at once (a mistyped address that was also
+   * refused, once corrected in a way our rule accepts and the relay's does not).
+   */
+  protected describedBy(field: 'email' | 'password'): string | null {
+    const ids: string[] = [];
+    if (field === 'email' ? this.emailError() : this.passwordError()) {
+      ids.push(`signup-${field}-error`);
+    }
+    if (this.refusalNames(field)) {
+      ids.push(REFUSAL_ID);
+    }
+    return ids.length > 0 ? ids.join(' ') : null;
+  }
+
+  /** Whether the field is in error at all — from either source. */
+  protected fieldInvalid(field: 'email' | 'password'): boolean {
+    const own = field === 'email' ? this.emailError() : this.passwordError();
+    return own !== null || this.refusalNames(field);
+  }
 
   /**
    * Why the email field is refused, or null while there is nothing to say.
@@ -101,8 +188,11 @@ export class SelfCheckoutSignUpComponent {
     if (!this.shouldReport(email)) {
       return null;
     }
-    return email.hasError('required')
-      ? 'Enter your email address.'
+    if (email.hasError('required')) {
+      return 'Enter your email address.';
+    }
+    return email.hasError('emailTooLong')
+      ? `Use an address of ${MAX_EMAIL_LENGTH} characters or fewer.`
       : 'That does not look like an email address — check for a typo.';
   }
 
@@ -119,7 +209,12 @@ export class SelfCheckoutSignUpComponent {
     if (!this.shouldReport(password)) {
       return null;
     }
-    return password.hasError('required') ? 'Choose a password.' : 'Use at least 8 characters.';
+    if (password.hasError('required')) {
+      return 'Choose a password.';
+    }
+    return password.hasError('maxlength')
+      ? `Use ${MAX_PASSWORD_LENGTH} characters or fewer.`
+      : `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
   }
 
   private shouldReport(control: AbstractControl): boolean {

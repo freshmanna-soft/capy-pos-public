@@ -34,7 +34,7 @@ describe('describeSignUpRefusal', () => {
       expect(refusal.message).not.toContain('password rules');
       expect(refusal.message).toContain('could not create your account');
       expect(refusal.detail).toBeNull();
-      expect(refusal.alreadyRegistered).toBe(false);
+      expect(refusal.field).toBeNull();
     });
 
     it('still classifies the relay 400 it was narrowed around', () => {
@@ -80,7 +80,7 @@ describe('describeSignUpRefusal', () => {
 
       expect(refusal.message).toContain('password rules');
       expect(refusal.detail).toBe(explanation);
-      expect(refusal.alreadyRegistered).toBe(false);
+      expect(refusal.field).toBe('password');
     });
 
     it('is classified from the status the adapter attached, corroborated by the wording', () => {
@@ -95,14 +95,74 @@ describe('describeSignUpRefusal', () => {
       // The relay answers 400 for its own request validation as well
       // (`customer-signup-validate.ts`), so the status alone cannot mean "policy".
       // Telling a shopper their password broke a rule sends them to fix the wrong
-      // field — and the address, which is the thing to fix, is never mentioned.
+      // field.
       const refusal = describeSignUpRefusal(
         Object.assign(new Error('email must be a valid email address.'), { status: 400 })
       );
 
       expect(refusal.message).not.toContain('password rules');
-      expect(refusal.message).toContain('could not create your account');
+      expect(refusal.field).toBe('email');
+    });
+  });
+
+  /**
+   * The relay's own request validation (`customer-signup-validate.ts`), which is a
+   * `400` like the policy refusal and means something else entirely.
+   *
+   * These used to fall through to the generic sentence, and both halves of that
+   * were wrong. "Please try again" invites a retry of an address the relay will
+   * refuse byte-for-byte every time, and naming no field left the shopper reading
+   * a banner about their account while the input that caused it stayed
+   * `aria-invalid=null` — WCAG 3.3.1 failed on the same screen that had just been
+   * given field-level copy. `customerEmailValidator` and the form's own
+   * `maxLength` should keep these unreachable; this branch is what happens when
+   * the mirrored rules drift, which is the normal fate of a rule living in two
+   * deployables.
+   */
+  describe('the relay’s own shape refusals', () => {
+    it.each([
+      ['a malformed address', 'email must be a valid email address.'],
+      ['an address over the transport bound', 'email must be at most 254 characters.'],
+    ])('blames the email field for %s', (_label, body) => {
+      const refusal = describeSignUpRefusal(Object.assign(new Error(body), { status: 400 }));
+
+      expect(refusal.message).toContain('Check it for a typo');
+      expect(refusal.field).toBe('email');
+      // Never the machine sentence itself: `detail` is rendered verbatim.
       expect(refusal.detail).toBeNull();
+      expect(refusal.message).not.toContain('try again');
+    });
+
+    it.each([
+      ['a passphrase over the transport bound', 'password must be at most 256 characters.'],
+      ['a missing passphrase', 'password is required.'],
+    ])('blames the password field for %s, without quoting store rules', (_label, body) => {
+      const refusal = describeSignUpRefusal(Object.assign(new Error(body), { status: 400 }));
+
+      expect(refusal.field).toBe('password');
+      // Not the policy sentence: nothing about the *tenant's* rules is known here,
+      // and saying so would be inventing a reason.
+      expect(refusal.message).not.toContain('password rules');
+      expect(refusal.message).toContain('shorter');
+    });
+
+    it.each([
+      [
+        'a minimum, which means the opposite of "too long"',
+        'Password must be between 8 and 100 characters.',
+      ],
+      ['a rule about content', 'Password must contain a digit and an uppercase letter.'],
+      ['a sentence merely opening the same way', 'email must be verified before signing in.'],
+    ])('does not read App ID’s own prose as a shape refusal — %s', (_label, body) => {
+      // Matched whole, not by prefix. The first case is a real policy detail that
+      // starts exactly like the passphrase refusal above and means a *minimum*;
+      // answering it with "try a shorter one" would send the shopper the wrong way.
+      const refusal = describeSignUpRefusal(Object.assign(new Error(body), { status: 400 }));
+
+      expect(refusal.message).not.toContain('shorter');
+      expect(refusal.message).not.toContain('Check it for a typo');
+      expect(refusal.message).toContain('could not create your account');
+      expect(refusal.field).toBeNull();
     });
   });
 
@@ -110,10 +170,21 @@ describe('describeSignUpRefusal', () => {
     it('offers signing in without promising it will work', () => {
       const refusal = describeSignUpRefusal(new Error(RELAY_409));
 
-      expect(refusal.alreadyRegistered).toBe(true);
       expect(refusal.message).toContain('Try signing in instead');
       // Never a promise: the account may itself still be PENDING (item 3).
       expect(refusal.message).not.toMatch(/will work|you can sign in now/i);
+    });
+
+    it('blames the address, which is the field the shopper would change', () => {
+      // What replaced the `alreadyRegistered` flag. That flag existed only to
+      // reveal a "Try signing in" link pointing at `/self-checkout`, where no
+      // sign-in form exists (Epic #261 item 18) — so the most common refusal
+      // offered an action that led back to the lane and dropped what had been
+      // typed. The advice survives in the copy; the field association is what the
+      // form can actually act on today.
+      expect(describeSignUpRefusal(Object.assign(new Error(''), { status: 409 })).field).toBe(
+        'email'
+      );
     });
 
     it('is not mistaken for a policy refusal, though its body says "password"', () => {
@@ -130,7 +201,7 @@ describe('describeSignUpRefusal', () => {
       expect(refusal.message).toContain('try again shortly');
       expect(refusal.message).not.toContain('429');
       expect(refusal.message).not.toMatch(/password|email|account/i);
-      expect(refusal.alreadyRegistered).toBe(false);
+      expect(refusal.field).toBeNull();
     });
 
     it('is still classified from the adapter’s no-body message alone', () => {
@@ -172,7 +243,7 @@ describe('describeSignUpRefusal', () => {
 
       expect(refusal.message).toContain('could not create your account');
       expect(refusal.detail).toBeNull();
-      expect(refusal.alreadyRegistered).toBe(false);
+      expect(refusal.field).toBeNull();
     });
   });
 });

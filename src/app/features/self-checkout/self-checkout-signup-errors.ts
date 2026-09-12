@@ -4,8 +4,8 @@
  * `infra/appid-token-relay/src/customer-signup.ts` deliberately answers with
  * machine answers and leaves the wording to this form (Epic #261 item 16), so
  * the mapping lives here, as a pure function rather than inside the component:
- * the three refusals each have their own copy for their own reason, and a pure
- * function is what lets each reason be asserted without a fixture.
+ * each refusal has its own copy for its own reason, and a pure function is what
+ * lets each reason be asserted without a fixture.
  *
  * The gateway (`AppIdCustomerAuthAdapter.signUp`) rethrows the relay's `error`
  * string verbatim and attaches the HTTP status it arrived with, falling back to
@@ -20,8 +20,27 @@
  * copy. The relay answers `400` for its own request validation too
  * (`customer-signup-validate.ts`: "email must be a valid email address."), and a
  * shopper told their password broke a rule when their address was the problem
- * has been sent to fix the wrong field.
+ * has been sent to fix the wrong field. Those request-validation refusals now get
+ * copy of their own instead of the generic sentence, because they are permanent —
+ * a retry of the same address or passphrase is refused identically — and each one
+ * names the field it blames (see {@link RefusedField}).
  */
+
+/**
+ * Which of the form's two fields the customer has to change, or null when the
+ * refusal blames neither (a rate limit, an outage).
+ *
+ * This replaced an `alreadyRegistered` flag, which existed to reveal a "Try
+ * signing in" link on the 409 — a link that pointed at `/self-checkout`, where no
+ * sign-in form exists (Epic #261 item 18 is unbuilt), so the most common refusal
+ * ended in a dead end. The copy still says to try signing in, because the shopper
+ * needs to know the address is taken; what the *form* does with a refusal is now
+ * the thing this type carries, and it is a field association rather than a
+ * navigation. WCAG 3.3.1 asks for the item in error to be identified, and until
+ * this existed a refusal named a field in prose while every input stayed
+ * `aria-invalid=null`.
+ */
+export type RefusedField = 'email' | 'password' | null;
 
 /** What a customer is told, and (for 400) what App ID said they must change. */
 export interface SignUpRefusalCopy {
@@ -32,8 +51,8 @@ export interface SignUpRefusalCopy {
    * Surfaced verbatim because it is the only part that says what to change.
    */
   readonly detail: string | null;
-  /** True when the address already has an account — the form offers sign-in. */
-  readonly alreadyRegistered: boolean;
+  /** The input to mark as the one in error, when the refusal blames one. */
+  readonly field: RefusedField;
 }
 
 const DUPLICATE_COPY =
@@ -46,6 +65,26 @@ const POLICY_COPY = 'That password does not meet this store’s password rules.'
  * content-free so it leaks nothing), so this invents no reason for it.
  */
 const RATE_LIMITED_COPY = 'Too many sign-up attempts just now. Please try again shortly.';
+
+/**
+ * The relay's *own* request validation refused the address
+ * (`customer-signup-validate.ts`), which is a permanent refusal: the same address
+ * will be refused identically every time, so generic "please try again" copy sent
+ * the shopper into a loop and named no field to fix. `customerEmailValidator` is
+ * what should keep this unreachable — see its own note on the parity — and this is
+ * the second line of defence for the day the two rules drift.
+ */
+const EMAIL_SHAPE_COPY =
+  'That email address was not accepted. Check it for a typo — an address looks like name@example.com.';
+
+/**
+ * The relay refused the passphrase on *shape*, not on the tenant's policy — in
+ * practice only its `MAX_PASSWORD_LENGTH` bound, since an empty one cannot leave
+ * this form. Distinct from {@link POLICY_COPY} because nothing about the store's
+ * rules is being reported, and equally permanent: worth its own sentence for the
+ * same reason the email one is.
+ */
+const PASSWORD_SHAPE_COPY = 'That password could not be used. Try a shorter one.';
 
 const GENERIC_COPY = 'We could not create your account just now. Please try again.';
 
@@ -131,6 +170,28 @@ function mentionsPasswordPolicy(message: string): boolean {
   return /password (?:policy|rules|requirements)/i.test(message);
 }
 
+/**
+ * The relay's own request-validation refusals, matched *whole* rather than by
+ * prefix.
+ *
+ * The relay composes these four itself (`customer-signup-validate.ts`) and they
+ * are the entire body when it sends them, so the whole sentence is available to
+ * match and matching all of it is what keeps the branch honest. A prefix would
+ * have been enough for the relay and too much for App ID: its forwarded policy
+ * explanation is prose about a person's password and routinely reads
+ * `"Password must be between 8 and 100 characters."`, which starts exactly like
+ * the passphrase refusal below and means the opposite of it — a *minimum*, answered
+ * with "try a shorter one". The policy branch runs first and would normally catch
+ * that sentence, but only while it arrives with the relay's lead phrase attached;
+ * anchoring both ends means this branch is not the thing standing behind that
+ * assumption.
+ *
+ * Bounds stay `\d+` rather than the literal 254/256: the number is the relay's to
+ * change, and it is not what identifies the refusal.
+ */
+const EMAIL_SHAPE = /^email must be (?:a valid email address|at most \d+ characters)\.?$/i;
+const PASSWORD_SHAPE = /^password (?:is required|must be at most \d+ characters)\.?$/i;
+
 /** `400`, the status the relay refuses a password with (`PASSWORD_POLICY_STATUS`). */
 const REFUSED_STATUS = 400;
 const DUPLICATE_STATUS = 409;
@@ -149,21 +210,35 @@ export function describeSignUpRefusal(error: unknown): SignUpRefusalCopy {
   // Tested before the policy branch: `DUPLICATE_EMAIL_MESSAGE` ends with "reset
   // your password", so a duplicate would otherwise read as a rejected password.
   if (status === DUPLICATE_STATUS || (status === null && mentionsExistingAccount(message))) {
-    return { message: DUPLICATE_COPY, detail: null, alreadyRegistered: true };
+    // The address is what the store refused, so it is the field to mark — the
+    // shopper either signs in with it or registers a different one.
+    return { message: DUPLICATE_COPY, detail: null, field: 'email' };
   }
 
   // Status only. Item 8c's limiter answers with no body on purpose, so there is
   // no wording to corroborate and none is wanted.
   if (status === RATE_LIMITED_STATUS) {
-    return { message: RATE_LIMITED_COPY, detail: null, alreadyRegistered: false };
+    return { message: RATE_LIMITED_COPY, detail: null, field: null };
   }
 
   // Status *and* wording — see {@link mentionsPasswordPolicy}. `null` is allowed
   // for the status because the real body is the policy sentence itself, never
   // `... returned 400`, so there is often nothing for {@link statusOf} to read.
   if ((status === REFUSED_STATUS || status === null) && mentionsPasswordPolicy(message)) {
-    return { message: POLICY_COPY, detail: policyDetail(message), alreadyRegistered: false };
+    return { message: POLICY_COPY, detail: policyDetail(message), field: 'password' };
   }
 
-  return { message: GENERIC_COPY, detail: null, alreadyRegistered: false };
+  // The relay's own shape checks, after the policy branch so App ID's explanation
+  // keeps its own copy. Both are permanent refusals of a specific field, which is
+  // the two things generic copy got wrong about them: it invited a retry that
+  // cannot succeed, and it pointed at nothing.
+  const body = message.trim();
+  if ((status === REFUSED_STATUS || status === null) && EMAIL_SHAPE.test(body)) {
+    return { message: EMAIL_SHAPE_COPY, detail: null, field: 'email' };
+  }
+  if ((status === REFUSED_STATUS || status === null) && PASSWORD_SHAPE.test(body)) {
+    return { message: PASSWORD_SHAPE_COPY, detail: null, field: 'password' };
+  }
+
+  return { message: GENERIC_COPY, detail: null, field: null };
 }

@@ -34,9 +34,9 @@
           formControlName="email"
           autocomplete="email"
           aria-required="true"
-          [attr.aria-invalid]="emailError() ? 'true' : null"
-          [attr.aria-describedby]="emailError() ? 'signup-email-error' : null"
-          [class.border-tsuba]="emailError()"
+          [attr.aria-invalid]="fieldInvalid('email') ? 'true' : null"
+          [attr.aria-describedby]="describedBy('email')"
+          [class.border-tsuba]="fieldInvalid('email')"
           class="mt-2 w-full rounded-xl border border-onsen-surface/60 bg-onsen-water/40 px-4 py-3 text-steam placeholder:text-kelp/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
           data-testid="signup-email"
         />
@@ -64,9 +64,9 @@
           formControlName="password"
           autocomplete="new-password"
           aria-required="true"
-          [attr.aria-invalid]="passwordError() ? 'true' : null"
-          [attr.aria-describedby]="passwordError() ? 'signup-password-error' : null"
-          [class.border-tsuba]="passwordError()"
+          [attr.aria-invalid]="fieldInvalid('password') ? 'true' : null"
+          [attr.aria-describedby]="describedBy('password')"
+          [class.border-tsuba]="fieldInvalid('password')"
           class="mt-2 w-full rounded-xl border border-onsen-surface/60 bg-onsen-water/40 px-4 py-3 text-steam placeholder:text-kelp/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
           data-testid="signup-password"
         />
@@ -83,7 +83,14 @@
       </div>
 
       @if (refusal(); as problem) {
+        <!--
+          `id` so a refusal that blames a field can be named by that field's
+          `aria-describedby` — see `refusalNames()` on why the duplicate case shows
+          no "Try signing in" link: there is no sign-in screen to link to yet
+          (Epic #261 item 18), and the copy carries that advice on its own.
+        -->
         <div
+          id="signup-refusal"
           role="alert"
           class="rounded-xl border border-tsuba/50 bg-tsuba/10 px-4 py-3 text-sm text-steam"
           data-testid="signup-error"
@@ -92,14 +99,6 @@
           @if (problem.detail) {
             <!-- App ID's own explanation: the part that says what to change. -->
             <p class="mt-2 text-kelp" data-testid="signup-error-detail">{{ problem.detail }}</p>
-          }
-          @if (offerSignIn()) {
-            <a
-              routerLink="/self-checkout"
-              class="mt-2 inline-block underline decoration-yuzu underline-offset-4"
-              data-testid="signup-try-sign-in"
-              >Try signing in</a
-            >
           }
         </div>
       }

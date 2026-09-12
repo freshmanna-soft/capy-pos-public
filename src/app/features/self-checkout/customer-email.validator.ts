@@ -44,16 +44,30 @@ export const MAX_EMAIL_LENGTH = 254;
  * fact have registered fine, which is the same class of mistake as this file's
  * reason for existing, only pointing the other way.
  *
- * Empty is left to `Validators.required`, so a field the customer has not reached
- * yet is not also "malformed".
+ * An *empty* field is left to `Validators.required`, so a field the customer has
+ * not reached yet is not also "malformed". Emptiness is measured before trimming,
+ * deliberately: `Validators.required` only checks length, so it accepts a field
+ * holding nothing but spaces, and the relay — which trims first — answers `400`
+ * for it. Testing the trimmed value here would have agreed with `required` that
+ * whitespace is content and let that submit go out, so this is the only rule that
+ * catches it — as it is for a non-string value, which `required` also waves
+ * through.
  */
 export const customerEmailValidator: ValidatorFn = (
   control: AbstractControl
 ): ValidationErrors | null => {
-  const value = typeof control.value === 'string' ? control.value.trim() : '';
-  if (value.length === 0) {
+  const raw: unknown = control.value;
+  // Absent, not wrong: the two values a control holds before anyone types in it.
+  if (raw === null || raw === undefined || raw === '') {
     return null;
   }
+  // Anything that is not a string cannot be an address, which is the relay's first
+  // check too (`typeof email !== 'string'`). `Validators.required` accepts a
+  // non-empty non-string, so without this the two rules leave a gap between them.
+  if (typeof raw !== 'string') {
+    return { email: true };
+  }
+  const value = raw.trim();
   if (!EMAIL_PATTERN.test(value)) {
     return { email: true };
   }
