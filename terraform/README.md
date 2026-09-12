@@ -20,7 +20,7 @@ template kept for reference and is not applied by this root module — see
 | `ibm_cloudant.store`                    | One shared Cloudant (Lite plan) instance, for pos-api's own data.         |
 | `ibm_resource_key.cloudant_key`         | Generated Cloudant credentials — never hand-entered.                     |
 | `ibm_code_engine_secret.cloudant_creds` | `CLOUDANT_URL`/`CLOUDANT_APIKEY`, one per app that sets `needs_cloudant`. |
-| `ibm_code_engine_secret.appid_secret`   | `APPID_CLIENT_SECRET`, one per app that sets `needs_appid_secret`.       |
+| `ibm_code_engine_secret.appid_secret`   | `APPID_CLIENT_SECRET`, `APPID_MANAGEMENT_APIKEY`, `APPID_CUSTOMER_CLIENT_SECRET`, one per app that sets `needs_appid_secret`. |
 | `ibm_code_engine_app.apps`              | `for_each` over `var.services`.                                          |
 
 The apps are a `for_each` rather than one resource block per service on purpose:
@@ -182,6 +182,18 @@ export TF_VAR_image_tag="v1"
 export TF_VAR_appid_tenant_id="…"          # matches environment.*.ts's appId.tenantId
 export TF_VAR_appid_client_id="…"          # matches environment.*.ts's appId.staffClientId
 export TF_VAR_appid_client_secret="…"      # from the App ID instance's Applications tab
+
+# Epic #261 item 25 — the CUSTOMER application, provisioned 2026-09-11.
+# BOTH or NEITHER: a plan-time precondition rejects setting one without the other,
+# because infra/appid-token-relay refuses to serve /appid/customer/token unless both
+# exist, and Code Engine would keep serving the previous revision — so a one-sided
+# apply breaks the service silently. Phase 5 lost ~10 hours to exactly that shape.
+export TF_VAR_appid_customer_client_id="7a2cdfd6-a289-4b86-b415-58b9faf17cb5"
+export TF_VAR_appid_customer_client_secret="…"   # capy-pos-customer, Applications tab
+
+# Applying these makes POST /appid/customer/sign-up publicly reachable for the FIRST
+# time. That is safe only because item 8b (duplicate-email/password validation, PR
+# #305) and item 8c (per-IP rate limiting, PR #304) both landed first.
 ```
 
 ### 3. Apply
