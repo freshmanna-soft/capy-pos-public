@@ -6,6 +6,7 @@ import {
   CustomerAuthGateway,
 } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CustomerRegistrationDto } from '@core/application/auth/dtos/customer-registration.dto';
+import { PendingRegistrationStore } from './pending-registration.store';
 import { CHECK_EMAIL_ROUTE, LANE_ROUTE } from './self-checkout-routes';
 import { SelfCheckoutSignUpComponent } from './self-checkout-signup.component';
 
@@ -20,7 +21,10 @@ import { SelfCheckoutSignUpComponent } from './self-checkout-signup.component';
  *   injects it, so "still signed out afterwards" is asserted on the service
  *   rather than inferred from the absence of a call;
  * - the address carried to the interstitial is the one the GATEWAY registered,
- *   not the raw field, so the customer is told the inbox the mail went to;
+ *   not the raw field, so the customer is told the inbox the mail went to — and it
+ *   travels in memory, never in the URL: this used to be `queryParams: { email }`,
+ *   which published a shopper's address into the address bar and history of a
+ *   shared terminal for a screen that did not read it;
  * - the guard on this route is asserted in `app.routes.spec.ts` instead, against
  *   the route table's own `canActivate` and the injector the family shares —
  *   calling the factory again here proved only that the factory works;
@@ -75,6 +79,7 @@ describe('SelfCheckoutSignUpComponent', () => {
         provideRouter([]),
         { provide: CUSTOMER_AUTH_GATEWAY, useValue: gateway },
         CurrentCustomerService,
+        PendingRegistrationStore,
       ],
     });
     const fixture = TestBed.createComponent(SelfCheckoutSignUpComponent);
@@ -114,7 +119,7 @@ describe('SelfCheckoutSignUpComponent', () => {
   }
 
   describe('success', () => {
-    it('routes to the interstitial with the address the gateway registered', async () => {
+    it('routes to the interstitial and hands it the address the gateway registered', async () => {
       const gateway = makeGateway(vi.fn().mockResolvedValue(registration));
       const fixture = await createComponent(gateway);
       const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
@@ -128,11 +133,28 @@ describe('SelfCheckoutSignUpComponent', () => {
         email: 'Yuzu@Example.com',
         password: 'sup3rsecret',
       });
-      // ...and the *registered* address back in, lowercased by the gateway. The
-      // typed casing differs, so reading `form.value.email` instead fails here.
-      expect(navigate).toHaveBeenCalledWith([CHECK_EMAIL_ROUTE], {
-        queryParams: { email: 'yuzu@example.com' },
-      });
+      expect(navigate).toHaveBeenCalledWith([CHECK_EMAIL_ROUTE]);
+      // ...and the *registered* address handed on, lowercased by the gateway. The
+      // typed casing differs, so remembering `form.value.email` instead fails here.
+      expect(TestBed.inject(PendingRegistrationStore).take()).toBe('yuzu@example.com');
+    });
+
+    it('puts the address nowhere the next shopper can read it', async () => {
+      // The kiosk rule, pinned as a mutation test: re-adding
+      // `queryParams: { email }` (or any other navigation extra carrying it) fails
+      // here. `/self-checkout` is a shared in-store terminal, so an address in the
+      // URL is an address in the address bar and in session history for whoever
+      // walks up next — and the interstitial never read the query param anyway.
+      const gateway = makeGateway(vi.fn().mockResolvedValue(registration));
+      const fixture = await createComponent(gateway);
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+
+      fill(fixture);
+      await submit(fixture);
+
+      const [commands, extras] = navigate.mock.calls[0];
+      expect(extras).toBeUndefined();
+      expect(JSON.stringify(commands)).not.toContain('example.com');
     });
 
     it('leaves the customer signed OUT — no session is invented', async () => {

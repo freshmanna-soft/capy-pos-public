@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { AbstractControl, FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
+import { PendingRegistrationStore } from './pending-registration.store';
 import { CHECK_EMAIL_ROUTE, LANE_ROUTE } from './self-checkout-routes';
 import { describeSignUpRefusal, SignUpRefusalCopy } from './self-checkout-signup-errors';
 
@@ -67,6 +68,7 @@ export class SelfCheckoutSignUpComponent {
   private readonly gateway = inject(CUSTOMER_AUTH_GATEWAY);
   private readonly router = inject(Router);
   private readonly fb = inject(FormBuilder);
+  private readonly pending = inject(PendingRegistrationStore);
 
   readonly form = this.fb.group({
     email: ['', [Validators.required, Validators.email]],
@@ -127,9 +129,15 @@ export class SelfCheckoutSignUpComponent {
   /**
    * Create the account, then send the customer to the interstitial.
    *
-   * The email carried across is the one the *gateway* normalized and registered,
-   * not the raw field value, so the interstitial names the inbox the
-   * verification mail actually went to.
+   * The address handed across is the one the *gateway* normalized and registered,
+   * not the raw field value, so the interstitial names the inbox the verification
+   * mail actually went to — and it travels through
+   * {@link PendingRegistrationStore}, in memory, not as a query param. A
+   * `queryParams: { email }` wrote the shopper's address into the address bar and
+   * the session history of a terminal the next shopper walks up to; router `state`
+   * only moves it from the URL into `history.state`, where a reload or a back
+   * navigation still hands it over. The store dies with the route subtree and
+   * forgets the address as the interstitial reads it.
    */
   protected async submit(): Promise<void> {
     if (this.form.invalid || this.submitting()) {
@@ -149,9 +157,8 @@ export class SelfCheckoutSignUpComponent {
         email: email ?? '',
         password: password ?? '',
       });
-      await this.router.navigate([CHECK_EMAIL_ROUTE], {
-        queryParams: { email: registration.email },
-      });
+      this.pending.remember(registration.email);
+      await this.router.navigate([CHECK_EMAIL_ROUTE]);
     } catch (error) {
       this.refusal.set(describeSignUpRefusal(error));
     } finally {

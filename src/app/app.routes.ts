@@ -6,6 +6,7 @@ import { redirectIfAuthenticatedGuard } from '@core/presentation/guards/redirect
 import { AppIdCustomerAuthAdapter } from '@core/infrastructure/auth/appid-customer-auth.adapter';
 import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palette';
 import { LANE_ROUTE } from '@features/self-checkout/self-checkout-routes';
+import { PendingRegistrationStore } from '@features/self-checkout/pending-registration.store';
 
 export const routes: Routes = [
   {
@@ -85,9 +86,16 @@ export const routes: Routes = [
     // customer→staff-adapter import edge, so this route's graph stops depending
     // on the staff adapter before that coupling can start costing anything.
     // `appid-customer-auth.import-graph.spec.ts` is what keeps the edge gone.
+    //
+    // `PendingRegistrationStore` is here for the same reason and not a weaker one:
+    // it is how the sign-up form tells the interstitial which inbox to name, and
+    // as a per-child provider it would be two instances — the form remembering an
+    // address the next screen cannot see, which is the query param this replaced
+    // all over again, minus the disclosure.
     providers: [
       { provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter },
       CurrentCustomerService,
+      PendingRegistrationStore,
     ],
     children: [
       {

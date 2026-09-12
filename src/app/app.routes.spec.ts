@@ -23,6 +23,7 @@ import {
   LANE_ROUTE,
   SIGN_UP_ROUTE,
 } from '@features/self-checkout/self-checkout-routes';
+import { PendingRegistrationStore } from '@features/self-checkout/pending-registration.store';
 import { Permission } from '@core/domain/auth';
 import { appConfig } from './app.config';
 import { routes } from './app.routes';
@@ -183,6 +184,19 @@ describe('routes', () => {
           `/${child.path} must inherit the customer identity, not re-provide it`
         ).toBeUndefined();
       }
+    });
+
+    it('provides PendingRegistrationStore once too, on the same shared parent', () => {
+      // Same failure mode as the service above, one screen further along: the
+      // sign-up form remembers the registered address here and the interstitial
+      // takes it, so a per-child copy would mean the form writing to an instance
+      // the next screen cannot see — which is what sent the address through
+      // `queryParams` and into the URL of a shared terminal in the first place.
+      expect(routesProviding(PendingRegistrationStore)).toEqual(['self-checkout']);
+      expect(appRoot.get(PendingRegistrationStore, null)).toBeNull();
+      expect(selfCheckoutRoute.get(PendingRegistrationStore)).toBeInstanceOf(
+        PendingRegistrationStore
+      );
     });
 
     /**

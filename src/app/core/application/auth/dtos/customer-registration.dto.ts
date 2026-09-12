@@ -19,8 +19,20 @@
  * that cannot authenticate. The compiler refuses that here instead.
  */
 export interface CustomerRegistrationDto {
-  /** App ID subject for the account just created. */
-  readonly customerId: string;
+  /**
+   * App ID subject for the account just created — absent if the backend answered
+   * `201` without one.
+   *
+   * Optional on purpose, and the asymmetry with {@link email} below is the point.
+   * The adapter used to answer a missing id with `''`, which is not a fallback but
+   * a fabricated identity: `''` type-checks everywhere a real `sub` does, and the
+   * first thing to key a lookup or an audit row off it would silently key it off
+   * nothing. `email` has a local truth to fall back on — the address the adapter
+   * itself normalized and sent, which is the account's — and an id has none, so
+   * this is absent instead of empty and the compiler makes every future reader say
+   * what it does about that.
+   */
+  readonly customerId?: string;
   /** The address the account was created against, normalized by the gateway. */
   readonly email: string;
 }

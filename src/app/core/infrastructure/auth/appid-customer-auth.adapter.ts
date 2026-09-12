@@ -190,11 +190,24 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
       );
     }
 
-    // `email` rather than `data.email` as the fallback: the address this
-    // adapter normalized and sent is the one the account exists under, so a
-    // relay that answered `201` without echoing it back still leaves the form
-    // able to tell the customer which inbox to open.
-    return { customerId: data.id ?? '', email: data.email ?? email };
+    // Two fields, two deliberately different treatments — see
+    // `CustomerRegistrationDto`'s own note on why they are not symmetric.
+    //
+    // `email` falls back to `email` rather than staying `data.email`: the address
+    // this adapter normalized and sent is the one the account exists under, so a
+    // relay that answered `201` without echoing it back still leaves the form able
+    // to tell the customer which inbox to open.
+    //
+    // `customerId` gets NO fallback. It was `data.id ?? ''`, which invented a
+    // subject for the account instead of admitting the response carried none: the
+    // relay's own doc calls this id "the `sub` every later call about this customer
+    // keys off", and `''` is an id that reads as present and resolves to nobody.
+    // Absent is the truth, and the DTO's optional field is what forces a caller to
+    // handle it. Not thrown, either: the account exists by the time the relay says
+    // `201`, and turning that into "we could not create your account" would send
+    // the customer to retry into the `409` this repo's resilient-mapping rule
+    // exists to avoid.
+    return { customerId: data.id, email: data.email ?? email };
   }
 
   async authenticate(creds: CredentialsDto): Promise<CustomerSessionDto> {

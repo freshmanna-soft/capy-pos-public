@@ -505,6 +505,24 @@ describe('AppIdCustomerAuthAdapter', () => {
       expect(registration.email).toBe('shopper@capy.test');
     });
 
+    it('invents no account id when the relay sends none, and still reports the address', async () => {
+      // The other half of the asymmetry, and the reason it is asymmetric: the
+      // address has a local truth to fall back on (the one this adapter just
+      // normalized and sent), an id has none. It used to be `data.id ?? ''` — an
+      // identity that type-checks like a real `sub` and resolves to nobody, on the
+      // very field the relay calls "the `sub` every later call about this customer
+      // keys off". Absent, not empty; and not thrown either, because the account
+      // exists by the time the relay says `201`.
+      installFetch({ signUpResult: { email: 'shopper@capy.test' } });
+      const adapter = makeAdapter();
+
+      const registration = await adapter.signUp({ email: 'Shopper@Capy.Test', password: 'pw' });
+
+      expect(registration.customerId).toBeUndefined();
+      expect(registration.customerId).not.toBe('');
+      expect(registration.email).toBe('shopper@capy.test');
+    });
+
     it('throws the relay error verbatim — mapping to copy is the form’s job', async () => {
       installFetch({ signUpResult: { error: 'email already registered' }, signUpStatus: 409 });
       const adapter = makeAdapter();
