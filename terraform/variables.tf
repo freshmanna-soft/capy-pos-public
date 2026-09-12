@@ -104,6 +104,47 @@ variable "appid_client_id" {
   default     = ""
 }
 
+variable "appid_customer_client_id" {
+  description = <<-EOT
+    The CUSTOMER App ID application's client id (epic #261 item 25). Not sensitive,
+    same reasoning as appid_client_id — it is the `aud` a customer token carries,
+    and it is already committed in `environment.*.ts` as
+    `appId.customerClientId`.
+
+    Staff and customers share one App ID *tenant* and are separated by being two
+    distinct App ID *applications*: the client a grant is exchanged under decides
+    the scopes the resulting token carries. What keeps a customer token out of the
+    staff gateway is the audience binding, not secrecy.
+
+    Provisioned 2026-09-11 as `capy-pos-customer`, type `regularwebapp` — a
+    `singlepageapp` is WRONG here because it gets no client secret, and the relay
+    performs a confidential-client password grant.
+
+    MUST be set together with appid_customer_client_secret. See the precondition
+    on ibm_code_engine_secret.appid_secret.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "appid_customer_client_secret" {
+  description = <<-EOT
+    The CUSTOMER App ID application's client secret (epic #261 item 25). Bound as
+    a Code Engine secret, never a literal env var, exactly like
+    appid_client_secret.
+
+    MUST be set together with appid_customer_client_id. `customer-token.ts`
+    refuses to serve `/appid/customer/token` unless BOTH are present, and it is
+    right to: exchanging a customer grant under any other client would hand the
+    caller staff scopes. Half-configured is a startup failure, not a degraded
+    mode — which is why the precondition below rejects it at plan time rather
+    than letting Code Engine discover it.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "appid_client_secret" {
   description = <<-EOT
     The one genuinely sensitive App ID value: the staff application's client
