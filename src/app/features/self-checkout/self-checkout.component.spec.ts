@@ -5,13 +5,16 @@ import { ProductService } from '@core/application/services/product.service';
 import { CartService } from '@core/application/services/cart.service';
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
 import { CameraService } from '@core/infrastructure/media/camera.service';
+import { SIGN_UP_ROUTE } from './self-checkout-routes';
 import { SelfCheckoutComponent } from './self-checkout.component';
 
 /**
  * The shell's contract is small but load-bearing: it has to render as a
  * full-screen takeover (a customer must not be able to reach the staff nav
- * behind it), and it has to offer a way back to the till, because a kiosk build
- * shows no browser chrome to escape through.
+ * behind it), it has to offer a way back to the till, because a kiosk build
+ * shows no browser chrome to escape through, and it has to offer the way IN to
+ * the sign-up form — the whole feature is reached from this one control, and it
+ * used to be deletable with every test still green.
  */
 describe('SelfCheckoutComponent', () => {
   const navigate = vi.fn();
@@ -105,6 +108,22 @@ describe('SelfCheckoutComponent', () => {
     // Two instances, not one: the root cart is what `/pos` rings a sale into, and
     // `/self-checkout` is an unguarded route. See the component's class comment.
     expect(fixture.debugElement.injector.get(CartService)).not.toBe(TestBed.inject(CartService));
+  });
+
+  it('offers the way in to the sign-up form, as a link and not a gate', () => {
+    // Registration is optional by product decision (2026-09-11, options 1+3), so
+    // this is an offer on the lane rather than something standing in front of it:
+    // the control navigates, and the lane itself stays reachable with no account.
+    const fixture = render();
+    const signUp: HTMLButtonElement | null = fixture.nativeElement.querySelector(
+      '[data-testid="self-checkout-signup-link"]'
+    );
+
+    expect(signUp).not.toBeNull();
+    expect(signUp?.textContent).toContain('Create an account');
+    signUp?.click();
+
+    expect(navigate).toHaveBeenCalledWith([SIGN_UP_ROUTE]);
   });
 
   it('navigates back to the till when the exit control is used', () => {

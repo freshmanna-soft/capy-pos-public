@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { CustomerAuthGateway } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CredentialsDto } from '@core/application/auth/dtos/credentials.dto';
+import { CustomerRegistrationDto } from '@core/application/auth/dtos/customer-registration.dto';
 import { CustomerSessionDto } from '@core/application/auth/dtos/customer-session.dto';
 import { InvalidCredentialsError } from './local-credential-auth.adapter';
 import { Permission } from '@core/domain/auth';
@@ -46,13 +47,24 @@ export class InMemoryCustomerAuthAdapter implements CustomerAuthGateway {
   private session: CustomerSessionDto | null = null;
   private tokenCounter = 0;
 
-  async signUp(creds: CredentialsDto): Promise<CustomerSessionDto> {
+  /**
+   * Register, and leave the caller signed out — the same shape the real adapter
+   * has and for the same reason (a just-created App ID account is `PENDING`).
+   * A stand-in that handed back a live session here would let everything above
+   * the port be built against a success that the real gateway cannot deliver,
+   * which is precisely how item 16's form acquired an unreachable happy path.
+   *
+   * The credentials are still recorded, so `authenticate()` accepts them
+   * afterwards — the fake stands in for a *confirmed* account being signed in,
+   * which is the flow item 18 exercises.
+   */
+  async signUp(creds: CredentialsDto): Promise<CustomerRegistrationDto> {
     const email = normalizeEmail(creds.email);
     if (this.accounts.has(email)) {
       throw new CustomerAlreadyExistsError();
     }
     this.accounts.set(email, creds.password);
-    return this.issue(email);
+    return { customerId: `fake-customer-${email}`, email };
   }
 
   async authenticate(creds: CredentialsDto): Promise<CustomerSessionDto> {

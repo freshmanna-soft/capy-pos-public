@@ -17,13 +17,23 @@ describe('InMemoryCustomerAuthAdapter', () => {
   });
 
   describe('signUp', () => {
-    it('registers a new customer and returns a live session for them', async () => {
-      const session = await adapter.signUp(creds);
+    it('registers a new customer and returns the account, with no session', async () => {
+      const registration = await adapter.signUp(creds);
 
-      expect(session.email).toBe('shopper@example.com');
-      expect(session.roles).toEqual(['customer']);
-      expect(session.permissions).toEqual([Permission.PROCESS_SALE]);
-      expect(new Date(session.expiresAt).getTime()).toBeGreaterThan(Date.now());
+      expect(registration).toEqual({
+        customerId: 'fake-customer-shopper@example.com',
+        email: 'shopper@example.com',
+      });
+    });
+
+    it('leaves the caller signed OUT, the way a PENDING App ID account does', async () => {
+      // The property the real adapter cannot avoid (item 3: a just-created
+      // account is `PENDING` and cannot complete a password grant), so the
+      // stand-in must not offer a success the real gateway never can.
+      await adapter.signUp(creds);
+
+      await expect(adapter.getActiveSession()).resolves.toBeNull();
+      expect(adapter.getAccessToken()).toBeNull();
     });
 
     it('rejects an email that is already registered', async () => {
@@ -39,24 +49,28 @@ describe('InMemoryCustomerAuthAdapter', () => {
         CustomerAlreadyExistsError
       );
     });
-
-    it('issues a token that is deliberately not a JWT', async () => {
-      // Nothing downstream may start trusting the fake token as a signed one,
-      // and no forgeable signing secret belongs in the bundle.
-      const session = await adapter.signUp(creds);
-
-      expect(session.accessToken.split('.')).toHaveLength(1);
-    });
   });
 
   describe('authenticate', () => {
-    it('accepts the registered password', async () => {
+    it('accepts the registered password and issues a live session', async () => {
       await adapter.signUp(creds);
-      await adapter.signOut();
 
       const session = await adapter.authenticate(creds);
 
       expect(session.email).toBe('shopper@example.com');
+      expect(session.roles).toEqual(['customer']);
+      expect(session.permissions).toEqual([Permission.PROCESS_SALE]);
+      expect(new Date(session.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    });
+
+    it('issues a token that is deliberately not a JWT', async () => {
+      // Nothing downstream may start trusting the fake token as a signed one,
+      // and no forgeable signing secret belongs in the bundle.
+      await adapter.signUp(creds);
+
+      const session = await adapter.authenticate(creds);
+
+      expect(session.accessToken.split('.')).toHaveLength(1);
     });
 
     it('rejects a wrong password', async () => {
@@ -78,8 +92,9 @@ describe('InMemoryCustomerAuthAdapter', () => {
       await expect(adapter.getActiveSession()).resolves.toBeNull();
     });
 
-    it('returns the session issued by signUp', async () => {
-      const issued = await adapter.signUp(creds);
+    it('returns the session issued by authenticate', async () => {
+      await adapter.signUp(creds);
+      const issued = await adapter.authenticate(creds);
 
       await expect(adapter.getActiveSession()).resolves.toEqual(issued);
     });
@@ -88,6 +103,7 @@ describe('InMemoryCustomerAuthAdapter', () => {
       vi.useFakeTimers();
       try {
         await adapter.signUp(creds);
+        await adapter.authenticate(creds);
 
         vi.advanceTimersByTime(31 * 60 * 1000);
 
@@ -101,7 +117,8 @@ describe('InMemoryCustomerAuthAdapter', () => {
 
   describe('refresh', () => {
     it('issues a new token for the same customer', async () => {
-      const first = await adapter.signUp(creds);
+      await adapter.signUp(creds);
+      const first = await adapter.authenticate(creds);
 
       const second = await adapter.refresh();
 
@@ -117,6 +134,7 @@ describe('InMemoryCustomerAuthAdapter', () => {
   describe('signOut', () => {
     it('clears the session and the access token', async () => {
       await adapter.signUp(creds);
+      await adapter.authenticate(creds);
       expect(adapter.getAccessToken()).not.toBeNull();
 
       await adapter.signOut();

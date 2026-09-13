@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { decodeProtectedHeader, jwtVerify, type JWTPayload } from 'jose';
 import { CustomerAuthGateway } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CredentialsDto } from '@core/application/auth/dtos/credentials.dto';
+import { CustomerRegistrationDto } from '@core/application/auth/dtos/customer-registration.dto';
 import { CustomerSessionDto } from '@core/application/auth/dtos/customer-session.dto';
 import { DEFAULT_TENANT_ID } from '@core/infrastructure/database/dexie-database.service';
 import { Permission } from '@core/domain/auth';
@@ -34,7 +35,9 @@ import { AppIdAuthError, AppIdJwksKeyResolver } from './appid-jwks';
  *    `CUSTOMER_AUTH_GATEWAY` is a separate port at all: self-checkout runs on
  *    the same device staff sign in on, so one tab has to hold both sessions.
  * 4. **`signUp`.** Not on {@link AuthGateway} — staff accounts are created by
- *    an admin, a customer creates their own (items 8a/16).
+ *    an admin, a customer creates their own (items 8a/16). It returns a
+ *    {@link CustomerRegistrationDto} and no session, for the reason its own doc
+ *    comment gives: item 3 proved a just-created account is `PENDING`.
  *
  * Not wired into DI here: binding `CUSTOMER_AUTH_GATEWAY` to this class, scoped
  * to the self-checkout lazy route's own providers, is item 13.
@@ -138,16 +141,25 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
   // -------------------------------------------------------------------------
 
   /**
-   * Register the customer, then sign them in.
+   * Register the customer. Does **not** sign them in, and must not start to.
    *
    * The relay's sign-up route answers `201 { id, email }` rather than a token
    * (item 8a: account creation goes through App ID's Management API, which does
-   * not mint grants), so the session this port promises comes from exchanging
-   * the credentials just created on the customer token route. Backend errors
-   * propagate verbatim — mapping them to user-facing copy is the sign-up form's
-   * job (item 16), not this adapter's.
+   * not mint grants). This used to chase that with a password grant on the
+   * customer token route so it could satisfy a `Promise<CustomerSessionDto>`,
+   * which was written before item 3 ran the experiment: an account this route
+   * just created is `PENDING`, so that grant is answered
+   * `403 "Pending user verification"` — every time, for every account, against
+   * any real tenant. The exchange therefore could not succeed, only mislabel
+   * itself, and the form above it inherited an unreachable success path plus a
+   * refusal wearing the wrong copy (`InvalidCredentialsError`'s "Invalid email
+   * or password" read as a password-policy rejection). So the `201` is now the
+   * whole answer, which is also all the relay ever promised.
+   *
+   * Backend errors propagate verbatim — mapping them to user-facing copy is the
+   * sign-up form's job (item 16), not this adapter's.
    */
-  async signUp(creds: CredentialsDto): Promise<CustomerSessionDto> {
+  async signUp(creds: CredentialsDto): Promise<CustomerRegistrationDto> {
     const email = normalizeEmail(creds.email);
     // Resolved before the try: a config failure is not a transport failure and
     // must not be re-worded as one by the catch below.
@@ -166,11 +178,36 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
 
     const data = (await response.json().catch(() => ({}))) as SignUpResponse;
     if (!response.ok) {
-      // Verbatim: whatever the relay said is what the form gets to interpret.
-      throw new AppIdAuthError(data.error ?? `Customer sign-up returned ${response.status}`);
+      // Verbatim: whatever the relay said is what the form gets to interpret —
+      // plus the status, as a number. The form classifies 409/400/429 into its own
+      // copy, and the only alternative to passing the status here is the form
+      // digging it back out of the sentence, which cannot be done safely: the
+      // relay forwards App ID's policy explanation and that prose quotes its own
+      // bounds, so "between 8 and 100 characters" reads as a status.
+      throw new AppIdAuthError(
+        data.error ?? `Customer sign-up returned ${response.status}`,
+        response.status
+      );
     }
 
-    return this.authenticate({ email, password: creds.password });
+    // Two fields, two deliberately different treatments — see
+    // `CustomerRegistrationDto`'s own note on why they are not symmetric.
+    //
+    // `email` falls back to `email` rather than staying `data.email`: the address
+    // this adapter normalized and sent is the one the account exists under, so a
+    // relay that answered `201` without echoing it back still leaves the form able
+    // to tell the customer which inbox to open.
+    //
+    // `customerId` gets NO fallback. It was `data.id ?? ''`, which invented a
+    // subject for the account instead of admitting the response carried none: the
+    // relay's own doc calls this id "the `sub` every later call about this customer
+    // keys off", and `''` is an id that reads as present and resolves to nobody.
+    // Absent is the truth, and the DTO's optional field is what forces a caller to
+    // handle it. Not thrown, either: the account exists by the time the relay says
+    // `201`, and turning that into "we could not create your account" would send
+    // the customer to retry into the `409` this repo's resilient-mapping rule
+    // exists to avoid.
+    return { customerId: data.id, email: data.email ?? email };
   }
 
   async authenticate(creds: CredentialsDto): Promise<CustomerSessionDto> {

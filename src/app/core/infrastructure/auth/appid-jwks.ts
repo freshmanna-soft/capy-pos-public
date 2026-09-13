@@ -14,9 +14,22 @@ import { importJWK } from 'jose';
 
 /** Raised for non-credential App ID failures (network, relay, service, config). */
 export class AppIdAuthError extends Error {
-  constructor(message: string) {
+  /**
+   * The HTTP status the relay answered with, when this error is one it answered
+   * with at all (a transport or config failure has none).
+   *
+   * Carried as a field rather than left to be read back out of `message`, which
+   * is what the sign-up form used to do — and could not do safely, because the
+   * message can be App ID's own prose and prose quotes numbers ("between 8 and
+   * 100 characters" is not a status). A refusal's status is structured data; only
+   * the sentence beside it is for a person.
+   */
+  readonly status: number | null;
+
+  constructor(message: string, status: number | null = null) {
     super(message);
     this.name = 'AppIdAuthError';
+    this.status = status;
   }
 }
 

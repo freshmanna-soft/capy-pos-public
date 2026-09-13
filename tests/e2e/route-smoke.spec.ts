@@ -56,6 +56,19 @@ const ROUTES: SmokeRoute[] = [
     name: 'Self-checkout',
     landmark: '[data-testid="self-checkout-shell"]',
   },
+  // The lane's side path (epic #261 item 16) and the interstitial it lands on.
+  // Reachable without any session on purpose: registration is optional, so these
+  // are smoked in both session states like the lane itself.
+  {
+    path: '/self-checkout/sign-up',
+    name: 'Self-checkout sign-up',
+    landmark: '[data-testid="self-checkout-signup"]',
+  },
+  {
+    path: '/self-checkout/check-email',
+    name: 'Self-checkout check email',
+    landmark: '[data-testid="self-checkout-check-email"]',
+  },
   // Also unguarded on purpose (#219) — the customer checks themselves out here.
   { path: '/clerk', name: 'Capy Clerk', landmark: '[data-testid="clerk-stage"]' },
   { path: '/admin', name: 'Admin', landmark: 'main, [data-testid="operator-list"]' },
@@ -69,7 +82,12 @@ const ROUTES: SmokeRoute[] = [
  * state apart. Missing a path here is a hard error rather than a silently
  * skipped route.
  */
-const ANONYMOUS_ROUTES: SmokeRoute[] = ['/clerk', '/self-checkout'].map((path) => {
+const ANONYMOUS_ROUTES: SmokeRoute[] = [
+  '/clerk',
+  '/self-checkout',
+  '/self-checkout/sign-up',
+  '/self-checkout/check-email',
+].map((path) => {
   const route = ROUTES.find((candidate) => candidate.path === path);
   if (!route) {
     throw new Error(`${path} is smoked anonymously but is missing from ROUTES`);
