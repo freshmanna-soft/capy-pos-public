@@ -91,6 +91,19 @@ locals {
         APPID_TENANT_ID = var.appid_tenant_id
         APPID_CLIENT_ID = var.appid_client_id
       } : {},
+      # The CUSTOMER application's client id (epic #261 item 25). Only the relay that
+      # actually exchanges a customer grant needs it — pos-api and the two proxies verify
+      # tokens and never mint them, so giving them a second audience would only invite a
+      # customer token into a staff path.
+      #
+      # Bound only when non-empty, and its secret half is guarded by a precondition
+      # below: `customer-token.ts` refuses to serve unless BOTH exist, so a half-set pair
+      # is a startup failure rather than a degraded mode. That exact shape — an
+      # "optional, set it later" var paired with an unconditionally-bound one — left two
+      # services crash-looping invisibly for ~10 hours during Phase 5.
+      service.needs_appid_secret && var.appid_customer_client_id != "" ? {
+        APPID_CUSTOMER_CLIENT_ID = var.appid_customer_client_id
+      } : {},
       # Only the two *callers* of pos-api's GET /internal/roles need to know
       # where it lives — pos-api itself reads the shared roles document
       # directly out of its own Cloudant store, no HTTP hop. Optional: an
@@ -150,12 +163,30 @@ resource "ibm_code_engine_secret" "appid_secret" {
   data = {
     APPID_CLIENT_SECRET     = var.appid_client_secret
     APPID_MANAGEMENT_APIKEY = var.appid_management_api_key
+    # The customer application's secret rides in the SAME secret resource for the same
+    # reason the management key does: only this one relay ever holds it. Empty until
+    # item 25 is applied, which is a state customer-token.ts handles explicitly by
+    # answering 502 on /appid/customer/token rather than refusing to boot — staff
+    # sign-in must keep working on a deployment that has not provisioned customers yet.
+    APPID_CUSTOMER_CLIENT_SECRET = var.appid_customer_client_secret
   }
 
   lifecycle {
     precondition {
       condition     = length(var.appid_client_secret) > 0 && length(var.appid_tenant_id) > 0 && length(var.appid_client_id) > 0
       error_message = "${each.key} needs an App ID tenant: set TF_VAR_appid_tenant_id, TF_VAR_appid_client_id and TF_VAR_appid_client_secret (never commit the secret)."
+    }
+    # Both halves of the customer pair, or neither. `customer-token.ts` exits rather than
+    # serve a half-configured customer route, so a one-sided apply produces a service that
+    # cannot start — and Code Engine keeps routing to the last good revision, which makes
+    # the failure INVISIBLE. That is exactly how Phase 5 left vision-proxy and
+    # clerk-agent-relay crash-looping for ~10 hours with no user-facing symptom. Failing
+    # at plan time is the cheap version of that lesson.
+    precondition {
+      condition = (
+        (length(var.appid_customer_client_id) > 0) == (length(var.appid_customer_client_secret) > 0)
+      )
+      error_message = "appid_customer_client_id and appid_customer_client_secret must be set TOGETHER, or both left empty. Setting one without the other makes infra/appid-token-relay refuse to serve /appid/customer/token, and Code Engine will keep serving the previous revision so the breakage is silent."
     }
   }
 }
