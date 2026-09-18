@@ -36,21 +36,33 @@ import {
   type AppIdVerificationConfig,
 } from './session-auth.ts';
 import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
+import type { CheckoutInventoryMarkers } from './checkout-inventory.ts';
+import {
+  productAvailableStock,
+  productHasActiveReservations,
+  type CheckoutSaleTransactionDocument,
+} from './checkout-fulfillment.ts';
 
 /** The catalogue document. Field-for-field what `create-product/index.js` writes. */
 export interface ProductDocument extends StoredDocument {
   readonly name: string;
   readonly price: number;
   readonly category: string;
+  /** Physical on-hand stock. Available stock additionally excludes active checkout reservations. */
   readonly stock: number;
+  /** Server-owned. Missing on pre-checkout catalogue documents and interpreted as an empty map. */
+  readonly checkoutMarkers?: CheckoutInventoryMarkers;
   readonly description: string;
   readonly isActive?: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
 
-/** The sale record. Field-for-field what `sell-product/index.js` writes, plus attribution. */
-export interface TransactionDocument extends StoredDocument {
+/** Reservation markers are persistence metadata and never cross the HTTP boundary. */
+export type PublicProductDocument = Omit<ProductDocument, 'checkoutMarkers'>;
+
+/** The legacy one-product sale record, kept compatible with the existing till. */
+export interface LegacyTransactionDocument extends StoredDocument {
   readonly productId: string;
   readonly productName: string;
   readonly quantity: number;
@@ -67,6 +79,9 @@ export interface TransactionDocument extends StoredDocument {
   readonly operatorId: string;
   readonly tenantId: string;
 }
+
+/** Existing staff sales and new basket-level checkout sales share the history collection. */
+export type TransactionDocument = LegacyTransactionDocument | CheckoutSaleTransactionDocument;
 
 /**
  * The one document `GET /internal/roles` serves — every role name this
@@ -164,7 +179,10 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
   const outcome = await authorize(
     request.authorization,
     route.permission,
-    { secret: deps.secret, appId: deps.appId ? { ...deps.appId, rolesSource: deps.roles } : undefined },
+    {
+      secret: deps.secret,
+      appId: deps.appId ? { ...deps.appId, rolesSource: deps.roles } : undefined,
+    },
     deps.nowSeconds()
   );
   if (!outcome.ok) {
@@ -183,7 +201,13 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
     case 'deleteProduct':
       return deleteProduct(route.id, deps);
     case 'sellProduct':
-      return sellProduct(route.id, request.body, outcome.claims.operatorId, outcome.claims.tenantId, deps);
+      return sellProduct(
+        route.id,
+        request.body,
+        outcome.claims.operatorId,
+        outcome.claims.tenantId,
+        deps
+      );
     case 'listTransactions':
       return { status: 200, body: await listTransactions(deps) };
   }
@@ -446,9 +470,17 @@ function withoutPosApiOnlyRoles(
 const SIBLING_ROLE_FALLBACK: Readonly<Record<string, readonly string[]>> =
   withoutPosApiOnlyRoles(ROLE_PERMISSIONS);
 
-async function listProducts(deps: ApiDeps): Promise<{ products: readonly ProductDocument[]; count: number }> {
-  const products = await deps.products.list();
+async function listProducts(
+  deps: ApiDeps
+): Promise<{ products: readonly PublicProductDocument[]; count: number }> {
+  const products = (await deps.products.list()).map(publicProduct);
   return { products, count: products.length };
+}
+
+/** Strips server-owned reservation markers from every product response. */
+function publicProduct(product: ProductDocument): PublicProductDocument {
+  const { checkoutMarkers: _checkoutMarkers, ...projection } = product;
+  return projection;
 }
 
 /**
@@ -466,7 +498,9 @@ async function listTransactions(
   const transactions = [...(await deps.transactions.list())].sort((left, right) => {
     const leftMs = Date.parse(right.timestamp);
     const rightMs = Date.parse(left.timestamp);
-    return (Number.isNaN(leftMs) ? -Infinity : leftMs) - (Number.isNaN(rightMs) ? -Infinity : rightMs);
+    return (
+      (Number.isNaN(leftMs) ? -Infinity : leftMs) - (Number.isNaN(rightMs) ? -Infinity : rightMs)
+    );
   });
   return { transactions, count: transactions.length };
 }
@@ -502,7 +536,7 @@ async function createProduct(rawBody: unknown, deps: ApiDeps): Promise<ApiRespon
   if (outcome === 'conflict') {
     return { status: 409, body: { error: 'Product with this ID already exists' } };
   }
-  return { status: 201, body: { product } };
+  return { status: 201, body: { product: publicProduct(product) } };
 }
 
 /** PUT — full replace. Requires the full field set and preserves the original `createdAt`. */
@@ -522,13 +556,29 @@ async function replaceProduct(id: string, rawBody: unknown, deps: ApiDeps): Prom
     return { status: 404, body: { error: 'Product not found', productId: id } };
   }
 
+  const requestedStock = readStock(body['stock']);
+  const requestedIsActive = readOptionalBoolean(body['isActive']);
+  const reservationConflict = inventoryMutationConflict(existing.document, {
+    nextStock: requestedStock,
+    nextIsActive: requestedIsActive ?? existing.document.isActive,
+  });
+  if (reservationConflict !== null) return reservationConflict;
+
   const replacement: ProductDocument = {
     id,
     name: fields.name,
     price: fields.price,
     category: fields.category,
-    stock: readStock(body['stock']),
+    stock: requestedStock,
+    ...(existing.document.checkoutMarkers === undefined
+      ? {}
+      : { checkoutMarkers: existing.document.checkoutMarkers }),
     description: asString(body['description']) ?? '',
+    ...(requestedIsActive === undefined
+      ? existing.document.isActive === undefined
+        ? {}
+        : { isActive: existing.document.isActive }
+      : { isActive: requestedIsActive }),
     createdAt: existing.document.createdAt,
     updatedAt: deps.nowIso(),
   };
@@ -541,7 +591,7 @@ async function replaceProduct(id: string, rawBody: unknown, deps: ApiDeps): Prom
     // silently clobbering the other write.
     return { status: 409, body: { error: 'Product was modified concurrently. Retry.' } };
   }
-  return { status: 200, body: { product: replacement } };
+  return { status: 200, body: { product: publicProduct(replacement) } };
 }
 
 /** PATCH — partial update over whichever mutable fields are present. */
@@ -591,12 +641,19 @@ async function patchProduct(id: string, rawBody: unknown, deps: ApiDeps): Promis
     return { status: 404, body: { error: 'Product not found', productId: id } };
   }
 
+  const reservationConflict = inventoryMutationConflict(existing.document, {
+    nextStock: typeof patch['stock'] === 'number' ? patch['stock'] : existing.document.stock,
+    nextIsActive:
+      typeof patch['isActive'] === 'boolean' ? patch['isActive'] : existing.document.isActive,
+  });
+  if (reservationConflict !== null) return reservationConflict;
+
   const updated = { ...existing.document, ...patch, updatedAt: deps.nowIso() } as ProductDocument;
   const outcome = await deps.products.write(updated, existing.rev);
   if (outcome === 'conflict') {
     return { status: 409, body: { error: 'Product was modified concurrently. Retry.' } };
   }
-  return { status: 200, body: { product: updated } };
+  return { status: 200, body: { product: publicProduct(updated) } };
 }
 
 async function deleteProduct(id: string, deps: ApiDeps): Promise<ApiResponse> {
@@ -604,11 +661,23 @@ async function deleteProduct(id: string, deps: ApiDeps): Promise<ApiResponse> {
   if (existing === null) {
     return { status: 404, body: { error: 'Product not found', productId: id } };
   }
+  if (productHasActiveReservations(existing.document)) {
+    return {
+      status: 409,
+      body: {
+        error: 'Product has active checkout reservations and cannot be deleted.',
+        productId: id,
+      },
+    };
+  }
   const outcome = await deps.products.remove(id, existing.rev);
   if (outcome === 'conflict') {
     return { status: 409, body: { error: 'Product was modified concurrently. Retry.' } };
   }
-  return { status: 200, body: { message: 'Product deleted', product: existing.document } };
+  return {
+    status: 200,
+    body: { message: 'Product deleted', product: publicProduct(existing.document) },
+  };
 }
 
 /**
@@ -658,13 +727,14 @@ async function sellProduct(
     }
 
     const product = existing.document;
-    if (product.stock < quantity) {
+    const available = productAvailableStock(product);
+    if (available < quantity) {
       return {
         status: 400,
         body: {
           error: 'Insufficient stock',
           productId: id,
-          available: product.stock,
+          available,
           requested: quantity,
         },
       };
@@ -679,7 +749,7 @@ async function sellProduct(
       continue; // Lost the race; re-read and re-check against real stock.
     }
 
-    const transaction: TransactionDocument = {
+    const transaction: LegacyTransactionDocument = {
       id: deps.newId(),
       productId: id,
       productName: product.name,
@@ -754,6 +824,42 @@ function readRequiredFields(
 function readStock(value: unknown): number {
   const stock = asFiniteNumber(value);
   return stock === null || stock < 0 ? 0 : Math.floor(stock);
+}
+
+function readOptionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+/**
+ * Reservation markers are server-owned and never copied from a request body. Catalogue writes
+ * preserve the persisted map, cannot lower physical stock below active reservations, and cannot
+ * deactivate an item while a paid checkout could still need its reserved units.
+ */
+function inventoryMutationConflict(
+  product: ProductDocument,
+  next: { readonly nextStock: number; readonly nextIsActive: boolean | undefined }
+): ApiResponse | null {
+  const reserved = product.stock - productAvailableStock(product);
+  if (next.nextStock < reserved) {
+    return {
+      status: 409,
+      body: {
+        error: 'Stock cannot be lower than active checkout reservations.',
+        productId: product.id,
+        reserved,
+      },
+    };
+  }
+  if (next.nextIsActive === false && productHasActiveReservations(product)) {
+    return {
+      status: 409,
+      body: {
+        error: 'Product has active checkout reservations and cannot be deactivated.',
+        productId: product.id,
+      },
+    };
+  }
+  return null;
 }
 
 /**

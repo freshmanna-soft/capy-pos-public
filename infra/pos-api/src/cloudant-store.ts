@@ -72,10 +72,14 @@ export class CloudantStore<T extends StoredDocument> implements DocumentStore<T>
     }
     const body = (await response.json()) as { rows?: readonly { doc?: Record<string, unknown> }[] };
     const rows = body.rows ?? [];
-    return rows
-      // `_all_docs` includes design documents; they are not products.
-      .filter((row) => row.doc !== undefined && !String(row.doc['_id'] ?? '').startsWith('_design/'))
-      .map((row) => stripMeta<T>(row.doc as Record<string, unknown>));
+    return (
+      rows
+        // `_all_docs` includes design documents; they are not products.
+        .filter(
+          (row) => row.doc !== undefined && !String(row.doc['_id'] ?? '').startsWith('_design/')
+        )
+        .map((row) => stripMeta<T>(row.doc as Record<string, unknown>))
+    );
   }
 
   async read(id: string): Promise<Revision<T> | null> {
@@ -137,6 +141,25 @@ export class CloudantStore<T extends StoredDocument> implements DocumentStore<T>
       throw new Error(`Cloudant delete failed with ${response.status}.`);
     }
     return 'written';
+  }
+
+  /**
+   * Run a database-scoped Cloudant request with the same IAM token cache as document operations.
+   * Specialized indexed adapters use this rather than duplicating authentication or exposing it.
+   */
+  async databaseRequest(method: string, path: string, body?: unknown): Promise<Response> {
+    const databaseRoot = new URL(
+      `${this.config.url.replace(/\/+$/, '')}/${encodeURIComponent(this.config.database)}/`
+    );
+    const target = new URL(path.startsWith('/') ? path.slice(1) : path, databaseRoot);
+    if (
+      !path.startsWith('/') ||
+      target.origin !== databaseRoot.origin ||
+      !target.pathname.startsWith(databaseRoot.pathname)
+    ) {
+      throw new Error('Cloudant database path must stay inside the configured database.');
+    }
+    return this.request(method, path, body);
   }
 
   private async request(method: string, path: string, body?: unknown): Promise<Response> {

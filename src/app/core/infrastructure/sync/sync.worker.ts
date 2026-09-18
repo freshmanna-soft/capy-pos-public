@@ -587,6 +587,11 @@ async function pushUpdates(products: PushProductPayload[]): Promise<void> {
 
   for (const product of products) {
     const { id, ...changes } = product;
+    delete changes.stock;
+    // Physical stock is now server-authoritative because checkout reservations are
+    // persisted there. Retrying an offline client's stale absolute value could erase
+    // completed sales or strand reservations, so generic sync updates never send it.
+    // A future stock-adjustment endpoint must carry an idempotent delta/version.
     // Captured as soon as a response lands so the trace ID survives even when
     // a non-2xx status makes us throw past the response below.
     let traceId: string | undefined;

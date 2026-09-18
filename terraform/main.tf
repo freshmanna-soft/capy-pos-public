@@ -49,6 +49,8 @@ locals {
   cloudant_services        = { for name, service in var.services : name => service if service.needs_cloudant }
   appid_secret_services    = { for name, service in var.services : name => service if service.needs_appid_secret }
   internal_secret_services = { for name, service in var.services : name => service if service.needs_internal_secret }
+  checkout_services        = { for name, service in var.services : name => service if service.needs_checkout }
+  checkout_job_services    = { for name, service in var.services : name => service if service.needs_checkout && service.needs_cloudant }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
   # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses. Empty until
@@ -66,12 +68,8 @@ locals {
   # which is the stock default — is what deployed two apps whose `requireConfig()`
   # calls `process.exit(1)` before they ever listen.
   #
-  # Deliberately separate from `needs_session_secret`: pos-api verifies the same
-  # session token the two proxies do, but (unlike them) answers every origin itself
-  # (`'Access-Control-Allow-Origin': '*'` in its own `server.ts`) and reads no
-  # `ALLOWED_ORIGINS` at all — binding it there would be dead config, and worse,
-  # would drag pos-api into the two-pass-apply dance below for a check it never
-  # performs.
+  # Deliberately separate from `needs_session_secret`: every browser-facing service,
+  # including pos-api's public checkout routes, must opt into exact-origin CORS.
   service_env = {
     for name, service in var.services : name => merge(
       { NODE_ENV = "production" },
@@ -112,6 +110,25 @@ locals {
       # each service's own server.ts).
       name != "capy-pos-api" && service.needs_internal_secret && var.pos_api_internal_url != "" ? {
         POS_API_INTERNAL_ROLES_URL = var.pos_api_internal_url
+      } : {},
+      service.needs_checkout ? {
+        ALLOWED_ORIGINS                  = local.allowed_origins
+        CLOUDANT_CHECKOUTS_DB            = "checkouts"
+        CHECKOUT_STORE_ID                = var.checkout_store_id
+        PAYPAL_EXPECTED_MERCHANT_ID      = var.paypal_expected_merchant_id
+        PAYPAL_CLIENT_ID                 = var.paypal_client_id
+        PAYPAL_ENVIRONMENT               = var.paypal_environment
+        PAYPAL_TIMEOUT_MS                = tostring(var.paypal_timeout_ms)
+        CHECKOUT_CURRENCY                = var.checkout_currency
+        CHECKOUT_TAX_BASIS_POINTS        = tostring(var.checkout_tax_basis_points)
+        CHECKOUT_MAX_ITEM_QUANTITY       = tostring(var.checkout_max_item_quantity)
+        CHECKOUT_MAX_AGGREGATE_QUANTITY  = tostring(var.checkout_max_aggregate_quantity)
+        CHECKOUT_MAX_TOTAL_MINOR_UNITS   = tostring(var.checkout_max_total_minor_units)
+        CHECKOUT_IDEMPOTENCY_KEY_VERSION = var.checkout_idempotency_key_version
+        CHECKOUT_CAPABILITY_KEY_VERSION  = var.checkout_capability_key_version
+        CHECKOUT_RATE_LIMIT_REQUESTS     = tostring(var.checkout_rate_limit_requests)
+        CHECKOUT_RATE_LIMIT_WINDOW_MS    = tostring(var.checkout_rate_limit_window_ms)
+        CHECKOUT_RATE_LIMIT_MAX_KEYS     = tostring(var.checkout_rate_limit_max_keys)
       } : {},
       service.env,
     )
@@ -251,9 +268,18 @@ resource "ibm_cloudant" "store" {
 }
 
 # Real, generated credentials — never hand-entered, never a literal env var.
+# The pre-existing Manager key is retained only for index migrations; Cloudant's
+# Writer role deliberately excludes index creation. Runtime traffic receives the
+# separate Writer key below, so compromising pos-api cannot administer databases.
 resource "ibm_resource_key" "cloudant_key" {
   name                 = "${var.project_name}-cloudant-key"
   role                 = "Manager"
+  resource_instance_id = ibm_cloudant.store.id
+}
+
+resource "ibm_resource_key" "cloudant_writer_key" {
+  name                 = "${var.project_name}-cloudant-writer-key"
+  role                 = "Writer"
   resource_instance_id = ibm_cloudant.store.id
 }
 
@@ -284,6 +310,11 @@ resource "ibm_cloudant_database" "roles" {
   instance_crn = ibm_cloudant.store.crn
 }
 
+resource "ibm_cloudant_database" "checkouts" {
+  db           = "checkouts"
+  instance_crn = ibm_cloudant.store.crn
+}
+
 locals {
   # `credentials_json` + jsondecode over the flat `credentials` map: IBM's own
   # resource_key docs document both, and jsondecode reads correctly whether a
@@ -294,7 +325,8 @@ locals {
   # (`terraform state show ibm_resource_key.cloudant_key`) before trusting this
   # blindly, since this project has never applied against a real Cloudant
   # instance before.
-  cloudant_credentials = jsondecode(ibm_resource_key.cloudant_key.credentials_json)
+  cloudant_manager_credentials = jsondecode(ibm_resource_key.cloudant_key.credentials_json)
+  cloudant_writer_credentials  = jsondecode(ibm_resource_key.cloudant_writer_key.credentials_json)
 }
 
 # Cloudant credentials, one generic secret per app that sets `needs_cloudant`.
@@ -310,9 +342,245 @@ resource "ibm_code_engine_secret" "cloudant_creds" {
   format     = "generic"
 
   data = {
-    CLOUDANT_URL    = local.cloudant_credentials.url
-    CLOUDANT_APIKEY = local.cloudant_credentials.apikey
+    CLOUDANT_URL    = local.cloudant_writer_credentials.url
+    CLOUDANT_APIKEY = local.cloudant_writer_credentials.apikey
   }
+}
+
+# Migration alone receives the Manager credential needed to create a Mango index.
+# This secret is never mounted into the HTTP app or reconciliation worker.
+resource "ibm_code_engine_secret" "cloudant_migration_creds" {
+  for_each = local.checkout_job_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-cloudant-migration-creds"
+  format     = "generic"
+
+  data = {
+    CLOUDANT_URL    = local.cloudant_manager_credentials.url
+    CLOUDANT_APIKEY = local.cloudant_manager_credentials.apikey
+  }
+}
+
+resource "ibm_code_engine_secret" "checkout" {
+  for_each = local.checkout_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-checkout"
+  format     = "generic"
+
+  data = {
+    PAYPAL_CLIENT_SECRET                = var.paypal_client_secret
+    CHECKOUT_IDEMPOTENCY_HMAC_KEYS_JSON = jsonencode(var.checkout_idempotency_hmac_keys)
+    CHECKOUT_CAPABILITY_HMAC_KEYS_JSON  = jsonencode(var.checkout_capability_hmac_keys)
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        length(var.paypal_client_secret) > 0 &&
+        length(var.paypal_client_id) > 0 &&
+        length(var.paypal_expected_merchant_id) > 0 &&
+        length(var.checkout_store_id) > 0
+      )
+      error_message = "Checkout needs the PayPal client pair, expected merchant id, and trusted store id. Never commit the client secret."
+    }
+    precondition {
+      condition = (
+        contains(keys(var.checkout_idempotency_hmac_keys), var.checkout_idempotency_key_version) &&
+        contains(keys(var.checkout_capability_hmac_keys), var.checkout_capability_key_version) &&
+        alltrue([for key in values(var.checkout_idempotency_hmac_keys) : length(key) >= 32]) &&
+        alltrue([for key in values(var.checkout_capability_hmac_keys) : length(key) >= 32])
+      )
+      error_message = "Each active checkout HMAC version must exist and every retained key must contain at least 32 characters."
+    }
+    precondition {
+      condition = (
+        var.paypal_environment == "production" &&
+        var.checkout_currency == "USD" &&
+        var.checkout_tax_basis_points >= 0 &&
+        var.checkout_tax_basis_points <= 10000 &&
+        var.checkout_max_item_quantity > 0 &&
+        var.checkout_max_item_quantity <= 10000 &&
+        var.checkout_max_aggregate_quantity >= var.checkout_max_item_quantity &&
+        var.checkout_max_aggregate_quantity <= 50000 &&
+        var.checkout_max_total_minor_units > 0 &&
+        var.checkout_max_total_minor_units <= 100000000 &&
+        var.paypal_timeout_ms > 0 &&
+        var.paypal_timeout_ms <= 120000 &&
+        var.checkout_rate_limit_requests > 0 &&
+        var.checkout_rate_limit_requests <= 1000 &&
+        var.checkout_rate_limit_window_ms >= 1000 &&
+        var.checkout_rate_limit_window_ms <= 3600000 &&
+        var.checkout_rate_limit_max_keys > 0 &&
+        var.checkout_rate_limit_max_keys <= 100000
+      )
+      error_message = "Checkout production policy or limits are missing or outside the service's accepted range."
+    }
+  }
+}
+
+# Checkout migration is a deliberately separate Cloudant-only job. It can create
+# and verify the Mango index before PayPal credentials exist, and it cannot call
+# the payment provider because those secrets are never bound to this job.
+resource "ibm_code_engine_job" "checkout_migration" {
+  for_each = local.checkout_job_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-checkout-migration"
+
+  image_reference = "us.icr.io/${var.cr_namespace}/${each.key}:${coalesce(each.value.image_tag, var.image_tag)}"
+  image_secret    = ibm_code_engine_secret.cr_secret.name
+
+  run_commands                       = ["node"]
+  run_arguments                      = ["dist/pos-api/src/checkout-migration-job.js"]
+  run_compute_resource_token_enabled = false
+  run_mode                           = "task"
+  run_service_account                = "none"
+  scale_cpu_limit                    = var.checkout_job_cpu_limit
+  scale_memory_limit                 = var.checkout_job_memory_limit
+  scale_max_execution_time           = var.checkout_migration_max_execution_seconds
+  scale_retry_limit                  = var.checkout_migration_retry_limit
+
+  run_env_variables {
+    type  = "literal"
+    name  = "NODE_ENV"
+    value = "production"
+  }
+
+  run_env_variables {
+    type  = "literal"
+    name  = "CLOUDANT_CHECKOUTS_DB"
+    value = "checkouts"
+  }
+
+  run_env_variables {
+    type      = "secret_key_reference"
+    name      = "CLOUDANT_URL"
+    key       = "CLOUDANT_URL"
+    reference = ibm_code_engine_secret.cloudant_migration_creds[each.key].name
+  }
+
+  run_env_variables {
+    type      = "secret_key_reference"
+    name      = "CLOUDANT_APIKEY"
+    key       = "CLOUDANT_APIKEY"
+    reference = ibm_code_engine_secret.cloudant_migration_creds[each.key].name
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        var.checkout_migration_max_execution_seconds > 0 &&
+        var.checkout_migration_max_execution_seconds <= 3600 &&
+        var.checkout_migration_retry_limit >= 0 &&
+        var.checkout_migration_retry_limit <= 10
+      )
+      error_message = "Checkout migration timeout or retry limit is outside the accepted Code Engine job bounds."
+    }
+  }
+
+  depends_on = [ibm_cloudant_database.checkouts]
+}
+
+# Reconciliation runs the same lease-fenced, idempotent state machine as client
+# completion. This resource defines the bounded job; the provider has no cron
+# subscription resource, so the post-apply schedule is documented in README.md.
+resource "ibm_code_engine_job" "checkout_reconciliation" {
+  for_each = local.checkout_job_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-checkout-reconciliation"
+
+  image_reference = "us.icr.io/${var.cr_namespace}/${each.key}:${coalesce(each.value.image_tag, var.image_tag)}"
+  image_secret    = ibm_code_engine_secret.cr_secret.name
+
+  run_commands                       = ["node"]
+  run_arguments                      = ["dist/pos-api/src/checkout-reconciliation-job.js"]
+  run_compute_resource_token_enabled = false
+  run_mode                           = "task"
+  run_service_account                = "none"
+  scale_cpu_limit                    = var.checkout_job_cpu_limit
+  scale_memory_limit                 = var.checkout_job_memory_limit
+  scale_max_execution_time           = var.checkout_reconciliation_max_execution_seconds
+  scale_retry_limit                  = var.checkout_reconciliation_retry_limit
+
+  dynamic "run_env_variables" {
+    for_each = {
+      NODE_ENV                         = "production"
+      CLOUDANT_CHECKOUTS_DB            = "checkouts"
+      CLOUDANT_PRODUCTS_DB             = "products"
+      CLOUDANT_TRANSACTIONS_DB         = "transactions"
+      CHECKOUT_STORE_ID                = var.checkout_store_id
+      PAYPAL_EXPECTED_MERCHANT_ID      = var.paypal_expected_merchant_id
+      PAYPAL_CLIENT_ID                 = var.paypal_client_id
+      PAYPAL_ENVIRONMENT               = var.paypal_environment
+      PAYPAL_TIMEOUT_MS                = tostring(var.paypal_timeout_ms)
+      CHECKOUT_CURRENCY                = var.checkout_currency
+      CHECKOUT_TAX_BASIS_POINTS        = tostring(var.checkout_tax_basis_points)
+      CHECKOUT_MAX_ITEM_QUANTITY       = tostring(var.checkout_max_item_quantity)
+      CHECKOUT_MAX_AGGREGATE_QUANTITY  = tostring(var.checkout_max_aggregate_quantity)
+      CHECKOUT_MAX_TOTAL_MINOR_UNITS   = tostring(var.checkout_max_total_minor_units)
+      CHECKOUT_IDEMPOTENCY_KEY_VERSION = var.checkout_idempotency_key_version
+      CHECKOUT_CAPABILITY_KEY_VERSION  = var.checkout_capability_key_version
+      CHECKOUT_WORKER_MAX_CHECKOUTS    = tostring(var.checkout_worker_max_checkouts)
+      CHECKOUT_WORKER_PAGE_SIZE        = tostring(var.checkout_worker_page_size)
+      CHECKOUT_WORKER_MAX_DURATION_MS  = tostring(var.checkout_worker_max_duration_ms)
+    }
+
+    content {
+      type  = "literal"
+      name  = run_env_variables.key
+      value = run_env_variables.value
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = toset(["CLOUDANT_URL", "CLOUDANT_APIKEY"])
+
+    content {
+      type      = "secret_key_reference"
+      name      = run_env_variables.key
+      key       = run_env_variables.key
+      reference = ibm_code_engine_secret.cloudant_creds[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = toset([
+      "PAYPAL_CLIENT_SECRET",
+      "CHECKOUT_IDEMPOTENCY_HMAC_KEYS_JSON",
+      "CHECKOUT_CAPABILITY_HMAC_KEYS_JSON",
+    ])
+
+    content {
+      type      = "secret_key_reference"
+      name      = run_env_variables.key
+      key       = run_env_variables.key
+      reference = ibm_code_engine_secret.checkout[each.key].name
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        var.checkout_worker_max_checkouts > 0 &&
+        var.checkout_worker_max_checkouts <= 1000 &&
+        var.checkout_worker_page_size > 0 &&
+        var.checkout_worker_page_size <= 100 &&
+        var.checkout_worker_max_duration_ms > 0 &&
+        var.checkout_worker_max_duration_ms <= 900000 &&
+        var.checkout_reconciliation_max_execution_seconds > 0 &&
+        var.checkout_reconciliation_max_execution_seconds <= 3600 &&
+        var.checkout_worker_max_duration_ms < var.checkout_reconciliation_max_execution_seconds * 1000 &&
+        var.checkout_reconciliation_retry_limit >= 0 &&
+        var.checkout_reconciliation_retry_limit <= 10
+      )
+      error_message = "Checkout worker bounds are invalid, or its application deadline does not leave room before the Code Engine timeout."
+    }
+  }
+
+  depends_on = [ibm_code_engine_job.checkout_migration]
 }
 
 # Code Engine Applications
@@ -392,6 +660,39 @@ resource "ibm_code_engine_app" "apps" {
   }
 
   dynamic "run_env_variables" {
+    for_each = each.value.needs_checkout ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "PAYPAL_CLIENT_SECRET"
+      key       = "PAYPAL_CLIENT_SECRET"
+      reference = ibm_code_engine_secret.checkout[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_checkout ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "CHECKOUT_IDEMPOTENCY_HMAC_KEYS_JSON"
+      key       = "CHECKOUT_IDEMPOTENCY_HMAC_KEYS_JSON"
+      reference = ibm_code_engine_secret.checkout[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_checkout ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "CHECKOUT_CAPABILITY_HMAC_KEYS_JSON"
+      key       = "CHECKOUT_CAPABILITY_HMAC_KEYS_JSON"
+      reference = ibm_code_engine_secret.checkout[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
     for_each = each.value.needs_appid_secret ? [1] : []
 
     content {
@@ -448,9 +749,8 @@ resource "ibm_code_engine_app" "apps" {
   # as a scaling failure rather than as the configuration mistake it is.
   #
   # Here rather than on a secret because origins are a literal env var, so there is no
-  # secret resource of their own to hang it from. The condition short-circuits for
-  # every service that does not pin CORS — the frontend, and (deliberately) pos-api,
-  # which answers every origin itself and needs no origins list.
+  # secret resource of their own to hang it from. The condition short-circuits only
+  # for services that do not expose a cross-origin browser API.
   lifecycle {
     precondition {
       condition     = !each.value.pins_cors_origins || local.allowed_origins != ""

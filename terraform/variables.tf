@@ -23,9 +23,17 @@ variable "project_name" {
 }
 
 variable "image_tag" {
-  description = "Container image tag applied to every service that does not override it"
+  description = "Explicit immutable container image tag applied to every service that does not override it"
   type        = string
-  default     = "latest"
+
+  validation {
+    condition = (
+      length(trimspace(var.image_tag)) > 0 &&
+      lower(trimspace(var.image_tag)) != "latest" &&
+      can(regex("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", var.image_tag))
+    )
+    error_message = "image_tag must be an explicit immutable image tag, not latest."
+  }
 }
 
 variable "cr_namespace" {
@@ -175,6 +183,197 @@ variable "appid_management_api_key" {
   default     = ""
 }
 
+variable "paypal_client_id" {
+  description = "PayPal REST application client id for server-owned checkout. Not a secret; the client secret is separate."
+  type        = string
+  default     = ""
+}
+
+variable "paypal_client_secret" {
+  description = "PayPal REST application client secret for server-owned checkout. Bound through Code Engine secrets only."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "paypal_expected_merchant_id" {
+  description = "PayPal merchant id that every order, authorization, and capture must match."
+  type        = string
+  default     = ""
+}
+
+variable "checkout_store_id" {
+  description = "Trusted store identifier bound into every server-owned checkout."
+  type        = string
+  default     = ""
+}
+
+variable "checkout_idempotency_hmac_keys" {
+  description = "Versioned checkout idempotency HMAC keyring. Retain old versions through the checkout retention window."
+  type        = map(string)
+  sensitive   = true
+  default     = {}
+}
+
+variable "checkout_capability_hmac_keys" {
+  description = "Versioned checkout capability HMAC keyring. Retain old versions through the checkout retention window."
+  type        = map(string)
+  sensitive   = true
+  default     = {}
+}
+
+variable "checkout_idempotency_key_version" {
+  description = "Active version in checkout_idempotency_hmac_keys."
+  type        = string
+  default     = ""
+}
+
+variable "checkout_capability_key_version" {
+  description = "Active version in checkout_capability_hmac_keys."
+  type        = string
+  default     = ""
+}
+
+variable "checkout_currency" {
+  description = "Approved checkout currency. The current service supports USD only."
+  type        = string
+  default     = ""
+}
+
+variable "checkout_tax_basis_points" {
+  description = "Approved checkout tax rate in basis points."
+  type        = number
+  default     = -1
+}
+
+variable "checkout_max_item_quantity" {
+  description = "Maximum quantity accepted for one checkout line."
+  type        = number
+  default     = 10000
+}
+
+variable "checkout_max_aggregate_quantity" {
+  description = "Maximum aggregate quantity accepted for one checkout."
+  type        = number
+  default     = 50000
+}
+
+variable "checkout_max_total_minor_units" {
+  description = "Maximum server-computed checkout total in minor currency units."
+  type        = number
+  default     = 100000000
+}
+
+variable "paypal_environment" {
+  description = "PayPal API environment for the production service. Must be production."
+  type        = string
+  default     = "production"
+}
+
+variable "paypal_timeout_ms" {
+  description = "Finite timeout in milliseconds for each PayPal SDK operation."
+  type        = number
+  default     = 10000
+}
+
+variable "checkout_rate_limit_requests" {
+  description = "Maximum checkout HTTP requests allowed per client address in one fixed window."
+  type        = number
+  default     = 60
+}
+
+variable "checkout_rate_limit_window_ms" {
+  description = "Fixed checkout HTTP rate-limit window in milliseconds."
+  type        = number
+  default     = 60000
+}
+
+variable "checkout_rate_limit_max_keys" {
+  description = "Maximum client-address buckets retained by one POS API instance."
+  type        = number
+  default     = 10000
+}
+
+variable "checkout_worker_max_checkouts" {
+  description = "Maximum due checkouts attempted by one reconciliation job run."
+  type        = number
+  default     = 100
+}
+
+variable "checkout_worker_page_size" {
+  description = "Maximum due checkouts loaded per reconciliation page."
+  type        = number
+  default     = 50
+}
+
+variable "checkout_worker_max_duration_ms" {
+  description = "Wall-clock budget enforced by the reconciliation worker before starting another checkout."
+  type        = number
+  default     = 240000
+}
+
+variable "checkout_job_cpu_limit" {
+  description = "CPU allocated to each checkout migration or reconciliation job instance."
+  type        = string
+  default     = "0.5"
+}
+
+variable "checkout_job_memory_limit" {
+  description = "Memory allocated to each checkout migration or reconciliation job instance."
+  type        = string
+  default     = "1G"
+}
+
+variable "checkout_migration_max_execution_seconds" {
+  description = "Code Engine timeout for the one-shot checkout index migration."
+  type        = number
+  default     = 300
+}
+
+variable "checkout_migration_retry_limit" {
+  description = "Code Engine retries for the idempotent checkout index migration."
+  type        = number
+  default     = 2
+}
+
+variable "checkout_reconciliation_max_execution_seconds" {
+  description = "Code Engine timeout for one checkout reconciliation run. Must exceed the worker's own wall-clock budget."
+  type        = number
+  default     = 300
+}
+
+variable "checkout_reconciliation_retry_limit" {
+  description = "Code Engine retries after a reconciliation run exits non-zero."
+  type        = number
+  default     = 2
+}
+
+variable "checkout_reconciliation_schedule" {
+  description = "Five-field cron schedule applied out of band because the IBM Terraform provider exposes the job but no Code Engine cron-subscription resource."
+  type        = string
+  default     = "*/5 * * * *"
+
+  validation {
+    condition = (
+      length(trimspace(var.checkout_reconciliation_schedule)) > 0 &&
+      !strcontains(var.checkout_reconciliation_schedule, "\n") &&
+      !strcontains(var.checkout_reconciliation_schedule, "\r")
+    )
+    error_message = "checkout_reconciliation_schedule must be a non-empty single-line cron expression."
+  }
+}
+
+variable "checkout_reconciliation_time_zone" {
+  description = "IANA time zone for the out-of-band Code Engine cron subscription."
+  type        = string
+  default     = "UTC"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_+\\-/]+$", var.checkout_reconciliation_time_zone))
+    error_message = "checkout_reconciliation_time_zone must be a non-empty IANA-style time-zone label."
+  }
+}
+
 variable "internal_api_secret" {
   description = <<-EOT
     Shared secret for service-to-service calls that have no end-user token to
@@ -261,10 +460,7 @@ variable "services" {
     # Verifies the browser's session token: binds SESSION_JWT_SECRET.
     needs_session_secret = optional(bool, false)
     # Pins CORS to `frontend_origins`: binds ALLOWED_ORIGINS, and requires
-    # `frontend_origins` to be set (see the precondition in main.tf). Separate from
-    # `needs_session_secret` because pos-api verifies the same session token the two
-    # proxies do but, unlike them, answers every origin itself and reads no
-    # ALLOWED_ORIGINS at all.
+    # `frontend_origins` to be set (see the precondition in main.tf).
     pins_cors_origins = optional(bool, false)
     # Binds CLOUDANT_URL and CLOUDANT_APIKEY from the shared Cloudant instance's
     # per-app secret.
@@ -287,6 +483,7 @@ variable "services" {
     # needs_session_secret, deliberately separate: this gates machine-to-
     # machine calls between Code Engine apps, not a browser-issued session.
     needs_internal_secret   = optional(bool, false)
+    needs_checkout          = optional(bool, false)
     scale_min_instances     = optional(number, 0)
     scale_max_instances     = optional(number, 2)
     scale_initial_instances = optional(number, 1)
@@ -343,21 +540,18 @@ variable "services" {
       needs_internal_secret    = true
       pins_cors_origins        = true
     }
-    # infra/pos-api — products/transactions/health, over Cloudant. Verifies the same
-    # session token the two proxies do, but answers every origin itself
-    # ('Access-Control-Allow-Origin: *' in its own server.ts) so it does not set
-    # `pins_cors_origins` and needs no `frontend_origins` — a genuine one-pass,
-    # deploy-this-alone-first service.
-    #
-    # image_tag pinned for the same reason as its two siblings above: v3
-    # ships the GET /internal/roles route (#255) and reading the shared
-    # roles document in-process (#257).
+    # infra/pos-api — products/transactions/health and public checkout, over Cloudant.
+    # Checkout capabilities replace staff sessions on the public checkout routes, but
+    # every browser route still pins CORS to the known frontend origins. This service
+    # deliberately uses var.image_tag so its API and checkout job entry points always
+    # come from the same explicitly selected image build.
     capy-pos-api = {
       image_port               = 8790
-      image_tag                = "v3"
       needs_session_secret     = true
       needs_appid_verification = true
       needs_cloudant           = true
+      needs_checkout           = true
+      pins_cors_origins        = true
       # Serves GET /internal/roles for the two proxies (Phase 5 RBAC
       # centralization) — gated by this shared secret, since that route has
       # no end-user token to check.
@@ -389,5 +583,24 @@ variable "services" {
   validation {
     condition     = alltrue([for service in var.services : service.image_port > 0 && service.image_port < 65536])
     error_message = "Each service's image_port must be a valid TCP port."
+  }
+
+  validation {
+    condition = alltrue([
+      for service in var.services : service.image_tag == null ? true : (
+        length(trimspace(service.image_tag)) > 0 &&
+        lower(trimspace(service.image_tag)) != "latest" &&
+        can(regex("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", service.image_tag))
+      )
+    ])
+    error_message = "Every service image_tag override must be an explicit immutable image tag, not latest."
+  }
+
+  validation {
+    condition = alltrue([
+      for service in var.services :
+      !service.needs_checkout || (service.needs_cloudant && service.pins_cors_origins)
+    ])
+    error_message = "Every checkout service must enable Cloudant and pin CORS to frontend_origins."
   }
 }
