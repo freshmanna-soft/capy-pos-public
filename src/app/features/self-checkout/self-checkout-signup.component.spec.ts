@@ -6,6 +6,7 @@ import {
   CustomerAuthGateway,
 } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CustomerRegistrationDto } from '@core/application/auth/dtos/customer-registration.dto';
+import { MAX_EMAIL_LENGTH } from './customer-email.validator';
 import { PendingRegistrationStore } from './pending-registration.store';
 import { CHECK_EMAIL_ROUTE, LANE_ROUTE } from './self-checkout-routes';
 import { SelfCheckoutSignUpComponent } from './self-checkout-signup.component';
@@ -532,9 +533,17 @@ describe('SelfCheckoutSignUpComponent', () => {
    * that the *form* is the thing using it.
    */
   describe('nothing the relay refuses on shape ever leaves the form', () => {
+    /**
+     * One character over the bound and otherwise well formed, so the length rule
+     * is the only rule it breaks — built from the constant rather than written
+     * out, so it cannot quietly fall back under the bound if the relay moves it.
+     */
+    const TOO_LONG_EMAIL = `${'y'.repeat(MAX_EMAIL_LENGTH + 1 - '@example.com'.length)}@example.com`;
+
     it.each([
       ['a domain with no TLD, which Validators.email accepts', 'jane@gmail'],
       ['an address that is only whitespace', '   '],
+      [`an address over the relay’s ${MAX_EMAIL_LENGTH}-character bound`, TOO_LONG_EMAIL],
       ['a passphrase over the relay’s 256-character bound', null],
     ])('does not submit %s', async (_label, email) => {
       const gateway = makeGateway(vi.fn().mockResolvedValue(registration));
@@ -563,6 +572,27 @@ describe('SelfCheckoutSignUpComponent', () => {
       await submit(fixture);
 
       expect(fieldError(fixture, 'password')?.textContent).toContain('256 characters or fewer');
+    });
+
+    it('states the relay’s bound for an address that is too long', async () => {
+      // The password bound above had no counterpart, and the asymmetry was
+      // load-bearing: delete the component's `emailTooLong` arm and every other
+      // assertion here still passes, because the field does still go into error —
+      // with "check for a typo", about an address that has no typo in it. That is
+      // the misdirected-field failure this form's WCAG 3.3.1 note exists to
+      // prevent, and "the field is in error" cannot see it. Hence both halves:
+      // the length copy is present AND the typo copy is not.
+      const fixture = await createComponent(makeGateway(vi.fn()));
+      fixture.componentInstance.form.setValue({
+        email: TOO_LONG_EMAIL,
+        password: 'sup3rsecret',
+      });
+
+      await submit(fixture);
+
+      const message = fieldError(fixture, 'email')?.textContent ?? '';
+      expect(message).toContain(`${MAX_EMAIL_LENGTH} characters or fewer`);
+      expect(message).not.toContain('typo');
     });
   });
 
