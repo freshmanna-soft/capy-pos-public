@@ -38,7 +38,14 @@ const MANAGER = [
 ];
 
 function mint(permissions = ADMIN, payload = {}) {
-  const claims = { sub: 'op-1', tenantId: 'store-1', roles: ['admin'], permissions, exp: NOW + 3600, ...payload };
+  const claims = {
+    sub: 'op-1',
+    tenantId: 'store-1',
+    roles: ['admin'],
+    permissions,
+    exp: NOW + 3600,
+    ...payload,
+  };
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
   const signingInput = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
   return `${signingInput}.${createHmac('sha256', SECRET).update(signingInput).digest('base64url')}`;
@@ -109,7 +116,9 @@ function mintAppId(payload, { kid, keyPair, config = APPID_CONFIG }) {
   };
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
   const signingInput = `${encode({ alg: 'RS256', typ: 'JWT', kid })}.${encode(claims)}`;
-  const signature = signRsa('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey).toString('base64url');
+  const signature = signRsa('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey).toString(
+    'base64url'
+  );
   return `${signingInput}.${signature}`;
 }
 
@@ -126,12 +135,22 @@ async function withJwks(keyPair, kid, run) {
 }
 
 /** Issue a request as an authorized admin unless told otherwise. */
-function call(method, path, { body, token = mint(), authorization, internalSecret } = {}, context = deps()) {
+function call(
+  method,
+  path,
+  { body, token = mint(), authorization, internalSecret } = {},
+  context = deps()
+) {
   return handle(
     {
       method,
       path,
-      authorization: authorization !== undefined ? authorization : token === null ? undefined : `Bearer ${token}`,
+      authorization:
+        authorization !== undefined
+          ? authorization
+          : token === null
+            ? undefined
+            : `Bearer ${token}`,
       internalSecret,
       body,
     },
@@ -230,10 +249,15 @@ describe('the auth boundary, as the story states it', () => {
   });
 
   it('leaks no product or transaction data in any rejection body', async () => {
-    const context = deps({ transactions: [{ id: 't-1', productName: 'Oat Milk 1L', timestamp: ISO }] });
+    const context = deps({
+      transactions: [{ id: 't-1', productName: 'Oat Milk 1L', timestamp: ISO }],
+    });
     for (const [method, path] of protectedRoutes) {
       const response = await call(method, path, { token: null }, context);
-      assert.ok(!JSON.stringify(response.body).includes('Oat Milk'), `${method} ${path} leaked a product name`);
+      assert.ok(
+        !JSON.stringify(response.body).includes('Oat Milk'),
+        `${method} ${path} leaked a product name`
+      );
     }
   });
 
@@ -266,7 +290,10 @@ describe('GET /api/health', () => {
 
 describe('GET /internal/roles', () => {
   it('refuses a caller with no X-Internal-Secret at all, the same as one that is wrong', async () => {
-    const missing = await call('GET', '/internal/roles', { token: null, internalSecret: undefined });
+    const missing = await call('GET', '/internal/roles', {
+      token: null,
+      internalSecret: undefined,
+    });
     assert.equal(missing.status, 401);
     const wrong = await call('GET', '/internal/roles', { token: null, internalSecret: 'nope' });
     assert.equal(wrong.status, 401);
@@ -289,7 +316,11 @@ describe('GET /internal/roles', () => {
       internalSecret: INTERNAL_SECRET,
     });
     assert.equal(status, 200);
-    assert.deepEqual(body.roles.operator, ['sale:process', 'sale:view_transactions', 'inventory:view']);
+    assert.deepEqual(body.roles.operator, [
+      'sale:process',
+      'sale:view_transactions',
+      'inventory:view',
+    ]);
     assert.ok(body.roles.admin.includes('inventory:delete'));
   });
 
@@ -308,7 +339,12 @@ describe('GET /internal/roles', () => {
 
   it('serves the stored document once one exists, not the fallback', async () => {
     const context = deps({
-      roles: [{ id: 'role-permissions', roles: { operator: ['sale:process'], manager: ['inventory:manage'] } }],
+      roles: [
+        {
+          id: 'role-permissions',
+          roles: { operator: ['sale:process'], manager: ['inventory:manage'] },
+        },
+      ],
     });
     const { status, body } = await call(
       'GET',
@@ -327,7 +363,12 @@ describe('GET /internal/roles', () => {
     // exact thing the fallback filter exists to prevent. The document's mere
     // existence must not bypass the rule.
     const context = deps({
-      roles: [{ id: 'role-permissions', roles: { operator: ['sale:process'], customer: ['sale:process'] } }],
+      roles: [
+        {
+          id: 'role-permissions',
+          roles: { operator: ['sale:process'], customer: ['sale:process'] },
+        },
+      ],
     });
     const { status, body } = await call(
       'GET',
@@ -389,7 +430,9 @@ describe('GET /internal/roles', () => {
     // through `isRolesShape` before trusting it; this route uses the same check,
     // so the two consumers of one document cannot disagree about what counts as
     // a usable one.
-    const context = deps({ roles: [{ id: 'role-permissions', roles: { operator: 'sale:process' } }] });
+    const context = deps({
+      roles: [{ id: 'role-permissions', roles: { operator: 'sale:process' } }],
+    });
     const { status, body } = await call(
       'GET',
       '/internal/roles',
@@ -408,7 +451,9 @@ describe('GET /internal/roles', () => {
     // customer-only document is a supported edit, not a corrupt one (an admin
     // narrowing self-checkout's single permission), so the siblings must simply
     // keep the fallback: it holds nothing about `customer` either way.
-    const context = deps({ roles: [{ id: 'role-permissions', roles: { customer: ['sale:narrowed'] } }] });
+    const context = deps({
+      roles: [{ id: 'role-permissions', roles: { customer: ['sale:narrowed'] } }],
+    });
     const { status, body } = await call(
       'GET',
       '/internal/roles',
@@ -462,7 +507,11 @@ describe('GET /internal/roles', () => {
   it('never reaches this route through the bearer-token boundary at all', async () => {
     // No Authorization header, no App ID/HS256 token — only the internal secret
     // matters, confirming `handle()` truly special-cases this route before `authorize()`.
-    const { status } = await call('GET', '/internal/roles', { token: null, authorization: undefined, internalSecret: INTERNAL_SECRET });
+    const { status } = await call('GET', '/internal/roles', {
+      token: null,
+      authorization: undefined,
+      internalSecret: INTERNAL_SECRET,
+    });
     assert.equal(status, 200);
   });
 
@@ -485,7 +534,10 @@ describe('GET /internal/roles', () => {
       const created = await call(
         'POST',
         '/api/products',
-        { body: { id: 'p-new', name: 'Kombucha', price: 3.5, category: 'Drinks' }, authorization: `Bearer ${token}` },
+        {
+          body: { id: 'p-new', name: 'Kombucha', price: 3.5, category: 'Drinks' },
+          authorization: `Bearer ${token}`,
+        },
         context
       );
       assert.equal(created.status, 201, JSON.stringify(created.body));
@@ -499,6 +551,20 @@ describe('GET /api/products', () => {
     assert.equal(status, 200);
     assert.equal(body.count, 1);
     assert.equal(body.products[0].name, 'Oat Milk 1L');
+  });
+
+  it('never exposes server-owned checkout reservation markers', async () => {
+    const context = deps({
+      products: [
+        product({
+          checkoutMarkers: {
+            'checkout-1': { state: 'reserved', quantity: 1, reservedAt: ISO },
+          },
+        }),
+      ],
+    });
+    const { body } = await call('GET', '/api/products', {}, context);
+    assert.equal(body.products[0].checkoutMarkers, undefined);
   });
 
   it('returns an empty list rather than 404 for an empty catalogue', async () => {
@@ -535,7 +601,12 @@ describe('POST /api/products', () => {
     const base = { id: 'p-9', name: 'Banana', price: 0.35, category: 'Produce' };
     const noStock = await call('POST', '/api/products', { body: base }, deps({ products: [] }));
     assert.equal(noStock.body.product.stock, 0);
-    const fractional = await call('POST', '/api/products', { body: { ...base, stock: 4.7 } }, deps({ products: [] }));
+    const fractional = await call(
+      'POST',
+      '/api/products',
+      { body: { ...base, stock: 4.7 } },
+      deps({ products: [] })
+    );
     assert.equal(fractional.body.product.stock, 4);
   });
 
@@ -570,7 +641,10 @@ describe('POST /api/products', () => {
 
   it('answers 400 for a body that is not a JSON object', async () => {
     for (const body of [undefined, null, 'a string', 42, [1, 2]]) {
-      assert.equal((await call('POST', '/api/products', { body }, deps({ products: [] }))).status, 400);
+      assert.equal(
+        (await call('POST', '/api/products', { body }, deps({ products: [] }))).status,
+        400
+      );
     }
   });
 });
@@ -599,7 +673,37 @@ describe('PUT /api/products/{id}', () => {
   });
 
   it('answers 400 when a required field is missing, since PUT is a full replace', async () => {
-    assert.equal((await call('PUT', '/api/products/p-1', { body: { name: 'Only a name' } })).status, 400);
+    assert.equal(
+      (await call('PUT', '/api/products/p-1', { body: { name: 'Only a name' } })).status,
+      400
+    );
+  });
+
+  it('preserves persisted checkout markers and ignores client-supplied markers', async () => {
+    const checkoutMarkers = {
+      'checkout-1': { state: 'reserved', quantity: 2, reservedAt: ISO },
+    };
+    const context = deps({ products: [product({ checkoutMarkers })] });
+    const { status, body } = await call(
+      'PUT',
+      '/api/products/p-1',
+      {
+        body: {
+          name: 'Oat Milk 2L',
+          price: 2.5,
+          category: 'Dairy',
+          stock: 6,
+          checkoutMarkers: {},
+        },
+      },
+      context
+    );
+    assert.equal(status, 200);
+    assert.equal(body.product.checkoutMarkers, undefined);
+    assert.deepEqual(
+      (await context.products.read('p-1')).document.checkoutMarkers,
+      checkoutMarkers
+    );
   });
 });
 
@@ -618,8 +722,77 @@ describe('PATCH /api/products/{id}', () => {
     assert.equal(body.product.isActive, false);
   });
 
+  it('preserves server-owned checkout markers and ignores a client replacement', async () => {
+    const checkoutMarkers = {
+      'checkout-1': { state: 'reserved', quantity: 2, reservedAt: ISO },
+    };
+    const context = deps({ products: [product({ checkoutMarkers })] });
+    const { status, body } = await call(
+      'PATCH',
+      '/api/products/p-1',
+      {
+        body: {
+          name: 'Renamed',
+          checkoutMarkers: {
+            attacker: { state: 'reserved', quantity: 10, reservedAt: ISO },
+          },
+        },
+      },
+      context
+    );
+    assert.equal(status, 200);
+    assert.equal(body.product.checkoutMarkers, undefined);
+    assert.deepEqual(
+      (await context.products.read('p-1')).document.checkoutMarkers,
+      checkoutMarkers
+    );
+  });
+
+  it('refuses to lower stock below active checkout reservations', async () => {
+    const context = deps({
+      products: [
+        product({
+          checkoutMarkers: {
+            'checkout-1': { state: 'reserved', quantity: 4, reservedAt: ISO },
+          },
+        }),
+      ],
+    });
+    const { status, body } = await call(
+      'PATCH',
+      '/api/products/p-1',
+      { body: { stock: 3 } },
+      context
+    );
+    assert.equal(status, 409);
+    assert.equal(body.reserved, 4);
+    assert.equal((await context.products.read('p-1')).document.stock, 10);
+  });
+
+  it('refuses soft deactivation while a checkout reservation is active', async () => {
+    const context = deps({
+      products: [
+        product({
+          checkoutMarkers: {
+            'checkout-1': { state: 'reserved', quantity: 1, reservedAt: ISO },
+          },
+        }),
+      ],
+    });
+    const { status } = await call(
+      'PATCH',
+      '/api/products/p-1',
+      { body: { isActive: false } },
+      context
+    );
+    assert.equal(status, 409);
+    assert.notEqual((await context.products.read('p-1')).document.isActive, false);
+  });
+
   it('answers 400 when no mutable field was provided', async () => {
-    const { status, body } = await call('PATCH', '/api/products/p-1', { body: { id: 'p-2', createdAt: ISO } });
+    const { status, body } = await call('PATCH', '/api/products/p-1', {
+      body: { id: 'p-2', createdAt: ISO },
+    });
     assert.equal(status, 400);
     assert.match(body.error, /No updatable fields provided/);
   });
@@ -632,8 +805,18 @@ describe('PATCH /api/products/{id}', () => {
   });
 
   it('answers 400 for a field of the wrong type instead of coercing it', async () => {
-    for (const body of [{ price: '2' }, { stock: 'many' }, { stock: -1 }, { isActive: 'false' }, { name: '' }]) {
-      assert.equal((await call('PATCH', '/api/products/p-1', { body })).status, 400, JSON.stringify(body));
+    for (const body of [
+      { price: '2' },
+      { stock: 'many' },
+      { stock: -1 },
+      { isActive: 'false' },
+      { name: '' },
+    ]) {
+      assert.equal(
+        (await call('PATCH', '/api/products/p-1', { body })).status,
+        400,
+        JSON.stringify(body)
+      );
     }
   });
 
@@ -656,6 +839,21 @@ describe('DELETE /api/products/{id}', () => {
     assert.equal((await call('DELETE', '/api/products/ghost')).status, 404);
   });
 
+  it('refuses a hard delete while a checkout reservation is active', async () => {
+    const context = deps({
+      products: [
+        product({
+          checkoutMarkers: {
+            'checkout-1': { state: 'reserved', quantity: 1, reservedAt: ISO },
+          },
+        }),
+      ],
+    });
+    const { status } = await call('DELETE', '/api/products/p-1', {}, context);
+    assert.equal(status, 409);
+    assert.notEqual(await context.products.read('p-1'), null);
+  });
+
   /**
    * The first server-side authorization decision in this repo. Until now roles were
    * enforced only by browser guards and directives, which anyone can bypass with
@@ -663,9 +861,82 @@ describe('DELETE /api/products/{id}', () => {
    */
   it('refuses a manager token, which lacks inventory:delete', async () => {
     const context = deps();
-    const { status, body } = await call('DELETE', '/api/products/p-1', { token: mint(MANAGER) }, context);
+    const { status, body } = await call(
+      'DELETE',
+      '/api/products/p-1',
+      { token: mint(MANAGER) },
+      context
+    );
     assert.equal(status, 403);
     assert.equal(body.error, 'Requires inventory:delete.');
-    assert.notEqual(await context.products.read('p-1'), null, 'the product must survive a refused delete');
+    assert.notEqual(
+      await context.products.read('p-1'),
+      null,
+      'the product must survive a refused delete'
+    );
+  });
+
+  it('allows deletion when only committed marker evidence remains', async () => {
+    const context = deps({
+      products: [
+        product({
+          stock: 9,
+          checkoutMarkers: {
+            'checkout-1': {
+              state: 'committed',
+              quantity: 1,
+              reservedAt: '2027-01-15T09:00:00.000Z',
+              committedAt: ISO,
+            },
+          },
+        }),
+      ],
+    });
+    const response = await call('DELETE', '/api/products/p-1', {}, context);
+    assert.equal(response.status, 200);
+    assert.equal(response.body.product.checkoutMarkers, undefined);
+  });
+});
+
+describe('POST /api/products/{id}/sell', () => {
+  it('cannot consume stock held by an active checkout reservation', async () => {
+    const context = deps({
+      products: [
+        product({
+          checkoutMarkers: {
+            'checkout-1': { state: 'reserved', quantity: 8, reservedAt: ISO },
+          },
+        }),
+      ],
+    });
+    const { status, body } = await call(
+      'POST',
+      '/api/products/p-1/sell',
+      { body: { quantity: 3 } },
+      context
+    );
+    assert.equal(status, 400);
+    assert.equal(body.available, 2);
+    assert.equal((await context.products.read('p-1')).document.stock, 10);
+    assert.equal((await context.transactions.list()).length, 0);
+  });
+
+  it('decrements physical stock while preserving checkout markers', async () => {
+    const checkoutMarkers = {
+      'checkout-1': { state: 'reserved', quantity: 8, reservedAt: ISO },
+    };
+    const context = deps({ products: [product({ checkoutMarkers })] });
+    const { status, body } = await call(
+      'POST',
+      '/api/products/p-1/sell',
+      { body: { quantity: 2 } },
+      context
+    );
+    assert.equal(status, 200);
+    assert.equal(body.remainingStock, 8);
+    assert.deepEqual(
+      (await context.products.read('p-1')).document.checkoutMarkers,
+      checkoutMarkers
+    );
   });
 });

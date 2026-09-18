@@ -187,6 +187,11 @@ describe('sync worker request authorization (#206, #224)', () => {
       expect((patch?.[1]?.headers as Record<string, string>)['Content-Type']).toBe(
         'application/json'
       );
+      expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
+        name: 'Hay',
+        price: 3,
+        category: 'feed',
+      });
     });
 
     it('sends the token when deleting a product', async () => {

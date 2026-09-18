@@ -42,7 +42,11 @@ describe('CloudantStore over Cloudant HTTP', () => {
     await store.list();
     await store.read('doc-1');
 
-    assert.equal(cloudant.tokenExchanges, 1, 'a token per request would rate-limit IAM, not Cloudant');
+    assert.equal(
+      cloudant.tokenExchanges,
+      1,
+      'a token per request would rate-limit IAM, not Cloudant'
+    );
     const iam = cloudant.calls.filter((call) => call.url.startsWith('https://iam.cloud.ibm.com/'));
     assert.equal(iam.length, 1);
     assert.equal(iam[0].method, 'POST');
@@ -53,7 +57,9 @@ describe('CloudantStore over Cloudant HTTP', () => {
 
     await store.list();
 
-    const documentCalls = cloudant.calls.filter((call) => !call.url.startsWith('https://iam.cloud.ibm.com/'));
+    const documentCalls = cloudant.calls.filter(
+      (call) => !call.url.startsWith('https://iam.cloud.ibm.com/')
+    );
     assert.ok(documentCalls.length > 0);
     for (const call of documentCalls) {
       assert.equal(call.headers['Authorization'], 'Bearer iam-access-token-1');
@@ -105,6 +111,29 @@ describe('CloudantStore over Cloudant HTTP', () => {
     assert.equal(call.url, `${cloudant.url}/my%20products/doc%2F1`);
   });
 
+  it('shares authenticated database requests with specialized indexed adapters', async () => {
+    const { store, cloudant } = storeWithFake();
+
+    await store.databaseRequest('POST', '/_find', { selector: { kind: 'checkout' } });
+
+    const call = cloudant.calls.at(-1);
+    assert.equal(call.url, `${cloudant.url}/${cloudant.database}/_find`);
+    assert.equal(call.method, 'POST');
+    assert.equal(call.headers['Authorization'], 'Bearer iam-access-token-1');
+  });
+
+  it('refuses database request paths that could escape the configured database', async () => {
+    const { store } = storeWithFake();
+    for (const path of [
+      'other-db/_all_docs',
+      '/../other-db/_all_docs',
+      '/%2e%2e/other-db/_all_docs',
+      '//attacker.example/_all_docs',
+    ]) {
+      await assert.rejects(store.databaseRequest('GET', path), /stay inside/);
+    }
+  });
+
   it('throws on a 5xx rather than reporting it as a conflict', async () => {
     // `conflict` is a retry signal. A store that answered it for a broken instance
     // would turn one outage into an infinite compare-and-swap loop in `api.ts`.
@@ -136,7 +165,10 @@ describe('CloudantStore over Cloudant HTTP', () => {
       };
       cloudant.seed({ id: 'doc-1', label: 'Espresso' });
       return {
-        store: new CloudantStore({ url: cloudant.url, apiKey: API_KEY, database: cloudant.database }, revless),
+        store: new CloudantStore(
+          { url: cloudant.url, apiKey: API_KEY, database: cloudant.database },
+          revless
+        ),
       };
     })();
 
