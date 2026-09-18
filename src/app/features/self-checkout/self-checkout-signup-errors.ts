@@ -53,6 +53,8 @@ export interface SignUpRefusalCopy {
   readonly detail: string | null;
   /** The input to mark as the one in error, when the refusal blames one. */
   readonly field: RefusedField;
+  /** Whether the form should offer the real customer sign-in route. */
+  readonly canSignIn: boolean;
 }
 
 const DUPLICATE_COPY =
@@ -212,20 +214,25 @@ export function describeSignUpRefusal(error: unknown): SignUpRefusalCopy {
   if (status === DUPLICATE_STATUS || (status === null && mentionsExistingAccount(message))) {
     // The address is what the store refused, so it is the field to mark — the
     // shopper either signs in with it or registers a different one.
-    return { message: DUPLICATE_COPY, detail: null, field: 'email' };
+    return { message: DUPLICATE_COPY, detail: null, field: 'email', canSignIn: true };
   }
 
   // Status only. Item 8c's limiter answers with no body on purpose, so there is
   // no wording to corroborate and none is wanted.
   if (status === RATE_LIMITED_STATUS) {
-    return { message: RATE_LIMITED_COPY, detail: null, field: null };
+    return { message: RATE_LIMITED_COPY, detail: null, field: null, canSignIn: false };
   }
 
   // Status *and* wording — see {@link mentionsPasswordPolicy}. `null` is allowed
   // for the status because the real body is the policy sentence itself, never
   // `... returned 400`, so there is often nothing for {@link statusOf} to read.
   if ((status === REFUSED_STATUS || status === null) && mentionsPasswordPolicy(message)) {
-    return { message: POLICY_COPY, detail: policyDetail(message), field: 'password' };
+    return {
+      message: POLICY_COPY,
+      detail: policyDetail(message),
+      field: 'password',
+      canSignIn: false,
+    };
   }
 
   // The relay's own shape checks, after the policy branch so App ID's explanation
@@ -234,11 +241,11 @@ export function describeSignUpRefusal(error: unknown): SignUpRefusalCopy {
   // cannot succeed, and it pointed at nothing.
   const body = message.trim();
   if ((status === REFUSED_STATUS || status === null) && EMAIL_SHAPE.test(body)) {
-    return { message: EMAIL_SHAPE_COPY, detail: null, field: 'email' };
+    return { message: EMAIL_SHAPE_COPY, detail: null, field: 'email', canSignIn: false };
   }
   if ((status === REFUSED_STATUS || status === null) && PASSWORD_SHAPE.test(body)) {
-    return { message: PASSWORD_SHAPE_COPY, detail: null, field: 'password' };
+    return { message: PASSWORD_SHAPE_COPY, detail: null, field: 'password', canSignIn: false };
   }
 
-  return { message: GENERIC_COPY, detail: null, field: null };
+  return { message: GENERIC_COPY, detail: null, field: null, canSignIn: false };
 }

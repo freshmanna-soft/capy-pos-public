@@ -5,7 +5,9 @@ import { ProductService } from '@core/application/services/product.service';
 import { CartService } from '@core/application/services/cart.service';
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
 import { CameraService } from '@core/infrastructure/media/camera.service';
-import { SIGN_UP_ROUTE } from './self-checkout-routes';
+import { SIGN_IN_ROUTE, SIGN_UP_ROUTE } from './self-checkout-routes';
+import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
+import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
 import { SelfCheckoutComponent } from './self-checkout.component';
 
 /**
@@ -26,6 +28,14 @@ describe('SelfCheckoutComponent', () => {
       imports: [SelfCheckoutComponent],
       providers: [
         { provide: Router, useValue: { navigate } },
+        {
+          provide: CUSTOMER_AUTH_GATEWAY,
+          useValue: {
+            getActiveSession: vi.fn().mockResolvedValue(null),
+            signOut: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+        CurrentCustomerService,
         { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
         {
           provide: BarcodeScannerService,
@@ -47,15 +57,10 @@ describe('SelfCheckoutComponent', () => {
       ],
     });
 
-    // The shell provides `CartService` and `PosFacade` itself — that is the lane's
-    // cart boundary, and component providers win over the module's, so the stand-in
-    // has to be installed at the component level or the real facade (and the whole
-    // sale graph behind it) gets built. `CartService` stays in the list: the
-    // boundary itself is asserted below, and `self-checkout-cart-boundary.spec.ts`
-    // covers the facade half against the real thing.
-    TestBed.overrideComponent(SelfCheckoutComponent, {
-      set: { providers: [CartService, { provide: PosFacade, useValue: cartOnlyFacade() }] },
-    });
+    // Real routing supplies these from the componentless parent. This focused
+    // shell spec supplies the same boundary from TestBed; the route-level lifetime
+    // and real facade wiring are asserted in self-checkout-cart-boundary.spec.ts.
+    TestBed.overrideProvider(PosFacade, { useValue: cartOnlyFacade() });
   });
 
   /** Just enough of `PosFacade` for the scan panel to paint an empty basket. */
@@ -102,12 +107,15 @@ describe('SelfCheckoutComponent', () => {
     expect(shell?.className).toContain('text-steam');
   });
 
-  it("keeps the lane on a cart of its own, not the till's", () => {
+  it('offers returning customers the sign-in route', () => {
     const fixture = render();
+    const signIn = fixture.nativeElement.querySelector(
+      '[data-testid="self-checkout-signin-link"]'
+    ) as HTMLButtonElement;
 
-    // Two instances, not one: the root cart is what `/pos` rings a sale into, and
-    // `/self-checkout` is an unguarded route. See the component's class comment.
-    expect(fixture.debugElement.injector.get(CartService)).not.toBe(TestBed.inject(CartService));
+    signIn.click();
+
+    expect(navigate).toHaveBeenCalledWith([SIGN_IN_ROUTE]);
   });
 
   it('offers the way in to the sign-up form, as a link and not a gate', () => {

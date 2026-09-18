@@ -4,6 +4,7 @@ import { CustomerAuthGateway } from '@core/application/auth/ports/customer-auth-
 import { CredentialsDto } from '@core/application/auth/dtos/credentials.dto';
 import { CustomerRegistrationDto } from '@core/application/auth/dtos/customer-registration.dto';
 import { CustomerSessionDto } from '@core/application/auth/dtos/customer-session.dto';
+import { CustomerVerificationPendingError } from '@core/application/auth/customer-auth.errors';
 import { DEFAULT_TENANT_ID } from '@core/infrastructure/database/dexie-database.service';
 import { Permission } from '@core/domain/auth';
 import { InvalidCredentialsError } from './local-credential-auth.adapter';
@@ -300,10 +301,16 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
       return data;
     }
 
+    if (isPendingVerification(response.status, data)) {
+      throw new CustomerVerificationPendingError();
+    }
     if (data.error === 'invalid_grant') {
       throw new InvalidCredentialsError();
     }
-    throw new AppIdAuthError(`App ID customer relay error: ${data.error ?? response.status}`);
+    throw new AppIdAuthError(
+      `App ID customer relay error: ${data.error_description ?? data.error ?? response.status}`,
+      response.status
+    );
   }
 
   private async buildSession(result: RelayTokenResponse): Promise<CustomerSessionDto> {
@@ -373,6 +380,14 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
     removeItem(CUSTOMER_ACCESS_TOKEN_KEY);
     removeItem(CUSTOMER_REFRESH_TOKEN_KEY);
   }
+}
+
+function isPendingVerification(status: number, response: RelayTokenResponse): boolean {
+  return (
+    status === 403 &&
+    response.error === 'invalid_grant' &&
+    response.error_description?.trim().toLowerCase() === 'pending user verification'
+  );
 }
 
 function normalizeEmail(email: string): string {

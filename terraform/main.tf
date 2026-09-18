@@ -413,6 +413,23 @@ resource "ibm_code_engine_app" "apps" {
     }
   }
 
+  # The customer application's confidential-client secret. The value already
+  # lives in the relay's Code Engine secret above; this binding is what makes it
+  # available to customer-token.ts without ever placing it in Terraform output,
+  # a literal environment value, or the browser bundle.
+  dynamic "run_env_variables" {
+    # Gate on the non-sensitive paired ID: the lifecycle precondition guarantees
+    # the customer secret is present whenever this value is non-empty.
+    for_each = each.value.needs_appid_secret && var.appid_customer_client_id != "" ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "APPID_CUSTOMER_CLIENT_SECRET"
+      key       = "APPID_CUSTOMER_CLIENT_SECRET"
+      reference = ibm_code_engine_secret.appid_secret[each.key].name
+    }
+  }
+
   dynamic "run_env_variables" {
     for_each = each.value.needs_internal_secret ? [1] : []
 

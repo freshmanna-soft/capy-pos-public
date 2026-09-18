@@ -20,5 +20,8 @@ export const LANE_ROUTE = '/self-checkout';
 /** The customer's own sign-up form (Epic #261 item 16). */
 export const SIGN_UP_ROUTE = '/self-checkout/sign-up';
 
+/** The returning customer's sign-in form (Epic #261 item 18). */
+export const SIGN_IN_ROUTE = '/self-checkout/sign-in';
+
 /** Where a created-but-unverified account is sent (Epic #261 item 17, issue #311). */
 export const CHECK_EMAIL_ROUTE = '/self-checkout/check-email';

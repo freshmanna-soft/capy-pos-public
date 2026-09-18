@@ -276,6 +276,20 @@ describe('CurrentCustomerService', () => {
       await vi.advanceTimersByTimeAsync(5000);
       expect(service.logoutReason()).toBe('manual');
     });
+
+    it('route destruction cancels the expiry timer without signing out', async () => {
+      vi.useFakeTimers();
+      service.setSession({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 5000).toISOString(),
+      });
+
+      TestBed.resetTestingModule();
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(gateway.signOut).not.toHaveBeenCalled();
+      expect(service.logoutReason()).toBeNull();
+    });
   });
 
   // ── session expiry warning ──────────────────────────────────────────────
@@ -335,6 +349,20 @@ describe('CurrentCustomerService', () => {
       await service.refresh();
 
       expect(service.expiryWarningActive()).toBe(false);
+    });
+
+    it('route destruction cancels a pending warning timer', async () => {
+      vi.useFakeTimers();
+      service.setSession({
+        ...baseSession,
+        expiresAt: new Date(Date.now() + 120_000).toISOString(),
+      });
+
+      TestBed.resetTestingModule();
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      expect(service.expiryWarningActive()).toBe(false);
+      expect(gateway.signOut).not.toHaveBeenCalled();
     });
   });
 });

@@ -16,6 +16,7 @@ import { AppIdCustomerAuthAdapter } from './appid-customer-auth.adapter';
 import { APPID_CONFIG, type AppIdConfig } from './appid-auth.adapter';
 import { AppIdAuthError } from './appid-jwks';
 import { InvalidCredentialsError } from './local-credential-auth.adapter';
+import { CustomerVerificationPendingError } from '@core/application/auth/customer-auth.errors';
 import { DEFAULT_TENANT_ID } from '@core/infrastructure/database/dexie-database.service';
 
 // ---------------------------------------------------------------------------
@@ -228,6 +229,53 @@ describe('AppIdCustomerAuthAdapter', () => {
       await expect(adapter.authenticate({ email: 'a@b.com', password: 'bad' })).rejects.toThrow(
         InvalidCredentialsError
       );
+    });
+
+    it('preserves App ID pending verification as a distinct application error', async () => {
+      installFetch({
+        tokenResult: {
+          error: 'invalid_grant',
+          error_description: 'Pending user verification',
+        },
+        tokenStatus: 403,
+      });
+      const adapter = makeAdapter();
+
+      await expect(adapter.authenticate({ email: 'a@b.com', password: 'pw' })).rejects.toThrow(
+        CustomerVerificationPendingError
+      );
+    });
+
+    it('does not classify provider prose as pending verification without the verified 403 shape', async () => {
+      installFetch({
+        tokenResult: {
+          error: 'invalid_grant',
+          error_description: 'Pending user verification',
+        },
+        tokenStatus: 400,
+      });
+      const adapter = makeAdapter();
+
+      await expect(adapter.authenticate({ email: 'a@b.com', password: 'pw' })).rejects.toThrow(
+        InvalidCredentialsError
+      );
+    });
+
+    it('preserves status and description for other structured relay failures', async () => {
+      installFetch({
+        tokenResult: { error: 'temporarily_unavailable', error_description: 'Try again later' },
+        tokenStatus: 503,
+      });
+      const adapter = makeAdapter();
+
+      const error = await adapter
+        .authenticate({ email: 'a@b.com', password: 'pw' })
+        .catch((reason: unknown) => reason);
+      expect(error).toBeInstanceOf(AppIdAuthError);
+      expect(error).toMatchObject({
+        status: 503,
+        message: 'App ID customer relay error: Try again later',
+      });
     });
 
     it('wraps a relay transport failure in AppIdAuthError', async () => {

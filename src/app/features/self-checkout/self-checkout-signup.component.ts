@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { customerEmailValidator, MAX_EMAIL_LENGTH } from './customer-email.validator';
 import { PendingRegistrationStore } from './pending-registration.store';
-import { CHECK_EMAIL_ROUTE, LANE_ROUTE } from './self-checkout-routes';
+import { CHECK_EMAIL_ROUTE, LANE_ROUTE, SIGN_IN_ROUTE } from './self-checkout-routes';
 import { describeSignUpRefusal, SignUpRefusalCopy } from './self-checkout-signup-errors';
 
 /**
@@ -259,6 +259,10 @@ export class SelfCheckoutSignUpComponent {
     } finally {
       this.submitting.set(false);
     }
+  }
+
+  protected goToSignIn(): void {
+    void this.router.navigate([SIGN_IN_ROUTE]);
   }
 
   /** Back to the lane, with no account — the equally-prominent way out. */

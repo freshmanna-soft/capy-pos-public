@@ -1,5 +1,13 @@
+import {
+  ApplicationRef,
+  ComponentRef,
+  EnvironmentInjector,
+  createComponent,
+  createEnvironmentInjector,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { Router } from '@angular/router';
+import { Router, type Route } from '@angular/router';
+import { PosFacade } from '@core/application/facades/pos.facade';
 import { CartService } from '@core/application/services/cart.service';
 import { ProductService } from '@core/application/services/product.service';
 import { AuditLogService } from '@core/infrastructure/audit/audit-log.service';
@@ -13,24 +21,16 @@ import { GenerateReceiptUseCase } from '@core/application/use-cases/generate-rec
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import { Product } from '@core/domain/entities/product.entity';
+import { routes } from '../../app.routes';
 import { SelfCheckoutComponent } from './self-checkout.component';
 
 /**
- * The lane's cart must not be the till's cart.
+ * The customer basket belongs to the `/self-checkout` route injector.
  *
- * `/self-checkout` is an unguarded route on the same terminal `/pos` runs on, and
- * `CartService` is `providedIn: 'root'`. Left shared, the bleed runs both ways and
- * both ways are real damage: a cashier's in-progress basket renders as the
- * customer's items and totals, and a customer who walks away leaves their scans in
- * the cashier's next sale. `SelfCheckoutComponent` provides `CartService` **and**
- * `PosFacade` to draw the boundary.
- *
- * `PosFacade` is the half that is easy to get wrong and impossible to see: it is a
- * root singleton, so if it is dropped from that providers array the panel still
- * compiles, still adds to a cart, and still passes every other spec in this folder —
- * while writing straight into the till's basket again. So this spec builds the
- * **real** facade (its sale-graph collaborators stubbed, the carts real) and asserts
- * on where the items actually land.
+ * The root cart is the staff till. A second cart and facade on the componentless
+ * parent isolate customer scans while allowing every child route to inherit the
+ * same sale in progress. Destroying a lane component during a side trip must not
+ * destroy that basket; destroying the parent route must.
  */
 describe('self-checkout cart boundary', () => {
   /** `036000291452` — a real UPC-A, check digit and all. */
@@ -40,12 +40,14 @@ describe('self-checkout cart boundary', () => {
     return new Product(id, name, 2.5, `SKU-${id}`, 'drinks', 10, undefined, undefined, barcode);
   }
 
-  /** The cashier's sale in progress, sitting in the root cart. */
   const CASHIER_ITEM = product('till-1', 'Sencha Tin', '5901234123457');
-  /** What the customer scans in the lane. */
   const LANE_ITEM = product('lane-1', 'Yuzu Soda', UPCA);
+  const selfCheckout = routes.find((route) => route.path === 'self-checkout') as Route;
 
+  let appRoot: EnvironmentInjector;
+  let routeInjector: EnvironmentInjector;
   let rootCart: CartService;
+  let laneRef: ComponentRef<SelfCheckoutComponent> | null;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
@@ -55,9 +57,6 @@ describe('self-checkout cart boundary', () => {
           provide: ProductService,
           useValue: { getActiveProducts: () => Promise.resolve([LANE_ITEM]) },
         },
-        // Everything `PosFacade` injects apart from the cart. Stubbed because the
-        // sale graph is irrelevant here — the cart wiring is the whole subject — but
-        // present because the real facade's field initializers ask for all of them.
         { provide: EventBusService, useValue: { publish: vi.fn() } },
         { provide: GenerateReceiptUseCase, useValue: {} },
         { provide: AdjustStockOnSaleUseCase, useValue: {} },
@@ -86,50 +85,79 @@ describe('self-checkout cart boundary', () => {
       ],
     });
 
-    // The till's basket, mid-sale, before anyone opens the lane.
+    appRoot = TestBed.inject(EnvironmentInjector);
+    routeInjector = createEnvironmentInjector(selfCheckout.providers ?? [], appRoot);
     rootCart = TestBed.inject(CartService);
     rootCart.addProduct(CASHIER_ITEM);
+    laneRef = null;
   });
 
-  async function openLane() {
-    const fixture = TestBed.createComponent(SelfCheckoutComponent);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    return fixture;
+  afterEach(() => {
+    laneRef?.destroy();
+    routeInjector.destroy();
+  });
+
+  async function openLane(): Promise<ComponentRef<SelfCheckoutComponent>> {
+    const host = document.createElement('div');
+    laneRef = createComponent(SelfCheckoutComponent, {
+      hostElement: host,
+      environmentInjector: routeInjector,
+    });
+    TestBed.inject(ApplicationRef).attachView(laneRef.hostView);
+    laneRef.changeDetectorRef.detectChanges();
+    await Promise.resolve();
+    await Promise.resolve();
+    laneRef.changeDetectorRef.detectChanges();
+    return laneRef;
   }
 
-  function scan(fixture: Awaited<ReturnType<typeof openLane>>, code: string) {
-    const input: HTMLInputElement = fixture.nativeElement.querySelector(
-      '[data-testid="self-checkout-code-input"]'
-    );
-    input.value = code;
-    input.dispatchEvent(new Event('input'));
-    fixture.detectChanges();
-    fixture.nativeElement.querySelector('[data-testid="self-checkout-add"]').click();
-    fixture.detectChanges();
+  function childInjector(path: string): EnvironmentInjector {
+    const child = selfCheckout.children?.find((route) => route.path === path);
+    return createEnvironmentInjector(child?.providers ?? [], routeInjector);
   }
 
   it('shows the customer an empty basket even when the till has a sale in progress', async () => {
-    const fixture = await openLane();
+    const ref = await openLane();
 
     expect(rootCart.items().length).toBe(1);
     expect(
-      fixture.nativeElement.querySelector('[data-testid="self-checkout-cart-empty"]')
+      ref.location.nativeElement.querySelector('[data-testid="self-checkout-cart-empty"]')
     ).not.toBeNull();
-    expect(fixture.nativeElement.textContent).not.toContain('Sencha Tin');
+    expect(ref.location.nativeElement.textContent).not.toContain('Sencha Tin');
   });
 
-  it("rings the customer's scan into the lane cart and leaves the till's untouched", async () => {
-    const fixture = await openLane();
+  it("rings the customer's item into the route cart and leaves the till untouched", () => {
+    const routeCart = routeInjector.get(CartService);
+    const routeFacade = routeInjector.get(PosFacade);
 
-    scan(fixture, UPCA);
+    expect(routeFacade.addToCart(LANE_ITEM)).toBe(true);
 
-    const laneCart = fixture.debugElement.injector.get(CartService);
-    expect(laneCart).not.toBe(rootCart);
-    expect(laneCart.items().map((item) => item.product.id)).toEqual(['lane-1']);
-    // The one that matters: "Back to till" must not hand the cashier the
-    // customer's soda.
+    expect(routeCart).not.toBe(rootCart);
+    expect(routeCart.items().map((item) => item.product.id)).toEqual(['lane-1']);
     expect(rootCart.items().map((item) => item.product.id)).toEqual(['till-1']);
   });
+
+  it.each(['sign-up', 'sign-in', 'check-email'])(
+    'preserves the basket across a lane → %s → lane side trip',
+    async (path) => {
+      const routeCart = routeInjector.get(CartService);
+      routeInjector.get(PosFacade).addToCart(LANE_ITEM);
+      const firstLane = await openLane();
+      firstLane.destroy();
+      laneRef = null;
+
+      const sideRoute = childInjector(path);
+      try {
+        expect(sideRoute.get(CartService)).toBe(routeCart);
+        expect(sideRoute.get(PosFacade)).toBe(routeInjector.get(PosFacade));
+      } finally {
+        sideRoute.destroy();
+      }
+
+      const reopenedLane = await openLane();
+      expect(routeCart.items().map((item) => item.product.id)).toEqual(['lane-1']);
+      expect(reopenedLane.location.nativeElement.textContent).toContain('Yuzu Soda');
+      expect(rootCart.items().map((item) => item.product.id)).toEqual(['till-1']);
+    }
+  );
 });

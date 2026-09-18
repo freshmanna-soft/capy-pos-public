@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { PendingRegistrationStore } from './pending-registration.store';
-import { LANE_ROUTE } from './self-checkout-routes';
+import { LANE_ROUTE, SIGN_IN_ROUTE } from './self-checkout-routes';
 
 /**
  * SelfCheckoutCheckEmailComponent — placeholder for Epic #261 item 17 (#311).
@@ -45,14 +45,24 @@ import { LANE_ROUTE } from './self-checkout-routes';
           — you can keep shopping in the meantime.
         }
       </p>
-      <button
-        type="button"
-        (click)="backToLane()"
-        class="rounded-xl border border-yuzu/60 px-4 py-3 font-semibold text-yuzu focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
-        data-testid="check-email-back-to-lane"
-      >
-        Back to checkout
-      </button>
+      <div class="flex flex-col gap-3 sm:flex-row">
+        <button
+          type="button"
+          (click)="goToSignIn()"
+          class="rounded-xl bg-yuzu px-4 py-3 font-semibold text-onsen-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          data-testid="check-email-signin"
+        >
+          Already verified? Sign in
+        </button>
+        <button
+          type="button"
+          (click)="backToLane()"
+          class="rounded-xl border border-yuzu/60 px-4 py-3 font-semibold text-yuzu focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          data-testid="check-email-back-to-lane"
+        >
+          Back to checkout
+        </button>
+      </div>
     </div>
   `,
 })
@@ -68,6 +78,10 @@ export class SelfCheckoutCheckEmailComponent {
    * first change-detection pass and then render nothing on the next.
    */
   protected readonly email = inject(PendingRegistrationStore).take();
+
+  protected goToSignIn(): void {
+    void this.router.navigate([SIGN_IN_ROUTE]);
+  }
 
   protected backToLane(): void {
     void this.router.navigate([LANE_ROUTE]);

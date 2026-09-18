@@ -2,11 +2,14 @@ import { Routes } from '@angular/router';
 import { authGuard } from '@core/presentation/guards/auth.guard';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
+import { PosFacade } from '@core/application/facades/pos.facade';
+import { CartService } from '@core/application/services/cart.service';
 import { redirectIfAuthenticatedGuard } from '@core/presentation/guards/redirect-if-authenticated.guard';
 import { AppIdCustomerAuthAdapter } from '@core/infrastructure/auth/appid-customer-auth.adapter';
 import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palette';
 import { LANE_ROUTE } from '@features/self-checkout/self-checkout-routes';
 import { PendingRegistrationStore } from '@features/self-checkout/pending-registration.store';
+import { customerSessionHydrationGuard } from '@features/self-checkout/customer-session-hydration.guard';
 
 export const routes: Routes = [
   {
@@ -60,6 +63,10 @@ export const routes: Routes = [
     // subtree instead of outliving it in the root injector, and so nothing
     // outside self-checkout can consult a customer identity for authorization.
     path: 'self-checkout',
+    // Hydration belongs on the parent, before any guest-only child guard. A
+    // persisted customer session must be visible on direct entry to sign-up or
+    // sign-in, not only after the lane component has happened to render.
+    canActivate: [customerSessionHydrationGuard],
     // The customer identity seam (epic #261 item 13), bound HERE and nowhere
     // else. Not in `auth.providers.ts` beside the staff `AUTH_GATEWAY`, and not
     // root-provided: `CUSTOMER_AUTH_GATEWAY` is unresolvable from the
@@ -96,6 +103,12 @@ export const routes: Routes = [
       { provide: CUSTOMER_AUTH_GATEWAY, useClass: AppIdCustomerAuthAdapter },
       CurrentCustomerService,
       PendingRegistrationStore,
+      // The customer basket follows the entire route subtree rather than the
+      // lane component. Side trips to sign-up, sign-in or check-email preserve
+      // it; leaving /self-checkout destroys it. Providing the facade alongside
+      // the cart makes its inject(CartService) resolve this scoped instance.
+      CartService,
+      PosFacade,
     ],
     children: [
       {
@@ -110,6 +123,17 @@ export const routes: Routes = [
             (m) => m.SelfCheckoutSignUpComponent
           ),
         title: 'Create an Account · Capy-POS',
+      },
+      {
+        // A returning customer signs in here. The same guest-only guard as
+        // sign-up redirects a hydrated session back to its basket.
+        path: 'sign-in',
+        canActivate: [redirectIfAuthenticatedGuard(CurrentCustomerService, LANE_ROUTE)],
+        loadComponent: () =>
+          import('./features/self-checkout/self-checkout-signin.component').then(
+            (m) => m.SelfCheckoutSignInComponent
+          ),
+        title: 'Sign In · Capy-POS',
       },
       {
         // Item 17's placeholder (#311). Deliberately NOT behind
