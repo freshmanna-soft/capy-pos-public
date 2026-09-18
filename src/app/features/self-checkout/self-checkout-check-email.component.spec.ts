@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { PendingRegistrationStore } from './pending-registration.store';
-import { LANE_ROUTE } from './self-checkout-routes';
+import { LANE_ROUTE, SIGN_IN_ROUTE } from './self-checkout-routes';
 import { SelfCheckoutCheckEmailComponent } from './self-checkout-check-email.component';
 
 /**
@@ -70,6 +70,17 @@ describe('SelfCheckoutCheckEmailComponent', () => {
     back?.click();
 
     expect(navigate).toHaveBeenCalledWith([LANE_ROUTE]);
+  });
+
+  it('offers sign-in after the customer verifies their address', () => {
+    const fixture = render();
+    const signIn = fixture.nativeElement.querySelector(
+      '[data-testid="check-email-signin"]'
+    ) as HTMLButtonElement;
+
+    signIn.click();
+
+    expect(navigate).toHaveBeenCalledWith([SIGN_IN_ROUTE]);
   });
 
   it('names the inbox the verification mail went to', () => {

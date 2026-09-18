@@ -1,4 +1,4 @@
-import { Injectable, inject, signal, computed } from '@angular/core';
+import { Injectable, OnDestroy, inject, signal, computed } from '@angular/core';
 import { CUSTOMER_AUTH_GATEWAY } from './ports/customer-auth-gateway.port';
 import { CustomerSessionDto } from './dtos/customer-session.dto';
 import { Permission } from '@core/domain/auth';
@@ -28,7 +28,7 @@ import { Permission } from '@core/domain/auth';
  * service — those stay staff-only.
  */
 @Injectable()
-export class CurrentCustomerService {
+export class CurrentCustomerService implements OnDestroy {
   private readonly gateway = inject(CUSTOMER_AUTH_GATEWAY);
 
   // ── writable backing signals (private) ─────────────────────────────────
@@ -158,6 +158,15 @@ export class CurrentCustomerService {
       this.expiryWarningTimer = null;
     }
     this._expiryWarningActive.set(false);
+  }
+
+  /**
+   * Stop route-owned timers without clearing the persisted customer session.
+   * A future self-checkout route instance may hydrate that same session, so
+   * destroying this instance must not let stale timers sign the new one out.
+   */
+  ngOnDestroy(): void {
+    this.clearExpiryTimer();
   }
 
   /**
