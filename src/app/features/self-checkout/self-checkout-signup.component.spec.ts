@@ -6,8 +6,9 @@ import {
   CustomerAuthGateway,
 } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CustomerRegistrationDto } from '@core/application/auth/dtos/customer-registration.dto';
+import { MAX_EMAIL_LENGTH } from './customer-email.validator';
 import { PendingRegistrationStore } from './pending-registration.store';
-import { CHECK_EMAIL_ROUTE, LANE_ROUTE } from './self-checkout-routes';
+import { CHECK_EMAIL_ROUTE, LANE_ROUTE, SIGN_IN_ROUTE } from './self-checkout-routes';
 import { SelfCheckoutSignUpComponent } from './self-checkout-signup.component';
 
 /**
@@ -325,7 +326,7 @@ describe('SelfCheckoutSignUpComponent', () => {
   });
 
   describe('refusals get their own copy', () => {
-    it('409 tells the customer to try signing in, and links nowhere', async () => {
+    it('409 tells the customer to try signing in and links to the real sign-in route', async () => {
       const gateway = makeGateway(vi.fn().mockRejectedValue(new Error(RELAY_409)));
       const fixture = await createComponent(gateway);
 
@@ -333,14 +334,13 @@ describe('SelfCheckoutSignUpComponent', () => {
       await submit(fixture);
 
       expect(errorText(fixture)).toContain('already has an account');
-      // The advice #309 asked for, in copy — and deliberately not as a link. There
-      // is no customer sign-in screen anywhere yet (Epic #261 item 18 is unbuilt);
-      // this used to render `routerLink="/self-checkout"`, which sent the shopper
-      // back to the lane, where no sign-in exists either, and lost what they had
-      // typed on the way. Re-adding a link fails here until it has somewhere to go.
       expect(errorText(fixture)).toContain('Try signing in');
-      const banner = fixture.nativeElement.querySelector('[data-testid="signup-error"]');
-      expect(banner.querySelectorAll('a')).toHaveLength(0);
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+      const signIn = fixture.nativeElement.querySelector(
+        '[data-testid="signup-signin-link"]'
+      ) as HTMLButtonElement;
+      signIn.click();
+      expect(navigate).toHaveBeenCalledWith([SIGN_IN_ROUTE]);
     });
 
     it('marks the field a refusal blames, not just the banner', async () => {
@@ -532,9 +532,17 @@ describe('SelfCheckoutSignUpComponent', () => {
    * that the *form* is the thing using it.
    */
   describe('nothing the relay refuses on shape ever leaves the form', () => {
+    /**
+     * One character over the bound and otherwise well formed, so the length rule
+     * is the only rule it breaks — built from the constant rather than written
+     * out, so it cannot quietly fall back under the bound if the relay moves it.
+     */
+    const TOO_LONG_EMAIL = `${'y'.repeat(MAX_EMAIL_LENGTH + 1 - '@example.com'.length)}@example.com`;
+
     it.each([
       ['a domain with no TLD, which Validators.email accepts', 'jane@gmail'],
       ['an address that is only whitespace', '   '],
+      [`an address over the relay’s ${MAX_EMAIL_LENGTH}-character bound`, TOO_LONG_EMAIL],
       ['a passphrase over the relay’s 256-character bound', null],
     ])('does not submit %s', async (_label, email) => {
       const gateway = makeGateway(vi.fn().mockResolvedValue(registration));
@@ -564,9 +572,43 @@ describe('SelfCheckoutSignUpComponent', () => {
 
       expect(fieldError(fixture, 'password')?.textContent).toContain('256 characters or fewer');
     });
+
+    it('states the relay’s bound for an address that is too long', async () => {
+      // The password bound above had no counterpart, and the asymmetry was
+      // load-bearing: delete the component's `emailTooLong` arm and every other
+      // assertion here still passes, because the field does still go into error —
+      // with "check for a typo", about an address that has no typo in it. That is
+      // the misdirected-field failure this form's WCAG 3.3.1 note exists to
+      // prevent, and "the field is in error" cannot see it. Hence both halves:
+      // the length copy is present AND the typo copy is not.
+      const fixture = await createComponent(makeGateway(vi.fn()));
+      fixture.componentInstance.form.setValue({
+        email: TOO_LONG_EMAIL,
+        password: 'sup3rsecret',
+      });
+
+      await submit(fixture);
+
+      const message = fieldError(fixture, 'email')?.textContent ?? '';
+      expect(message).toContain(`${MAX_EMAIL_LENGTH} characters or fewer`);
+      expect(message).not.toContain('typo');
+    });
   });
 
   describe('registration stays optional', () => {
+    it('offers existing customers the sign-in route', async () => {
+      const fixture = await createComponent(makeGateway(vi.fn()));
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
+
+      (
+        fixture.nativeElement.querySelector(
+          '[data-testid="signup-existing-account"]'
+        ) as HTMLButtonElement
+      ).click();
+
+      expect(navigate).toHaveBeenCalledWith([SIGN_IN_ROUTE]);
+    });
+
     it('offers continuing without an account alongside the submit', async () => {
       const fixture = await createComponent(makeGateway(vi.fn()));
 

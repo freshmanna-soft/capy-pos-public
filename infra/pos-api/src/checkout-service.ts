@@ -25,10 +25,11 @@ import {
   type PayPalOrderSnapshot,
 } from './checkout-paypal.ts';
 import {
-  CheckoutValidationError,
+  CheckoutRequestValidationError,
   checkoutQuotesEqual,
   parseCheckoutCreateRequest,
   priceCheckout,
+  type CheckoutCreateRequest,
   type CheckoutQuote,
 } from './checkout-pricing.ts';
 import {
@@ -115,6 +116,28 @@ class CheckoutProductPersistenceError extends Error {
   }
 }
 
+export class CheckoutProviderBindingPersistenceError extends Error {
+  readonly code = 'provider-binding-persistence';
+  readonly retryable = true;
+
+  constructor() {
+    super('Checkout provider reference binding could not be persisted.');
+    this.name = 'CheckoutProviderBindingPersistenceError';
+  }
+}
+
+export class CheckoutProviderBindingCollisionError extends Error {
+  readonly code: 'provider-binding-conflict' | 'provider-binding-digest-collision';
+
+  constructor(outcome: 'conflict' | 'digest-collision') {
+    const code =
+      outcome === 'conflict' ? 'provider-binding-conflict' : 'provider-binding-digest-collision';
+    super(`Checkout provider reference binding failed: ${code}.`);
+    this.name = 'CheckoutProviderBindingCollisionError';
+    this.code = code;
+  }
+}
+
 const CAS_ATTEMPTS = 5;
 const RECONCILE_STEPS = 24;
 const MAX_PROVIDER_ATTEMPTS = 8;
@@ -154,7 +177,15 @@ export class CheckoutService {
   }
 
   async create(rawBody: unknown, rawIdempotencyKey: string): Promise<CreatedCheckoutProjection> {
-    const request = parseCheckoutCreateRequest(rawBody, this.deps.config);
+    let request: CheckoutCreateRequest;
+    try {
+      request = parseCheckoutCreateRequest(rawBody, this.deps.config);
+    } catch (error) {
+      if (error instanceof CheckoutRequestValidationError) {
+        throw new CheckoutServiceError('bad-request');
+      }
+      throw error;
+    }
     const idempotencyKey = boundedHeader(rawIdempotencyKey, 'Idempotency-Key');
     const requestFingerprint = digestCanonicalRequest(request.items);
     const idempotency = await this.lookupIdempotency(idempotencyKey, requestFingerprint);
@@ -181,7 +212,15 @@ export class CheckoutService {
       }
     }
     const products = await this.readProducts(request.items.map((item) => item.productId));
-    const quote = priceCheckout(request, products, this.deps.config);
+    let quote: CheckoutQuote;
+    try {
+      quote = priceCheckout(request, products, this.deps.config);
+    } catch (error) {
+      if (error instanceof CheckoutRequestValidationError) {
+        throw new CheckoutServiceError('bad-request');
+      }
+      throw error;
+    }
     if (idempotency.lookup.outcome === 'missing') {
       for (const line of quote.lines) {
         const product = products.get(line.productId)!;
@@ -318,13 +357,8 @@ export class CheckoutService {
         case CheckoutState.AWAITING_APPROVAL:
           if (Date.parse(this.now()) >= Date.parse(current.document.expiresAt)) {
             await this.expireAwaitingApproval(current, lease);
-          } else {
-            await this.transition(
-              checkoutId,
-              CheckoutState.AUTHORIZE_REQUESTED,
-              { nextActionAt: addMilliseconds(this.now(), PROVIDER_RETRY_MS) },
-              lease
-            );
+          } else if (!(await this.beginAuthorizationIfApproved(current, lease))) {
+            return projectStatus((await this.requireCheckout(checkoutId)).document);
           }
           continue;
         case CheckoutState.AUTHORIZE_REQUESTED:
@@ -589,12 +623,22 @@ export class CheckoutService {
       });
       await this.bindReference('order', order.id, checkout.document.id);
     } catch (error) {
-      await this.recordProviderMismatch(
-        checkout.document.id,
-        error,
-        CheckoutState.MANUAL_REVIEW_CREATE_UNKNOWN,
-        lease
-      );
+      if (error instanceof CheckoutProviderBindingPersistenceError) {
+        await this.recordProviderFailure(
+          checkout.document.id,
+          error,
+          CheckoutState.RECONCILE_CREATE_ORDER_UNKNOWN,
+          CheckoutState.MANUAL_REVIEW_CREATE_UNKNOWN,
+          lease
+        );
+      } else {
+        await this.recordProviderMismatch(
+          checkout.document.id,
+          error,
+          CheckoutState.MANUAL_REVIEW_CREATE_UNKNOWN,
+          lease
+        );
+      }
       throw providerServiceError(error);
     }
     const next = await this.transition(
@@ -608,6 +652,99 @@ export class CheckoutService {
       lease
     );
     return createdProjection(next.document, checkoutToken);
+  }
+
+  private async beginAuthorizationIfApproved(
+    checkout: VersionedCheckout,
+    lease: CheckoutReconciliationLease
+  ): Promise<boolean> {
+    const orderId = requiredProviderId(checkout.document.paypalOrderId);
+    let order: PayPalOrderSnapshot;
+    await this.assertLeaseBeforeProviderMutation(checkout.document.id, lease);
+    try {
+      order = await this.deps.paypal.getOrder(orderId);
+    } catch (error) {
+      if (isRetryableProviderError(error)) {
+        await this.recordProviderRetrievalFailure(
+          checkout.document.id,
+          error,
+          CheckoutState.AWAITING_APPROVAL,
+          CheckoutState.MANUAL_REVIEW_AWAITING_APPROVAL,
+          lease
+        );
+      } else {
+        await this.recordProviderMismatch(
+          checkout.document.id,
+          error,
+          CheckoutState.MANUAL_REVIEW_AWAITING_APPROVAL,
+          lease
+        );
+      }
+      throw providerServiceError(error);
+    }
+    await this.assertLeaseBeforeLocalMutation(checkout.document.id, lease);
+    let unit;
+    try {
+      unit = verifyPayPalOrder(order, {
+        ...expectedFacts(checkout.document),
+        orderId,
+        allowedStatuses: CREATED_OR_APPROVED_ORDER_STATUSES,
+      });
+    } catch (error) {
+      await this.recordProviderMismatch(
+        checkout.document.id,
+        error,
+        CheckoutState.MANUAL_REVIEW_AWAITING_APPROVAL,
+        lease
+      );
+      throw providerServiceError(error);
+    }
+    if (unit.authorizations.length > 0) {
+      await this.transition(
+        checkout.document.id,
+        CheckoutState.MANUAL_REVIEW_AWAITING_APPROVAL,
+        {
+          lastFailure: failure('authorization-without-request', false, this.now()),
+          nextActionAt: null,
+          lease: null,
+        },
+        lease
+      );
+      throw new CheckoutServiceError('manual-review');
+    }
+    if (order.status !== PayPalOrderStatus.APPROVED) return false;
+    return this.beginAuthorizationBeforeExpiry(checkout.document.id, lease);
+  }
+
+  private async beginAuthorizationBeforeExpiry(
+    checkoutId: string,
+    lease: CheckoutReconciliationLease
+  ): Promise<boolean> {
+    for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.requireCheckout(checkoutId);
+      if (current.document.state !== CheckoutState.AWAITING_APPROVAL) {
+        throw new CheckoutServiceError('conflict', true);
+      }
+      const now = this.now();
+      const expired = Date.parse(now) >= Date.parse(current.document.expiresAt);
+      const next: CheckoutDocument = {
+        ...current.document,
+        state: expired ? CheckoutState.EXPIRED : CheckoutState.AUTHORIZE_REQUESTED,
+        nextActionAt: expired ? null : addMilliseconds(now, PROVIDER_RETRY_MS),
+        lease: expired ? null : current.document.lease,
+        updatedAt: now,
+      };
+      if (
+        (await this.deps.checkouts.compareAndSwap(checkoutId, next, current.revision, {
+          ownerId: lease.ownerId,
+          leaseId: lease.leaseId,
+          nowIso: now,
+        })) === 'written'
+      ) {
+        return !expired;
+      }
+    }
+    throw new CheckoutServiceError('conflict', true);
   }
 
   private async authorize(
@@ -637,12 +774,22 @@ export class CheckoutService {
       await this.acceptAuthorization(checkout.document, order, lease);
     } catch (error) {
       if (error instanceof CheckoutServiceError && error.code === 'conflict') throw error;
-      await this.recordProviderMismatch(
-        checkout.document.id,
-        error,
-        CheckoutState.MANUAL_REVIEW_AUTHORIZE_UNKNOWN,
-        lease
-      );
+      if (error instanceof CheckoutProviderBindingPersistenceError) {
+        await this.recordProviderFailure(
+          checkout.document.id,
+          error,
+          CheckoutState.RECONCILE_AUTHORIZE_UNKNOWN,
+          CheckoutState.MANUAL_REVIEW_AUTHORIZE_UNKNOWN,
+          lease
+        );
+      } else {
+        await this.recordProviderMismatch(
+          checkout.document.id,
+          error,
+          CheckoutState.MANUAL_REVIEW_AUTHORIZE_UNKNOWN,
+          lease
+        );
+      }
       throw providerServiceError(error);
     }
   }
@@ -686,12 +833,22 @@ export class CheckoutService {
       await this.acceptAuthorization(checkout.document, order, lease);
     } catch (error) {
       if (error instanceof CheckoutServiceError && error.code === 'conflict') throw error;
-      await this.recordProviderMismatch(
-        checkout.document.id,
-        error,
-        CheckoutState.MANUAL_REVIEW_AUTHORIZE_UNKNOWN,
-        lease
-      );
+      if (isRetryableProviderError(error)) {
+        await this.recordProviderRetrievalFailure(
+          checkout.document.id,
+          error,
+          CheckoutState.RECONCILE_AUTHORIZE_UNKNOWN,
+          CheckoutState.MANUAL_REVIEW_AUTHORIZE_UNKNOWN,
+          lease
+        );
+      } else {
+        await this.recordProviderMismatch(
+          checkout.document.id,
+          error,
+          CheckoutState.MANUAL_REVIEW_AUTHORIZE_UNKNOWN,
+          lease
+        );
+      }
       throw providerServiceError(error);
     }
   }
@@ -798,13 +955,32 @@ export class CheckoutService {
     try {
       await this.acceptCapture(checkout.document, capture, lease);
     } catch (error) {
-      if (error instanceof CheckoutServiceError && error.code === 'conflict') throw error;
-      await this.recordProviderMismatch(
-        checkout.document.id,
-        error,
-        CheckoutState.MANUAL_REVIEW_CAPTURE_UNKNOWN,
-        lease
-      );
+      if (error instanceof CheckoutServiceError && error.code === 'conflict') {
+        await this.recordProviderFailure(
+          checkout.document.id,
+          error,
+          CheckoutState.RECONCILE_CAPTURE_UNKNOWN,
+          CheckoutState.MANUAL_REVIEW_CAPTURE_UNKNOWN,
+          lease
+        );
+        throw error;
+      }
+      if (error instanceof CheckoutProviderBindingPersistenceError) {
+        await this.recordProviderFailure(
+          checkout.document.id,
+          error,
+          CheckoutState.RECONCILE_CAPTURE_UNKNOWN,
+          CheckoutState.MANUAL_REVIEW_CAPTURE_UNKNOWN,
+          lease
+        );
+      } else {
+        await this.recordProviderMismatch(
+          checkout.document.id,
+          error,
+          CheckoutState.MANUAL_REVIEW_CAPTURE_UNKNOWN,
+          lease
+        );
+      }
       throw providerServiceError(error);
     }
   }
@@ -821,13 +997,7 @@ export class CheckoutService {
         await this.acceptCapture(checkout.document, capture, lease);
         return;
       } catch (error) {
-        if (error instanceof CheckoutServiceError && error.code === 'conflict') throw error;
-        await this.recordProviderMismatch(
-          checkout.document.id,
-          error,
-          CheckoutState.MANUAL_REVIEW_CAPTURE_UNKNOWN,
-          lease
-        );
+        await this.recordCaptureReconciliationFailure(checkout.document.id, error, lease);
         throw providerServiceError(error);
       }
     }
@@ -880,15 +1050,33 @@ export class CheckoutService {
         );
       }
     } catch (error) {
-      if (error instanceof CheckoutServiceError) throw error;
-      await this.recordProviderMismatch(
-        checkout.document.id,
+      await this.recordCaptureReconciliationFailure(checkout.document.id, error, lease);
+      throw providerServiceError(error);
+    }
+  }
+
+  private async recordCaptureReconciliationFailure(
+    checkoutId: string,
+    error: unknown,
+    lease: CheckoutReconciliationLease
+  ): Promise<void> {
+    if (error instanceof CheckoutServiceError) throw error;
+    if (isRetryableProviderError(error)) {
+      await this.recordProviderRetrievalFailure(
+        checkoutId,
         error,
+        CheckoutState.RECONCILE_CAPTURE_UNKNOWN,
         CheckoutState.MANUAL_REVIEW_CAPTURE_UNKNOWN,
         lease
       );
-      throw providerServiceError(error);
+      return;
     }
+    await this.recordProviderMismatch(
+      checkoutId,
+      error,
+      CheckoutState.MANUAL_REVIEW_CAPTURE_UNKNOWN,
+      lease
+    );
   }
 
   private async acceptCapture(
@@ -1044,12 +1232,22 @@ export class CheckoutService {
       );
     } catch (error) {
       if (error instanceof CheckoutServiceError && error.code === 'conflict') throw error;
-      await this.recordProviderMismatch(
-        checkout.document.id,
-        error,
-        CheckoutState.MANUAL_REVIEW_AUTHORIZED,
-        lease
-      );
+      if (isRetryableProviderError(error)) {
+        await this.recordProviderRetrievalFailure(
+          checkout.document.id,
+          error,
+          CheckoutState.RECONCILE_VOID_UNKNOWN,
+          CheckoutState.MANUAL_REVIEW_AUTHORIZED,
+          lease
+        );
+      } else {
+        await this.recordProviderMismatch(
+          checkout.document.id,
+          error,
+          CheckoutState.MANUAL_REVIEW_AUTHORIZED,
+          lease
+        );
+      }
       throw providerServiceError(error);
     }
   }
@@ -1248,6 +1446,28 @@ export class CheckoutService {
     );
   }
 
+  private async recordProviderRetrievalFailure(
+    checkoutId: string,
+    error: unknown,
+    retryState: State,
+    terminalState: State,
+    lease: CheckoutReconciliationLease
+  ): Promise<void> {
+    const current = await this.requireCheckout(checkoutId);
+    const exhausted = current.document.attempts + 1 >= MAX_PROVIDER_ATTEMPTS;
+    await this.transition(
+      checkoutId,
+      exhausted ? terminalState : retryState,
+      {
+        lastFailure: failure(providerErrorCode(error), !exhausted, this.now()),
+        nextActionAt: exhausted ? null : providerRetryAt(this.now(), current.document.attempts + 1),
+        attemptsIncrement: true,
+        ...(exhausted ? { lease: null } : {}),
+      },
+      lease
+    );
+  }
+
   private async transition(
     checkoutId: string,
     state: State,
@@ -1298,8 +1518,9 @@ export class CheckoutService {
     const products = new Map<string, ProductDocument>();
     for (const productId of productIds) {
       const revision = await this.deps.products.read(productId);
-      if (revision === null)
-        throw new CheckoutValidationError(`Unknown or inactive product: ${productId}.`);
+      if (revision === null || revision.document.isActive === false) {
+        throw new CheckoutServiceError('bad-request');
+      }
       products.set(productId, revision.document);
     }
     return products;
@@ -1309,11 +1530,19 @@ export class CheckoutService {
     checkoutId: string,
     checkoutToken: string
   ): Promise<VersionedCheckout> {
-    const checkout = await this.requireCheckout(checkoutId);
-    const candidate = this.capabilityHash(
-      boundedHeader(checkoutToken, 'X-Checkout-Token'),
-      checkout.document.capabilityKeyVersion
-    );
+    let id: string;
+    let token: string;
+    try {
+      id = checkoutIdentifier(checkoutId);
+      token = boundedHeader(checkoutToken, 'X-Checkout-Token');
+    } catch (error) {
+      if (error instanceof CheckoutServiceError && error.code === 'bad-request') {
+        throw new CheckoutServiceError('not-found');
+      }
+      throw error;
+    }
+    const checkout = await this.requireCheckout(id);
+    const candidate = this.capabilityHash(token, checkout.document.capabilityKeyVersion);
     if (!constantTimeEqual(candidate, checkout.document.capabilityTokenHash)) {
       throw new CheckoutServiceError('not-found');
     }
@@ -1351,12 +1580,17 @@ export class CheckoutService {
     referenceId: string,
     checkoutId: string
   ): Promise<void> {
-    const binding = await this.deps.checkouts.bindProviderReference({
-      referenceKind,
-      referenceId,
-      checkoutId,
-      nowIso: this.now(),
-    });
+    let binding: BindingResult;
+    try {
+      binding = await this.deps.checkouts.bindProviderReference({
+        referenceKind,
+        referenceId,
+        checkoutId,
+        nowIso: this.now(),
+      });
+    } catch {
+      throw new CheckoutProviderBindingPersistenceError();
+    }
     assertBinding(binding);
   }
 
@@ -1520,26 +1754,27 @@ function localCorruptionCode(error: unknown): string {
 function providerErrorCode(error: unknown): string {
   if (error instanceof PayPalGatewayError) return `paypal-${error.code}`;
   if (error instanceof PayPalFactMismatchError) return `paypal-fact-${error.code}`;
+  if (error instanceof CheckoutProviderBindingPersistenceError) return error.code;
+  if (error instanceof CheckoutProviderBindingCollisionError) return error.code;
   return 'paypal-unknown';
 }
 
 function isRetryableProviderError(error: unknown): boolean {
-  return error instanceof PayPalGatewayError ? error.retryable : false;
+  return (
+    (error instanceof PayPalGatewayError && error.retryable) ||
+    error instanceof CheckoutProviderBindingPersistenceError
+  );
 }
 
 function providerServiceError(error: unknown): CheckoutServiceError {
   if (error instanceof CheckoutServiceError) return error;
-  return new CheckoutServiceError(
-    error instanceof PayPalGatewayError && error.retryable
-      ? 'provider-unavailable'
-      : 'manual-review',
-    error instanceof PayPalGatewayError && error.retryable
-  );
+  const retryable = isRetryableProviderError(error);
+  return new CheckoutServiceError(retryable ? 'provider-unavailable' : 'manual-review', retryable);
 }
 
 function assertBinding(binding: BindingResult): void {
-  if (binding.outcome !== 'claimed' && binding.outcome !== 'replay') {
-    throw new CheckoutServiceError('manual-review');
+  if (binding.outcome === 'conflict' || binding.outcome === 'digest-collision') {
+    throw new CheckoutProviderBindingCollisionError(binding.outcome);
   }
 }
 

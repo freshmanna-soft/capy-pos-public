@@ -11,8 +11,9 @@
  * and a dev-only shortcut cannot diverge from production behaviour the way a
  * separate handler can.
  *
- *   SESSION_JWT_SECRET=… POS_API_STORE=memory npm start      # laptop, port 8790
- *   SESSION_JWT_SECRET=… CLOUDANT_URL=… CLOUDANT_APIKEY=… npm start
+ * Local startup also needs the checkout policy, PayPal sandbox credentials, HMAC
+ * keyrings, and `ALLOWED_ORIGINS`; see `checkout-config.ts` and
+ * `checkout-secrets.ts` for the complete environment contract.
  *
  * APPID_REGION/APPID_TENANT_ID/APPID_CLIENT_ID are optional — unset, this
  * verifies HS256 only, exactly as above. Set all three together to also accept
@@ -21,10 +22,12 @@
  *   SESSION_JWT_SECRET=… POS_API_STORE=memory \
  *   APPID_REGION=us-south APPID_TENANT_ID=… APPID_CLIENT_ID=… npm start
  */
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { handle } from './api.ts';
 import type { ApiDeps, ProductDocument, RolesDocument, TransactionDocument } from './api.ts';
+import { handleCheckoutHttp } from './checkout-http.ts';
+import { buildCheckoutRuntime, type CheckoutRuntime } from './checkout-runtime.ts';
 import { CloudantStore } from './cloudant-store.ts';
 import { MemoryStore } from '../../shared/src/document-store.ts';
 import type { DocumentStore } from '../../shared/src/document-store.ts';
@@ -40,6 +43,7 @@ const PORT = Number(process.env['PORT'] ?? 8790);
  * cap is what makes the boundary hold against a body rather than a token.
  */
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_CHECKOUT_BODY_BYTES = 16 * 1024;
 
 /**
  * Fail before listening, not on the first request.
@@ -100,11 +104,14 @@ function readAppIdConfig(): { region: string; tenantId: string; audience: string
  * `CLOUDANT_APIKEY` would give a Code Engine revision that starts, answers 200,
  * passes its health check, and loses every sale on the next scale-to-zero.
  */
-function buildStores(): {
-  products: DocumentStore<ProductDocument>;
-  transactions: DocumentStore<TransactionDocument>;
-  roles: DocumentStore<RolesDocument>;
-} {
+interface PosStores {
+  readonly products: DocumentStore<ProductDocument>;
+  readonly transactions: DocumentStore<TransactionDocument>;
+  readonly roles: DocumentStore<RolesDocument>;
+  readonly cloudant?: { readonly url: string; readonly apiKey: string };
+}
+
+function buildStores(): PosStores {
   const url = process.env['CLOUDANT_URL'] ?? '';
   const apiKey = process.env['CLOUDANT_APIKEY'] ?? '';
 
@@ -113,20 +120,19 @@ function buildStores(): {
     const transactionsDb = process.env['CLOUDANT_TRANSACTIONS_DB'] ?? 'transactions';
     const rolesDb = process.env['CLOUDANT_ROLES_DB'] ?? 'roles';
     console.log(`[pos-api] store: cloudant (${productsDb}, ${transactionsDb}, ${rolesDb})`);
+    const cloudant = { url: url.replace(/\/+$/, ''), apiKey };
     return {
+      cloudant,
       products: new CloudantStore<ProductDocument>({
-        url: url.replace(/\/+$/, ''),
-        apiKey,
+        ...cloudant,
         database: productsDb,
       }),
       transactions: new CloudantStore<TransactionDocument>({
-        url: url.replace(/\/+$/, ''),
-        apiKey,
+        ...cloudant,
         database: transactionsDb,
       }),
       roles: new CloudantStore<RolesDocument>({
-        url: url.replace(/\/+$/, ''),
-        apiKey,
+        ...cloudant,
         database: rolesDb,
       }),
     };
@@ -158,15 +164,31 @@ function readInternalSecret(): string {
   return process.env['INTERNAL_API_SECRET'] ?? '';
 }
 
-const deps: ApiDeps = {
-  ...buildStores(),
-  secret: requireSecret(),
-  appId: readAppIdConfig(),
-  internalSecret: readInternalSecret(),
-  nowSeconds: () => Math.floor(Date.now() / 1000),
-  nowIso: () => new Date().toISOString(),
-  newId: () => randomUUID(),
-};
+function buildRuntimeDeps(): { readonly api: ApiDeps; readonly checkout: CheckoutRuntime } {
+  const stores = buildStores();
+  try {
+    return {
+      api: {
+        ...stores,
+        secret: requireSecret(),
+        appId: readAppIdConfig(),
+        internalSecret: readInternalSecret(),
+        nowSeconds: () => Math.floor(Date.now() / 1000),
+        nowIso: () => new Date().toISOString(),
+        newId: () => randomUUID(),
+      },
+      checkout: buildCheckoutRuntime({
+        environment: process.env,
+        products: stores.products,
+        transactions: stores.transactions,
+        cloudant: stores.cloudant,
+      }),
+    };
+  } catch (error) {
+    console.error('[pos-api] checkout configuration is invalid. Refusing to start.', error);
+    process.exit(1);
+  }
+}
 
 /**
  * CORS.
@@ -178,93 +200,198 @@ const deps: ApiDeps = {
  * browser hides it even though it is on the wire. Both are the lesson recorded in
  * this repo when API Gateway's own CORS block stripped exactly these.
  */
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Trace-Id',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-  'Access-Control-Expose-Headers': 'X-Trace-Id',
-  'Access-Control-Max-Age': '600',
-} as const;
-
-createServer((req, res) => {
-  // Honour the caller's trace id when it sent one — `trace-context.interceptor.ts`
-  // does — so one id spans the browser span and this request's logs. Otherwise mint
-  // one, because a log line with no correlation id is a log line nobody can follow.
-  const incoming = req.headers['x-trace-id'];
-  const traceId = typeof incoming === 'string' && incoming.length > 0 ? incoming : randomUUID();
-
-  const send = (status: number, body: unknown): void => {
-    res.writeHead(status, { ...CORS, 'Content-Type': 'application/json', 'X-Trace-Id': traceId });
-    res.end(JSON.stringify(body));
-  };
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, { ...CORS, 'X-Trace-Id': traceId }).end();
-    return;
+export function readAllowedOrigins(
+  environment: Readonly<Record<string, string | undefined>>
+): Set<string> {
+  const origins = (environment['ALLOWED_ORIGINS'] ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (origins.length === 0) throw new Error('ALLOWED_ORIGINS must contain at least one origin.');
+  for (const origin of origins) {
+    const parsed = new URL(origin);
+    if (
+      parsed.origin !== origin ||
+      (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost')
+    ) {
+      throw new Error('ALLOWED_ORIGINS contains an invalid origin.');
+    }
   }
+  return new Set(origins);
+}
 
-  const chunks: Buffer[] = [];
-  let received = 0;
-  let aborted = false;
+export function createPosRequestHandler(input: {
+  readonly api: ApiDeps;
+  readonly checkout: CheckoutRuntime;
+  readonly allowedOrigins: ReadonlySet<string>;
+  readonly newTraceId?: () => string;
+}): (req: IncomingMessage, res: ServerResponse) => void {
+  const newTraceId = input.newTraceId ?? randomUUID;
+  return (req, res) => {
+    const incoming = req.headers['x-trace-id'];
+    const traceId = typeof incoming === 'string' && incoming.length > 0 ? incoming : newTraceId();
+    const origin = singleHeader(req.headers.origin);
+    const cors = corsHeaders(origin, input.allowedOrigins);
+    const path = (req.url ?? '/').split('?')[0] ?? '/';
+    const checkoutRoute = path.startsWith('/api/self-checkout/checkouts');
+    const responsePolicy = checkoutRoute
+      ? { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }
+      : {};
+    const send = (status: number, body: unknown, headers: Record<string, string> = {}): void => {
+      res.writeHead(status, {
+        ...cors,
+        ...responsePolicy,
+        ...headers,
+        'Content-Type': 'application/json',
+        'X-Trace-Id': traceId,
+      });
+      res.end(JSON.stringify(body));
+    };
 
-  req.on('data', (chunk: Buffer) => {
-    if (aborted) {
+    if (origin !== undefined && cors['Access-Control-Allow-Origin'] === undefined) {
+      send(403, { error: 'Origin not allowed.' });
       return;
     }
-    received += chunk.length;
-    if (received > MAX_BODY_BYTES) {
-      aborted = true;
-      send(413, { error: 'Request body too large.' });
-      req.destroy();
+    if (req.method === 'OPTIONS') {
+      res
+        .writeHead(204, {
+          ...cors,
+          ...responsePolicy,
+          'X-Trace-Id': traceId,
+          'Access-Control-Allow-Headers':
+            'Content-Type, Authorization, X-Trace-Id, Idempotency-Key, X-Checkout-Token',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+          'Access-Control-Max-Age': '600',
+        })
+        .end();
       return;
     }
-    chunks.push(chunk);
-  });
 
-  req.on('end', () => {
-    if (aborted) {
-      return;
-    }
-    void (async () => {
-      const raw = Buffer.concat(chunks).toString('utf8');
+    const chunks: Buffer[] = [];
+    let received = 0;
+    let aborted = false;
+    const maxBodyBytes = checkoutRoute ? MAX_CHECKOUT_BODY_BYTES : MAX_BODY_BYTES;
 
-      let body: unknown;
-      if (raw.trim().length > 0) {
-        try {
-          body = JSON.parse(raw);
-        } catch {
-          send(400, { error: 'Body must be JSON.' });
-          return;
+    req.on('data', (chunk: Buffer) => {
+      if (aborted) return;
+      received += chunk.length;
+      if (received > maxBodyBytes) {
+        aborted = true;
+        send(413, { error: 'Request body too large.' });
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on('end', () => {
+      if (aborted) return;
+      void (async () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        let body: unknown;
+        if (raw.trim().length > 0) {
+          try {
+            body = JSON.parse(raw);
+          } catch {
+            send(400, { error: 'Body must be JSON.' });
+            return;
+          }
         }
+        const internalSecretHeader = req.headers['x-internal-secret'];
+        try {
+          const checkoutResponse = await handleCheckoutHttp(
+            {
+              method: req.method ?? 'GET',
+              path,
+              idempotencyKey: singleHeader(req.headers['idempotency-key']),
+              checkoutToken: singleHeader(req.headers['x-checkout-token']),
+              body,
+            },
+            {
+              checkout: input.checkout.service,
+              rateLimiter: input.checkout.rateLimiter,
+              rateLimitKey: clientRateLimitKey(req),
+            }
+          );
+          if (checkoutResponse !== null) {
+            const retryAfter = retryAfterHeader(checkoutResponse.body);
+            send(
+              checkoutResponse.status,
+              checkoutResponse.body,
+              retryAfter === undefined ? {} : { 'Retry-After': retryAfter }
+            );
+            return;
+          }
+          const response = await handle(
+            {
+              method: req.method ?? 'GET',
+              path,
+              authorization: req.headers.authorization,
+              internalSecret:
+                typeof internalSecretHeader === 'string' ? internalSecretHeader : undefined,
+              body,
+            },
+            input.api
+          );
+          send(response.status, response.body);
+        } catch (error) {
+          console.error(`[pos-api] request failed`, { traceId, path, method: req.method, error });
+          send(502, { error: 'The API is unavailable.' });
+        }
+      })();
+    });
+  };
+}
+
+function corsHeaders(
+  origin: string | undefined,
+  allowed: ReadonlySet<string>
+): Record<string, string> {
+  return origin !== undefined && allowed.has(origin)
+    ? {
+        'Access-Control-Allow-Origin': origin,
+        'Access-Control-Expose-Headers': 'X-Trace-Id, Retry-After',
+        Vary: 'Origin',
       }
+    : { Vary: 'Origin' };
+}
 
-      // Path only: a query string is not part of any route here, and leaving it on
-      // would make `/api/health?x=1` a 404.
-      const path = (req.url ?? '/').split('?')[0] ?? '/';
+function singleHeader(value: string | readonly string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
 
-      const internalSecretHeader = req.headers['x-internal-secret'];
+export function clientRateLimitKey(req: IncomingMessage, trustedProxyHops = 1): string {
+  const raw = req.headers['x-forwarded-for'];
+  const forwarded = Array.isArray(raw) ? raw.join(',') : raw;
+  const entries = (forwarded ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  const hops = Math.max(1, Math.floor(trustedProxyHops));
+  const address =
+    entries[Math.max(0, entries.length - hops)] ?? req.socket.remoteAddress ?? 'unknown';
+  return address.slice(0, 500);
+}
 
-      try {
-        const response = await handle(
-          {
-            method: req.method ?? 'GET',
-            path,
-            authorization: req.headers.authorization,
-            internalSecret: typeof internalSecretHeader === 'string' ? internalSecretHeader : undefined,
-            body,
-          },
-          deps
-        );
-        send(response.status, response.body);
-      } catch (error) {
-        // The store threw — Cloudant unreachable, IAM refusing the key. The message
-        // stays in the log and out of the response: it names hosts and databases,
-        // and the caller can do nothing with it but learn the shape of the backend.
-        console.error(`[pos-api] request failed`, { traceId, path, method: req.method, error });
-        send(502, { error: 'The API is unavailable.' });
-      }
-    })();
+function retryAfterHeader(body: unknown): string | undefined {
+  if (body === null || typeof body !== 'object') return undefined;
+  const value = (body as { retryAfterSeconds?: unknown }).retryAfterSeconds;
+  return Number.isSafeInteger(value) && (value as number) > 0 ? String(value) : undefined;
+}
+
+export function startPosServer(): ReturnType<typeof createServer> {
+  const deps = buildRuntimeDeps();
+  let allowedOrigins: ReadonlySet<string>;
+  try {
+    allowedOrigins = readAllowedOrigins(process.env);
+  } catch (error) {
+    console.error('[pos-api] CORS configuration is invalid. Refusing to start.', error);
+    process.exit(1);
+  }
+  const server = createServer(createPosRequestHandler({ ...deps, allowedOrigins }));
+  return server.listen(PORT, () => {
+    console.log(`[pos-api] listening on http://localhost:${PORT}/api/health`);
   });
-}).listen(PORT, () => {
-  console.log(`[pos-api] listening on http://localhost:${PORT}/api/health`);
-});
+}
+
+if (process.env['NODE_ENV'] !== 'test') startPosServer();

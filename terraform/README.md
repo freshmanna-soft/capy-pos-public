@@ -9,19 +9,24 @@ template kept for reference and is not applied by this root module — see
 
 ## What gets created
 
-| Resource                                | Why                                                                      |
-| --------------------------------------- | ------------------------------------------------------------------------ |
-| `ibm_resource_group` (data)             | Where everything lands.                                                  |
-| `ibm_cr_namespace.namespace`            | Holds every service image.                                               |
-| `ibm_code_engine_project.project`       | One project for the estate.                                              |
-| `ibm_code_engine_secret.cr_secret`      | Registry pull secret (`icr-secret`).                                      |
-| `ibm_code_engine_secret.model_key`      | `ANTHROPIC_API_KEY`, one per app that sets `needs_model_key`.             |
-| `ibm_code_engine_secret.session_jwt`    | `SESSION_JWT_SECRET`, one for the project, when any app sets `needs_session_secret`. |
-| `ibm_cloudant.store`                    | One shared Cloudant (Lite plan) instance, for pos-api's own data.         |
-| `ibm_resource_key.cloudant_key`         | Generated Cloudant credentials — never hand-entered.                     |
-| `ibm_code_engine_secret.cloudant_creds` | `CLOUDANT_URL`/`CLOUDANT_APIKEY`, one per app that sets `needs_cloudant`. |
-| `ibm_code_engine_secret.appid_secret`   | `APPID_CLIENT_SECRET`, `APPID_MANAGEMENT_APIKEY`, `APPID_CUSTOMER_CLIENT_SECRET`, one per app that sets `needs_appid_secret`. |
-| `ibm_code_engine_app.apps`              | `for_each` over `var.services`.                                          |
+| Resource                                          | Why                                                                                                                           |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `ibm_resource_group` (data)                       | Where everything lands.                                                                                                       |
+| `ibm_cr_namespace.namespace`                      | Holds every service image.                                                                                                    |
+| `ibm_code_engine_project.project`                 | One project for the estate.                                                                                                   |
+| `ibm_code_engine_secret.cr_secret`                | Registry pull secret (`icr-secret`).                                                                                          |
+| `ibm_code_engine_secret.model_key`                | `ANTHROPIC_API_KEY`, one per app that sets `needs_model_key`.                                                                 |
+| `ibm_code_engine_secret.session_jwt`              | `SESSION_JWT_SECRET`, one for the project, when any app sets `needs_session_secret`.                                          |
+| `ibm_cloudant.store`                              | One shared Cloudant (Lite plan) instance, for pos-api's own data.                                                             |
+| `ibm_resource_key.cloudant_key`                   | Generated Manager credential used only by checkout index migration.                                                           |
+| `ibm_resource_key.cloudant_writer_key`            | Generated Writer credential used by runtime apps and reconciliation.                                                          |
+| `ibm_code_engine_secret.cloudant_creds`           | Writer `CLOUDANT_URL`/`CLOUDANT_APIKEY`, one per app that sets `needs_cloudant`.                                              |
+| `ibm_code_engine_secret.cloudant_migration_creds` | Manager credential mounted only into checkout migration jobs.                                                                 |
+| `ibm_code_engine_secret.appid_secret`             | `APPID_CLIENT_SECRET`, `APPID_MANAGEMENT_APIKEY`, `APPID_CUSTOMER_CLIENT_SECRET`, one per app that sets `needs_appid_secret`. |
+| `ibm_code_engine_secret.checkout`                 | PayPal secret and versioned checkout HMAC keyrings.                                                                           |
+| `ibm_code_engine_job.checkout_migration`          | Cloudant-only, idempotent checkout-index migration.                                                                           |
+| `ibm_code_engine_job.checkout_reconciliation`     | Bounded lease-fenced checkout recovery worker.                                                                                |
+| `ibm_code_engine_app.apps`                        | `for_each` over `var.services`.                                                                                               |
 
 The apps are a `for_each` rather than one resource block per service on purpose:
 the frontend, the two proxies and pos-api differ only in a port, a tag and which
@@ -31,9 +36,9 @@ secrets they need.
 
 ```
 terraform/
-├── main.tf         # project, namespace, secrets, and the app loop
+├── main.tf         # project, namespace, secrets, jobs, and the app loop
 ├── variables.tf    # inputs, including the `services` map
-├── outputs.tf      # app URLs, project id, namespace
+├── outputs.tf      # app URLs, job names, schedule, project id, namespace
 ├── moved.tf        # state moves; see "Renaming the frontend app" below
 ├── providers.tf    # the ibm provider
 ├── versions.tf     # terraform >= 1.5.0, ibm ~> 1.71
@@ -47,7 +52,8 @@ state. Per-environment deploys are separate workspaces/state files with differen
 ## Prerequisites
 
 - Terraform >= 1.5.0
-- IBM Cloud CLI (`ibmcloud`) with the Container Registry plugin
+- IBM Cloud CLI (`ibmcloud`) with the Container Registry and Code Engine plugins
+- `jq` for the checkout-job commands below
 - Docker, to build and push the service images
 - An IBM Cloud API key with Code Engine, Container Registry, and Resource Controller
   (to provision the Cloudant instance and its credentials) access
@@ -56,23 +62,31 @@ state. Per-environment deploys are separate workspaces/state files with differen
 
 Set these as `TF_VAR_*` environment variables (never in a committed `.tfvars`):
 
-| Variable              | Required                          | Default     | Notes                                                            |
-| --------------------- | ---------------------------------- | ----------- | ---------------------------------------------------------------- |
-| `ibmcloud_api_key`    | always                             | —           | Sensitive. Also used as the registry pull password.              |
-| `anthropic_api_key`   | if any service `needs_model_key`   | `""`        | Sensitive. Bound as a secret, never as a literal env var.        |
-| `anthropic_base_url`  | no                              | `""`        | Route model calls through a gateway (e.g. an IBM litellm proxy) instead of the real API. Not sensitive — a literal env var. `anthropic_api_key` must be shaped for whichever endpoint this points at. |
-| `session_jwt_secret`  | if any service `needs_session_secret` | `""`     | Sensitive. Must match `getJwtSecret()` — see the auth note below.|
-| `frontend_origins`    | if any service `pins_cors_origins` | `[]`        | List of `scheme://host[:port]`, no trailing slash.                |
-| `appid_region`        | if any service `needs_appid_secret` | `us-south` | Not sensitive.                                                   |
-| `appid_tenant_id`     | if any service `needs_appid_secret` | `""`      | Not sensitive — matches `environment.*.ts`'s `appId.tenantId`.    |
-| `appid_client_id`     | if any service `needs_appid_secret` | `""`      | Not sensitive — matches `environment.*.ts`'s `appId.staffClientId`.|
-| `appid_client_secret` | if any service `needs_appid_secret` | `""`      | Sensitive. The App ID staff application's client secret.          |
-| `region`              | no                              | `us-south`  |                                                                  |
-| `resource_group_name` | no                              | `Default`   |                                                                  |
-| `project_name`        | no                              | `capy-pos`  | Code Engine project name.                                        |
-| `cr_namespace`        | no                              | `capy-pos-3223793` | Registry namespace holding every image — globally unique across every IBM Cloud account in the region, so the default carries this account's number. |
-| `image_tag`           | no                              | `latest`    | Applied to every service that does not override it.              |
-| `services`            | no                              | 5 apps      | See below.                                                       |
+| Variable                                          | Required                              | Default             | Notes                                                                                                                                                                                                 |
+| ------------------------------------------------- | ------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ibmcloud_api_key`                                | always                                | —                   | Sensitive. Also used as the registry pull password.                                                                                                                                                   |
+| `anthropic_api_key`                               | if any service `needs_model_key`      | `""`                | Sensitive. Bound as a secret, never as a literal env var.                                                                                                                                             |
+| `anthropic_base_url`                              | no                                    | `""`                | Route model calls through a gateway (e.g. an IBM litellm proxy) instead of the real API. Not sensitive — a literal env var. `anthropic_api_key` must be shaped for whichever endpoint this points at. |
+| `session_jwt_secret`                              | if any service `needs_session_secret` | `""`                | Sensitive. Must match `getJwtSecret()` — see the auth note below.                                                                                                                                     |
+| `frontend_origins`                                | if any service `pins_cors_origins`    | production defaults | List of `scheme://host[:port]`, no trailing slash.                                                                                                                                                    |
+| `paypal_client_id`                                | if any service `needs_checkout`       | `""`                | PayPal REST client id; not secret.                                                                                                                                                                    |
+| `paypal_client_secret`                            | if any service `needs_checkout`       | `""`                | Sensitive; bound through Code Engine secrets only.                                                                                                                                                    |
+| `paypal_expected_merchant_id`                     | if any service `needs_checkout`       | `""`                | Merchant id checked against provider facts.                                                                                                                                                           |
+| `checkout_store_id`                               | if any service `needs_checkout`       | `""`                | Trusted store id bound into every checkout.                                                                                                                                                           |
+| `checkout_*_hmac_keys`                            | if any service `needs_checkout`       | `{}`                | Sensitive versioned keyrings; retain old versions through retention.                                                                                                                                  |
+| `checkout_currency` / `checkout_tax_basis_points` | if checkout enabled                   | `""` / `-1`         | Explicit production pricing policy.                                                                                                                                                                   |
+| `checkout_reconciliation_schedule`                | no                                    | `*/5 * * * *`       | Applied out of band; Terraform provider has no cron resource.                                                                                                                                         |
+| `checkout_reconciliation_time_zone`               | no                                    | `UTC`               | IANA time zone for the out-of-band cron subscription.                                                                                                                                                 |
+| `appid_region`                                    | if any service `needs_appid_secret`   | `us-south`          | Not sensitive.                                                                                                                                                                                        |
+| `appid_tenant_id`                                 | if any service `needs_appid_secret`   | `""`                | Not sensitive — matches `environment.*.ts`'s `appId.tenantId`.                                                                                                                                        |
+| `appid_client_id`                                 | if any service `needs_appid_secret`   | `""`                | Not sensitive — matches `environment.*.ts`'s `appId.staffClientId`.                                                                                                                                   |
+| `appid_client_secret`                             | if any service `needs_appid_secret`   | `""`                | Sensitive. The App ID staff application's client secret.                                                                                                                                              |
+| `region`                                          | no                                    | `us-south`          |                                                                                                                                                                                                       |
+| `resource_group_name`                             | no                                    | `Default`           |                                                                                                                                                                                                       |
+| `project_name`                                    | no                                    | `capy-pos`          | Code Engine project name.                                                                                                                                                                             |
+| `cr_namespace`                                    | no                                    | `capy-pos-3223793`  | Registry namespace holding every image — globally unique across every IBM Cloud account in the region, so the default carries this account's number.                                                  |
+| `image_tag`                                       | always                                | —                   | Explicit immutable tag applied to every service that does not override it; `latest` is rejected.                                                                                                      |
+| `services`                                        | no                                    | 5 apps              | See below.                                                                                                                                                                                            |
 
 There is **no `app_name` variable**. The frontend used to be a single hardcoded app
 named by `var.app_name`; it is now the `capy-pos-app` key in `var.services`. Rename
@@ -87,7 +101,7 @@ services = {
   capy-pos-app            = { image_port = 8080 }
   capy-vision-proxy       = { image_port = 8787, needs_model_key = true, needs_session_secret = true, needs_appid_verification = true, pins_cors_origins = true }
   capy-clerk-agent-relay  = { image_port = 8789, needs_model_key = true, needs_session_secret = true, needs_appid_verification = true, pins_cors_origins = true }
-  capy-pos-api            = { image_port = 8790, needs_session_secret = true, needs_appid_verification = true, needs_cloudant = true }
+  capy-pos-api            = { image_port = 8790, needs_session_secret = true, needs_appid_verification = true, needs_cloudant = true, needs_checkout = true, pins_cors_origins = true }
   capy-appid-token-relay  = { image_port = 8792, needs_appid_secret = true, pins_cors_origins = true }
 }
 ```
@@ -98,12 +112,13 @@ services = {
 - `needs_session_secret` — binds `SESSION_JWT_SECRET`, i.e. the service verifies the
   browser's session token itself.
 - `pins_cors_origins` — binds `ALLOWED_ORIGINS` and requires `frontend_origins` (see
-  "Two-pass apply"). Separate from `needs_session_secret` because pos-api verifies the
-  same token the two proxies do but answers every origin itself and needs no origins
-  list — it sets the former, not the latter, and is a genuine one-pass, deploy-alone
-  first target: `terraform apply -target='ibm_code_engine_app.apps["capy-pos-api"]'`.
-- `needs_cloudant` — binds `CLOUDANT_URL`/`CLOUDANT_APIKEY` from the shared Cloudant
-  instance's per-app secret.
+  "Two-pass apply"). Separate from `needs_session_secret`: pos-api has both guarded
+  staff routes and capability-guarded public checkout routes, and all of its browser
+  routes still require exact-origin CORS.
+- `needs_cloudant` — binds Writer-scoped `CLOUDANT_URL`/`CLOUDANT_APIKEY` from the
+  shared Cloudant instance's per-app secret.
+- `needs_checkout` — binds server-only PayPal/HMAC configuration and, together with
+  `needs_cloudant`, declares the checkout migration and reconciliation jobs.
 - `needs_appid_secret` — binds `APPID_REGION`/`APPID_TENANT_ID`/`APPID_CLIENT_ID` as
   literal env and `APPID_CLIENT_SECRET` from a per-app secret. Only
   `capy-appid-token-relay` sets this. Unlike pos-api, this service also sets
@@ -111,24 +126,29 @@ services = {
   `frontend_origins` set the same as the two model-key proxies do.
 - `needs_appid_verification` — binds the same three literals as
   `needs_appid_secret`, but never the client secret: for a service that
-  *verifies* App ID's RS256 access tokens (`pos-api` and the two proxies)
+  _verifies_ App ID's RS256 access tokens (`pos-api` and the two proxies)
   rather than minting them. All three env vars are optional in practice —
   unset, the service verifies HS256 only, its original behaviour.
-- `image_tag`, `scale_*`, `env` — optional per-service overrides. `env` merges last,
-  so it can override `NODE_ENV`.
+- `image_tag`, `scale_*`, `env` — optional per-service overrides. Image-tag overrides
+  must also be explicit immutable tags; `latest` is rejected. `env` merges last, so it
+  can override `NODE_ENV`.
 
 ## Outputs
 
-| Output                  | Use                                                                      |
-| ----------------------- | ------------------------------------------------------------------------ |
-| `app_urls`              | Every app's endpoint, keyed by app name.                                  |
-| `app_url`               | The frontend's URL. This is what `frontend_origins` needs.               |
-| `vision_proxy_url`      | Base for `visionApiUrl`; append `/vision/identify`.                       |
-| `clerk_agent_relay_url` | Base for `clerkAgentApiUrl`; append `/clerk/agent`.                       |
-| `pos_api_url`           | Base for `apiUrl`.                                                       |
-| `appid_token_relay_url` | Base for `appId.relayUrl`; append `/appid/token`.                        |
-| `project_id`            | Code Engine project id, for `ibmcloud ce project select`.                 |
-| `cr_namespace`          | Registry namespace, for `docker push`.                                    |
+| Output                              | Use                                                        |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `app_urls`                          | Every app's endpoint, keyed by app name.                   |
+| `app_url`                           | The frontend's URL. This is what `frontend_origins` needs. |
+| `vision_proxy_url`                  | Base for `visionApiUrl`; append `/vision/identify`.        |
+| `clerk_agent_relay_url`             | Base for `clerkAgentApiUrl`; append `/clerk/agent`.        |
+| `pos_api_url`                       | Base for `apiUrl`.                                         |
+| `appid_token_relay_url`             | Base for `appId.relayUrl`; append `/appid/token`.          |
+| `checkout_migration_jobs`           | Checkout migration job names keyed by service.             |
+| `checkout_reconciliation_jobs`      | Checkout reconciliation job names keyed by service.        |
+| `checkout_reconciliation_schedule`  | Out-of-band reconciliation cron expression.                |
+| `checkout_reconciliation_time_zone` | Out-of-band reconciliation cron time zone.                 |
+| `project_id`                        | Code Engine project id, for `ibmcloud ce project select`.  |
+| `cr_namespace`                      | Registry namespace, for `docker push`.                     |
 
 ## Quick start
 
@@ -150,25 +170,27 @@ pushes in one step. On an Intel Mac or Linux, plain `docker build` already produ
 ```bash
 ibmcloud cr login
 export CR_NAMESPACE=capy-pos-3223793   # must match var.cr_namespace, and be globally unique
+export TF_VAR_image_tag="<reviewed-pos-api-image-tag>"
 
 docker build -t us.icr.io/$CR_NAMESPACE/capy-pos-app:v1 .
 docker build -t us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1 infra/vision-proxy
 docker build -t us.icr.io/$CR_NAMESPACE/capy-clerk-agent-relay:v1 infra/clerk-agent-relay
 # pos-api's context is infra/, not infra/pos-api: it imports the DocumentStore
 # port from infra/shared/, which Docker can only see if it's inside the context.
-docker build -f infra/pos-api/Dockerfile -t us.icr.io/$CR_NAMESPACE/capy-pos-api:v1 infra
+# Its app and checkout jobs share TF_VAR_image_tag so they cannot drift apart.
+docker build -f infra/pos-api/Dockerfile -t us.icr.io/$CR_NAMESPACE/capy-pos-api:$TF_VAR_image_tag infra
 docker build -t us.icr.io/$CR_NAMESPACE/capy-appid-token-relay:v1 infra/appid-token-relay
 docker push us.icr.io/$CR_NAMESPACE/capy-pos-app:v1
 docker push us.icr.io/$CR_NAMESPACE/capy-vision-proxy:v1
 docker push us.icr.io/$CR_NAMESPACE/capy-clerk-agent-relay:v1
-docker push us.icr.io/$CR_NAMESPACE/capy-pos-api:v1
+docker push us.icr.io/$CR_NAMESPACE/capy-pos-api:$TF_VAR_image_tag
 docker push us.icr.io/$CR_NAMESPACE/capy-appid-token-relay:v1
 ```
 
-Deploying one service alone first (recommended for a first-ever apply against a new
-account)? Build and push just that image, then target it:
-`terraform apply -target='ibm_code_engine_app.apps["capy-pos-api"]'`. pos-api needs no
-`frontend_origins` and no other service deployed first — see `pins_cors_origins` above.
+On a first-ever apply, deploy the frontend alone to discover its URL before deploying
+any CORS-pinned browser API, including pos-api. See "Two-pass apply" below. When later
+targeting pos-api deliberately, remember that its checkout jobs and secrets are
+separate resources; a targeted app-only apply does not create them.
 
 ### 2. Set the inputs
 
@@ -176,7 +198,7 @@ account)? Build and push just that image, then target it:
 export TF_VAR_ibmcloud_api_key="…"
 export TF_VAR_anthropic_api_key="sk-ant-…"
 export TF_VAR_session_jwt_secret="…"       # must match the browser's, see below
-export TF_VAR_image_tag="v1"
+# Keep the reviewed TF_VAR_image_tag exported from the build/push step above.
 
 # Only needed once capy-appid-token-relay is in var.services:
 export TF_VAR_appid_tenant_id="…"          # matches environment.*.ts's appId.tenantId
@@ -195,6 +217,10 @@ export TF_VAR_appid_customer_client_secret="…"   # capy-pos-customer, Applicat
 # time. That is safe only because item 8b (duplicate-email/password validation, PR
 # #305) and item 8c (per-IP rate limiting, PR #304) both landed first.
 ```
+
+Checkout values are intentionally not illustrated with fake credentials or policy.
+Set the required `TF_VAR_paypal_*` and `TF_VAR_checkout_*` values from the reviewed
+production policy and secret source; never commit them.
 
 ### 3. Apply
 
@@ -216,10 +242,10 @@ Engine URL — an **output of this same apply**, so on a first deploy it does no
 yet. (`needs_session_secret` and `needs_model_key` need `session_jwt_secret` and
 `anthropic_api_key`, which you know up front — no cycle there.)
 
-A guarded container refuses to start without `ALLOWED_ORIGINS` (`requireConfig()` in
-each proxy's `server.ts` calls `process.exit(1)`), because the alternative it replaces
-— `Access-Control-Allow-Origin: *` in front of a metered model — is the thing these
-services must not do. So the module has a precondition on
+A browser-facing backend refuses to start without `ALLOWED_ORIGINS` (`requireConfig()`
+in each proxy and `readAllowedOrigins()` in pos-api enforce it), because the alternative
+— `Access-Control-Allow-Origin: *` in front of a metered model or checkout API — is the
+thing these services must not do. So the module has a precondition on
 `ibm_code_engine_app.apps` that fails the **plan** instead, rather than deploying
 revisions that exit on boot and surface as a scaling failure.
 
@@ -245,8 +271,8 @@ Already know the origin — a redeploy, or a custom domain? Set
 
 `frontend_origins` is validated as `scheme://host[:port]` with no path and no trailing
 slash, because it is compared against the request's `Origin` header verbatim. Multiple
-origins (a Code Engine URL *and* a custom domain) are a longer list; `main.tf` joins
-them with commas for `readAllowedOrigins` in `session-guard.ts` to parse.
+origins (a Code Engine URL _and_ a custom domain) are a longer list; `main.tf` joins
+them with commas for `readAllowedOrigins` in each guarded service to parse.
 
 ## Auth note: what `session_jwt_secret` actually buys
 
@@ -259,7 +285,7 @@ on every call, which looks exactly like a broken login.
 browser bundle today, so anyone who can read the bundle can mint a token that
 verifies. What the check buys is real but limited: an arbitrary internet caller
 cannot spend the shop's model key, and the relay's cart tools are not an open
-endpoint. What it does *not* buy is proof of who the operator is. Treat the
+endpoint. What it does _not_ buy is proof of who the operator is. Treat the
 `operatorId` in a proxy log as a hint, not an audit record.
 
 Making it identity means moving issuance server-side (a real IdP, or asymmetric keys
@@ -276,11 +302,60 @@ been applied through it, then it is safe to delete.
 `capy-pos-app`. Renaming that key in `var.services` without adding a matching `moved`
 block is a destroy-and-recreate, and the new URL invalidates `frontend_origins`.
 
+## Checkout jobs and scheduler
+
+Terraform creates two Code Engine jobs for every service that sets both
+`needs_checkout` and `needs_cloudant`:
+
+- `capy-pos-api-checkout-migration` runs only the idempotent Cloudant Mango-index
+  migration. It receives the Manager Cloudant credential needed to create an index,
+  but no PayPal or checkout-HMAC secrets.
+- `capy-pos-api-checkout-reconciliation` runs the bounded, lease-fenced checkout
+  state machine with the Writer Cloudant credential. Its application deadline defaults
+  to 240 seconds, below the Code Engine job timeout of 300 seconds.
+
+The IBM Terraform provider version used here exposes `ibm_code_engine_job`, but no
+Code Engine cron-subscription resource. Scheduling is therefore an explicit
+post-apply operation. The following commands are intentionally **not** run by
+Terraform:
+
+```bash
+ibmcloud ce project select --id "$(terraform output -raw project_id)"
+MIGRATION_JOB="$(terraform output -json checkout_migration_jobs | jq -r '.["capy-pos-api"]')"
+RECONCILIATION_JOB="$(terraform output -json checkout_reconciliation_jobs | jq -r '.["capy-pos-api"]')"
+RECONCILIATION_SCHEDULE="$(terraform output -raw checkout_reconciliation_schedule)"
+RECONCILIATION_TIME_ZONE="$(terraform output -raw checkout_reconciliation_time_zone)"
+
+# Run the idempotent migration once after creating or changing its index.
+ibmcloud ce jobrun submit --job "$MIGRATION_JOB" --wait
+
+# Create the reconciliation schedule once from the reviewed Terraform inputs.
+ibmcloud ce subscription cron create \
+  --name "$RECONCILIATION_JOB" \
+  --destination "$RECONCILIATION_JOB" \
+  --destination-type job \
+  --schedule "$RECONCILIATION_SCHEDULE" \
+  --time-zone "$RECONCILIATION_TIME_ZONE"
+```
+
+If the subscription already exists, make the operation idempotent with `cron update`
+using the same destination, destination type, schedule, and time zone. Inspect failed
+runs without exposing their secret environment values:
+
+```bash
+ibmcloud ce jobrun logs --jobrun JOB_RUN_NAME
+```
+
+The worker emits only checkout IDs, error class names, and aggregate counters. A run
+with isolated reconciliation failures exits non-zero so Code Engine retries it and
+its failure remains visible to operational monitoring. Choose and document an alert
+destination and retention policy before treating checkout as production-ready.
+
 ## Troubleshooting
 
 **Plan fails: `… sets pins_cors_origins, so it needs TF_VAR_frontend_origins`**
-Expected on a first deploy of a CORS-pinned service (vision-proxy, clerk-agent-relay
-— not pos-api). See "Two-pass apply".
+Expected on a first deploy of a CORS-pinned service (vision-proxy, clerk-agent-relay,
+pos-api, or appid-token-relay). See "Two-pass apply".
 
 **Plan fails: `… needs a model key` / `Session verification needs TF_VAR_session_jwt_secret`**
 The precondition on the secret. Export the variable; never commit it.
@@ -315,8 +390,8 @@ ibmcloud login --apikey "$TF_VAR_ibmcloud_api_key"
 Single root module, single state. `terraform state list`,
 `terraform state show ibm_code_engine_app.apps['capy-vision-proxy']`. Use a remote
 backend for anything shared; a local `terraform.tfstate` holds `session_jwt_secret`,
-`anthropic_api_key`, and now the Cloudant credentials `ibm_resource_key.cloudant_key`
-generates, in plaintext, and is gitignored for that reason.
+`anthropic_api_key`, and both generated Cloudant credentials in plaintext, and is
+gitignored for that reason.
 
 ## Links
 

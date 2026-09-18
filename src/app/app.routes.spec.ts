@@ -16,14 +16,18 @@ import { TestBed } from '@angular/core/testing';
 import { authGuard } from '@core/presentation/guards/auth.guard';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
+import { PosFacade } from '@core/application/facades/pos.facade';
+import { CartService } from '@core/application/services/cart.service';
 import { AppIdCustomerAuthAdapter } from '@core/infrastructure/auth/appid-customer-auth.adapter';
 import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palette';
 import {
   CHECK_EMAIL_ROUTE,
   LANE_ROUTE,
+  SIGN_IN_ROUTE,
   SIGN_UP_ROUTE,
 } from '@features/self-checkout/self-checkout-routes';
 import { PendingRegistrationStore } from '@features/self-checkout/pending-registration.store';
+import { customerSessionHydrationGuard } from '@features/self-checkout/customer-session-hydration.guard';
 import { Permission } from '@core/domain/auth';
 import { appConfig } from './app.config';
 import { routes } from './app.routes';
@@ -45,6 +49,7 @@ describe('routes', () => {
   const children = selfCheckout?.children ?? [];
   const lane = children.find((c) => c.path === '');
   const signUp = children.find((c) => c.path === 'sign-up');
+  const signIn = children.find((c) => c.path === 'sign-in');
   const checkEmail = children.find((c) => c.path === 'check-email');
 
   it('registers /self-checkout as a top-level route whose lane is its empty child', () => {
@@ -60,17 +65,18 @@ describe('routes', () => {
     expect(lane?.title).toBe(SELF_CHECKOUT_TITLE);
   });
 
-  it('exposes the sign-up form and the check-email interstitial under that parent', () => {
+  it('exposes sign-up, sign-in and check-email under that parent', () => {
     // The paths the shared constants promise (`self-checkout-routes.ts`), which
     // is what the components navigate with — assert the table actually answers
     // them rather than trusting two copies of the same string.
     expect(`/self-checkout/${signUp?.path}`).toBe(SIGN_UP_ROUTE);
+    expect(`/self-checkout/${signIn?.path}`).toBe(SIGN_IN_ROUTE);
     expect(`/self-checkout/${checkEmail?.path}`).toBe(CHECK_EMAIL_ROUTE);
     expect(`/${selfCheckout?.path}`).toBe(LANE_ROUTE);
   });
 
   it('leaves /self-checkout and every child unguarded by the staff authGuard', () => {
-    expect(selfCheckout?.canActivate).toBeUndefined();
+    expect(selfCheckout?.canActivate ?? []).not.toContain(authGuard);
     for (const child of children) {
       expect(child.canActivate ?? [], `/${child.path} should not be staff-guarded`).not.toContain(
         authGuard
@@ -94,8 +100,9 @@ describe('routes', () => {
    * - **sign-up** is the only screen a signed-in customer has no use for, so it is
    *   the only one that redirects.
    */
-  it('guards only the sign-up child, and deliberately neither the lane nor check-email', () => {
+  it('guards only the guest-only sign-up/sign-in children, and neither lane nor check-email', () => {
     expect(signUp?.canActivate).toHaveLength(1);
+    expect(signIn?.canActivate).toHaveLength(1);
     expect(
       checkEmail?.canActivate,
       'check-email must stay reachable when signed in'
@@ -103,7 +110,12 @@ describe('routes', () => {
     expect(lane?.canActivate, 'the lane must never require an account').toBeUndefined();
     expect(children.filter((c) => c.canActivate !== undefined).map((c) => c.path)).toEqual([
       'sign-up',
+      'sign-in',
     ]);
+  });
+
+  it('hydrates the customer session on the parent before child guards run', () => {
+    expect(selfCheckout?.canActivate).toEqual([customerSessionHydrationGuard]);
   });
 
   it('lazily loads the SelfCheckoutComponent', async () => {
@@ -199,6 +211,16 @@ describe('routes', () => {
       );
     });
 
+    it('provides one customer cart and facade on the parent route only', () => {
+      expect(routesProviding(CartService)).toEqual(['self-checkout']);
+      expect(routesProviding(PosFacade)).toEqual(['self-checkout']);
+      expect(selfCheckoutRoute.get(CartService)).not.toBe(appRoot.get(CartService));
+
+      for (const child of children) {
+        expect(child.providers, `/${child.path} must inherit the shared basket`).toBeUndefined();
+      }
+    });
+
     /**
      * `redirectIfAuthenticatedGuard`, run for real out of the route table.
      *
@@ -227,6 +249,14 @@ describe('routes', () => {
         const guard = signUp?.canActivate?.[0] as CanActivateFn;
         expect(guard, 'the sign-up child must carry a canActivate guard').toBeInstanceOf(Function);
         return runInInjectionContext(injector, () =>
+          guard({} as ActivatedRouteSnapshot, {} as RouterStateSnapshot)
+        );
+      }
+
+      async function runParentHydration(injector: EnvironmentInjector): Promise<void> {
+        const guard = selfCheckout?.canActivate?.[0] as CanActivateFn;
+        expect(guard, 'the parent must hydrate before child guards').toBeInstanceOf(Function);
+        await runInInjectionContext(injector, () =>
           guard({} as ActivatedRouteSnapshot, {} as RouterStateSnapshot)
         );
       }
@@ -264,6 +294,32 @@ describe('routes', () => {
             accessToken: 'token',
             expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
           });
+
+          expect(runGuard(injector)).not.toBe(true);
+          expect(createUrlTree).toHaveBeenCalledWith([LANE_ROUTE]);
+        } finally {
+          injector.destroy();
+          vi.useRealTimers();
+        }
+      });
+
+      it('hydrates a persisted session before the sign-up guard evaluates', async () => {
+        vi.useFakeTimers();
+        const injector = guardInjector();
+        try {
+          const session = {
+            customerId: 'customer-persisted',
+            email: 'returning@capy.test',
+            tenantId: 'store-a',
+            roles: ['customer'],
+            permissions: [Permission.PROCESS_SALE],
+            accessToken: 'stored-token',
+            expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+          };
+          const gateway = injector.get(CUSTOMER_AUTH_GATEWAY);
+          vi.spyOn(gateway, 'getActiveSession').mockResolvedValue(session);
+
+          await runParentHydration(injector);
 
           expect(runGuard(injector)).not.toBe(true);
           expect(createUrlTree).toHaveBeenCalledWith([LANE_ROUTE]);

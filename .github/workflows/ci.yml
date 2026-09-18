@@ -77,12 +77,12 @@ jobs:
       # so each needs its own step or it is never run at all — which is how a `test`
       # script that could not resolve its own files reached review green.
       #
-      # The two proxies verify the session token and pin CORS themselves now (#197),
-      # and their suites are the only thing standing behind that claim, so they are
-      # gated exactly like pos-api's. `npm ci` per proxy because both carry the model
-      # SDK as a real dependency; the suites themselves need nothing but Node.
+      # The POS API and two proxies carry their own runtime dependencies, so install
+      # each service lockfile before running its node:test suite.
       - name: POS API service tests
-        run: npm test --prefix infra/pos-api
+        run: |
+          npm ci --ignore-scripts --prefix infra/pos-api
+          npm test --prefix infra/pos-api
       - name: Vision proxy service tests
         run: |
           npm ci --ignore-scripts --prefix infra/vision-proxy

@@ -31,6 +31,26 @@ output "appid_token_relay_url" {
   value       = try(ibm_code_engine_app.apps["capy-appid-token-relay"].endpoint, "")
 }
 
+output "checkout_migration_jobs" {
+  description = "Checkout migration Code Engine job names, keyed by service"
+  value       = { for name, job in ibm_code_engine_job.checkout_migration : name => job.name }
+}
+
+output "checkout_reconciliation_jobs" {
+  description = "Checkout reconciliation Code Engine job names, keyed by service"
+  value       = { for name, job in ibm_code_engine_job.checkout_reconciliation : name => job.name }
+}
+
+output "checkout_reconciliation_schedule" {
+  description = "Cron schedule to apply out of band to each checkout reconciliation job"
+  value       = var.checkout_reconciliation_schedule
+}
+
+output "checkout_reconciliation_time_zone" {
+  description = "Time zone to apply out of band to each checkout reconciliation cron subscription"
+  value       = var.checkout_reconciliation_time_zone
+}
+
 output "project_id" {
   description = "Code Engine project ID"
   value       = ibm_code_engine_project.project.project_id

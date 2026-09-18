@@ -119,6 +119,9 @@ class FakePayPal {
   createError = null;
   authorizeError = null;
   captureError = null;
+  captureLookupError = null;
+  authorizationLookupError = null;
+  orderLookupError = null;
   voidError = null;
   orderLookup = null;
   captureLookup = capture();
@@ -134,7 +137,8 @@ class FakePayPal {
 
   async getOrder(orderId) {
     this.calls.push(['get-order', orderId]);
-    return this.orderLookup ?? order('COMPLETED', authorization(), this.createdInput);
+    if (this.orderLookupError) throw this.orderLookupError;
+    return this.orderLookup ?? order('APPROVED', undefined, this.createdInput);
   }
 
   async authorizeOrder(orderId, requestId) {
@@ -145,6 +149,7 @@ class FakePayPal {
 
   async getAuthorization(authorizationId) {
     this.calls.push(['get-authorization', authorizationId]);
+    if (this.authorizationLookupError) throw this.authorizationLookupError;
     return paymentForInput(this.authorizationLookup, this.createdInput);
   }
 
@@ -156,6 +161,7 @@ class FakePayPal {
 
   async getCapture(captureId) {
     this.calls.push(['get-capture', captureId]);
+    if (this.captureLookupError) throw this.captureLookupError;
     return paymentForInput({ ...this.captureLookup, id: captureId }, this.createdInput);
   }
 
@@ -236,12 +242,74 @@ describe('checkout orchestration create flow', () => {
     assert.equal(ctx.paypal.calls.length, 0);
   });
 
+  it('returns bad-request for malformed input and unknown product selection', async () => {
+    const ctx = context();
+
+    await assert.rejects(
+      ctx.service.create(
+        { items: [{ productId: 'p-1', quantity: 1 }], total: 109 },
+        'idempotency-key-that-is-long-enough'
+      ),
+      (error) => error instanceof CheckoutServiceError && error.code === 'bad-request'
+    );
+    await assert.rejects(
+      ctx.service.create(
+        { items: [{ productId: 'missing', quantity: 1 }] },
+        'another-idempotency-key-that-is-long-enough'
+      ),
+      (error) => error instanceof CheckoutServiceError && error.code === 'bad-request'
+    );
+    const inactive = context({ products: new MemoryStore([product({ isActive: false })]) });
+    await assert.rejects(
+      createCheckout(inactive),
+      (error) => error instanceof CheckoutServiceError && error.code === 'bad-request'
+    );
+    assert.equal(ctx.paypal.calls.length, 0);
+    assert.equal(inactive.paypal.calls.length, 0);
+  });
+
+  it('returns bad-request when the server-computed total exceeds the checkout limit', async () => {
+    const ctx = context({ products: new MemoryStore([product({ price: 1_000_000 })]) });
+
+    await assert.rejects(
+      createCheckout(ctx),
+      (error) => error instanceof CheckoutServiceError && error.code === 'bad-request'
+    );
+    assert.equal(ctx.paypal.calls.length, 0);
+  });
+
+  it('does not classify corrupt server-owned product pricing as browser input', async () => {
+    const ctx = context({ products: new MemoryStore([product({ price: 1.001 })]) });
+
+    await assert.rejects(createCheckout(ctx), (error) => error.name === 'CheckoutValidationError');
+    assert.equal(ctx.paypal.calls.length, 0);
+  });
+
   it('replays an identical create with the same checkout capability and no second order', async () => {
     const ctx = context();
     const created = await createCheckout(ctx);
     const replay = await createCheckout(ctx);
     assert.deepEqual(replay, created);
     assert.equal(ctx.paypal.calls.filter(([name]) => name === 'create').length, 1);
+  });
+
+  it('collapses concurrent identical creates onto one checkout and one provider order', async () => {
+    const ctx = context();
+    const [first, second] = await Promise.allSettled([createCheckout(ctx), createCheckout(ctx)]);
+    const fulfilled = [first, second].filter((result) => result.status === 'fulfilled');
+    const retryable = [first, second].filter(
+      (result) =>
+        result.status === 'rejected' &&
+        result.reason instanceof CheckoutServiceError &&
+        result.reason.retryable
+    );
+
+    assert.ok(fulfilled.length >= 1);
+    assert.equal(fulfilled.length + retryable.length, 2);
+    assert.equal((await ctx.checkouts.read('checkout-1')).document.paypalOrderId, 'order-1');
+    const createCalls = ctx.paypal.calls.filter(([name]) => name === 'create');
+    assert.ok(createCalls.length >= 1);
+    assert.ok(createCalls.every(([, input]) => input.requestId === createCalls[0][1].requestId));
   });
 
   it('replays a completed checkout even after the catalogue product is removed', async () => {
@@ -314,6 +382,62 @@ describe('checkout orchestration create flow', () => {
     assert.equal(paypal.calls[0][1].requestId, paypal.calls[1][1].requestId);
   });
 
+  it('retries provider success when the order binding write failed', async () => {
+    const checkoutDocuments = new MemoryStore();
+    const baseCheckouts = new DocumentCheckoutStore(
+      checkoutDocuments,
+      (value) => Buffer.from(value).toString('base64url'),
+      new MemoryDueCheckoutReader(checkoutDocuments)
+    );
+    let failBinding = true;
+    const checkouts = new Proxy(baseCheckouts, {
+      get(target, property, receiver) {
+        if (property !== 'bindProviderReference') return Reflect.get(target, property, receiver);
+        return async (input) => {
+          if (failBinding) {
+            failBinding = false;
+            throw new Error('injected provider-binding write failure');
+          }
+          return target.bindProviderReference(input);
+        };
+      },
+    });
+    const ctx = context({ checkoutDocuments, checkouts });
+
+    await assert.rejects(
+      createCheckout(ctx),
+      (error) => error instanceof CheckoutServiceError && error.code === 'provider-unavailable'
+    );
+    const pending = await ctx.checkouts.read('checkout-1');
+    assert.equal(pending.document.state, 'reconcile-create-order-unknown');
+    assert.equal(pending.document.lastFailure.code, 'provider-binding-persistence');
+    assert.equal(pending.document.lastFailure.retryable, true);
+
+    const recovered = await createCheckout(ctx);
+    assert.equal(recovered.state, 'awaiting-approval');
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'create').length, 2);
+    assert.equal(ctx.paypal.calls[0][1].requestId, ctx.paypal.calls[1][1].requestId);
+  });
+
+  it('classifies a provider reference collision separately from PayPal fact mismatch', async () => {
+    const ctx = context();
+    await ctx.checkouts.bindProviderReference({
+      referenceKind: 'order',
+      referenceId: 'order-1',
+      checkoutId: 'checkout-other',
+      nowIso: T0,
+    });
+
+    await assert.rejects(
+      createCheckout(ctx),
+      (error) => error instanceof CheckoutServiceError && error.code === 'manual-review'
+    );
+    const stored = await ctx.checkouts.read('checkout-1');
+    assert.equal(stored.document.state, 'manual-review-create-unknown');
+    assert.equal(stored.document.lastFailure.code, 'provider-binding-conflict');
+    assert.equal(stored.document.lastFailure.retryable, false);
+  });
+
   it('recovers a durable idempotency claim whose checkout create crashed', async () => {
     const checkoutDocuments = new MemoryStore();
     const checkouts = new DocumentCheckoutStore(
@@ -375,6 +499,47 @@ describe('checkout orchestration completion', () => {
     assert.equal((await ctx.transactions.list()).length, 1);
   });
 
+  it('does not authorize before PayPal reports customer approval', async () => {
+    const paypal = new FakePayPal();
+    paypal.orderLookup = order('CREATED', undefined);
+    const ctx = context({ paypal });
+    const created = await createCheckout(ctx);
+
+    const pending = await ctx.service.complete(created.checkoutId, created.checkoutToken);
+
+    assert.equal(pending.state, 'awaiting-approval');
+    assert.equal(paypal.calls.filter(([name]) => name === 'authorize').length, 0);
+    assert.equal(
+      (await ctx.checkouts.read(created.checkoutId)).document.state,
+      'awaiting-approval'
+    );
+
+    paypal.orderLookup = order('APPROVED', undefined);
+    const completed = await ctx.service.complete(created.checkoutId, created.checkoutToken);
+    assert.equal(completed.state, 'completed');
+    assert.equal(paypal.calls.filter(([name]) => name === 'authorize').length, 1);
+  });
+
+  it('retries approval retrieval failures without creating an authorization boundary', async () => {
+    const paypal = new FakePayPal();
+    paypal.orderLookupError = new PayPalGatewayError('provider-unavailable', {
+      ambiguous: false,
+      retryable: true,
+    });
+    const ctx = context({ paypal });
+    const created = await createCheckout(ctx);
+
+    await assert.rejects(
+      ctx.service.complete(created.checkoutId, created.checkoutToken),
+      (error) => error instanceof CheckoutServiceError && error.code === 'provider-unavailable'
+    );
+
+    const pending = await ctx.checkouts.read(created.checkoutId);
+    assert.equal(pending.document.state, 'awaiting-approval');
+    assert.equal(pending.document.lastFailure.retryable, true);
+    assert.equal(paypal.calls.filter(([name]) => name === 'authorize').length, 0);
+  });
+
   it('requires the separate checkout capability without revealing checkout existence', async () => {
     const ctx = context();
     const created = await createCheckout(ctx);
@@ -386,6 +551,12 @@ describe('checkout orchestration completion', () => {
       ctx.service.status('missing-checkout', created.checkoutToken),
       (error) => error.code === 'not-found'
     );
+    await assert.rejects(ctx.service.status('', created.checkoutToken), (error) => {
+      return error.code === 'not-found';
+    });
+    await assert.rejects(ctx.service.status(created.checkoutId, ''), (error) => {
+      return error.code === 'not-found';
+    });
   });
 
   it('retains reservations and reconciles an ambiguous captured response through PayPal retrieval', async () => {
@@ -408,6 +579,168 @@ describe('checkout orchestration completion', () => {
       relatedCaptureId: 'capture-1',
     });
     ctx.paypal.captureError = null;
+    const completed = await ctx.service.complete(created.checkoutId, created.checkoutToken);
+    assert.equal(completed.state, 'completed');
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'capture').length, 1);
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'get-capture').length, 1);
+  });
+
+  it('recovers provider capture success when its binding write failed', async () => {
+    const checkoutDocuments = new MemoryStore();
+    const baseCheckouts = new DocumentCheckoutStore(
+      checkoutDocuments,
+      (value) => Buffer.from(value).toString('base64url'),
+      new MemoryDueCheckoutReader(checkoutDocuments)
+    );
+    let failCaptureBinding = true;
+    const checkouts = new Proxy(baseCheckouts, {
+      get(target, property, receiver) {
+        if (property !== 'bindProviderReference') return Reflect.get(target, property, receiver);
+        return async (input) => {
+          if (failCaptureBinding && input.referenceKind === 'capture') {
+            failCaptureBinding = false;
+            throw new Error('injected capture-binding write failure');
+          }
+          return target.bindProviderReference(input);
+        };
+      },
+    });
+    const ctx = context({ checkoutDocuments, checkouts });
+    const created = await createCheckout(ctx);
+
+    await assert.rejects(
+      ctx.service.complete(created.checkoutId, created.checkoutToken),
+      (error) => error instanceof CheckoutServiceError && error.code === 'provider-unavailable'
+    );
+    const pending = await ctx.checkouts.read(created.checkoutId);
+    assert.equal(pending.document.state, 'reconcile-capture-unknown');
+    assert.equal(pending.document.paypalCaptureId, null);
+    assert.equal(pending.document.lastFailure.code, 'provider-binding-persistence');
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'capture').length, 1);
+
+    ctx.paypal.authorizationLookup = authorization({
+      status: 'CAPTURED',
+      relatedCaptureId: 'capture-1',
+    });
+    const completed = await ctx.service.complete(created.checkoutId, created.checkoutToken);
+    assert.equal(completed.state, 'completed');
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'capture').length, 1);
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'get-capture').length, 1);
+  });
+
+  it('retries void retrieval failures without releasing reservations', async () => {
+    const paypal = new FakePayPal();
+    const products = new MemoryStore([product(), product({ id: 'p-2', name: 'Milk', stock: 1 })]);
+    const ctx = context({ paypal, products });
+    const created = await ctx.service.create(
+      {
+        items: [
+          { productId: 'p-1', quantity: 1 },
+          { productId: 'p-2', quantity: 1 },
+        ],
+      },
+      'idempotency-key-that-is-long-enough'
+    );
+    const p2 = await products.read('p-2');
+    await products.write({ ...p2.document, isActive: false }, p2.rev);
+    paypal.voidError = new PayPalGatewayError('provider-unavailable', {
+      ambiguous: true,
+      retryable: true,
+    });
+
+    await assert.rejects(ctx.service.complete(created.checkoutId, created.checkoutToken));
+    paypal.voidError = null;
+    paypal.authorizationLookupError = new PayPalGatewayError('provider-unavailable', {
+      ambiguous: false,
+      retryable: true,
+    });
+    await assert.rejects(
+      ctx.service.complete(created.checkoutId, created.checkoutToken),
+      (error) => error instanceof CheckoutServiceError && error.code === 'provider-unavailable'
+    );
+
+    const pending = await ctx.checkouts.read(created.checkoutId);
+    assert.equal(pending.document.state, 'reconcile-void-unknown');
+    assert.equal(pending.document.lastFailure.code, 'paypal-provider-unavailable');
+    assert.equal(pending.document.lastFailure.retryable, true);
+    assert.equal(
+      (await products.read('p-1')).document.checkoutMarkers[created.checkoutId].state,
+      'reserved'
+    );
+    assert.equal(paypal.calls.filter(([name]) => name === 'capture').length, 0);
+  });
+
+  it('retries capture retrieval failure without issuing another capture mutation', async () => {
+    const ctx = context();
+    const created = await createCheckout(ctx);
+    ctx.paypal.captureError = new PayPalGatewayError('provider-unavailable', {
+      ambiguous: true,
+      retryable: true,
+    });
+    await assert.rejects(ctx.service.complete(created.checkoutId, created.checkoutToken));
+    ctx.paypal.authorizationLookup = authorization({
+      status: 'CAPTURED',
+      relatedCaptureId: 'capture-1',
+    });
+    ctx.paypal.captureError = null;
+    ctx.paypal.captureLookupError = new PayPalGatewayError('provider-unavailable', {
+      ambiguous: false,
+      retryable: true,
+    });
+
+    await assert.rejects(
+      ctx.service.complete(created.checkoutId, created.checkoutToken),
+      (error) => error instanceof CheckoutServiceError && error.code === 'provider-unavailable'
+    );
+    const pending = await ctx.checkouts.read(created.checkoutId);
+    assert.equal(pending.document.state, 'reconcile-capture-unknown');
+    assert.equal(pending.document.lastFailure.code, 'paypal-provider-unavailable');
+    assert.equal(pending.document.lastFailure.retryable, true);
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'capture').length, 1);
+
+    ctx.paypal.captureLookupError = null;
+    const completed = await ctx.service.complete(created.checkoutId, created.checkoutToken);
+    assert.equal(completed.state, 'completed');
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'capture').length, 1);
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'get-capture').length, 2);
+  });
+
+  it('recovers after binding a capture but exhausting the checkout CAS', async () => {
+    const checkoutDocuments = new MemoryStore();
+    const baseCheckouts = new DocumentCheckoutStore(
+      checkoutDocuments,
+      (value) => Buffer.from(value).toString('base64url'),
+      new MemoryDueCheckoutReader(checkoutDocuments)
+    );
+    let failCaptureCas = 5;
+    const checkouts = new Proxy(baseCheckouts, {
+      get(target, property, receiver) {
+        if (property !== 'compareAndSwap') return Reflect.get(target, property, receiver);
+        return async (checkoutId, document, revision, leaseFence) => {
+          if (failCaptureCas > 0 && document.state === 'captured-pending-commit') {
+            failCaptureCas -= 1;
+            return 'conflict';
+          }
+          return target.compareAndSwap(checkoutId, document, revision, leaseFence);
+        };
+      },
+    });
+    const ctx = context({ checkoutDocuments, checkouts });
+    const created = await createCheckout(ctx);
+
+    await assert.rejects(
+      ctx.service.complete(created.checkoutId, created.checkoutToken),
+      (error) => error instanceof CheckoutServiceError && error.code === 'conflict'
+    );
+    const pending = await ctx.checkouts.read(created.checkoutId);
+    assert.equal(pending.document.state, 'reconcile-capture-unknown');
+    assert.equal(pending.document.paypalCaptureId, null);
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'capture').length, 1);
+
+    ctx.paypal.authorizationLookup = authorization({
+      status: 'CAPTURED',
+      relatedCaptureId: 'capture-1',
+    });
     const completed = await ctx.service.complete(created.checkoutId, created.checkoutToken);
     assert.equal(completed.state, 'completed');
     assert.equal(ctx.paypal.calls.filter(([name]) => name === 'capture').length, 1);
@@ -545,7 +878,7 @@ describe('checkout orchestration completion', () => {
     assert.equal(result.state, 'voided');
     assert.deepEqual(
       paypal.calls.map(([name]) => name),
-      ['create', 'authorize', 'void']
+      ['create', 'get-order', 'authorize', 'void']
     );
     assert.equal((await products.read('p-1')).document.checkoutMarkers['checkout-1'], undefined);
   });
@@ -585,7 +918,7 @@ describe('checkout orchestration completion', () => {
     assert.equal(stored.document.lease, null);
     assert.deepEqual(
       paypal.calls.map(([name]) => name),
-      ['create', 'authorize', 'void']
+      ['create', 'get-order', 'authorize', 'void']
     );
     assert.equal(paypal.calls.filter(([name]) => name === 'capture').length, 0);
   });
@@ -659,7 +992,7 @@ describe('checkout orchestration completion', () => {
     assert.equal(result.state, 'voided');
     assert.deepEqual(
       paypal.calls.map(([name]) => name),
-      ['create', 'authorize', 'void']
+      ['create', 'get-order', 'authorize', 'void']
     );
     assert.equal((await products.read('p-1')).document.checkoutMarkers['checkout-1'], undefined);
     assert.equal((await products.read('p-2')).document.checkoutMarkers.other.state, 'reserved');
@@ -829,6 +1162,30 @@ describe('checkout reconciliation fencing and recovery', () => {
     assert.equal(completed.outcome, 'reconciled');
     assert.equal(completed.status.state, 'completed');
     assert.equal(paypal.calls.filter(([name]) => name === 'authorize').length, 1);
+  });
+
+  it('does not authorize when approval retrieval crosses the deadline', async () => {
+    let now = T0;
+    const paypal = new FakePayPal();
+    const getOrder = paypal.getOrder.bind(paypal);
+    paypal.getOrder = async (orderId) => {
+      const approved = await getOrder(orderId);
+      now = '2026-09-18T12:30:00.000Z';
+      return approved;
+    };
+    const ctx = context({ paypal, nowIso: () => now });
+    const created = await createCheckout(ctx);
+    now = '2026-09-18T12:29:59.999Z';
+
+    const expired = await ctx.service.reconcile(created.checkoutId, {
+      ownerId: 'worker-crossing-expiry',
+      leaseId: 'lease-crossing-expiry',
+    });
+
+    assert.equal(expired.outcome, 'reconciled');
+    assert.equal(expired.status.state, 'expired');
+    assert.equal(paypal.calls.filter(([name]) => name === 'authorize').length, 0);
+    assert.equal((await ctx.checkouts.read(created.checkoutId)).document.state, 'expired');
   });
 
   it('expires an unknown authorization only after retrieval confirms no authorization at expiry', async () => {

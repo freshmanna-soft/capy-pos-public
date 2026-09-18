@@ -53,6 +53,13 @@ export class CheckoutValidationError extends Error {
   }
 }
 
+export class CheckoutRequestValidationError extends CheckoutValidationError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CheckoutRequestValidationError';
+  }
+}
+
 export function parseCheckoutCreateRequest(
   value: unknown,
   limits: Pick<CheckoutPricingPolicy, 'maxItemQuantity' | 'maxAggregateQuantity'> = {
@@ -62,43 +69,51 @@ export function parseCheckoutCreateRequest(
 ): CheckoutCreateRequest {
   assertPositiveLimit(limits.maxItemQuantity, 'maxItemQuantity');
   assertPositiveLimit(limits.maxAggregateQuantity, 'maxAggregateQuantity');
-  const body = recordWithExactKeys(value, ['items'], 'Checkout request');
-  if (
-    !Array.isArray(body['items']) ||
-    body['items'].length < 1 ||
-    body['items'].length > MAX_CHECKOUT_ITEMS
-  ) {
-    throw new CheckoutValidationError(
-      `items must contain 1 through ${MAX_CHECKOUT_ITEMS} entries.`
-    );
-  }
-
-  const productIds = new Set<string>();
-  let aggregate = 0n;
-  const items = body['items'].map((raw, index) => {
-    const item = recordWithExactKeys(raw, ['productId', 'quantity'], `items[${index}]`);
-    const productId = item['productId'];
-    const quantity = item['quantity'];
-    assertProductId(productId, `items[${index}].productId`);
-    if (productIds.has(productId)) {
-      throw new CheckoutValidationError(`Duplicate product id: ${productId}.`);
-    }
+  try {
+    const body = recordWithExactKeys(value, ['items'], 'Checkout request');
     if (
-      !Number.isSafeInteger(quantity) ||
-      (quantity as number) < 1 ||
-      (quantity as number) > limits.maxItemQuantity
+      !Array.isArray(body['items']) ||
+      body['items'].length < 1 ||
+      body['items'].length > MAX_CHECKOUT_ITEMS
     ) {
-      throw new CheckoutValidationError(`items[${index}].quantity is invalid.`);
+      throw new CheckoutValidationError(
+        `items must contain 1 through ${MAX_CHECKOUT_ITEMS} entries.`
+      );
     }
-    aggregate += BigInt(quantity as number);
-    if (aggregate > BigInt(limits.maxAggregateQuantity)) {
-      throw new CheckoutValidationError('Aggregate quantity exceeds the checkout limit.');
-    }
-    productIds.add(productId);
-    return Object.freeze({ productId, quantity: quantity as number });
-  });
 
-  return Object.freeze({ items: Object.freeze(items) });
+    const productIds = new Set<string>();
+    let aggregate = 0n;
+    const items = body['items'].map((raw, index) => {
+      const item = recordWithExactKeys(raw, ['productId', 'quantity'], `items[${index}]`);
+      const productId = item['productId'];
+      const quantity = item['quantity'];
+      assertProductId(productId, `items[${index}].productId`);
+      if (productIds.has(productId)) {
+        throw new CheckoutValidationError(`Duplicate product id: ${productId}.`);
+      }
+      if (
+        !Number.isSafeInteger(quantity) ||
+        (quantity as number) < 1 ||
+        (quantity as number) > limits.maxItemQuantity
+      ) {
+        throw new CheckoutValidationError(`items[${index}].quantity is invalid.`);
+      }
+      aggregate += BigInt(quantity as number);
+      if (aggregate > BigInt(limits.maxAggregateQuantity)) {
+        throw new CheckoutValidationError('Aggregate quantity exceeds the checkout limit.');
+      }
+      productIds.add(productId);
+      return Object.freeze({ productId, quantity: quantity as number });
+    });
+
+    return Object.freeze({ items: Object.freeze(items) });
+  } catch (error) {
+    if (error instanceof CheckoutRequestValidationError) throw error;
+    if (error instanceof CheckoutValidationError) {
+      throw new CheckoutRequestValidationError(error.message);
+    }
+    throw error;
+  }
 }
 
 /** Converts a finite, non-negative JavaScript major-unit number at an exact-cent boundary. */
@@ -170,7 +185,7 @@ export function priceCheckout(
   const tax = (subtotal * BigInt(policy.taxRateBasisPoints) + 5_000n) / 10_000n;
   const total = subtotal + tax;
   if (total > BigInt(policy.maxTotalMinorUnits)) {
-    throw new CheckoutValidationError('Checkout total exceeds the configured limit.');
+    throw new CheckoutRequestValidationError('Checkout total exceeds the configured limit.');
   }
 
   return Object.freeze({

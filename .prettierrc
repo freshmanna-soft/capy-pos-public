@@ -45,6 +45,12 @@
         "parser": "markdown",
         "proseWrap": "always"
       }
+    },
+    {
+      "files": "terraform/README.md",
+      "options": {
+        "proseWrap": "preserve"
+      }
     }
   ]
 }
