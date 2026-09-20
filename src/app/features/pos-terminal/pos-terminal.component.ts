@@ -3,10 +3,8 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 
 import { ProductSearchComponent } from '@features/pos-terminal/components/product-search/product-search.component';
 import { ShoppingCartComponent } from '@features/pos-terminal/components/shopping-cart/shopping-cart.component';
-import {
-  CheckoutComponent,
-  PaymentResult,
-} from '@features/pos-terminal/components/checkout/checkout.component';
+import { CheckoutComponent } from '@features/pos-terminal/components/checkout/checkout.component';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
 import { CustomerLoyaltyComponent } from '@features/pos-terminal/components/customer-loyalty/customer-loyalty.component';
 import { ProductGridComponent } from '@shared/ui/organisms/product-grid/product-grid.component';

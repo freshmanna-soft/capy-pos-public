@@ -78,6 +78,12 @@ export const environment = {
     enabled: true,
   },
 
+  paypal: {
+    enabled: false,
+    clientId: '',
+    environment: 'sandbox' as const,
+  },
+
   features: {
     analytics: false,
     telemetry: false,

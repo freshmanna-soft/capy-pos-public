@@ -74,6 +74,11 @@ const ROUTES: SmokeRoute[] = [
     name: 'Self-checkout check email',
     landmark: '[data-testid="self-checkout-check-email"]',
   },
+  {
+    path: '/self-checkout/pay',
+    name: 'Self-checkout payment',
+    landmark: '[data-testid="self-checkout-payment"]',
+  },
   // Also unguarded on purpose (#219) — the customer checks themselves out here.
   { path: '/clerk', name: 'Capy Clerk', landmark: '[data-testid="clerk-stage"]' },
   { path: '/admin', name: 'Admin', landmark: 'main, [data-testid="operator-list"]' },
@@ -93,6 +98,7 @@ const ANONYMOUS_ROUTES: SmokeRoute[] = [
   '/self-checkout/sign-up',
   '/self-checkout/sign-in',
   '/self-checkout/check-email',
+  '/self-checkout/pay',
 ].map((path) => {
   const route = ROUTES.find((candidate) => candidate.path === path);
   if (!route) {

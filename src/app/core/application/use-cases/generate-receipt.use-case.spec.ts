@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { GenerateReceiptUseCase } from '@core/application/use-cases/generate-receipt.use-case';
 import { CartService } from '@core/application/services/cart.service';
 import { ProductBuilder } from '@core/domain/entities/product.builder';
-import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
 
 /**
  * Unit Tests for GenerateReceiptUseCase
@@ -82,7 +82,7 @@ describe('GenerateReceiptUseCase', () => {
 
       expect(receipt.payment).toBe(mockPayment);
       expect(receipt.items).toHaveLength(1);
-      expect(receipt.items[0].product.id).toBe('1');
+      expect(receipt.items[0].productId).toBe('1');
       expect(receipt.items[0].quantity).toBe(1);
     });
 
@@ -94,9 +94,9 @@ describe('GenerateReceiptUseCase', () => {
       const receipt = useCase.execute(mockPayment);
 
       expect(receipt.items).toHaveLength(3);
-      expect(receipt.items[0].product.name).toBe('Organic Coffee');
-      expect(receipt.items[1].product.name).toBe('Blueberry Muffin');
-      expect(receipt.items[2].product.name).toBe('Orange Juice');
+      expect(receipt.items[0].productName).toBe('Organic Coffee');
+      expect(receipt.items[1].productName).toBe('Blueberry Muffin');
+      expect(receipt.items[2].productName).toBe('Orange Juice');
     });
 
     it('should capture correct quantities for repeated products', () => {
@@ -168,7 +168,7 @@ describe('GenerateReceiptUseCase', () => {
 
       // Receipt items should still be intact after cart is cleared
       expect(receipt.items).toHaveLength(1);
-      expect(receipt.items[0].product.name).toBe('Organic Coffee');
+      expect(receipt.items[0].productName).toBe('Organic Coffee');
     });
 
     it('should handle card payment without change', () => {
@@ -224,7 +224,7 @@ describe('GenerateReceiptUseCase', () => {
 
       // Should use provided values, not cart state
       expect(receipt.items).toHaveLength(1);
-      expect(receipt.items[0].product.name).toBe('Organic Coffee');
+      expect(receipt.items[0].productName).toBe('Organic Coffee');
       expect(receipt.subtotal).toBe(12.99);
     });
   });

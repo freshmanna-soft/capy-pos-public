@@ -1,19 +1,10 @@
 import { Injectable, inject } from '@angular/core';
 import { CartService } from '@core/application/services/cart.service';
 import { CartItem } from '@core/application/services/cart.service.interface';
-import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
+import { ReceiptData, ReceiptLine } from '@core/application/dtos/receipt.dto';
 
-/**
- * Receipt data structure for display
- */
-export interface ReceiptData {
-  payment: PaymentResult;
-  items: CartItem[];
-  subtotal: number;
-  tax: number;
-  taxRate: number;
-  total: number;
-}
+export type { ReceiptData } from '@core/application/dtos/receipt.dto';
 
 /**
  * Generate Receipt Use Case
@@ -46,7 +37,8 @@ export class GenerateReceiptUseCase {
   execute(payment: PaymentResult): ReceiptData {
     return {
       payment,
-      items: [...this.cartService.items()],
+      items: this.linesFromCart(this.cartService.items()),
+      currency: 'USD',
       subtotal: this.cartService.subtotal(),
       tax: this.cartService.tax(),
       taxRate: this.cartService.taxRate(),
@@ -73,6 +65,24 @@ export class GenerateReceiptUseCase {
     taxRate: number,
     total: number
   ): ReceiptData {
-    return { payment, items, subtotal, tax, taxRate, total };
+    return {
+      payment,
+      items: this.linesFromCart(items),
+      currency: 'USD',
+      subtotal,
+      tax,
+      taxRate,
+      total,
+    };
+  }
+
+  private linesFromCart(items: readonly CartItem[]): ReceiptLine[] {
+    return items.map((item) => ({
+      productId: item.product.id,
+      productName: item.product.name,
+      quantity: item.quantity,
+      unitPrice: item.product.price,
+      subtotal: item.product.price * item.quantity,
+    }));
   }
 }

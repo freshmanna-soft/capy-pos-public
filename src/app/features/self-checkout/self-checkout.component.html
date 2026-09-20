@@ -52,6 +52,6 @@
   </header>
 
   <main class="flex-1 overflow-y-auto px-6 pb-10">
-    <app-self-checkout-scan />
+    <app-self-checkout-scan (checkout)="goToPay()" />
   </main>
 </div>

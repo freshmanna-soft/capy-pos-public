@@ -14,16 +14,7 @@ import { ProcessCardPaymentUseCase } from '@core/application/use-cases/process-c
 import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
 import { CircuitBreakerService } from '@core/infrastructure/resilience/circuit-breaker.service';
 import { RetryService } from '@core/infrastructure/resilience/retry.service';
-
-export type PaymentMethod = 'cash' | 'card' | 'mobile';
-
-export interface PaymentResult {
-  method: PaymentMethod;
-  amount: number;
-  change?: number;
-  transactionId: string;
-  timestamp: Date;
-}
+import { PaymentResult, StaffPaymentMethod } from '@core/application/dtos/payment.dto';
 
 /**
  * Name of the circuit breaker that fronts the (simulated) card payment gateway.
@@ -820,7 +811,7 @@ export class CheckoutComponent {
   readonly step = signal<
     'select' | 'cash' | 'card' | 'mobile' | 'processing' | 'retrying' | 'error'
   >('select');
-  readonly selectedMethod = signal<PaymentMethod | null>(null);
+  readonly selectedMethod = signal<StaffPaymentMethod | null>(null);
   readonly changeAmount = signal<number>(0);
 
   /** User-facing message shown in the 'error' step after a failed payment. */
@@ -842,7 +833,7 @@ export class CheckoutComponent {
     return [rounded, rounded + 5, rounded + 10, rounded + 20].filter((a) => a >= total);
   });
 
-  selectMethod(method: PaymentMethod): void {
+  selectMethod(method: StaffPaymentMethod): void {
     this.selectedMethod.set(method);
   }
 
@@ -1025,7 +1016,7 @@ export class CheckoutComponent {
    * emits the result. Shared by the cash/mobile timeout path and the card
    * gateway path so completion behaviour stays identical across methods.
    */
-  private finalizePayment(method: PaymentMethod, transactionId: string): void {
+  private finalizePayment(method: StaffPaymentMethod, transactionId: string): void {
     const result: PaymentResult = {
       method,
       amount: this.cartService.total(),

@@ -24,7 +24,9 @@ import {
 } from '@core/application/use-cases/award-loyalty-points.use-case';
 import { Product } from '@core/domain/entities/product.entity';
 import { CustomerTier } from '@core/domain/entities/customer.entity';
-import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
+import { ReceiptLine } from '@core/application/dtos/receipt.dto';
+import { SelfCheckoutReceipt } from '@core/application/ports/self-checkout-gateway.port';
 
 /**
  * The customer attached to the sale in progress.
@@ -45,6 +47,13 @@ export type AddToCartRejection = 'out-of-stock' | 'max-stock-reached';
 
 /** Outcome of an attempt to add a product to the cart. */
 export type AddToCartResult = { added: true } | { added: false; reason: AddToCartRejection };
+
+export class CartChangedDuringCheckoutError extends Error {
+  constructor() {
+    super('The cart changed while payment was in progress.');
+    this.name = 'CartChangedDuringCheckoutError';
+  }
+}
 
 /**
  * PosFacade - Single point of access for POS Terminal operations.
@@ -331,6 +340,77 @@ export class PosFacade {
   }
 
   /**
+   * Finalizes a sale that the checkout server has already captured and committed.
+   *
+   * This path deliberately does not reuse `checkout()`: stock, transaction persistence,
+   * and customer rewards are server-owned for self-checkout. Repeating any of them here
+   * would turn a successful provider retry into a second local sale.
+   */
+  finalizeServerCheckout(receipt: SelfCheckoutReceipt, expectedCartRevision: number): ReceiptData {
+    if (this.cartService.revision() !== expectedCartRevision) {
+      throw new CartChangedDuringCheckoutError();
+    }
+
+    const result = this.serverCheckoutReceiptData(receipt);
+    const payment = result.payment;
+    const quote = receipt.quote;
+
+    this.cartService.clearCart();
+    this.detachCustomer();
+    this.eventBus.publish(
+      busEvent(
+        EventType.TRANSACTION_COMPLETED,
+        EventSource.POS_FACADE,
+        { itemCount: quote.lines.length, amount: payment.amount, method: payment.method },
+        'high'
+      )
+    );
+    this.auditLog
+      .log({
+        agentName: 'SelfCheckoutPaymentAgent',
+        operation: 'finalizeServerCheckout',
+        entityType: 'Transaction',
+        entityId: receipt.transactionId,
+        action: AuditAction.EXECUTE,
+        status: AuditStatus.SUCCESS,
+        metadata: { method: payment.method, amount: payment.amount },
+      })
+      .catch((error) => console.error('[PosFacade] Self-checkout audit log failed:', error));
+    try {
+      this.telemetry.recordCounter('payments.processed', 1, { method: payment.method });
+      this.telemetry.recordGauge('payment.amount', payment.amount, { method: payment.method });
+    } catch (error) {
+      console.error('[PosFacade] Self-checkout telemetry failed:', error);
+    }
+
+    return result;
+  }
+
+  /** Maps a completed server sale to display data without mutating local sale state. */
+  serverCheckoutReceiptData(receipt: SelfCheckoutReceipt): ReceiptData {
+    const completedAt = new Date(receipt.completedAt);
+    if (Number.isNaN(completedAt.getTime())) {
+      throw new Error('The checkout server returned an invalid completion time.');
+    }
+
+    const quote = receipt.quote;
+    return {
+      payment: {
+        method: 'paypal',
+        amount: minorUnitsToAmount(quote.totalMinorUnits),
+        transactionId: receipt.transactionId,
+        timestamp: completedAt,
+      },
+      items: quote.lines.map(serverReceiptLine),
+      currency: quote.currency,
+      subtotal: minorUnitsToAmount(quote.subtotalMinorUnits),
+      tax: minorUnitsToAmount(quote.taxMinorUnits),
+      taxRate: quote.taxRateBasisPoints / 10_000,
+      total: minorUnitsToAmount(quote.totalMinorUnits),
+    };
+  }
+
+  /**
    * Awards the points earned by a completed sale, without waiting for the write.
    *
    * The use case reports every failure as a result rather than throwing, so the
@@ -375,4 +455,18 @@ export class PosFacade {
   async initializeDatabase(): Promise<void> {
     await this.db.initializeWithSeedData();
   }
+}
+
+function minorUnitsToAmount(value: number): number {
+  return value / 100;
+}
+
+function serverReceiptLine(line: SelfCheckoutReceipt['quote']['lines'][number]): ReceiptLine {
+  return {
+    productId: line.productId,
+    productName: line.productName,
+    quantity: line.quantity,
+    unitPrice: minorUnitsToAmount(line.unitPriceMinorUnits),
+    subtotal: minorUnitsToAmount(line.subtotalMinorUnits),
+  };
 }

@@ -563,11 +563,21 @@ function verifyPaymentBinding(
   payment: PayPalAuthorizationSnapshot | PayPalCaptureSnapshot,
   expected: ExpectedPayPalFacts
 ): void {
-  if (payment.customId !== expected.checkoutId || payment.invoiceId !== expected.checkoutId) {
+  // PayPal's authorization and capture resources do not consistently repeat the
+  // purchase unit's custom_id, invoice_id, or payee. The order is the authoritative
+  // source for those facts, and its verified resource plus the stored provider-id
+  // binding proves which checkout these child resources belong to. When PayPal does
+  // repeat a fact it must still match; absence alone is not a mismatch.
+  if (
+    (payment.customId !== null && payment.customId !== expected.checkoutId) ||
+    (payment.invoiceId !== null && payment.invoiceId !== expected.checkoutId)
+  ) {
     mismatch('checkout-binding');
   }
   verifyMoney(payment.amount, expected.quote);
-  if (payment.payeeMerchantId !== expected.merchantId) mismatch('merchant');
+  if (payment.payeeMerchantId !== null && payment.payeeMerchantId !== expected.merchantId) {
+    mismatch('merchant');
+  }
 }
 
 function verifyMoney(money: PayPalMoneySnapshot, quote: CheckoutQuote): void {

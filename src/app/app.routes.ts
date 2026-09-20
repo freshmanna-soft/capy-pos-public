@@ -10,6 +10,11 @@ import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palet
 import { LANE_ROUTE } from '@features/self-checkout/self-checkout-routes';
 import { PendingRegistrationStore } from '@features/self-checkout/pending-registration.store';
 import { customerSessionHydrationGuard } from '@features/self-checkout/customer-session-hydration.guard';
+import { SELF_CHECKOUT_GATEWAY } from '@core/application/ports/self-checkout-gateway.port';
+import { PAYPAL_CHECKOUT } from '@core/application/ports/paypal-checkout.port';
+import { SelfCheckoutHttpAdapter } from '@core/infrastructure/payments/self-checkout-http.adapter';
+import { PayPalV6CheckoutAdapter } from '@core/infrastructure/payments/paypal-v6-checkout.adapter';
+import { SelfCheckoutAttemptStore } from '@core/infrastructure/payments/self-checkout-attempt.store';
 
 export const routes: Routes = [
   {
@@ -109,6 +114,9 @@ export const routes: Routes = [
       // the cart makes its inject(CartService) resolve this scoped instance.
       CartService,
       PosFacade,
+      { provide: SELF_CHECKOUT_GATEWAY, useClass: SelfCheckoutHttpAdapter },
+      { provide: PAYPAL_CHECKOUT, useClass: PayPalV6CheckoutAdapter },
+      SelfCheckoutAttemptStore,
     ],
     children: [
       {
@@ -146,6 +154,14 @@ export const routes: Routes = [
             (m) => m.SelfCheckoutCheckEmailComponent
           ),
         title: 'Check Your Email · Capy-POS',
+      },
+      {
+        path: 'pay',
+        loadComponent: () =>
+          import('./features/self-checkout/self-checkout-pay.component').then(
+            (m) => m.SelfCheckoutPayComponent
+          ),
+        title: 'Pay · Capy-POS',
       },
       {
         // The lane. `pathMatch: 'full'` rather than relying on the router

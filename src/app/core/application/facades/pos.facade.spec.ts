@@ -13,6 +13,7 @@ import { CustomerService } from '@core/application/services/customer.service';
 import { AwardLoyaltyPointsUseCase } from '@core/application/use-cases/award-loyalty-points.use-case';
 import { Product } from '@core/domain/entities/product.entity';
 import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
+import { SelfCheckoutReceipt } from '@core/application/ports/self-checkout-gateway.port';
 
 describe('PosFacade', () => {
   let facade: PosFacade;
@@ -287,6 +288,128 @@ describe('PosFacade', () => {
 
       expect(receipt).toBeTruthy();
       expect(mockCartService.clearCart).toHaveBeenCalled();
+    });
+  });
+
+  describe('server-completed self-checkout', () => {
+    const serverReceipt: SelfCheckoutReceipt = {
+      transactionId: 'transaction-1',
+      checkoutId: 'checkout-1',
+      paypalCaptureId: 'capture-1',
+      completedAt: '2026-09-02T12:00:00.000Z',
+      quote: {
+        currency: 'USD',
+        taxRateBasisPoints: 850,
+        lines: [
+          {
+            productId: 'product-1',
+            productName: 'Coffee',
+            quantity: 2,
+            unitPriceMinorUnits: 450,
+            subtotalMinorUnits: 900,
+          },
+        ],
+        subtotalMinorUnits: 900,
+        taxMinorUnits: 77,
+        totalMinorUnits: 977,
+      },
+    };
+
+    it('builds a receipt from server-owned minor-unit facts', () => {
+      const receipt = facade.finalizeServerCheckout(serverReceipt, 0);
+
+      expect(receipt).toEqual({
+        payment: {
+          method: 'paypal',
+          amount: 9.77,
+          transactionId: 'transaction-1',
+          timestamp: new Date('2026-09-02T12:00:00.000Z'),
+        },
+        items: [
+          {
+            productId: 'product-1',
+            productName: 'Coffee',
+            quantity: 2,
+            unitPrice: 4.5,
+            subtotal: 9,
+          },
+        ],
+        currency: 'USD',
+        subtotal: 9,
+        tax: 0.77,
+        taxRate: 0.085,
+        total: 9.77,
+      });
+      expect(mockCartService.clearCart).toHaveBeenCalledOnce();
+    });
+
+    it('refuses to clear a cart that changed after checkout creation', () => {
+      mockCartService.revision.set(3);
+
+      expect(() => facade.finalizeServerCheckout(serverReceipt, 2)).toThrow(
+        'The cart changed while payment was in progress.'
+      );
+      expect(mockCartService.clearCart).not.toHaveBeenCalled();
+    });
+
+    it('maps a recovered receipt without clearing or publishing a second local sale', () => {
+      mockCartService.revision.set(3);
+
+      const receipt = facade.serverCheckoutReceiptData(serverReceipt);
+
+      expect(receipt.payment.transactionId).toBe('transaction-1');
+      expect(receipt.total).toBe(9.77);
+      expect(mockCartService.clearCart).not.toHaveBeenCalled();
+      expect(mockEventBus.publish).not.toHaveBeenCalled();
+    });
+
+    it('does not repeat server-owned stock or loyalty side effects', () => {
+      facade.finalizeServerCheckout(serverReceipt, 0);
+
+      expect(mockAdjustStock.execute).not.toHaveBeenCalled();
+      expect(mockAwardLoyalty.execute).not.toHaveBeenCalled();
+      expect(mockGenerateReceipt.execute).not.toHaveBeenCalled();
+      expect(mockGenerateReceipt.fromSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('publishes only the local completion observability facts', async () => {
+      const mockAudit = { log: vi.fn().mockResolvedValue(undefined) };
+      const mockTelemetry = { recordCounter: vi.fn(), recordGauge: vi.fn() };
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          PosFacade,
+          { provide: CartService, useValue: mockCartService },
+          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
+          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
+          { provide: DexieDatabase, useValue: mockDb },
+          { provide: CustomerService, useValue: mockCustomers },
+          { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
+          { provide: EventBusService, useValue: mockEventBus },
+          { provide: AuditLogService, useValue: mockAudit },
+          { provide: TelemetryService, useValue: mockTelemetry },
+        ],
+      });
+      const scopedFacade = TestBed.inject(PosFacade);
+
+      scopedFacade.finalizeServerCheckout(serverReceipt, 0);
+      await Promise.resolve();
+
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: EventType.TRANSACTION_COMPLETED,
+          payload: expect.objectContaining({ method: 'paypal', amount: 9.77 }),
+        })
+      );
+      expect(mockAudit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: 'finalizeServerCheckout',
+          entityId: 'transaction-1',
+        })
+      );
+      expect(mockTelemetry.recordCounter).toHaveBeenCalledWith('payments.processed', 1, {
+        method: 'paypal',
+      });
     });
   });
 

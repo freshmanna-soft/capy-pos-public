@@ -5,7 +5,7 @@ import { ProductService } from '@core/application/services/product.service';
 import { CartService } from '@core/application/services/cart.service';
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
 import { CameraService } from '@core/infrastructure/media/camera.service';
-import { SIGN_IN_ROUTE, SIGN_UP_ROUTE } from './self-checkout-routes';
+import { PAY_ROUTE, SIGN_IN_ROUTE, SIGN_UP_ROUTE } from './self-checkout-routes';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
 import { SelfCheckoutComponent } from './self-checkout.component';
@@ -132,6 +132,13 @@ describe('SelfCheckoutComponent', () => {
     signUp?.click();
 
     expect(navigate).toHaveBeenCalledWith([SIGN_UP_ROUTE]);
+  });
+
+  it('opens the pay route when the scan panel emits checkout', () => {
+    const fixture = render();
+    fixture.debugElement.children[0].children[1].children[0].triggerEventHandler('checkout');
+
+    expect(navigate).toHaveBeenCalledWith([PAY_ROUTE]);
   });
 
   it('navigates back to the till when the exit control is used', () => {

@@ -1,0 +1,108 @@
+<div class="fixed inset-0 z-[60] overflow-y-auto bg-onsen-deep px-4 py-8 text-steam sm:px-6">
+  <main class="mx-auto w-full max-w-2xl" data-testid="self-checkout-payment">
+    @if (view() === 'completed' && receipt(); as completedReceipt) {
+      <app-receipt [data]="completedReceipt" (newTransaction)="newBasket()" />
+    } @else {
+      <header class="mb-6 flex items-center justify-between gap-4">
+        <div>
+          <p class="font-data text-[10px] uppercase tracking-[0.22em] text-kelp">Capy-POS</p>
+          <h1 class="mt-1 font-display text-3xl font-bold">Pay securely</h1>
+        </div>
+        <button
+          type="button"
+          (click)="returnToBasket()"
+          [disabled]="view() === 'loading' || view() === 'processing'"
+          class="rounded-full border border-kelp/30 px-4 py-2 font-data text-[10px] uppercase tracking-[0.16em] text-kelp focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu disabled:cursor-not-allowed disabled:opacity-40"
+          data-testid="self-checkout-payment-back"
+        >
+          Back to basket
+        </button>
+      </header>
+
+      <section class="rounded-2xl border border-kelp/25 bg-onsen-water/40 p-5 sm:p-7">
+        <p
+          class="rounded-xl border border-kelp/25 bg-onsen-deep/50 px-4 py-3 text-sm leading-relaxed"
+          [attr.role]="view() === 'failed' || view() === 'manual-review' ? 'alert' : 'status'"
+          data-testid="self-checkout-payment-status"
+        >
+          {{ message() }}
+        </p>
+
+        @if (quote(); as serverQuote) {
+          <div class="mt-6" data-testid="self-checkout-server-quote">
+            <p class="font-data text-[10px] uppercase tracking-[0.18em] text-kelp">
+              Confirmed by the checkout server
+            </p>
+            <ul class="mt-3 space-y-2">
+              @for (line of serverQuote.lines; track line.productId) {
+                <li class="flex justify-between gap-4 text-sm">
+                  <span
+                    >{{ line.productName }}
+                    <span class="text-kelp">×{{ line.quantity }}</span></span
+                  >
+                  <span class="font-data">{{
+                    line.subtotalMinorUnits / 100 | currency: serverQuote.currency
+                  }}</span>
+                </li>
+              }
+            </ul>
+            <dl class="mt-4 space-y-1 border-t border-kelp/25 pt-3 font-data text-xs">
+              <div class="flex justify-between">
+                <dt>Subtotal</dt>
+                <dd>{{ serverQuote.subtotalMinorUnits / 100 | currency: serverQuote.currency }}</dd>
+              </div>
+              <div class="flex justify-between">
+                <dt>Tax</dt>
+                <dd>{{ serverQuote.taxMinorUnits / 100 | currency: serverQuote.currency }}</dd>
+              </div>
+              <div class="flex justify-between pt-2 text-base font-bold">
+                <dt>Total</dt>
+                <dd data-testid="self-checkout-payment-total">
+                  {{ total() | currency: currency() }}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        }
+
+        <div class="mt-7 flex flex-wrap gap-3">
+          @if (view() === 'ready' || view() === 'cancelled') {
+            <button
+              type="button"
+              (click)="pay()"
+              class="flex-1 rounded-xl bg-yuzu px-5 py-3 font-data text-[11px] font-bold uppercase tracking-[0.16em] text-onsen-deep focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+              data-testid="self-checkout-payment-paypal"
+            >
+              Pay with PayPal
+            </button>
+          }
+          @if (view() === 'failed' || view() === 'unavailable') {
+            <button
+              type="button"
+              (click)="retry()"
+              class="flex-1 rounded-xl border border-kelp/40 px-5 py-3 font-data text-[11px] font-bold uppercase tracking-[0.16em] text-steam focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+              data-testid="self-checkout-payment-retry"
+            >
+              Check again
+            </button>
+          }
+          @if (canDiscardLocalAttempt()) {
+            <button
+              type="button"
+              (click)="discardLocalAttempt()"
+              class="flex-1 rounded-xl border border-kelp/40 px-5 py-3 font-data text-[11px] font-bold uppercase tracking-[0.16em] text-steam focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+              data-testid="self-checkout-discard-local-attempt"
+            >
+              Discard local test attempt
+            </button>
+          }
+          @if (view() === 'loading' || view() === 'processing') {
+            <span class="font-data text-[11px] uppercase tracking-[0.16em] text-kelp">
+              Please wait…
+            </span>
+          }
+        </div>
+      </section>
+    }
+  </main>
+</div>
