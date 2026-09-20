@@ -72,6 +72,13 @@ export const environment = {
     enabled: true,
   },
 
+  // Public browser configuration only. Never add a PayPal client secret here.
+  paypal: {
+    enabled: false,
+    clientId: '', // Set to the sandbox public client ID when rollout is approved
+    environment: 'sandbox' as const,
+  },
+
   // Feature Flags
   features: {
     analytics: true,

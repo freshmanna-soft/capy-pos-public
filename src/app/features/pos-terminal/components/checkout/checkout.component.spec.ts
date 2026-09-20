@@ -1,8 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import {
-  CheckoutComponent,
-  PaymentResult,
-} from '@features/pos-terminal/components/checkout/checkout.component';
+import { CheckoutComponent } from '@features/pos-terminal/components/checkout/checkout.component';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { CartService } from '@core/application/services/cart.service';
 import { ProcessCashPaymentUseCase } from '@core/application/use-cases/process-cash-payment.use-case';
 import { ProcessCardPaymentUseCase } from '@core/application/use-cases/process-card-payment.use-case';

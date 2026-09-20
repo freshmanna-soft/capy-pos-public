@@ -4,8 +4,7 @@ import {
   ReceiptComponent,
   ReceiptData,
 } from '@features/pos-terminal/components/receipt/receipt.component';
-import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
-import { Product } from '@core/domain/entities/product.entity';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
 
 /**
  * Unit Tests for ReceiptComponent
@@ -52,28 +51,21 @@ describe('ReceiptComponent', () => {
     payment: mockPayment,
     items: [
       {
-        product: {
-          id: '1',
-          name: 'Coffee',
-          price: 4.5,
-          sku: 'COF-001',
-          stock: 50,
-          category: 'Beverages',
-        } as unknown as Product,
+        productId: '1',
+        productName: 'Coffee',
         quantity: 2,
+        unitPrice: 4.5,
+        subtotal: 9,
       },
       {
-        product: {
-          id: '2',
-          name: 'Muffin',
-          price: 3,
-          sku: 'MUF-001',
-          stock: 30,
-          category: 'Food',
-        } as unknown as Product,
+        productId: '2',
+        productName: 'Muffin',
         quantity: 1,
+        unitPrice: 3,
+        subtotal: 3,
       },
     ],
+    currency: 'USD',
     subtotal: 12,
     tax: 1.02,
     taxRate: 0.085,
@@ -146,9 +138,9 @@ describe('ReceiptComponent', () => {
     it('should define ReceiptData interface with items field', () => {
       const data: ReceiptData = mockReceiptData;
       expect(data.items).toHaveLength(2);
-      expect(data.items[0].product.name).toBe('Coffee');
+      expect(data.items[0].productName).toBe('Coffee');
       expect(data.items[0].quantity).toBe(2);
-      expect(data.items[1].product.name).toBe('Muffin');
+      expect(data.items[1].productName).toBe('Muffin');
       expect(data.items[1].quantity).toBe(1);
     });
 

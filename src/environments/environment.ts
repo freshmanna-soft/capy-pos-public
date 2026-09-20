@@ -108,6 +108,13 @@ export const environment = {
     enabled: true,
   },
 
+  // PayPal's browser client ID is public. Never add a client secret here.
+  paypal: {
+    enabled: false,
+    clientId: '',
+    environment: 'sandbox' as const,
+  },
+
   // Feature Flags
   features: {
     analytics: false,

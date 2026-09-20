@@ -23,11 +23,17 @@ import { SELF_CHECKOUT_TITLE } from '@features/self-checkout/self-checkout-palet
 import {
   CHECK_EMAIL_ROUTE,
   LANE_ROUTE,
+  PAY_ROUTE,
   SIGN_IN_ROUTE,
   SIGN_UP_ROUTE,
 } from '@features/self-checkout/self-checkout-routes';
 import { PendingRegistrationStore } from '@features/self-checkout/pending-registration.store';
 import { customerSessionHydrationGuard } from '@features/self-checkout/customer-session-hydration.guard';
+import { SELF_CHECKOUT_GATEWAY } from '@core/application/ports/self-checkout-gateway.port';
+import { PAYPAL_CHECKOUT } from '@core/application/ports/paypal-checkout.port';
+import { SelfCheckoutHttpAdapter } from '@core/infrastructure/payments/self-checkout-http.adapter';
+import { PayPalV6CheckoutAdapter } from '@core/infrastructure/payments/paypal-v6-checkout.adapter';
+import { SelfCheckoutAttemptStore } from '@core/infrastructure/payments/self-checkout-attempt.store';
 import { Permission } from '@core/domain/auth';
 import { appConfig } from './app.config';
 import { routes } from './app.routes';
@@ -51,6 +57,7 @@ describe('routes', () => {
   const signUp = children.find((c) => c.path === 'sign-up');
   const signIn = children.find((c) => c.path === 'sign-in');
   const checkEmail = children.find((c) => c.path === 'check-email');
+  const pay = children.find((c) => c.path === 'pay');
 
   it('registers /self-checkout as a top-level route whose lane is its empty child', () => {
     expect(selfCheckout).toBeDefined();
@@ -72,6 +79,7 @@ describe('routes', () => {
     expect(`/self-checkout/${signUp?.path}`).toBe(SIGN_UP_ROUTE);
     expect(`/self-checkout/${signIn?.path}`).toBe(SIGN_IN_ROUTE);
     expect(`/self-checkout/${checkEmail?.path}`).toBe(CHECK_EMAIL_ROUTE);
+    expect(`/self-checkout/${pay?.path}`).toBe(PAY_ROUTE);
     expect(`/${selfCheckout?.path}`).toBe(LANE_ROUTE);
   });
 
@@ -209,6 +217,16 @@ describe('routes', () => {
       expect(selfCheckoutRoute.get(PendingRegistrationStore)).toBeInstanceOf(
         PendingRegistrationStore
       );
+    });
+
+    it('scopes checkout and PayPal adapters to the same parent route', () => {
+      expect(selfCheckoutRoute.get(SELF_CHECKOUT_GATEWAY)).toBeInstanceOf(SelfCheckoutHttpAdapter);
+      expect(selfCheckoutRoute.get(PAYPAL_CHECKOUT)).toBeInstanceOf(PayPalV6CheckoutAdapter);
+      expect(selfCheckoutRoute.get(SelfCheckoutAttemptStore)).toBeInstanceOf(
+        SelfCheckoutAttemptStore
+      );
+      expect(routesProviding(SELF_CHECKOUT_GATEWAY)).toEqual(['self-checkout']);
+      expect(routesProviding(PAYPAL_CHECKOUT)).toEqual(['self-checkout']);
     });
 
     it('provides one customer cart and facade on the parent route only', () => {

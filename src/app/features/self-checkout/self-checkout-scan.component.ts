@@ -6,6 +6,7 @@ import {
   ViewChild,
   computed,
   inject,
+  output,
   signal,
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
@@ -70,6 +71,7 @@ type ScanFeedback =
   templateUrl: './self-checkout-scan.component.html',
 })
 export class SelfCheckoutScanComponent {
+  readonly checkout = output<void>();
   private readonly pos = inject(PosFacade);
   private readonly products = inject(ProductService);
   private readonly camera = inject(CameraService);

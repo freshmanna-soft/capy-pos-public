@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { SIGN_IN_ROUTE, SIGN_UP_ROUTE } from './self-checkout-routes';
+import { PAY_ROUTE, SIGN_IN_ROUTE, SIGN_UP_ROUTE } from './self-checkout-routes';
 import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
 import { SELF_CHECKOUT_TITLE } from './self-checkout-palette';
 import { SelfCheckoutScanComponent } from './self-checkout-scan.component';
@@ -66,6 +66,10 @@ export class SelfCheckoutComponent {
 
   protected goToSignIn(): void {
     void this.router.navigate([SIGN_IN_ROUTE]);
+  }
+
+  protected goToPay(): void {
+    void this.router.navigate([PAY_ROUTE]);
   }
 
   protected async signOut(): Promise<void> {

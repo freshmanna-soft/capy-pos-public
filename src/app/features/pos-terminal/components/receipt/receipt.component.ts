@@ -1,16 +1,8 @@
 import { Component, ChangeDetectionStrategy, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
-import { CartItem } from '@core/application/services/cart.service.interface';
+import { ReceiptData } from '@core/application/dtos/receipt.dto';
 
-export interface ReceiptData {
-  payment: PaymentResult;
-  items: CartItem[];
-  subtotal: number;
-  tax: number;
-  taxRate: number;
-  total: number;
-}
+export type { ReceiptData } from '@core/application/dtos/receipt.dto';
 
 /**
  * Receipt Component
@@ -65,13 +57,13 @@ export interface ReceiptData {
 
           <!-- Items -->
           <div class="receipt-items">
-            @for (item of data().items; track item.product.id) {
+            @for (item of data().items; track item.productId) {
               <div class="receipt-item">
                 <div class="item-info">
-                  <span class="item-name">{{ item.product.name }}</span>
+                  <span class="item-name">{{ item.productName }}</span>
                   <span class="item-qty">x{{ item.quantity }}</span>
                 </div>
-                <span class="item-price">{{ item.product.price * item.quantity | currency }}</span>
+                <span class="item-price">{{ item.subtotal | currency: data().currency }}</span>
               </div>
             }
           </div>
@@ -82,15 +74,17 @@ export interface ReceiptData {
           <div class="receipt-totals">
             <div class="total-row">
               <span>Subtotal</span>
-              <span>{{ data().subtotal | currency }}</span>
+              <span>{{ data().subtotal | currency: data().currency }}</span>
             </div>
             <div class="total-row">
               <span>Tax ({{ (data().taxRate * 100).toFixed(1) }}%)</span>
-              <span>{{ data().tax | currency }}</span>
+              <span>{{ data().tax | currency: data().currency }}</span>
             </div>
             <div class="total-row grand-total">
               <span>Total</span>
-              <span data-testid="receipt-total">{{ data().total | currency }}</span>
+              <span data-testid="receipt-total">{{
+                data().total | currency: data().currency
+              }}</span>
             </div>
           </div>
 
@@ -106,12 +100,14 @@ export interface ReceiptData {
             </div>
             <div class="payment-row">
               <span>Amount Paid</span>
-              <span>{{ data().payment.amount | currency }}</span>
+              <span>{{ data().payment.amount | currency: data().currency }}</span>
             </div>
             @if (data().payment.change !== undefined && data().payment.change! > 0) {
               <div class="payment-row change">
                 <span>Change</span>
-                <span data-testid="receipt-change">{{ data().payment.change! | currency }}</span>
+                <span data-testid="receipt-change">{{
+                  data().payment.change! | currency: data().currency
+                }}</span>
               </div>
             }
           </div>
@@ -362,6 +358,7 @@ export class ReceiptComponent {
       cash: '💵 Cash',
       card: '💳 Card',
       mobile: '📱 Mobile',
+      paypal: 'PayPal',
     };
     return labels[method] || method;
   }

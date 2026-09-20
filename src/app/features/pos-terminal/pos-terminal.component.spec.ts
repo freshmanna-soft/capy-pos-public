@@ -2,10 +2,8 @@ import { TestBed, ComponentFixture } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { PosTerminalComponent } from '@features/pos-terminal/pos-terminal.component';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
-import {
-  CheckoutComponent,
-  PaymentResult,
-} from '@features/pos-terminal/components/checkout/checkout.component';
+import { CheckoutComponent } from '@features/pos-terminal/components/checkout/checkout.component';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { ProductSearchComponent } from '@features/pos-terminal/components/product-search/product-search.component';
 import { ShoppingCartComponent } from '@features/pos-terminal/components/shopping-cart/shopping-cart.component';
 import { CartService } from '@core/application/services/cart.service';
@@ -580,8 +578,8 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       const receipt = component.receiptData();
       expect(receipt).not.toBeNull();
       expect(receipt!.items).toHaveLength(2);
-      expect(receipt!.items[0].product.name).toBe('Organic Coffee');
-      expect(receipt!.items[1].product.name).toBe('Green Tea');
+      expect(receipt!.items[0].productName).toBe('Organic Coffee');
+      expect(receipt!.items[1].productName).toBe('Green Tea');
     });
 
     it('should include correct totals in receipt', async () => {

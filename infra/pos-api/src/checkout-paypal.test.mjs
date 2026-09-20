@@ -196,6 +196,76 @@ describe('PayPal SDK gateway', () => {
     assert.equal('body' in mapped, false);
   });
 
+  it('maps documented PayPal child shapes whose binding stays on the purchase unit', async () => {
+    const documentedAuthorization = {
+      id: 'authorization-1',
+      status: 'CREATED',
+      amount: { currencyCode: 'USD', value: '3.26' },
+      sellerProtection: { status: 'ELIGIBLE' },
+    };
+    const documentedCapture = {
+      id: 'capture-1',
+      status: 'COMPLETED',
+      amount: { currencyCode: 'USD', value: '3.26' },
+      finalCapture: true,
+    };
+    const fake = controllers({
+      orders: {
+        async createOrder() {
+          return response(order());
+        },
+        async getOrder() {
+          return response(order());
+        },
+        async authorizeOrder() {
+          return response(
+            order({
+              status: 'COMPLETED',
+              purchaseUnits: [
+                purchaseUnit({ payments: { authorizations: [documentedAuthorization] } }),
+              ],
+            })
+          );
+        },
+      },
+      payments: {
+        async getAuthorizedPayment() {
+          return response(documentedAuthorization);
+        },
+        async captureAuthorizedPayment() {
+          return response(documentedCapture);
+        },
+        async getCapturedPayment() {
+          return response(documentedCapture);
+        },
+        async voidPayment() {
+          return response({ ...documentedAuthorization, status: 'VOIDED' });
+        },
+      },
+    });
+    const gateway = new PayPalSdkGateway(fake.value, 1_000);
+
+    const mappedOrder = await gateway.authorizeOrder('order-1', 'request-authorize');
+    assert.deepEqual(mappedOrder.purchaseUnits[0].authorizations[0], {
+      id: 'authorization-1',
+      status: 'CREATED',
+      amount: { currencyCode: 'USD', value: '3.26' },
+      customId: null,
+      invoiceId: null,
+      payeeMerchantId: 'merchant-1',
+      relatedCaptureId: null,
+    });
+    assert.deepEqual(await gateway.captureAuthorization('authorization-1', 'request-capture'), {
+      id: 'capture-1',
+      status: 'COMPLETED',
+      amount: { currencyCode: 'USD', value: '3.26' },
+      customId: null,
+      invoiceId: null,
+      payeeMerchantId: null,
+      finalCapture: true,
+    });
+  });
+
   it('fails closed on malformed provider representations', async () => {
     const fake = controllers({
       orders: {
@@ -363,6 +433,72 @@ describe('PayPal checkout fact verification', () => {
           'COMPLETED',
         ]),
       /capture/i
+    );
+  });
+
+  it('accepts real PayPal child resources that omit purchase-unit binding fields', () => {
+    const expectedAuthorization = {
+      ...expected,
+      authorizationId: 'authorization-1',
+    };
+    const expectedCapture = { ...expected, captureId: 'capture-1' };
+    const authorizationSnapshot = {
+      id: 'authorization-1',
+      status: 'CREATED',
+      amount: { currencyCode: 'USD', value: '3.26' },
+      customId: null,
+      invoiceId: null,
+      payeeMerchantId: null,
+    };
+    const captureSnapshot = {
+      id: 'capture-1',
+      status: 'COMPLETED',
+      amount: { currencyCode: 'USD', value: '3.26' },
+      customId: null,
+      invoiceId: null,
+      payeeMerchantId: null,
+      finalCapture: true,
+    };
+
+    assert.equal(
+      assertPayPalAuthorization(authorizationSnapshot, expectedAuthorization, ['CREATED']).id,
+      'authorization-1'
+    );
+    assert.equal(
+      assertPayPalCapture(captureSnapshot, expectedCapture, ['COMPLETED']).id,
+      'capture-1'
+    );
+  });
+
+  it('still rejects child binding fields when PayPal returns conflicting values', () => {
+    const expectedAuthorization = {
+      ...expected,
+      authorizationId: 'authorization-1',
+    };
+    const snapshot = {
+      id: 'authorization-1',
+      status: 'CREATED',
+      amount: { currencyCode: 'USD', value: '3.26' },
+      customId: null,
+      invoiceId: null,
+      payeeMerchantId: null,
+    };
+
+    assert.throws(
+      () =>
+        assertPayPalAuthorization({ ...snapshot, customId: 'other' }, expectedAuthorization, [
+          'CREATED',
+        ]),
+      /authorization/i
+    );
+    assert.throws(
+      () =>
+        assertPayPalAuthorization(
+          { ...snapshot, payeeMerchantId: 'other' },
+          expectedAuthorization,
+          ['CREATED']
+        ),
+      /authorization/i
     );
   });
 });

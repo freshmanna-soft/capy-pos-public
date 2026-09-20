@@ -141,6 +141,14 @@ describe('SelfCheckoutScanComponent', () => {
     return { arrive, fail };
   }
 
+  function renderPending() {
+    configure([]);
+    const catalogue = deferredCatalogue();
+    const fixture = TestBed.createComponent(SelfCheckoutScanComponent);
+    fixture.detectChanges();
+    return { fixture, catalogue };
+  }
+
   function scan(fixture: Awaited<ReturnType<typeof render>>, code: string) {
     const input: HTMLInputElement = fixture.nativeElement.querySelector(
       '[data-testid="self-checkout-code-input"]'
@@ -169,6 +177,26 @@ describe('SelfCheckoutScanComponent', () => {
     expect(
       fixture.nativeElement.querySelector('[data-testid="self-checkout-cart-empty"]')
     ).not.toBeNull();
+  });
+
+  it('offers checkout only after the basket contains an item', async () => {
+    const fixture = await render();
+    expect(fixture.nativeElement.querySelector('[data-testid="self-checkout-pay"]')).toBeNull();
+
+    scan(fixture, UPCA);
+
+    expect(fixture.nativeElement.querySelector('[data-testid="self-checkout-pay"]')).not.toBeNull();
+  });
+
+  it('emits checkout without owning router navigation', async () => {
+    const fixture = await render();
+    const emitted = vi.fn();
+    fixture.componentInstance.checkout.subscribe(emitted);
+    scan(fixture, UPCA);
+
+    fixture.nativeElement.querySelector('[data-testid="self-checkout-pay"]').click();
+
+    expect(emitted).toHaveBeenCalledOnce();
   });
 
   it('adds a product scanned at the width it was registered at', async () => {
@@ -322,14 +350,6 @@ describe('SelfCheckoutScanComponent', () => {
     ).not.toBeNull();
   });
 
-  it('offers no pay control — the payment step is a separate item', async () => {
-    const fixture = await render();
-
-    scan(fixture, UPCA);
-
-    expect(fixture.nativeElement.textContent).not.toContain('Pay');
-  });
-
   /**
    * Scans that beat the catalogue.
    *
@@ -339,14 +359,6 @@ describe('SelfCheckoutScanComponent', () => {
    * unrecognized because of a race the customer cannot see.
    */
   describe('before the catalogue has loaded', () => {
-    function renderPending() {
-      configure([]);
-      const catalogue = deferredCatalogue();
-      const fixture = TestBed.createComponent(SelfCheckoutScanComponent);
-      fixture.detectChanges();
-      return { fixture, catalogue };
-    }
-
     it('says the items are still coming', () => {
       const { fixture } = renderPending();
 
@@ -716,14 +728,6 @@ describe('SelfCheckoutScanComponent', () => {
 
     function reply(fixture: Fixture, testId: string): HTMLElement | null {
       return fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
-    }
-
-    function renderPending() {
-      configure([]);
-      const catalogue = deferredCatalogue();
-      const fixture = TestBed.createComponent(SelfCheckoutScanComponent);
-      fixture.detectChanges();
-      return { fixture, catalogue };
     }
 
     it('announces a successful add politely', async () => {

@@ -199,9 +199,14 @@
             <dd data-testid="self-checkout-total">{{ total() | number: '1.2-2' }}</dd>
           </div>
         </dl>
-        <!-- No pay control here on purpose: the payment seam and the sale
-             submission are separate items, and a button that looks like it pays
-             but does not is worse than no button. -->
+        <button
+          type="button"
+          (click)="checkout.emit()"
+          class="mt-5 w-full rounded-xl bg-yuzu px-5 py-3 font-data text-[11px] font-bold uppercase tracking-[0.16em] text-onsen-deep transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yuzu"
+          data-testid="self-checkout-pay"
+        >
+          Continue to PayPal
+        </button>
       }
     </aside>
   </div>

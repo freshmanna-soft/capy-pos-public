@@ -137,7 +137,7 @@ describe('self-checkout cart boundary', () => {
     expect(rootCart.items().map((item) => item.product.id)).toEqual(['till-1']);
   });
 
-  it.each(['sign-up', 'sign-in', 'check-email'])(
+  it.each(['sign-up', 'sign-in', 'check-email', 'pay'])(
     'preserves the basket across a lane → %s → lane side trip',
     async (path) => {
       const routeCart = routeInjector.get(CartService);
