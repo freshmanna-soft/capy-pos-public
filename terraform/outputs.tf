@@ -41,6 +41,16 @@ output "checkout_reconciliation_jobs" {
   value       = { for name, job in ibm_code_engine_job.checkout_reconciliation : name => job.name }
 }
 
+output "loyalty_migration_jobs" {
+  description = "Loyalty migration Code Engine job names, keyed by service"
+  value       = { for name, job in ibm_code_engine_job.loyalty_migration : name => job.name }
+}
+
+output "loyalty_reconciliation_jobs" {
+  description = "Loyalty reconciliation Code Engine job names, keyed by service"
+  value       = { for name, job in ibm_code_engine_job.loyalty_reconciliation : name => job.name }
+}
+
 output "checkout_reconciliation_schedule" {
   description = "Cron schedule to apply out of band to each checkout reconciliation job"
   value       = var.checkout_reconciliation_schedule

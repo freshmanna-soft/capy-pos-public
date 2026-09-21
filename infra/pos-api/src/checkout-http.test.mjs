@@ -6,8 +6,8 @@ import { handleCheckoutHttp, matchCheckoutRoute } from './checkout-http.ts';
 function context(overrides = {}) {
   const calls = [];
   const checkout = {
-    async create(body, idempotencyKey) {
-      calls.push(['create', body, idempotencyKey]);
+    async create(body, idempotencyKey, customer) {
+      calls.push(['create', body, idempotencyKey, customer]);
       return { checkoutId: 'checkout-1', checkoutToken: 'token', state: 'awaiting-approval' };
     },
     async status(checkoutId, checkoutToken) {
@@ -34,6 +34,7 @@ function request(method, path, overrides = {}) {
   return {
     method,
     path,
+    authorization: overrides.authorization,
     idempotencyKey: overrides.idempotencyKey,
     checkoutToken: overrides.checkoutToken,
     body: overrides.body,
@@ -89,9 +90,99 @@ describe('checkout HTTP routes', () => {
       ctx.deps
     );
     assert.deepEqual(ctx.calls, [
-      ['create', body, 'idempotency-key'],
+      ['create', body, 'idempotency-key', null],
       ['status', 'c-1', 'token'],
       ['complete', 'c-1', 'token'],
+    ]);
+  });
+
+  it('passes a verified customer only to checkout creation', async () => {
+    const keyPair = (await import('node:crypto')).generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+    });
+    const config = {
+      region: 'us-south',
+      tenantId: 'checkout-customer-tenant',
+      audience: 'customer-client',
+    };
+    const issuer = `https://${config.region}.appid.cloud.ibm.com/oauth/v4/${config.tenantId}`;
+    const kid = 'checkout-http-customer-key';
+    const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const payload = {
+      sub: 'customer-1',
+      scope: 'openid customer',
+      iss: issuer,
+      aud: [config.audience],
+      exp: 1_800_000_100,
+    };
+    const signingInput = `${encode({ alg: 'RS256', kid })}.${encode(payload)}`;
+    const signature = (await import('node:crypto'))
+      .sign('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey)
+      .toString('base64url');
+    const token = `${signingInput}.${signature}`;
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        keys: [{ kid, ...keyPair.publicKey.export({ format: 'jwk' }) }],
+      }),
+    });
+    try {
+      const ctx = context();
+      ctx.deps.customerAuth = config;
+      ctx.deps.nowSeconds = () => 1_800_000_000;
+      const response = await handleCheckoutHttp(
+        request('POST', '/api/self-checkout/checkouts', {
+          authorization: `Bearer ${token}`,
+          body: { items: [] },
+          idempotencyKey: 'key',
+        }),
+        ctx.deps
+      );
+      assert.equal(response.status, 201);
+      assert.equal(ctx.calls[0][0], 'create');
+      assert.equal(ctx.calls[0][3].subject, 'customer-1');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('rejects invalid present auth without degrading to guest', async () => {
+    for (const authorization of ['Bearer forged', ['Bearer first', 'Bearer second']]) {
+      const ctx = context();
+      ctx.deps.customerAuth = { region: 'us-south', tenantId: 'tenant', audience: 'customer' };
+      const response = await handleCheckoutHttp(
+        request('POST', '/api/self-checkout/checkouts', { authorization }),
+        ctx.deps
+      );
+      assert.deepEqual(response, {
+        status: 401,
+        body: { error: 'Customer authorization required.' },
+      });
+      assert.deepEqual(ctx.calls, []);
+    }
+  });
+
+  it('does not authenticate status or completion with the customer bearer', async () => {
+    const ctx = context();
+    await handleCheckoutHttp(
+      request('GET', '/api/self-checkout/checkouts/c-1', {
+        authorization: 'Bearer forged',
+        checkoutToken: 'capability',
+      }),
+      ctx.deps
+    );
+    await handleCheckoutHttp(
+      request('POST', '/api/self-checkout/checkouts/c-1/complete', {
+        authorization: 'Bearer forged',
+        checkoutToken: 'capability',
+      }),
+      ctx.deps
+    );
+    assert.deepEqual(ctx.calls, [
+      ['status', 'c-1', 'capability'],
+      ['complete', 'c-1', 'capability'],
     ]);
   });
 

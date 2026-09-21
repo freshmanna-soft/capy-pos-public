@@ -1,9 +1,14 @@
-import type { CheckoutService } from './checkout-service.ts';
 import { CheckoutServiceError } from './checkout-service.ts';
+import {
+  authenticateOptionalCustomer,
+  type CustomerPrincipal,
+  type CustomerVerificationConfig,
+} from './customer-auth.ts';
 
 export interface CheckoutHttpRequest {
   readonly method: string;
   readonly path: string;
+  readonly authorization: string | readonly string[] | undefined;
   readonly idempotencyKey: string | undefined;
   readonly checkoutToken: string | undefined;
   readonly body: unknown;
@@ -23,10 +28,22 @@ export interface CheckoutRateLimiter {
   consume(key: string): CheckoutRateLimitResult;
 }
 
+export interface CheckoutHttpCheckoutService {
+  create(
+    body: unknown,
+    idempotencyKey: string,
+    customer?: CustomerPrincipal | null
+  ): Promise<unknown>;
+  status(checkoutId: string, checkoutToken: string): Promise<unknown>;
+  complete(checkoutId: string, checkoutToken: string): Promise<unknown>;
+}
+
 export interface CheckoutHttpDeps {
-  readonly checkout: CheckoutService;
+  readonly checkout: CheckoutHttpCheckoutService;
   readonly rateLimiter: CheckoutRateLimiter;
   readonly rateLimitKey: string;
+  readonly customerAuth?: CustomerVerificationConfig;
+  readonly nowSeconds?: () => number;
 }
 
 export type CheckoutHttpRoute =
@@ -74,11 +91,23 @@ export async function handleCheckoutHttp(
 
   try {
     switch (route.kind) {
-      case 'create':
+      case 'create': {
+        const customer = await authenticateOptionalCustomer(
+          optionalAuthorization(request.authorization),
+          deps.customerAuth,
+          (deps.nowSeconds ?? (() => Math.floor(Date.now() / 1000)))()
+        );
+        if (!customer.ok) return { status: customer.status, body: { error: customer.error } };
         return {
           status: 201,
-          body: await deps.checkout.create(request.body, request.idempotencyKey ?? ''),
+          body: await createCheckout(
+            deps.checkout,
+            request.body,
+            request.idempotencyKey ?? '',
+            customer.principal
+          ),
         };
+      }
       case 'status':
         return {
           status: 200,
@@ -93,6 +122,22 @@ export async function handleCheckoutHttp(
   } catch (error) {
     return checkoutErrorResponse(error);
   }
+}
+
+function optionalAuthorization(value: string | readonly string[] | undefined): string | undefined {
+  if (value === undefined || typeof value === 'string') return value;
+  // A repeated Authorization header is present but invalid. Preserve "present"
+  // so strict optional auth rejects it instead of silently creating a guest.
+  return '';
+}
+
+function createCheckout(
+  checkout: CheckoutHttpCheckoutService,
+  body: unknown,
+  idempotencyKey: string,
+  customer: CustomerPrincipal | null
+): Promise<unknown> {
+  return checkout.create(body, idempotencyKey, customer);
 }
 
 function checkoutErrorResponse(error: unknown): CheckoutHttpResponse {

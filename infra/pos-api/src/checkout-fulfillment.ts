@@ -17,7 +17,14 @@ export interface ReservationAwareProductInventory {
   readonly checkoutMarkers?: CheckoutInventoryMarkers;
 }
 
-export interface CheckoutSaleTransactionDocument extends StoredDocument {
+export const CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2 = 'v2' as const;
+
+export interface CheckoutTransactionCustomerBinding {
+  readonly customerKey: string;
+  readonly keyVersion: 'sha256-v1';
+}
+
+interface CheckoutSaleTransactionDocumentBase extends StoredDocument {
   readonly kind: 'checkout-sale';
   readonly type: 'sale';
   readonly checkoutId: string;
@@ -26,6 +33,22 @@ export interface CheckoutSaleTransactionDocument extends StoredDocument {
   readonly quote: CheckoutQuote;
   readonly timestamp: string;
 }
+
+export interface CheckoutSaleTransactionDocumentV1 extends CheckoutSaleTransactionDocumentBase {
+  readonly schemaVersion?: never;
+  readonly customerBinding?: never;
+}
+
+export interface CheckoutSaleTransactionDocumentV2 extends CheckoutSaleTransactionDocumentBase {
+  readonly schemaVersion: typeof CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2;
+  readonly customerBinding: CheckoutTransactionCustomerBinding | null;
+}
+
+export type CheckoutSaleTransactionDocument =
+  | CheckoutSaleTransactionDocumentV1
+  | CheckoutSaleTransactionDocumentV2;
+
+export type PublicCheckoutSaleTransactionDocument = CheckoutSaleTransactionDocumentBase;
 
 export type CheckoutTransactionPersistenceResult = Readonly<{
   outcome: 'created' | 'replay';
@@ -77,6 +100,8 @@ export async function persistCheckoutTransaction(
     readonly storeId: string;
     readonly quote: CheckoutQuote;
     readonly completedAt: string;
+    readonly schemaVersion?: typeof CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2;
+    readonly customerBinding?: CheckoutTransactionCustomerBinding | null;
   }
 ): Promise<CheckoutTransactionPersistenceResult> {
   assertIdentifier(input.checkoutId, 'checkoutId');
@@ -84,8 +109,14 @@ export async function persistCheckoutTransaction(
   assertIdentifier(input.storeId, 'storeId');
   assertCanonicalUtc(input.completedAt, 'completedAt');
   assertCheckoutQuote(input.quote);
+  if (input.schemaVersion === undefined && input.customerBinding !== undefined) {
+    throw new Error('customerBinding requires a V2 checkout transaction.');
+  }
+  if (input.schemaVersion === CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2) {
+    validateTransactionCustomerBinding(input.customerBinding ?? null);
+  }
 
-  const transaction: CheckoutSaleTransactionDocument = {
+  const base: CheckoutSaleTransactionDocumentBase = {
     id: checkoutTransactionId(input.checkoutId),
     kind: 'checkout-sale',
     type: 'sale',
@@ -95,6 +126,14 @@ export async function persistCheckoutTransaction(
     quote: input.quote,
     timestamp: input.completedAt,
   };
+  const transaction: CheckoutSaleTransactionDocument =
+    input.schemaVersion === CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2
+      ? {
+          ...base,
+          schemaVersion: CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2,
+          customerBinding: input.customerBinding ?? null,
+        }
+      : base;
 
   if ((await transactions.create(transaction)) === 'created') {
     return { outcome: 'created', transaction };
@@ -113,7 +152,8 @@ export async function persistCheckoutTransaction(
     existing.document.checkoutId !== transaction.checkoutId ||
     existing.document.paypalCaptureId !== transaction.paypalCaptureId ||
     existing.document.storeId !== transaction.storeId ||
-    !checkoutQuotesEqual(existing.document.quote, transaction.quote)
+    !checkoutQuotesEqual(existing.document.quote, transaction.quote) ||
+    !sameTransactionCustomerBinding(existing.document, transaction)
   ) {
     throw new CheckoutTransactionCorruptionError('binding-conflict');
   }
@@ -126,10 +166,24 @@ export function checkoutTransactionId(checkoutId: string): string {
   return `${TRANSACTION_PREFIX}${Buffer.from(checkoutId, 'utf8').toString('base64url')}`;
 }
 
+/** Removes V2 customer/loyalty metadata before a transaction crosses an HTTP boundary. */
+export function publicCheckoutSaleTransaction(
+  transaction: CheckoutSaleTransactionDocument
+): PublicCheckoutSaleTransactionDocument {
+  assertCheckoutSaleTransaction(transaction);
+  const {
+    schemaVersion: _schemaVersion,
+    customerBinding: _customerBinding,
+    ...publicRecord
+  } = transaction;
+  return publicRecord;
+}
+
 function assertCheckoutSaleTransaction(
   value: unknown
 ): asserts value is CheckoutSaleTransactionDocument {
   if (!isRecord(value)) throw new Error('Stored checkout transaction is invalid.');
+  const v2 = Object.prototype.hasOwnProperty.call(value, 'schemaVersion');
   const expectedKeys = [
     'id',
     'kind',
@@ -139,6 +193,7 @@ function assertCheckoutSaleTransaction(
     'storeId',
     'quote',
     'timestamp',
+    ...(v2 ? ['schemaVersion', 'customerBinding'] : []),
   ];
   const keys = Object.keys(value);
   if (keys.length !== expectedKeys.length || keys.some((key) => !expectedKeys.includes(key))) {
@@ -156,6 +211,45 @@ function assertCheckoutSaleTransaction(
   assertIdentifier(value['storeId'], 'transaction.storeId');
   assertCheckoutQuote(value['quote']);
   assertCanonicalUtc(value['timestamp'], 'transaction.timestamp');
+  if (v2) {
+    if (value['schemaVersion'] !== CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2) {
+      throw new Error('Stored checkout transaction has an invalid version.');
+    }
+    validateTransactionCustomerBinding(value['customerBinding']);
+  }
+}
+
+function validateTransactionCustomerBinding(
+  value: unknown
+): asserts value is CheckoutTransactionCustomerBinding | null {
+  if (value === null) return;
+  if (!isRecord(value)) throw new Error('transaction.customerBinding is invalid.');
+  const expectedKeys = ['customerKey', 'keyVersion'];
+  const keys = Object.keys(value);
+  if (keys.length !== expectedKeys.length || keys.some((key) => !expectedKeys.includes(key))) {
+    throw new Error('transaction.customerBinding has an invalid shape.');
+  }
+  assertIdentifier(value['customerKey'], 'transaction.customerBinding.customerKey');
+  if (value['keyVersion'] !== 'sha256-v1') {
+    throw new Error('transaction.customerBinding.keyVersion is invalid.');
+  }
+}
+
+function sameTransactionCustomerBinding(
+  left: CheckoutSaleTransactionDocument,
+  right: CheckoutSaleTransactionDocument
+): boolean {
+  const leftV2 = left.schemaVersion === CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2;
+  const rightV2 = right.schemaVersion === CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2;
+  if (leftV2 !== rightV2) return false;
+  if (!leftV2 || !rightV2) return true;
+  if (left.customerBinding === null || right.customerBinding === null) {
+    return left.customerBinding === right.customerBinding;
+  }
+  return (
+    left.customerBinding.customerKey === right.customerBinding.customerKey &&
+    left.customerBinding.keyVersion === right.customerBinding.keyVersion
+  );
 }
 
 function assertIdentifier(value: unknown, label: string): asserts value is string {

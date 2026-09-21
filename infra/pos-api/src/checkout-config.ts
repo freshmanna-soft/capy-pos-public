@@ -14,6 +14,10 @@ export interface CheckoutConfig extends CheckoutPricingPolicy {
   readonly paypalClientSecret: string;
   readonly paypalEnvironment: 'sandbox' | 'production';
   readonly paypalTimeoutMs: number;
+  /** Compatibility rollout: omitted/false keeps every new checkout on the V1 schema. */
+  readonly checkoutV2WritesEnabled?: boolean;
+  /** Loyalty obligations are written only when V2 writes and this flag are both enabled. */
+  readonly customerLoyaltyEnabled?: boolean;
 }
 
 export function loadCheckoutConfig(
@@ -94,6 +98,14 @@ export function loadCheckoutConfig(
       1,
       120_000
     ),
+    checkoutV2WritesEnabled: booleanFlag(
+      environment['CHECKOUT_V2_WRITES_ENABLED'],
+      'CHECKOUT_V2_WRITES_ENABLED'
+    ),
+    customerLoyaltyEnabled: booleanFlag(
+      environment['CUSTOMER_LOYALTY_ENABLED'],
+      'CUSTOMER_LOYALTY_ENABLED'
+    ),
   });
 }
 
@@ -112,6 +124,12 @@ function paypalEnvironment(
     throw new Error('Production checkout requires PAYPAL_ENVIRONMENT=production.');
   }
   return selected;
+}
+
+function booleanFlag(value: string | undefined, name: string): boolean {
+  if (value === undefined || value.length === 0 || value === 'false') return false;
+  if (value === 'true') return true;
+  throw new Error(`${name} must be true or false.`);
 }
 
 function required(value: string | undefined, name: string): string {

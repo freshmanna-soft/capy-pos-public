@@ -3,6 +3,7 @@ import type { DocumentStore } from '../../shared/src/document-store.ts';
 import type { ProductDocument, TransactionDocument } from './api.ts';
 import type { CheckoutConfig } from './checkout-config.ts';
 import {
+  CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2,
   CheckoutTransactionCorruptionError,
   checkoutInventoryOf,
   persistCheckoutTransaction,
@@ -37,13 +38,21 @@ import {
   isTerminalCheckoutState,
   type CheckoutState as State,
 } from './checkout-state.ts';
-import type {
-  BindingResult,
-  CheckoutDocument,
-  CheckoutReceiptProjection,
-  CheckoutRepository,
-  VersionedCheckout,
+import {
+  CHECKOUT_FINGERPRINT_VERSION_V2,
+  CHECKOUT_SCHEMA_VERSION_V2,
+  type BindingResult,
+  type CheckoutCustomerBinding,
+  type CheckoutDocument,
+  type CheckoutLoyaltyProjection,
+  type CheckoutReceiptProjection,
+  type CheckoutRepository,
+  type IdempotencyFingerprintBinding,
+  type PublicCheckoutLoyalty,
+  type VersionedCheckout,
 } from './checkout-store.ts';
+import type { CustomerPrincipal } from './customer-auth.ts';
+import { pointsForSelfCheckout, SELF_CHECKOUT_LOYALTY_POLICY_VERSION } from './loyalty-policy.ts';
 
 export interface CheckoutSecrets {
   readonly idempotencyHmacKeys: Readonly<Record<string, string>>;
@@ -75,6 +84,7 @@ export type CheckoutStatusProjection = Readonly<{
   quote: CheckoutQuote;
   paypalOrderId: string | null;
   receipt: CheckoutReceiptProjection | null;
+  loyalty: PublicCheckoutLoyalty;
   failure: Readonly<{ code: string; retryable: boolean }> | null;
 }>;
 
@@ -176,7 +186,11 @@ export class CheckoutService {
     this.deps = deps;
   }
 
-  async create(rawBody: unknown, rawIdempotencyKey: string): Promise<CreatedCheckoutProjection> {
+  async create(
+    rawBody: unknown,
+    rawIdempotencyKey: string,
+    customer: CustomerPrincipal | null = null
+  ): Promise<CreatedCheckoutProjection> {
     let request: CheckoutCreateRequest;
     try {
       request = parseCheckoutCreateRequest(rawBody, this.deps.config);
@@ -187,13 +201,28 @@ export class CheckoutService {
       throw error;
     }
     const idempotencyKey = boundedHeader(rawIdempotencyKey, 'Idempotency-Key');
-    const requestFingerprint = digestCanonicalRequest(request.items);
-    const idempotency = await this.lookupIdempotency(idempotencyKey, requestFingerprint);
+    const customerBinding = checkoutCustomerBinding(customer);
+    const fingerprintBinding = this.fingerprintBinding(customerBinding);
+    const requestFingerprint = digestCanonicalRequest(
+      request.items,
+      customerBinding,
+      fingerprintBinding.requestFingerprintVersion === CHECKOUT_FINGERPRINT_VERSION_V2
+    );
+    const idempotency = await this.lookupIdempotency(
+      idempotencyKey,
+      requestFingerprint,
+      fingerprintBinding
+    );
     if (idempotency.lookup.outcome === 'conflict') {
       throw new CheckoutServiceError('idempotency-conflict');
     }
     if (idempotency.lookup.outcome === 'digest-collision') {
       throw new CheckoutServiceError('conflict');
+    }
+    if (customerBinding.kind === 'customer' && this.deps.config.checkoutV2WritesEnabled !== true) {
+      // Compatibility-only revisions must not silently persist an authenticated
+      // purchase as a guest V1 record. Activation is an explicit deployment gate.
+      throw new CheckoutServiceError('provider-unavailable', true);
     }
     if (idempotency.lookup.outcome === 'replay') {
       const existing = await this.deps.checkouts.read(idempotency.lookup.checkoutId);
@@ -206,6 +235,7 @@ export class CheckoutService {
           keyHash: idempotency.keyHash,
           keyVersion: idempotency.keyVersion,
           requestFingerprint,
+          fingerprintBinding,
           quote: existing.document.quote,
           now: this.now(),
         });
@@ -238,6 +268,7 @@ export class CheckoutService {
             keyHash: idempotency.keyHash,
             keyVersion: idempotency.keyVersion,
             requestFingerprint,
+            ...fingerprintBinding,
             checkoutId: proposedCheckoutId,
             nowIso: now,
           });
@@ -251,6 +282,7 @@ export class CheckoutService {
         keyHash: idempotency.keyHash,
         keyVersion: idempotency.keyVersion,
         requestFingerprint,
+        fingerprintBinding,
         quote,
         now,
       });
@@ -262,6 +294,7 @@ export class CheckoutService {
       idempotency.keyHash,
       idempotency.keyVersion,
       requestFingerprint,
+      fingerprintBinding,
       quote,
       now
     );
@@ -422,7 +455,8 @@ export class CheckoutService {
 
   private async lookupIdempotency(
     idempotencyKey: string,
-    requestFingerprint: string
+    requestFingerprint: string,
+    fingerprintBinding: IdempotencyFingerprintBinding
   ): Promise<{
     readonly keyHash: string;
     readonly keyVersion: string;
@@ -447,6 +481,7 @@ export class CheckoutService {
         keyHash,
         keyVersion,
         requestFingerprint,
+        ...fingerprintBinding,
       });
       if (lookup.outcome !== 'missing') return { keyHash, keyVersion, lookup };
     }
@@ -465,6 +500,26 @@ export class CheckoutService {
     };
   }
 
+  private fingerprintBinding(
+    customerBinding: CheckoutCustomerBinding
+  ): IdempotencyFingerprintBinding {
+    if (this.deps.config.checkoutV2WritesEnabled === true) {
+      return {
+        requestFingerprintVersion: CHECKOUT_FINGERPRINT_VERSION_V2,
+        customerBinding,
+      };
+    }
+    // Compatibility release: anonymous requests continue to write/read exact V1.
+    // An authenticated request is deliberately V2-shaped even while writes are off,
+    // so it conflicts with (and can never inherit) a V1 item-only claim.
+    return customerBinding.kind === 'guest'
+      ? {}
+      : {
+          requestFingerprintVersion: CHECKOUT_FINGERPRINT_VERSION_V2,
+          customerBinding,
+        };
+  }
+
   private async resumeCreateReplay(
     checkoutId: string,
     checkoutToken: string,
@@ -472,6 +527,7 @@ export class CheckoutService {
       readonly keyHash: string;
       readonly keyVersion: string;
       readonly requestFingerprint: string;
+      readonly fingerprintBinding: IdempotencyFingerprintBinding;
       readonly quote: CheckoutQuote;
       readonly now: string;
     }
@@ -484,6 +540,7 @@ export class CheckoutService {
         expected.keyHash,
         expected.keyVersion,
         expected.requestFingerprint,
+        expected.fingerprintBinding,
         expected.quote,
         expected.now
       );
@@ -525,15 +582,31 @@ export class CheckoutService {
     keyHash: string,
     keyVersion: string,
     requestFingerprint: string,
+    fingerprintBinding: IdempotencyFingerprintBinding,
     quote: CheckoutQuote,
     now: string
   ): CheckoutDocument {
+    const versioned =
+      fingerprintBinding.requestFingerprintVersion === CHECKOUT_FINGERPRINT_VERSION_V2
+        ? {
+            schemaVersion: CHECKOUT_SCHEMA_VERSION_V2,
+            requestFingerprintVersion: CHECKOUT_FINGERPRINT_VERSION_V2,
+            customerBinding: fingerprintBinding.customerBinding,
+            loyalty: loyaltyObligation(
+              fingerprintBinding.customerBinding,
+              quote.totalMinorUnits,
+              this.deps.config.customerLoyaltyEnabled === true,
+              now
+            ),
+          }
+        : {};
     return {
       id: checkoutId,
       kind: 'checkout',
       idempotencyKeyHash: keyHash,
       idempotencyKeyVersion: keyVersion,
       requestFingerprint,
+      ...versioned,
       capabilityTokenHash: this.capabilityHash(checkoutToken),
       capabilityKeyVersion: this.deps.config.capabilityKeyVersion,
       storeId: this.deps.config.storeId,
@@ -566,6 +639,7 @@ export class CheckoutService {
       readonly keyHash: string;
       readonly keyVersion: string;
       readonly requestFingerprint: string;
+      readonly fingerprintBinding: IdempotencyFingerprintBinding;
       readonly quote: CheckoutQuote;
     }
   ): void {
@@ -573,6 +647,7 @@ export class CheckoutService {
       checkout.idempotencyKeyHash !== expected.keyHash ||
       checkout.idempotencyKeyVersion !== expected.keyVersion ||
       checkout.requestFingerprint !== expected.requestFingerprint ||
+      !checkoutMatchesFingerprintBinding(checkout, expected.fingerprintBinding) ||
       checkout.storeId !== this.deps.config.storeId ||
       checkout.expectedPayPalMerchantId !== this.deps.config.expectedPayPalMerchantId ||
       checkout.quote.currency !== expected.quote.currency ||
@@ -1116,24 +1191,49 @@ export class CheckoutService {
         });
       }
       await this.assertLeaseBeforeLocalMutation(checkout.document.id, lease);
+      const v2 = checkout.document.schemaVersion === CHECKOUT_SCHEMA_VERSION_V2;
+      const customer =
+        v2 && checkout.document.customerBinding?.kind === 'customer'
+          ? {
+              customerKey: checkout.document.customerBinding.customerKey,
+              keyVersion: checkout.document.customerBinding.keyVersion,
+            }
+          : null;
       const persisted = await persistCheckoutTransaction(this.deps.transactions, {
         checkoutId: checkout.document.id,
         paypalCaptureId: captureId,
         storeId: checkout.document.storeId,
         quote: checkout.document.quote,
         completedAt,
+        ...(v2
+          ? {
+              schemaVersion: CHECKOUT_TRANSACTION_SCHEMA_VERSION_V2,
+              customerBinding: customer,
+            }
+          : {}),
       });
-      await this.transition(
-        checkout.document.id,
-        CheckoutState.COMPLETED,
-        {
-          receipt: {
+      const receipt: CheckoutReceiptProjection = v2
+        ? {
             transactionId: persisted.transaction.id,
             checkoutId: checkout.document.id,
             quote: checkout.document.quote,
             paypalCaptureId: captureId,
             completedAt: persisted.transaction.timestamp,
-          },
+            schemaVersion: CHECKOUT_SCHEMA_VERSION_V2,
+            requestFingerprintVersion: CHECKOUT_FINGERPRINT_VERSION_V2,
+          }
+        : {
+            transactionId: persisted.transaction.id,
+            checkoutId: checkout.document.id,
+            quote: checkout.document.quote,
+            paypalCaptureId: captureId,
+            completedAt: persisted.transaction.timestamp,
+          };
+      await this.transition(
+        checkout.document.id,
+        CheckoutState.COMPLETED,
+        {
+          receipt,
           nextActionAt: null,
           lastFailure: null,
           lease: null,
@@ -1624,6 +1724,7 @@ function projectStatus(checkout: CheckoutDocument): CheckoutStatusProjection {
     quote: checkout.quote,
     paypalOrderId: checkout.paypalOrderId,
     receipt: checkout.receipt,
+    loyalty: publicCheckoutLoyalty(checkout.loyalty),
     failure:
       checkout.lastFailure === null
         ? null
@@ -1644,11 +1745,71 @@ function expectedFacts(checkout: CheckoutDocument): {
 }
 
 function digestCanonicalRequest(
-  items: readonly Readonly<{ productId: string; quantity: number }>[]
+  items: readonly Readonly<{ productId: string; quantity: number }>[],
+  customerBinding: CheckoutCustomerBinding,
+  v2: boolean
 ): string {
-  return createHash('sha256')
-    .update(JSON.stringify({ items: items.map((item) => [item.productId, item.quantity]) }))
-    .digest('base64url');
+  const canonical = v2
+    ? {
+        version: CHECKOUT_FINGERPRINT_VERSION_V2,
+        items: items.map((item) => [item.productId, item.quantity]),
+        customerBinding,
+      }
+    : { items: items.map((item) => [item.productId, item.quantity]) };
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('base64url');
+}
+
+function checkoutCustomerBinding(customer: CustomerPrincipal | null): CheckoutCustomerBinding {
+  return customer === null ? { kind: 'guest' } : { kind: 'customer', ...customer };
+}
+
+function checkoutMatchesFingerprintBinding(
+  checkout: CheckoutDocument,
+  expected: IdempotencyFingerprintBinding
+): boolean {
+  if (expected.requestFingerprintVersion !== CHECKOUT_FINGERPRINT_VERSION_V2) {
+    return checkout.schemaVersion === undefined;
+  }
+  if (
+    checkout.schemaVersion !== CHECKOUT_SCHEMA_VERSION_V2 ||
+    checkout.requestFingerprintVersion !== CHECKOUT_FINGERPRINT_VERSION_V2 ||
+    checkout.customerBinding === undefined
+  ) {
+    return false;
+  }
+  return JSON.stringify(checkout.customerBinding) === JSON.stringify(expected.customerBinding);
+}
+
+function loyaltyObligation(
+  binding: CheckoutCustomerBinding,
+  totalMinorUnits: number,
+  enabled: boolean,
+  now: string
+): CheckoutLoyaltyProjection {
+  if (!enabled || binding.kind === 'guest') return { status: 'not-applicable' };
+  const pointsEarned = pointsForSelfCheckout(totalMinorUnits);
+  return {
+    status: pointsEarned === 0 ? 'awarded' : 'pending',
+    customerKey: binding.customerKey,
+    pointsEarned,
+    policyVersion: SELF_CHECKOUT_LOYALTY_POLICY_VERSION,
+    nextActionAt: pointsEarned === 0 ? null : now,
+    attempts: 0,
+    lease: null,
+  };
+}
+
+function publicCheckoutLoyalty(
+  loyalty: CheckoutLoyaltyProjection | undefined
+): PublicCheckoutLoyalty {
+  if (loyalty === undefined || loyalty.status === 'not-applicable') {
+    return { status: 'not-applicable' };
+  }
+  return {
+    status: loyalty.status,
+    pointsEarned: loyalty.pointsEarned,
+    policyVersion: loyalty.policyVersion,
+  };
 }
 
 function keyedDigest(key: string, value: string): string {

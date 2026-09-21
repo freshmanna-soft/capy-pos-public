@@ -43,6 +43,26 @@ describe('checkout config', () => {
     assert.equal(config.paypalTimeoutMs, 10_000);
   });
 
+  it('defaults Batch 4 writes off and accepts only explicit boolean flags', () => {
+    const defaults = loadCheckoutConfig(REQUIRED, 'development');
+    assert.equal(defaults.checkoutV2WritesEnabled, false);
+    assert.equal(defaults.customerLoyaltyEnabled, false);
+
+    const enabled = loadCheckoutConfig(
+      {
+        ...REQUIRED,
+        CHECKOUT_V2_WRITES_ENABLED: 'true',
+        CUSTOMER_LOYALTY_ENABLED: 'true',
+      },
+      'development'
+    );
+    assert.equal(enabled.checkoutV2WritesEnabled, true);
+    assert.equal(enabled.customerLoyaltyEnabled, true);
+    assert.throws(() =>
+      loadCheckoutConfig({ ...REQUIRED, CHECKOUT_V2_WRITES_ENABLED: '1' }, 'development')
+    );
+  });
+
   it('requires credentials, a finite timeout, and production PayPal in production mode', () => {
     assert.throws(() =>
       loadCheckoutConfig(

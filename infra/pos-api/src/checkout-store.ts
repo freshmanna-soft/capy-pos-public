@@ -15,6 +15,7 @@ import {
   isCheckoutState,
   isTerminalCheckoutState,
 } from './checkout-state.ts';
+import { SELF_CHECKOUT_LOYALTY_POLICY_VERSION } from './loyalty-policy.ts';
 
 export interface CheckoutLease {
   readonly ownerId: string;
@@ -35,7 +36,43 @@ export interface CheckoutFailure {
   readonly detail: string;
 }
 
-export interface CheckoutReceiptProjection {
+export const CHECKOUT_SCHEMA_VERSION_V2 = 'v2' as const;
+export const CHECKOUT_FINGERPRINT_VERSION_V1 = 'items-v1' as const;
+export const CHECKOUT_FINGERPRINT_VERSION_V2 = 'customer-binding-v2' as const;
+
+export interface DurableCustomerPrincipal {
+  readonly issuer: string;
+  readonly subject: string;
+  readonly tenantId: string;
+  readonly customerKey: string;
+  readonly keyVersion: 'sha256-v1';
+}
+
+export type CheckoutCustomerBinding =
+  | { readonly kind: 'guest' }
+  | ({ readonly kind: 'customer' } & DurableCustomerPrincipal);
+
+export type CheckoutLoyaltyProjection =
+  | { readonly status: 'not-applicable' }
+  | {
+      readonly status: 'pending' | 'awarded' | 'manual-review';
+      readonly customerKey: string;
+      readonly pointsEarned: number;
+      readonly policyVersion: typeof SELF_CHECKOUT_LOYALTY_POLICY_VERSION;
+      readonly nextActionAt: string | null;
+      readonly attempts: number;
+      readonly lease: CheckoutLease | null;
+    };
+
+export type PublicCheckoutLoyalty =
+  | { readonly status: 'not-applicable' }
+  | {
+      readonly status: 'pending' | 'awarded' | 'manual-review';
+      readonly pointsEarned: number;
+      readonly policyVersion: typeof SELF_CHECKOUT_LOYALTY_POLICY_VERSION;
+    };
+
+interface CheckoutReceiptProjectionBase {
   readonly transactionId: string;
   readonly checkoutId: string;
   readonly quote: CheckoutQuote;
@@ -43,7 +80,19 @@ export interface CheckoutReceiptProjection {
   readonly completedAt: string;
 }
 
-export interface CheckoutDocument extends StoredDocument {
+export interface CheckoutReceiptProjectionV1 extends CheckoutReceiptProjectionBase {
+  readonly schemaVersion?: never;
+  readonly requestFingerprintVersion?: never;
+}
+
+export interface CheckoutReceiptProjectionV2 extends CheckoutReceiptProjectionBase {
+  readonly schemaVersion: typeof CHECKOUT_SCHEMA_VERSION_V2;
+  readonly requestFingerprintVersion: typeof CHECKOUT_FINGERPRINT_VERSION_V2;
+}
+
+export type CheckoutReceiptProjection = CheckoutReceiptProjectionV1 | CheckoutReceiptProjectionV2;
+
+interface CheckoutDocumentBase extends StoredDocument {
   readonly kind: 'checkout';
   readonly idempotencyKeyHash: string;
   readonly idempotencyKeyVersion: string;
@@ -71,9 +120,30 @@ export interface CheckoutDocument extends StoredDocument {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly expiresAt: string;
+  readonly schemaVersion?: typeof CHECKOUT_SCHEMA_VERSION_V2;
+  readonly requestFingerprintVersion?: typeof CHECKOUT_FINGERPRINT_VERSION_V2;
+  readonly customerBinding?: CheckoutCustomerBinding;
+  readonly loyalty?: CheckoutLoyaltyProjection;
 }
 
-interface IdempotencyClaimDocument extends StoredDocument {
+export interface CheckoutDocumentV1 extends CheckoutDocumentBase {
+  readonly schemaVersion?: undefined;
+  readonly requestFingerprintVersion?: undefined;
+  readonly customerBinding?: undefined;
+  readonly loyalty?: undefined;
+}
+
+export interface CheckoutDocumentV2 extends CheckoutDocumentBase {
+  readonly schemaVersion: typeof CHECKOUT_SCHEMA_VERSION_V2;
+  readonly requestFingerprintVersion: typeof CHECKOUT_FINGERPRINT_VERSION_V2;
+  readonly customerBinding: CheckoutCustomerBinding;
+  readonly loyalty: CheckoutLoyaltyProjection;
+}
+
+/** Compatibility-facing shape; runtime validation still accepts only exact V1 or exact V2. */
+export type CheckoutDocument = CheckoutDocumentBase;
+
+interface IdempotencyClaimDocumentBase extends StoredDocument {
   readonly kind: 'checkout-idempotency-claim';
   readonly keyHash: string;
   readonly keyVersion: string;
@@ -81,6 +151,34 @@ interface IdempotencyClaimDocument extends StoredDocument {
   readonly checkoutId: string;
   readonly createdAt: string;
 }
+
+interface IdempotencyClaimDocumentV1 extends IdempotencyClaimDocumentBase {
+  readonly schemaVersion?: never;
+  readonly requestFingerprintVersion?: never;
+  readonly customerBinding?: never;
+}
+
+interface IdempotencyClaimDocumentV2 extends IdempotencyClaimDocumentBase {
+  readonly schemaVersion: typeof CHECKOUT_SCHEMA_VERSION_V2;
+  readonly requestFingerprintVersion: typeof CHECKOUT_FINGERPRINT_VERSION_V2;
+  readonly customerBinding: CheckoutCustomerBinding;
+}
+
+type IdempotencyClaimDocument = IdempotencyClaimDocumentV1 | IdempotencyClaimDocumentV2;
+
+export interface IdempotencyFingerprintBindingV1 {
+  readonly requestFingerprintVersion?: undefined;
+  readonly customerBinding?: undefined | { readonly kind: 'guest' };
+}
+
+export interface IdempotencyFingerprintBindingV2 {
+  readonly requestFingerprintVersion: typeof CHECKOUT_FINGERPRINT_VERSION_V2;
+  readonly customerBinding: CheckoutCustomerBinding;
+}
+
+export type IdempotencyFingerprintBinding =
+  | IdempotencyFingerprintBindingV1
+  | IdempotencyFingerprintBindingV2;
 
 export type PayPalReferenceKind = 'order' | 'authorization' | 'capture';
 
@@ -166,18 +264,22 @@ export interface CheckoutRepository extends DueCheckoutReader {
     expectedRevision: CheckoutRevision,
     leaseFence?: CheckoutLeaseFence
   ): Promise<WriteOutcome>;
-  lookupIdempotency(input: {
-    keyHash: string;
-    keyVersion: string;
-    requestFingerprint: string;
-  }): Promise<ClaimLookupResult>;
-  claimIdempotency(input: {
-    keyHash: string;
-    keyVersion: string;
-    requestFingerprint: string;
-    checkoutId: string;
-    nowIso: string;
-  }): Promise<ClaimResult>;
+  lookupIdempotency(
+    input: {
+      keyHash: string;
+      keyVersion: string;
+      requestFingerprint: string;
+    } & IdempotencyFingerprintBinding
+  ): Promise<ClaimLookupResult>;
+  claimIdempotency(
+    input: {
+      keyHash: string;
+      keyVersion: string;
+      requestFingerprint: string;
+      checkoutId: string;
+      nowIso: string;
+    } & IdempotencyFingerprintBinding
+  ): Promise<ClaimResult>;
   bindProviderReference(input: {
     referenceKind: PayPalReferenceKind;
     referenceId: string;
@@ -296,14 +398,14 @@ export class DocumentCheckoutStore implements CheckoutRepository {
     return this.documents.write(checkout, revision.token);
   }
 
-  async lookupIdempotency(input: {
-    keyHash: string;
-    keyVersion: string;
-    requestFingerprint: string;
-  }): Promise<ClaimLookupResult> {
-    nonEmpty(input.keyHash, 'keyHash');
-    nonEmpty(input.keyVersion, 'keyVersion');
-    nonEmpty(input.requestFingerprint, 'requestFingerprint');
+  async lookupIdempotency(
+    input: {
+      keyHash: string;
+      keyVersion: string;
+      requestFingerprint: string;
+    } & IdempotencyFingerprintBinding
+  ): Promise<ClaimLookupResult> {
+    validateFingerprintBinding(input);
     const id = this.idempotencyClaimId(input.keyVersion, input.keyHash);
     const existing = await this.documents.read(id);
     if (existing === null) return { outcome: 'missing' };
@@ -315,33 +417,46 @@ export class DocumentCheckoutStore implements CheckoutRepository {
       return { outcome: 'digest-collision' };
     }
     validateClaim(doc);
-    return doc.requestFingerprint === input.requestFingerprint
+    return claimMatchesRequest(doc, input)
       ? { outcome: 'replay', checkoutId: doc.checkoutId }
       : { outcome: 'conflict', checkoutId: doc.checkoutId };
   }
 
-  async claimIdempotency(input: {
-    keyHash: string;
-    keyVersion: string;
-    requestFingerprint: string;
-    checkoutId: string;
-    nowIso: string;
-  }): Promise<ClaimResult> {
-    nonEmpty(input.keyHash, 'keyHash');
-    nonEmpty(input.keyVersion, 'keyVersion');
-    nonEmpty(input.requestFingerprint, 'requestFingerprint');
+  async claimIdempotency(
+    input: {
+      keyHash: string;
+      keyVersion: string;
+      requestFingerprint: string;
+      checkoutId: string;
+      nowIso: string;
+    } & IdempotencyFingerprintBinding
+  ): Promise<ClaimResult> {
+    validateFingerprintBinding(input);
     assertCheckoutIdNamespace(input.checkoutId);
     canonicalUtcEpoch(input.nowIso, 'nowIso');
     const id = this.idempotencyClaimId(input.keyVersion, input.keyHash);
-    const claim: IdempotencyClaimDocument = {
-      id,
-      kind: 'checkout-idempotency-claim',
-      keyHash: input.keyHash,
-      keyVersion: input.keyVersion,
-      requestFingerprint: input.requestFingerprint,
-      checkoutId: input.checkoutId,
-      createdAt: input.nowIso,
-    };
+    const claim: IdempotencyClaimDocument = isV2FingerprintBinding(input)
+      ? {
+          id,
+          kind: 'checkout-idempotency-claim',
+          keyHash: input.keyHash,
+          keyVersion: input.keyVersion,
+          requestFingerprint: input.requestFingerprint,
+          checkoutId: input.checkoutId,
+          createdAt: input.nowIso,
+          schemaVersion: CHECKOUT_SCHEMA_VERSION_V2,
+          requestFingerprintVersion: CHECKOUT_FINGERPRINT_VERSION_V2,
+          customerBinding: input.customerBinding,
+        }
+      : {
+          id,
+          kind: 'checkout-idempotency-claim',
+          keyHash: input.keyHash,
+          keyVersion: input.keyVersion,
+          requestFingerprint: input.requestFingerprint,
+          checkoutId: input.checkoutId,
+          createdAt: input.nowIso,
+        };
     if ((await this.documents.create(claim)) === 'created') {
       return { outcome: 'claimed', checkoutId: input.checkoutId };
     }
@@ -353,7 +468,7 @@ export class DocumentCheckoutStore implements CheckoutRepository {
       return { outcome: 'digest-collision' };
     }
     validateClaim(doc);
-    if (doc.requestFingerprint === input.requestFingerprint) {
+    if (claimMatchesRequest(doc, input)) {
       return { outcome: 'replay', checkoutId: doc.checkoutId };
     }
     return { outcome: 'conflict', checkoutId: doc.checkoutId };
@@ -591,6 +706,8 @@ export class MemoryDueCheckoutReader implements DueCheckoutReader {
 }
 
 function assertCheckoutDocument(value: unknown): asserts value is CheckoutDocument {
+  if (!isRecord(value)) throw corrupt('checkout must be an object.');
+  const v2 = hasOwn(value, 'schemaVersion');
   const document = exactRecord(
     value,
     [
@@ -617,9 +734,20 @@ function assertCheckoutDocument(value: unknown): asserts value is CheckoutDocume
       'createdAt',
       'updatedAt',
       'expiresAt',
+      ...(v2 ? ['schemaVersion', 'requestFingerprintVersion', 'customerBinding', 'loyalty'] : []),
     ],
     'checkout'
   );
+  if (v2) {
+    if (
+      document['schemaVersion'] !== CHECKOUT_SCHEMA_VERSION_V2 ||
+      document['requestFingerprintVersion'] !== CHECKOUT_FINGERPRINT_VERSION_V2
+    ) {
+      throw corrupt('Invalid checkout version.');
+    }
+    validateCustomerBinding(document['customerBinding'], 'customerBinding');
+    validateLoyalty(document['loyalty']);
+  }
   if (document['kind'] !== 'checkout') throw corrupt('Invalid checkout kind.');
   assertCheckoutIdNamespace(document['id']);
   for (const [field, label] of [
@@ -678,6 +806,10 @@ function assertImmutableCheckoutBindings(current: CheckoutDocument, next: Checko
     current.idempotencyKeyHash !== next.idempotencyKeyHash ||
     current.idempotencyKeyVersion !== next.idempotencyKeyVersion ||
     current.requestFingerprint !== next.requestFingerprint ||
+    checkoutSchemaVersion(current) !== checkoutSchemaVersion(next) ||
+    checkoutFingerprintVersion(current) !== checkoutFingerprintVersion(next) ||
+    !sameCustomerBinding(checkoutCustomerBinding(current), checkoutCustomerBinding(next)) ||
+    !sameLoyaltyBinding(checkoutLoyalty(current), checkoutLoyalty(next)) ||
     current.capabilityTokenHash !== next.capabilityTokenHash ||
     current.capabilityKeyVersion !== next.capabilityKeyVersion ||
     current.storeId !== next.storeId ||
@@ -796,11 +928,30 @@ function assertProviderIdPresence(
 }
 
 function validateReceipt(value: unknown, document: CheckoutDocument): void {
+  if (!isRecord(value)) throw corrupt('receipt must be an object.');
+  const v2 = hasOwn(value, 'schemaVersion');
+  if (v2 !== isCheckoutV2(document)) {
+    throw corrupt('Receipt version differs from checkout version.');
+  }
   const receipt = exactRecord(
     value,
-    ['transactionId', 'checkoutId', 'quote', 'paypalCaptureId', 'completedAt'],
+    [
+      'transactionId',
+      'checkoutId',
+      'quote',
+      'paypalCaptureId',
+      'completedAt',
+      ...(v2 ? ['schemaVersion', 'requestFingerprintVersion'] : []),
+    ],
     'receipt'
   );
+  if (
+    v2 &&
+    (receipt['schemaVersion'] !== CHECKOUT_SCHEMA_VERSION_V2 ||
+      receipt['requestFingerprintVersion'] !== CHECKOUT_FINGERPRINT_VERSION_V2)
+  ) {
+    throw corrupt('Invalid receipt version.');
+  }
   nonEmpty(receipt['transactionId'], 'receipt.transactionId');
   if (
     receipt['checkoutId'] !== document.id ||
@@ -828,18 +979,110 @@ function validateFailure(value: unknown): void {
   if (typeof failure['retryable'] !== 'boolean') throw corrupt('Invalid failure.retryable.');
 }
 
+function validateLoyalty(value: unknown): asserts value is CheckoutLoyaltyProjection {
+  if (!isRecord(value)) throw corrupt('loyalty must be an object.');
+  if (value['status'] === 'not-applicable') {
+    exactRecord(value, ['status'], 'loyalty');
+    return;
+  }
+  const loyalty = exactRecord(
+    value,
+    ['status', 'customerKey', 'pointsEarned', 'policyVersion', 'nextActionAt', 'attempts', 'lease'],
+    'loyalty'
+  );
+  if (!['pending', 'awarded', 'manual-review'].includes(String(loyalty['status']))) {
+    throw corrupt('Invalid loyalty status.');
+  }
+  nonEmpty(loyalty['customerKey'], 'loyalty.customerKey');
+  if (!Number.isSafeInteger(loyalty['pointsEarned']) || (loyalty['pointsEarned'] as number) < 0) {
+    throw corrupt('Invalid loyalty.pointsEarned.');
+  }
+  if (loyalty['policyVersion'] !== SELF_CHECKOUT_LOYALTY_POLICY_VERSION) {
+    throw corrupt('Invalid loyalty policy.');
+  }
+  if (loyalty['nextActionAt'] !== null) {
+    canonicalUtcEpoch(loyalty['nextActionAt'], 'loyalty.nextActionAt');
+  }
+  if (!Number.isSafeInteger(loyalty['attempts']) || (loyalty['attempts'] as number) < 0) {
+    throw corrupt('Invalid loyalty.attempts.');
+  }
+  if (loyalty['lease'] !== null) validateLease(loyalty['lease']);
+}
+
 function validateClaim(document: IdempotencyClaimDocument): void {
+  const v2 = hasOwn(document, 'schemaVersion');
   exactRecord(
     document,
-    ['id', 'kind', 'keyHash', 'keyVersion', 'requestFingerprint', 'checkoutId', 'createdAt'],
+    [
+      'id',
+      'kind',
+      'keyHash',
+      'keyVersion',
+      'requestFingerprint',
+      'checkoutId',
+      'createdAt',
+      ...(v2 ? ['schemaVersion', 'requestFingerprintVersion', 'customerBinding'] : []),
+    ],
     'claim'
   );
   if (document.kind !== 'checkout-idempotency-claim') throw corrupt('Invalid claim kind.');
+  if (v2) {
+    if (
+      document.schemaVersion !== CHECKOUT_SCHEMA_VERSION_V2 ||
+      document.requestFingerprintVersion !== CHECKOUT_FINGERPRINT_VERSION_V2
+    ) {
+      throw corrupt('Invalid claim version.');
+    }
+    validateCustomerBinding(document.customerBinding, 'claim.customerBinding');
+  }
   nonEmpty(document.keyHash, 'claim.keyHash');
   nonEmpty(document.keyVersion, 'claim.keyVersion');
   nonEmpty(document.requestFingerprint, 'claim.requestFingerprint');
   assertCheckoutIdNamespace(document.checkoutId);
   canonicalUtcEpoch(document.createdAt, 'claim.createdAt');
+}
+
+function validateFingerprintBinding(
+  input: {
+    readonly keyHash: unknown;
+    readonly keyVersion: unknown;
+    readonly requestFingerprint: unknown;
+  } & IdempotencyFingerprintBinding
+): void {
+  nonEmpty(input.keyHash, 'keyHash');
+  nonEmpty(input.keyVersion, 'keyVersion');
+  nonEmpty(input.requestFingerprint, 'requestFingerprint');
+  if (isV2FingerprintBinding(input)) {
+    validateCustomerBinding(input.customerBinding, 'customerBinding');
+    return;
+  }
+  if (input.requestFingerprintVersion !== undefined) {
+    throw new Error('Unknown idempotency fingerprint version.');
+  }
+  if (input.customerBinding !== undefined && input.customerBinding.kind !== 'guest') {
+    throw new Error('Legacy idempotency fingerprints can bind only guest requests.');
+  }
+}
+
+function claimMatchesRequest(
+  document: IdempotencyClaimDocument,
+  input: { readonly requestFingerprint: string } & IdempotencyFingerprintBinding
+): boolean {
+  if (document.requestFingerprint !== input.requestFingerprint) return false;
+  if (hasOwn(document, 'schemaVersion')) {
+    return (
+      isV2FingerprintBinding(input) &&
+      document.customerBinding !== undefined &&
+      sameCustomerBinding(document.customerBinding, input.customerBinding)
+    );
+  }
+  return !isV2FingerprintBinding(input);
+}
+
+function isV2FingerprintBinding(
+  value: IdempotencyFingerprintBinding
+): value is IdempotencyFingerprintBindingV2 {
+  return value.requestFingerprintVersion === CHECKOUT_FINGERPRINT_VERSION_V2;
 }
 
 function validateBinding(document: ProviderBindingDocument): void {
@@ -901,6 +1144,85 @@ function validateDueCursor(value: unknown, asOf: string): asserts value is DueCh
 function compareCursor(left: DueCheckoutCursor, right: DueCheckoutCursor): number {
   const byTime = Date.parse(left.nextActionAt) - Date.parse(right.nextActionAt);
   return byTime || left.checkoutId.localeCompare(right.checkoutId);
+}
+
+function validateCustomerBinding(
+  value: unknown,
+  label: string
+): asserts value is CheckoutCustomerBinding {
+  if (!isRecord(value)) throw corrupt(`${label} must be an object.`);
+  if (value['kind'] === 'guest') {
+    exactRecord(value, ['kind'], label);
+    return;
+  }
+  const customer = exactRecord(
+    value,
+    ['kind', 'issuer', 'subject', 'tenantId', 'customerKey', 'keyVersion'],
+    label
+  );
+  if (customer['kind'] !== 'customer' || customer['keyVersion'] !== 'sha256-v1') {
+    throw corrupt(`${label} is invalid.`);
+  }
+  for (const field of ['issuer', 'subject', 'tenantId', 'customerKey'] as const) {
+    nonEmpty(customer[field], `${label}.${field}`);
+  }
+}
+
+function isCheckoutV2(document: CheckoutDocument): document is CheckoutDocumentV2 {
+  return document.schemaVersion === CHECKOUT_SCHEMA_VERSION_V2;
+}
+
+function checkoutSchemaVersion(document: CheckoutDocument): 'v1' | 'v2' {
+  return isCheckoutV2(document) ? document.schemaVersion : 'v1';
+}
+
+function checkoutFingerprintVersion(
+  document: CheckoutDocument
+): typeof CHECKOUT_FINGERPRINT_VERSION_V1 | typeof CHECKOUT_FINGERPRINT_VERSION_V2 {
+  return isCheckoutV2(document)
+    ? document.requestFingerprintVersion
+    : CHECKOUT_FINGERPRINT_VERSION_V1;
+}
+
+function checkoutCustomerBinding(document: CheckoutDocument): CheckoutCustomerBinding {
+  return isCheckoutV2(document) ? document.customerBinding : { kind: 'guest' };
+}
+
+function sameCustomerBinding(
+  left: CheckoutCustomerBinding,
+  right: CheckoutCustomerBinding
+): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === 'guest' || right.kind === 'guest') return true;
+  return (
+    left.issuer === right.issuer &&
+    left.subject === right.subject &&
+    left.tenantId === right.tenantId &&
+    left.customerKey === right.customerKey &&
+    left.keyVersion === right.keyVersion
+  );
+}
+
+function checkoutLoyalty(document: CheckoutDocument): CheckoutLoyaltyProjection {
+  return isCheckoutV2(document) ? document.loyalty : { status: 'not-applicable' };
+}
+
+function sameLoyaltyBinding(
+  left: CheckoutLoyaltyProjection,
+  right: CheckoutLoyaltyProjection
+): boolean {
+  if (left.status === 'not-applicable' || right.status === 'not-applicable') {
+    return left.status === right.status;
+  }
+  return (
+    left.customerKey === right.customerKey &&
+    left.pointsEarned === right.pointsEarned &&
+    left.policyVersion === right.policyVersion
+  );
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function exactRecord(

@@ -374,6 +374,28 @@ variable "checkout_reconciliation_time_zone" {
   }
 }
 
+variable "checkout_v2_writes_enabled" {
+  description = <<-EOT
+    Enables V2 checkout, claim, transaction, and receipt writes only after every
+    running pos-api instance can read both V1 and V2. Leave false for the mandatory
+    compatibility release. Rollback after enabling this flag must target that
+    compatibility release, never a V1-only image.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "customer_loyalty_enabled" {
+  description = <<-EOT
+    Enables authenticated server-owned loyalty after V2 writes, the profile and
+    ledger databases, both loyalty indexes, reconciliation, privacy projections,
+    monitoring, and recovery runbooks have been verified. This flag may be true
+    only when checkout_v2_writes_enabled is also true.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "internal_api_secret" {
   description = <<-EOT
     Shared secret for service-to-service calls that have no end-user token to
@@ -476,6 +498,14 @@ variable "services" {
     # a real credential it has no reason to hold, for a capability (verification)
     # that only ever needs the tenant's public JWKS.
     needs_appid_verification = optional(bool, false)
+    # Binds only the CUSTOMER application's non-secret client id as a second,
+    # customer-only verification audience. It never binds the customer client
+    # secret and does not widen the generic staff verifier.
+    needs_customer_verification = optional(bool, false)
+    # Declares this service as the owner of durable server-side loyalty storage,
+    # index migration, and feature flags. It requires checkout, Cloudant, and the
+    # dedicated customer verifier (validated below).
+    needs_customer_loyalty = optional(bool, false)
     # Binds INTERNAL_API_SECRET from the shared internal-secret Code Engine
     # secret — for a service that either answers or calls a service-to-service
     # route with no end-user token (pos-api's GET /internal/roles today; the
@@ -546,12 +576,14 @@ variable "services" {
     # deliberately uses var.image_tag so its API and checkout job entry points always
     # come from the same explicitly selected image build.
     capy-pos-api = {
-      image_port               = 8790
-      needs_session_secret     = true
-      needs_appid_verification = true
-      needs_cloudant           = true
-      needs_checkout           = true
-      pins_cors_origins        = true
+      image_port                  = 8790
+      needs_session_secret        = true
+      needs_appid_verification    = true
+      needs_customer_verification = true
+      needs_customer_loyalty      = true
+      needs_cloudant              = true
+      needs_checkout              = true
+      pins_cors_origins           = true
       # Serves GET /internal/roles for the two proxies (Phase 5 RBAC
       # centralization) — gated by this shared secret, since that route has
       # no end-user token to check.
@@ -602,5 +634,37 @@ variable "services" {
       !service.needs_checkout || (service.needs_cloudant && service.pins_cors_origins)
     ])
     error_message = "Every checkout service must enable Cloudant and pin CORS to frontend_origins."
+  }
+
+  validation {
+    condition = alltrue([
+      for service in var.services :
+      !service.needs_customer_verification || (
+        service.needs_appid_verification &&
+        service.needs_checkout &&
+        !service.needs_appid_secret
+      )
+    ])
+    error_message = "Customer verification is checkout-specific, requires the existing staff App ID verifier configuration plus checkout, and must never receive App ID client secrets."
+  }
+
+  validation {
+    condition = alltrue([
+      for service in var.services :
+      !service.needs_customer_loyalty || (
+        service.needs_customer_verification &&
+        service.needs_checkout &&
+        service.needs_cloudant
+      )
+    ])
+    error_message = "Every customer-loyalty service must enable dedicated customer verification, checkout, and Cloudant."
+  }
+
+  validation {
+    condition = alltrue([
+      for name, service in var.services :
+      !service.needs_customer_verification || name == "capy-pos-api"
+    ])
+    error_message = "The customer verification audience may be bound only to capy-pos-api."
   }
 }

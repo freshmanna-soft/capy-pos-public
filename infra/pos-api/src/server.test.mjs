@@ -4,8 +4,13 @@ import { createServer } from 'node:http';
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 process.env.NODE_ENV = 'test';
-const { clientRateLimitKey, createPosRequestHandler, readAllowedOrigins } =
-  await import('./server.ts');
+const {
+  clientRateLimitKey,
+  createPosRequestHandler,
+  readAllowedOrigins,
+  readAppIdConfig,
+  readCustomerAppIdConfig,
+} = await import('./server.ts');
 const { CheckoutServiceError } = await import('./checkout-service.ts');
 
 class AllowAllRateLimiter {
@@ -26,6 +31,7 @@ function deps() {
       nowIso: () => '2026-09-18T12:00:00.000Z',
       newId: () => 'id-1',
     },
+    customerLoyalty: { read: async () => null },
     checkout: {
       checkouts: {},
       rateLimiter: new AllowAllRateLimiter(),
@@ -74,6 +80,30 @@ async function withServer(run) {
 }
 
 describe('POS API HTTP adapter', () => {
+  it('keeps staff and customer App ID audiences in separate configs', () => {
+    const environment = {
+      APPID_REGION: 'us-south',
+      APPID_TENANT_ID: 'tenant-1',
+      APPID_CLIENT_ID: 'staff-client',
+      APPID_CUSTOMER_CLIENT_ID: 'customer-client',
+    };
+    assert.deepEqual(readAppIdConfig(environment), {
+      region: 'us-south',
+      tenantId: 'tenant-1',
+      audience: 'staff-client',
+    });
+    assert.deepEqual(readCustomerAppIdConfig(environment), {
+      region: 'us-south',
+      tenantId: 'tenant-1',
+      audience: 'customer-client',
+    });
+    assert.equal(readCustomerAppIdConfig({ APPID_REGION: 'us-south' }), undefined);
+    assert.throws(
+      () => readCustomerAppIdConfig({ APPID_CUSTOMER_CLIENT_ID: 'customer-client' }),
+      /APPID_REGION and APPID_TENANT_ID/
+    );
+  });
+
   it('keys rate limits from the trusted right-hand forwarded hop', () => {
     const request = (forwarded, remoteAddress = '10.0.0.1') => ({
       headers: forwarded === undefined ? {} : { 'x-forwarded-for': forwarded },
@@ -99,6 +129,19 @@ describe('POS API HTTP adapter', () => {
       () => readAllowedOrigins({ ALLOWED_ORIGINS: 'http://capy-pos.com' }),
       /invalid origin/
     );
+  });
+
+  it('serves loyalty routes with the private response policy before staff authorization', async () => {
+    await withServer(async (url) => {
+      const response = await fetch(`${url}/api/self-checkout/customer/loyalty`, {
+        headers: { Origin: 'https://capy-pos.com' },
+      });
+      assert.equal(response.status, 401);
+      assert.equal(response.headers.get('access-control-allow-origin'), 'https://capy-pos.com');
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+      assert.deepEqual(await response.json(), { error: 'Customer authorization required.' });
+    });
   });
 
   it('serves checkout routes with exact-origin CORS and private response policy', async () => {

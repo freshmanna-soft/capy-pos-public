@@ -23,7 +23,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac, generateKeyPairSync, sign as signRsa } from 'node:crypto';
-import { Permission, authorize, readBearer, verifyAppIdAccessToken, verifySessionToken } from './session-auth.ts';
+import {
+  Permission,
+  authorize,
+  readBearer,
+  verifyAppIdAccessToken,
+  verifySessionToken,
+} from './session-auth.ts';
 
 const SECRET = 'capy-pos-local-jwt-secret-change-in-production';
 const NOW = 1_800_000_000;
@@ -75,7 +81,9 @@ function mintAppId(payload, { kid, keyPair, config = APPID_CONFIG, header = {} }
   };
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
   const signingInput = `${encode({ alg: 'RS256', typ: 'JWT', kid, ...header })}.${encode(claims)}`;
-  const signature = signRsa('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey).toString('base64url');
+  const signature = signRsa('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey).toString(
+    'base64url'
+  );
   return `${signingInput}.${signature}`;
 }
 
@@ -201,7 +209,12 @@ describe('verifySessionToken', () => {
     it('refuses a tampered payload', () => {
       const [header, , signature] = mint().split('.');
       const escalated = Buffer.from(
-        JSON.stringify({ sub: 'op-1', tenantId: 'store-1', permissions: ['inventory:delete'], exp: NOW + 3600 })
+        JSON.stringify({
+          sub: 'op-1',
+          tenantId: 'store-1',
+          permissions: ['inventory:delete'],
+          exp: NOW + 3600,
+        })
       ).toString('base64url');
       assert.equal(verifySessionToken(`${header}.${escalated}.${signature}`, SECRET, NOW), null);
     });
@@ -255,7 +268,13 @@ describe('verifySessionToken', () => {
 
   describe('attribution', () => {
     it('refuses a signed token with no subject or no tenant', () => {
-      for (const payload of [{ sub: undefined }, { sub: '' }, { sub: 42 }, { tenantId: undefined }, { tenantId: '' }]) {
+      for (const payload of [
+        { sub: undefined },
+        { sub: '' },
+        { sub: 42 },
+        { tenantId: undefined },
+        { tenantId: '' },
+      ]) {
         assert.equal(verifySessionToken(mint(payload), SECRET, NOW), null, JSON.stringify(payload));
       }
     });
@@ -263,7 +282,11 @@ describe('verifySessionToken', () => {
     it('reduces a malformed roles/permissions claim to an empty list rather than trusting it', () => {
       // Resilient mapping (#110): one non-string entry must not throw, and must not
       // survive into a permission check either.
-      const claims = verifySessionToken(mint({ roles: 'manager', permissions: ['inventory:view', 7, null] }), SECRET, NOW);
+      const claims = verifySessionToken(
+        mint({ roles: 'manager', permissions: ['inventory:view', 7, null] }),
+        SECRET,
+        NOW
+      );
       assert.deepEqual(claims?.roles, []);
       assert.deepEqual(claims?.permissions, ['inventory:view']);
     });
@@ -272,14 +295,24 @@ describe('verifySessionToken', () => {
 
 describe('authorize', () => {
   it('admits a token that carries the required permission', async () => {
-    const outcome = await authorize(bearer(mint()), Permission.PROCESS_SALE, { secret: SECRET }, NOW);
+    const outcome = await authorize(
+      bearer(mint()),
+      Permission.PROCESS_SALE,
+      { secret: SECRET },
+      NOW
+    );
     assert.equal(outcome.ok, true);
     assert.equal(outcome.claims.operatorId, 'op-1');
     assert.equal(outcome.claims.tenantId, 'store-1');
   });
 
   it('admits a valid token when no specific permission is required', async () => {
-    const outcome = await authorize(bearer(mint({ permissions: [] })), null, { secret: SECRET }, NOW);
+    const outcome = await authorize(
+      bearer(mint({ permissions: [] })),
+      null,
+      { secret: SECRET },
+      NOW
+    );
     assert.equal(outcome.ok, true);
   });
 
@@ -306,7 +339,12 @@ describe('authorize', () => {
   it('answers 403 naming the missing permission when the caller is authenticated', async () => {
     // An operator token reaching the delete route: authenticated, not permitted.
     const operator = mint({ roles: ['operator'], permissions: ['sale:process', 'inventory:view'] });
-    const outcome = await authorize(bearer(operator), Permission.DELETE_PRODUCT, { secret: SECRET }, NOW);
+    const outcome = await authorize(
+      bearer(operator),
+      Permission.DELETE_PRODUCT,
+      { secret: SECRET },
+      NOW
+    );
     assert.equal(outcome.ok, false);
     assert.equal(outcome.status, 403);
     assert.equal(outcome.error, 'Requires inventory:delete.');
@@ -368,7 +406,13 @@ describe('verifyAppIdAccessToken', () => {
         // read off the token.
         tenantId: 'default-tenant',
         roles: ['admin'],
-        permissions: ['sale:process', 'sale:view_transactions', 'inventory:view', 'inventory:manage', 'inventory:delete'],
+        permissions: [
+          'sale:process',
+          'sale:view_transactions',
+          'inventory:view',
+          'inventory:manage',
+          'inventory:delete',
+        ],
         expiresAt: NOW + 3600,
       });
     });
@@ -448,10 +492,13 @@ describe('verifyAppIdAccessToken', () => {
       await withJwks(keyPair, 'kid-tamper', async () => {
         const token = mintAppId({}, { kid: 'kid-tamper', keyPair });
         const [header, , signature] = token.split('.');
-        const escalated = Buffer.from(JSON.stringify({ sub: 'op-1', scope: 'admin', exp: NOW + 3600 })).toString(
-          'base64url'
+        const escalated = Buffer.from(
+          JSON.stringify({ sub: 'op-1', scope: 'admin', exp: NOW + 3600 })
+        ).toString('base64url');
+        assert.equal(
+          await verifyAppIdAccessToken(`${header}.${escalated}.${signature}`, APPID_CONFIG, NOW),
+          null
         );
-        assert.equal(await verifyAppIdAccessToken(`${header}.${escalated}.${signature}`, APPID_CONFIG, NOW), null);
       });
     });
 
@@ -465,7 +512,11 @@ describe('verifyAppIdAccessToken', () => {
 
     it('refuses anything that is not three segments of base64url JSON', async () => {
       for (const token of ['', '.', 'a.b', 'a.b.c.d', 'a.b.c', '!!!.???.###']) {
-        assert.equal(await verifyAppIdAccessToken(token, APPID_CONFIG, NOW), null, `expected null for "${token}"`);
+        assert.equal(
+          await verifyAppIdAccessToken(token, APPID_CONFIG, NOW),
+          null,
+          `expected null for "${token}"`
+        );
       }
     });
   });
@@ -474,7 +525,10 @@ describe('verifyAppIdAccessToken', () => {
     it('refuses a token issued for a different tenant, even though the signature is real', async () => {
       const keyPair = generateRsaKeyPair();
       await withJwks(keyPair, 'kid-tenant', async () => {
-        const token = mintAppId({}, { kid: 'kid-tenant', keyPair, config: { ...APPID_CONFIG, tenantId: 'other-tenant' } });
+        const token = mintAppId(
+          {},
+          { kid: 'kid-tenant', keyPair, config: { ...APPID_CONFIG, tenantId: 'other-tenant' } }
+        );
         assert.equal(await verifyAppIdAccessToken(token, APPID_CONFIG, NOW), null);
       });
     });
@@ -487,7 +541,7 @@ describe('verifyAppIdAccessToken', () => {
       });
     });
 
-    it('admits aud as a bare string too, not only App ID\'s real array shape', async () => {
+    it("admits aud as a bare string too, not only App ID's real array shape", async () => {
       const keyPair = generateRsaKeyPair();
       await withJwks(keyPair, 'kid-aud-string', async () => {
         const token = mintAppId({ aud: APPID_CONFIG.audience }, { kid: 'kid-aud-string', keyPair });
@@ -499,7 +553,10 @@ describe('verifyAppIdAccessToken', () => {
       // App ID's `tenant` is the service instance id, the same for every user.
       const keyPair = generateRsaKeyPair();
       await withJwks(keyPair, 'kid-instance', async () => {
-        const token = mintAppId({ tenant: 'appid-instance-abc123' }, { kid: 'kid-instance', keyPair });
+        const token = mintAppId(
+          { tenant: 'appid-instance-abc123' },
+          { kid: 'kid-instance', keyPair }
+        );
         const claims = await verifyAppIdAccessToken(token, APPID_CONFIG, NOW);
         assert.equal(claims.tenantId, 'default-tenant');
       });
@@ -528,7 +585,10 @@ describe('verifyAppIdAccessToken', () => {
     it('grants exactly the operator tier for an operator scope', async () => {
       const keyPair = generateRsaKeyPair();
       await withJwks(keyPair, 'kid-operator', async () => {
-        const token = mintAppId({ scope: 'openid appid_default operator' }, { kid: 'kid-operator', keyPair });
+        const token = mintAppId(
+          { scope: 'openid appid_default operator' },
+          { kid: 'kid-operator', keyPair }
+        );
         const claims = await verifyAppIdAccessToken(token, APPID_CONFIG, NOW);
         assert.deepEqual(claims.roles, ['operator']);
         assert.deepEqual(
@@ -563,7 +623,10 @@ describe('verifyAppIdAccessToken', () => {
     it('grants a customer scope exactly sale:process and nothing else', async () => {
       const keyPair = generateRsaKeyPair();
       await withJwks(keyPair, 'kid-customer', async () => {
-        const token = mintAppId({ scope: 'openid appid_default customer' }, { kid: 'kid-customer', keyPair });
+        const token = mintAppId(
+          { scope: 'openid appid_default customer' },
+          { kid: 'kid-customer', keyPair }
+        );
         const claims = await verifyAppIdAccessToken(token, APPID_CONFIG, NOW);
         assert.deepEqual(claims.roles, ['customer']);
         // Exact, not a superset check: self-checkout must not read the till's
@@ -613,7 +676,10 @@ describe('shared roles document (Phase 5)', () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-roles-1', async () => {
       const config = { ...ROLES_CONFIG_BASE, rolesSource: fakeRolesReader(async () => null) };
-      const token = mintAppId({ scope: 'openid operator', exp: NOW + 1_000_000 + 3600 }, { kid: 'kid-roles-1', keyPair });
+      const token = mintAppId(
+        { scope: 'openid operator', exp: NOW + 1_000_000 + 3600 },
+        { kid: 'kid-roles-1', keyPair }
+      );
       const claims = await verifyAppIdAccessToken(token, config, NOW + 1_000_000);
       // ROLE_PERMISSIONS' own operator tier — proves the missing document
       // degraded to it rather than granting nothing.
@@ -635,7 +701,10 @@ describe('shared roles document (Phase 5)', () => {
           return { document: { roles: { operator: ['custom:permission'] } } };
         }),
       };
-      const token = mintAppId({ scope: 'openid operator', exp: NOW + 2_000_100 + 3600 }, { kid: 'kid-roles-2', keyPair });
+      const token = mintAppId(
+        { scope: 'openid operator', exp: NOW + 2_000_100 + 3600 },
+        { kid: 'kid-roles-2', keyPair }
+      );
       const claims = await verifyAppIdAccessToken(token, config, NOW + 2_000_000);
       // Not ROLE_PERMISSIONS' operator tier — this can only be the read document.
       assert.deepEqual(claims.permissions, ['custom:permission']);
@@ -723,7 +792,9 @@ describe('shared roles document (Phase 5)', () => {
     await withJwks(keyPair, 'kid-roles-6', async () => {
       const config = {
         ...ROLES_CONFIG_BASE,
-        rolesSource: fakeRolesReader(async () => ({ document: { roles: { customer: ['custom:narrowed'] } } })),
+        rolesSource: fakeRolesReader(async () => ({
+          document: { roles: { customer: ['custom:narrowed'] } },
+        })),
       };
       const token = mintAppId(
         { scope: 'openid customer', exp: NOW + 5_000_000 + 3600 },
@@ -769,12 +840,20 @@ describe('shared roles document (Phase 5)', () => {
       );
 
       const seeded = await verifyAppIdAccessToken(token, config, NOW + 6_000_000);
-      assert.deepEqual(seeded.permissions, ['custom:narrowed'], 'precondition: the good document is cached');
+      assert.deepEqual(
+        seeded.permissions,
+        ['custom:narrowed'],
+        'precondition: the good document is cached'
+      );
 
       // 400s later — past the 5-minute TTL, so this forces the re-read that
       // returns `{}` rather than answering from the cache.
       const claims = await verifyAppIdAccessToken(token, config, NOW + 6_000_400);
-      assert.equal(reads, 2, 'the empty document must actually have been read, not skipped as fresh cache');
+      assert.equal(
+        reads,
+        2,
+        'the empty document must actually have been read, not skipped as fresh cache'
+      );
       // The seeded document survived. Had `{}` been accepted, the backfill
       // would have made this ROLE_PERMISSIONS' own ['sale:process'] instead.
       assert.deepEqual(claims.permissions, ['custom:narrowed']);
@@ -840,7 +919,12 @@ describe('authorize — App ID dispatch', () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-authz', async () => {
       const token = mintAppId({ scope: 'admin' }, { kid: 'kid-authz', keyPair });
-      const outcome = await authorize(bearer(token), Permission.DELETE_PRODUCT, { secret: SECRET, appId: APPID_CONFIG }, NOW);
+      const outcome = await authorize(
+        bearer(token),
+        Permission.DELETE_PRODUCT,
+        { secret: SECRET, appId: APPID_CONFIG },
+        NOW
+      );
       assert.equal(outcome.ok, true);
       assert.equal(outcome.claims.operatorId, 'op-1');
     });
@@ -850,7 +934,12 @@ describe('authorize — App ID dispatch', () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-authz-403', async () => {
       const token = mintAppId({ scope: 'operator' }, { kid: 'kid-authz-403', keyPair });
-      const outcome = await authorize(bearer(token), Permission.DELETE_PRODUCT, { secret: SECRET, appId: APPID_CONFIG }, NOW);
+      const outcome = await authorize(
+        bearer(token),
+        Permission.DELETE_PRODUCT,
+        { secret: SECRET, appId: APPID_CONFIG },
+        NOW
+      );
       assert.equal(outcome.ok, false);
       assert.equal(outcome.status, 403);
       assert.equal(outcome.error, 'Requires inventory:delete.');
@@ -861,20 +950,52 @@ describe('authorize — App ID dispatch', () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-authz-customer', async () => {
       const token = mintAppId({ scope: 'customer' }, { kid: 'kid-authz-customer', keyPair });
-      const outcome = await authorize(bearer(token), Permission.VIEW_INVENTORY, { secret: SECRET, appId: APPID_CONFIG }, NOW);
+      const outcome = await authorize(
+        bearer(token),
+        Permission.VIEW_INVENTORY,
+        { secret: SECRET, appId: APPID_CONFIG },
+        NOW
+      );
       assert.equal(outcome.ok, false);
       assert.equal(outcome.status, 403);
       assert.equal(outcome.error, 'Requires inventory:view.');
     });
   });
 
-  it('admits an RS256 customer token on the sale route it does have', async () => {
+  it('admits a staff-audience RS256 token carrying the legacy customer scope on its sale route', async () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-authz-customer-ok', async () => {
       const token = mintAppId({ scope: 'customer' }, { kid: 'kid-authz-customer-ok', keyPair });
-      const outcome = await authorize(bearer(token), Permission.PROCESS_SALE, { secret: SECRET, appId: APPID_CONFIG }, NOW);
+      const outcome = await authorize(
+        bearer(token),
+        Permission.PROCESS_SALE,
+        { secret: SECRET, appId: APPID_CONFIG },
+        NOW
+      );
       assert.equal(outcome.ok, true);
       assert.deepEqual(outcome.claims.roles, ['customer']);
+    });
+  });
+
+  it('refuses an actual customer-application token on every staff route', async () => {
+    const keyPair = generateRsaKeyPair();
+    await withJwks(keyPair, 'kid-authz-customer-audience', async () => {
+      const customerConfig = { ...APPID_CONFIG, audience: 'customer-client' };
+      const token = mintAppId(
+        { scope: 'customer' },
+        { kid: 'kid-authz-customer-audience', keyPair, config: customerConfig }
+      );
+      const outcome = await authorize(
+        bearer(token),
+        Permission.PROCESS_SALE,
+        { secret: SECRET, appId: APPID_CONFIG },
+        NOW
+      );
+      assert.deepEqual(outcome, {
+        ok: false,
+        status: 401,
+        error: 'Authorization required.',
+      });
     });
   });
 
@@ -882,7 +1003,12 @@ describe('authorize — App ID dispatch', () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-unconfigured', async () => {
       const token = mintAppId({}, { kid: 'kid-unconfigured', keyPair });
-      const outcome = await authorize(bearer(token), Permission.VIEW_INVENTORY, { secret: SECRET }, NOW);
+      const outcome = await authorize(
+        bearer(token),
+        Permission.VIEW_INVENTORY,
+        { secret: SECRET },
+        NOW
+      );
       assert.equal(outcome.ok, false);
       assert.equal(outcome.status, 401);
     });
@@ -891,7 +1017,12 @@ describe('authorize — App ID dispatch', () => {
   it('still verifies HS256 correctly when appId is also configured', async () => {
     // The two paths are independent — configuring App ID must not break the
     // local-secret path any deployment might still carry.
-    const outcome = await authorize(bearer(mint()), Permission.PROCESS_SALE, { secret: SECRET, appId: APPID_CONFIG }, NOW);
+    const outcome = await authorize(
+      bearer(mint()),
+      Permission.PROCESS_SALE,
+      { secret: SECRET, appId: APPID_CONFIG },
+      NOW
+    );
     assert.equal(outcome.ok, true);
   });
 });
