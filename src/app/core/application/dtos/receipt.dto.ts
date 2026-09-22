@@ -18,4 +18,8 @@ export interface ReceiptData {
   readonly tax: number;
   readonly taxRate: number;
   readonly total: number;
+  /** Display name of the store that processed the transaction. */
+  readonly storeName: string;
+  /** Store address, shown on the receipt footer. */
+  readonly storeAddress: string;
 }

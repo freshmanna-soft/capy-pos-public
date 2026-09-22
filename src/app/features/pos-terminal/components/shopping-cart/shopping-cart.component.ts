@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 
 import { Product } from '@core/domain/entities/product.entity';
-import { CartService } from '@core/application/services/cart.service';
+import { CartService, MAX_QTY_PER_PRODUCT } from '@core/application/services/cart.service';
 import { CartTotalsComponent } from '@features/pos-terminal/components/cart-totals/cart-totals.component';
 
 /**
@@ -192,7 +192,11 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
                     class="flex items-center justify-center w-11 h-11 bg-white border border-gray-300 rounded-lg active:bg-indigo-500 active:border-indigo-500 active:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     [attr.data-testid]="'increase-quantity-' + item.product.id"
                     (click)="cartService.increaseQuantity(item.product.id)"
-                    [disabled]="item.quantity >= item.product.stock || item.product.stock === 0"
+                    [disabled]="
+                      item.quantity >= item.product.stock ||
+                      item.product.stock === 0 ||
+                      item.quantity >= maxQtyPerProduct
+                    "
                     aria-label="Increase quantity"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -283,6 +287,8 @@ import { CartTotalsComponent } from '@features/pos-terminal/components/cart-tota
 })
 export class ShoppingCartComponent {
   public cartService = inject(CartService);
+  /** Exposed to the template for the per-product quantity cap. */
+  readonly maxQtyPerProduct = MAX_QTY_PER_PRODUCT;
   private readonly injector = inject(Injector);
 
   /** Reference to the scrollable cart items container */
@@ -377,7 +383,7 @@ export class ShoppingCartComponent {
 
     const item = this.cartService.getItem(productId);
     if (item) {
-      const quantity = Math.min(newQuantity, item.product.stock);
+      const quantity = Math.min(newQuantity, item.product.stock, MAX_QTY_PER_PRODUCT);
       input.value = quantity.toString();
       this.cartService.updateQuantity(productId, quantity);
     }

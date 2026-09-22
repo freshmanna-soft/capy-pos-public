@@ -34,6 +34,7 @@ export const environment = {
 
   // See environment.ts — decoupled from `production` on purpose.
   allowSeededAdmin: true,
+  geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration
   //

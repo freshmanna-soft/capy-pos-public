@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { CartService } from '@core/application/services/cart.service';
+import { CartService, MAX_QTY_PER_PRODUCT } from '@core/application/services/cart.service';
 import {
   GenerateReceiptUseCase,
   ReceiptData,
@@ -141,7 +141,7 @@ export class PosFacade {
     }
 
     const currentQuantity = this.cartService.getQuantity(product.id);
-    if (currentQuantity >= product.stock) {
+    if (currentQuantity >= product.stock || currentQuantity >= MAX_QTY_PER_PRODUCT) {
       return { added: false, reason: 'max-stock-reached' };
     }
 

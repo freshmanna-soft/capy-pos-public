@@ -14,6 +14,10 @@ import {
   TenantIsolationError,
   AuthorizationService,
   AuthorizationError,
+  OrgId,
+  StoreId,
+  TerminalId,
+  TerminalMode,
 } from './index';
 
 /**
@@ -39,13 +43,17 @@ describe('auth domain public surface (@core/domain/auth barrel)', () => {
       'MANAGER_PERMISSIONS',
       'OPERATOR_PERMISSIONS',
       'Operator',
+      'OrgId',
       'Permission',
       'Role',
       'RoleName',
+      'StoreId',
       'TenantId',
       'TenantIsolationError',
       'TenantMembership',
       'TenantMembershipSet',
+      'TerminalId',
+      'TerminalMode',
       'isPermission',
     ]);
   });
@@ -78,5 +86,15 @@ describe('auth domain public surface (@core/domain/auth barrel)', () => {
   it('exposes the entity and error constructors', () => {
     expect(typeof Operator).toBe('function');
     expect(AuthorizationError.prototype).toBeInstanceOf(Error);
+  });
+
+  it('re-exports the Org → Store → Terminal hierarchy', () => {
+    const org = new OrgId('my-org');
+    const store = new StoreId(org, 'store-1');
+    const terminal = new TerminalId(store, 'till-1', TerminalMode.KIOSK);
+    expect(terminal.isKiosk).toBe(true);
+    expect(terminal.storeId.orgId.value).toBe('my-org');
+    expect(TerminalMode.OPERATOR).toBe('operator');
+    expect(TerminalMode.KIOSK).toBe('kiosk');
   });
 });

@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { GenerateReceiptUseCase } from '@core/application/use-cases/generate-receipt.use-case';
 import { CartService } from '@core/application/services/cart.service';
+import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
 import { ProductBuilder } from '@core/domain/entities/product.builder';
 import { PaymentResult } from '@core/application/dtos/payment.dto';
 
@@ -63,7 +64,18 @@ describe('GenerateReceiptUseCase', () => {
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [GenerateReceiptUseCase, CartService],
+      providers: [
+        GenerateReceiptUseCase,
+        CartService,
+        {
+          provide: KioskSettingsService,
+          useValue: {
+            storeName: () => 'Test Store',
+            storeAddress: () => '',
+            load: () => Promise.resolve(),
+          },
+        },
+      ],
     });
 
     useCase = TestBed.inject(GenerateReceiptUseCase);

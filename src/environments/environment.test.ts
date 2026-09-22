@@ -8,6 +8,7 @@ export const environment = {
 
   // See environment.ts — decoupled from `production` on purpose.
   allowSeededAdmin: true,
+  geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration
   apiUrl: 'http://localhost:4200/api',
@@ -74,10 +75,18 @@ export const environment = {
     enabled: false,
   },
 
+  // MercadoPago — disabled under test; the adapter is mocked in specs.
+  mercadopago: {
+    enabled: false,
+    publicKey: 'TEST-mock-public-key',
+    preferenceApiUrl: 'http://localhost:8790/api/mercadopago/preference',
+  },
+
+  // PayPal — disabled under test; the adapter is mocked in specs.
   paypal: {
     enabled: false,
-    clientId: '',
-    environment: 'sandbox' as const,
+    clientId: 'test-paypal-client-id',
+    preferenceApiUrl: 'http://localhost:8790/api/paypal/order',
   },
 
   // Feature Flags
@@ -91,6 +100,8 @@ export const environment = {
     // flag, not aiVision: that one governs paying the model to *look*, and the two
     // switch on independently.
     clerkAgent: false,
+    // Kiosk self-checkout mode — disabled under test.
+    kiosk: false,
   },
 
   // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but

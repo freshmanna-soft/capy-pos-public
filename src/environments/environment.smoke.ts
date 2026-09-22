@@ -29,6 +29,7 @@ export const environment = {
 
   // The one flag this file exists to flip. See environment.ts.
   allowSeededAdmin: true,
+  geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration — identical to environment.prod.ts. The smoke suite
   // exercises the real production backends on purpose, same as `start:prod`

@@ -9,6 +9,8 @@ import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculat
 import { CircuitBreakerService } from '@core/infrastructure/resilience/circuit-breaker.service';
 import { RetryService } from '@core/infrastructure/resilience/retry.service';
 import { signal } from '@angular/core';
+import { MERCADOPAGO_PAYMENT_PORT } from '@core/application/ports/mercadopago.port';
+import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
 
 /**
  * Unit Tests for CheckoutComponent
@@ -264,6 +266,26 @@ describe('CheckoutComponent', () => {
         { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
         { provide: CircuitBreakerService, useValue: mockCircuitBreaker },
         { provide: RetryService, useValue: mockRetry },
+        // No-op stub: checkout tests do not exercise the MercadoPago path
+        {
+          provide: MERCADOPAGO_PAYMENT_PORT,
+          useValue: {
+            isEnabled: () => false,
+            loadSdk: () => Promise.resolve(),
+            createAndRender: () => Promise.reject(new Error('not tested')),
+            destroy: () => undefined,
+          },
+        },
+        // No-op stub: checkout tests do not exercise the PayPal path
+        {
+          provide: PAYPAL_PAYMENT_PORT,
+          useValue: {
+            isEnabled: () => false,
+            loadSdk: () => Promise.resolve(),
+            createAndRender: () => Promise.reject(new Error('not tested')),
+            destroy: () => undefined,
+          },
+        },
       ],
     }).compileComponents();
 
