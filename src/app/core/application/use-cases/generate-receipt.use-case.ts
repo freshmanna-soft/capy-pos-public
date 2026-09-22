@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { CartService } from '@core/application/services/cart.service';
 import { CartItem } from '@core/application/services/cart.service.interface';
 import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
+import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
 
 /**
  * Receipt data structure for display
@@ -13,6 +14,10 @@ export interface ReceiptData {
   tax: number;
   taxRate: number;
   total: number;
+  /** Display name of the store that processed the transaction. */
+  storeName: string;
+  /** Store address, shown on the receipt footer. */
+  storeAddress: string;
 }
 
 /**
@@ -36,6 +41,7 @@ export interface ReceiptData {
 })
 export class GenerateReceiptUseCase {
   private readonly cartService = inject(CartService);
+  private readonly kioskSettings = inject(KioskSettingsService);
 
   /**
    * Generates receipt data from current cart state and payment result.
@@ -51,6 +57,8 @@ export class GenerateReceiptUseCase {
       tax: this.cartService.tax(),
       taxRate: this.cartService.taxRate(),
       total: this.cartService.total(),
+      storeName: this.kioskSettings.storeName() || 'Capy-POS',
+      storeAddress: this.kioskSettings.storeAddress(),
     };
   }
 
@@ -71,8 +79,10 @@ export class GenerateReceiptUseCase {
     subtotal: number,
     tax: number,
     taxRate: number,
-    total: number
+    total: number,
+    storeName = '',
+    storeAddress = ''
   ): ReceiptData {
-    return { payment, items, subtotal, tax, taxRate, total };
+    return { payment, items, subtotal, tax, taxRate, total, storeName, storeAddress };
   }
 }

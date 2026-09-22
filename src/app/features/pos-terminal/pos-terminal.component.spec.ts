@@ -1,5 +1,7 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+import { MERCADOPAGO_PAYMENT_PORT } from '@core/application/ports/mercadopago.port';
+import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
 import { PosTerminalComponent } from '@features/pos-terminal/pos-terminal.component';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
 import {
@@ -20,6 +22,8 @@ import { PosFacade } from '@core/application/facades';
 import { GenerateReceiptUseCase } from '@core/application/use-cases/generate-receipt.use-case';
 import { AdjustStockOnSaleUseCase } from '@core/application/use-cases/adjust-stock-on-sale.use-case';
 import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
+import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
+import { GeofencingService } from '@core/application/services/geofencing.service';
 
 /**
  * Unit Tests for PosTerminalComponent - S1-4: Add to Cart Interaction
@@ -154,6 +158,38 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
         { provide: CUSTOMER_REPOSITORY, useValue: mockCustomerRepository },
         { provide: PRODUCT_REPOSITORY, useValue: mockProductRepository },
         { provide: 'ITransactionRepository', useValue: mockTransactionRepository },
+        {
+          provide: MERCADOPAGO_PAYMENT_PORT,
+          useValue: { isEnabled: () => false, createAndRender: vi.fn(), destroy: vi.fn() },
+        },
+        {
+          provide: PAYPAL_PAYMENT_PORT,
+          useValue: { isEnabled: () => false, createAndRender: vi.fn(), destroy: vi.fn() },
+        },
+        {
+          provide: KioskSettingsService,
+          useValue: {
+            storeName: () => '',
+            storeAddress: () => '',
+            storePhone: () => '',
+            orgName: () => '',
+            load: vi.fn().mockResolvedValue(undefined),
+            fenceEnabled: () => false,
+            fenceLat: () => null,
+            fenceLng: () => null,
+            fenceRadiusMeters: () => 200,
+          },
+        },
+        {
+          provide: GeofencingService,
+          useValue: {
+            status: () => 'idle',
+            isInsideFence: () => true,
+            isOutsideFence: () => false,
+            checkFence: vi.fn().mockResolvedValue('disabled'),
+            reset: vi.fn(),
+          },
+        },
       ],
     }).compileComponents();
 

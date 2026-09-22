@@ -4,8 +4,20 @@ import { authGuard } from '@core/presentation/guards/auth.guard';
 export const routes: Routes = [
   {
     path: '',
-    redirectTo: 'pos',
+    redirectTo: 'kiosk',
     pathMatch: 'full',
+  },
+  {
+    path: 'kiosk',
+    loadComponent: () =>
+      import('./features/kiosk/kiosk-splash.component').then((m) => m.KioskSplashComponent),
+    title: 'Welcome · Capy Shop',
+  },
+  {
+    path: 'kiosk/shop',
+    loadComponent: () =>
+      import('./features/kiosk/kiosk-shop.component').then((m) => m.KioskShopComponent),
+    title: 'Shop · Capy Shop',
   },
   {
     path: 'pos',
@@ -91,6 +103,6 @@ export const routes: Routes = [
   },
   {
     path: '**',
-    redirectTo: 'pos',
+    redirectTo: 'kiosk',
   },
 ];

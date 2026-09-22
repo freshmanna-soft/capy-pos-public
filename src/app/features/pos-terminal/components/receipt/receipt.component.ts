@@ -1,16 +1,8 @@
 import { Component, ChangeDetectionStrategy, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
-import { CartItem } from '@core/application/services/cart.service.interface';
-
-export interface ReceiptData {
-  payment: PaymentResult;
-  items: CartItem[];
-  subtotal: number;
-  tax: number;
-  taxRate: number;
-  total: number;
-}
+// Re-export the canonical ReceiptData so consumers can import from one place.
+export type { ReceiptData } from '@core/application/use-cases/generate-receipt.use-case';
+import { ReceiptData } from '@core/application/use-cases/generate-receipt.use-case';
 
 /**
  * Receipt Component
@@ -47,9 +39,12 @@ export interface ReceiptData {
         <div class="receipt-body">
           <!-- Store Info -->
           <div class="store-info">
-            <span class="store-name">🦫 Capy-POS</span>
+            <span class="store-name">🦫 {{ data().storeName }}</span>
             <span class="store-date">{{ data().payment.timestamp | date: 'medium' }}</span>
           </div>
+          @if (data().storeAddress) {
+            <p class="store-address">📍 {{ data().storeAddress }}</p>
+          }
 
           <div class="divider"></div>
 
@@ -131,6 +126,13 @@ export interface ReceiptData {
   `,
   styles: [
     `
+      .store-address {
+        font-size: 0.75rem;
+        color: #6b7280;
+        margin: 0.125rem 0 0;
+        text-align: center;
+      }
+
       .receipt-overlay {
         position: fixed;
         inset: 0;

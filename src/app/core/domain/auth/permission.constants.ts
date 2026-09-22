@@ -48,6 +48,20 @@ export const Permission = {
   MANAGE_ROLES: 'admin:manage_roles',
   /** Access application settings */
   MANAGE_SETTINGS: 'admin:settings',
+
+  // --- Kiosk / Self-checkout ---
+  /**
+   * Enable or configure a kiosk terminal (set mode, enable MP/PayPal, geofencing).
+   * Held by Manager and Admin; an Operator cannot reconfigure the terminal
+   * they are running on.
+   */
+  MANAGE_KIOSK: 'kiosk:manage',
+  /**
+   * Use the self-checkout flow (kiosk terminal mode).
+   * Granted to every role so any authenticated session may ring up a sale via
+   * the kiosk — the terminal mode, not the user's role, restricts payment options.
+   */
+  USE_KIOSK: 'kiosk:use',
 } as const;
 
 export type Permission = (typeof Permission)[keyof typeof Permission];
@@ -61,6 +75,7 @@ export const OPERATOR_PERMISSIONS: ReadonlySet<Permission> = new Set([
   Permission.VIEW_TRANSACTIONS,
   Permission.VIEW_INVENTORY,
   Permission.VIEW_CUSTOMERS,
+  Permission.USE_KIOSK,
 ]);
 
 export const MANAGER_PERMISSIONS: ReadonlySet<Permission> = new Set([
@@ -72,6 +87,7 @@ export const MANAGER_PERMISSIONS: ReadonlySet<Permission> = new Set([
   Permission.MANAGE_CUSTOMERS,
   Permission.VIEW_REPORTS,
   Permission.EXPORT_REPORTS,
+  Permission.MANAGE_KIOSK,
 ]);
 
 export const ADMIN_PERMISSIONS: ReadonlySet<Permission> = new Set([

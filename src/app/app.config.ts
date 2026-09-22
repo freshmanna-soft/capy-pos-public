@@ -28,6 +28,8 @@ import { ThemeService } from '@core/application/services/theme.service';
 import { OtlpExporterService } from '@core/infrastructure/telemetry/otlp-exporter.service';
 import { TraceContextInterceptor } from '@core/infrastructure/telemetry/trace-context.interceptor';
 import { environment } from '../environments/environment';
+import { MERCADOPAGO_PROVIDER } from '@core/infrastructure/payment/mercadopago.provider';
+import { PAYPAL_PROVIDER } from '@core/infrastructure/payment/paypal.provider';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -128,6 +130,10 @@ export const appConfig: ApplicationConfig = {
     ...INVENTORY_AGENT_PROVIDERS,
     ...SALES_AGENT_PROVIDERS,
     PAYMENT_AGENT_PROVIDER,
+    // MercadoPago payment adapter — no-op stub when the feature flag is off
+    MERCADOPAGO_PROVIDER,
+    // PayPal payment adapter — no-op stub when the feature flag is off
+    PAYPAL_PROVIDER,
     // Auth providers (local credential adapter — swap for Cognito in Story #42)
     ...AUTH_PROVIDERS,
     // Background sync worker (syncs local Dexie ↔ the pos-api sync backend).

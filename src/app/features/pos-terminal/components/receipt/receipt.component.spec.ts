@@ -78,6 +78,8 @@ describe('ReceiptComponent', () => {
     tax: 1.02,
     taxRate: 0.085,
     total: 13.02,
+    storeName: 'Test Store',
+    storeAddress: '123 Main St',
   };
 
   beforeEach(() => {

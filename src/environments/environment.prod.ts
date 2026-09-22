@@ -12,6 +12,7 @@ export const environment = {
   // flipped, so CI can exercise a logged-in state without this file granting
   // the same thing to the real deployed pilot.
   allowSeededAdmin: false,
+  geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration
   //
@@ -92,6 +93,23 @@ export const environment = {
     enabled: true,
   },
 
+  // MercadoPago — enabled for production. Public key is not a secret; the
+  // access token lives in the pos-api backend only.
+  mercadopago: {
+    enabled: true,
+    publicKey: '', // Set via environment variable: MERCADOPAGO_PUBLIC_KEY
+    preferenceApiUrl:
+      'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api/mercadopago/preference',
+  },
+
+  // PayPal — disabled until keys are provisioned. clientId is not a secret.
+  paypal: {
+    enabled: false,
+    clientId: '', // Set via environment variable: PAYPAL_CLIENT_ID
+    preferenceApiUrl:
+      'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api/paypal/order',
+  },
+
   // Feature Flags
   features: {
     analytics: true,
@@ -103,6 +121,8 @@ export const environment = {
     // flag, not aiVision: that one governs paying the model to *look*, and the two
     // switch on independently.
     clerkAgent: true,
+    // Kiosk self-checkout mode — prod has kiosk enabled.
+    kiosk: true,
   },
 
   // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but

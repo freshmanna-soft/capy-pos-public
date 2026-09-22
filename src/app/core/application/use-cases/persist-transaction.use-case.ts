@@ -14,8 +14,8 @@ import { EmptyCartException, TransactionPersistenceException } from '@core/appli
  * Request DTO for persisting a transaction
  */
 export interface PersistTransactionRequest {
-  /** Payment method used (cash, card, mobile) */
-  paymentMethod: 'cash' | 'card' | 'mobile';
+  /** Payment method used */
+  paymentMethod: 'cash' | 'card' | 'mobile' | 'mercadopago' | 'paypal';
   /** Unique transaction identifier */
   transactionId: string;
   /** Amount tendered by customer (cash payments) */
@@ -35,7 +35,7 @@ export interface PersistTransactionResult {
   /** Transaction ID */
   transactionId: string;
   /** Payment method used */
-  paymentMethod: 'cash' | 'card' | 'mobile';
+  paymentMethod: 'cash' | 'card' | 'mobile' | 'mercadopago' | 'paypal';
   /** Timestamp of persistence */
   timestamp: Date;
   /** Error message if persistence failed */

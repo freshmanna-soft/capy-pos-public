@@ -38,6 +38,34 @@
         </svg>
         Norma POS
       </h1>
+
+      <!-- Store context chip — shows active store and geofence status once known -->
+      @if (kioskSettings.storeName()) {
+        <div
+          class="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border"
+          [class]="
+            geofencing.status() === 'outside'
+              ? 'bg-amber-50 border-amber-300 text-amber-800'
+              : geofencing.status() === 'error'
+                ? 'bg-red-50 border-red-200 text-red-700'
+                : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          "
+          data-testid="store-context-chip"
+          [title]="kioskSettings.storeAddress() || kioskSettings.storeName()"
+        >
+          @if (geofencing.status() === 'locating') {
+            <span class="animate-pulse">📡</span>
+          } @else if (geofencing.status() === 'outside') {
+            <span>⚠️</span>
+          } @else if (geofencing.status() === 'error') {
+            <span>📍</span>
+          } @else {
+            <span>🏪</span>
+          }
+          <span>{{ kioskSettings.storeName() }}</span>
+        </div>
+      }
+
       <div class="flex gap-2 md:gap-3">
         <a
           routerLink="/clerk"

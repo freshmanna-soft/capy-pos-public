@@ -15,6 +15,8 @@ import { PosFacade } from '@core/application/facades';
 import { ProductService } from '@core/application/services/product.service';
 import { ReceiptData } from '@core/application/use-cases/generate-receipt.use-case';
 import { ToastService } from '@shared/ui/toast/toast.service';
+import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
+import { GeofencingService } from '@core/application/services/geofencing.service';
 
 /**
  * POS Terminal Page Component
@@ -53,6 +55,8 @@ export class PosTerminalComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  protected readonly kioskSettings = inject(KioskSettingsService);
+  protected readonly geofencing = inject(GeofencingService);
 
   @ViewChild(ProductSearchComponent) productSearch!: ProductSearchComponent;
 
@@ -90,6 +94,13 @@ export class PosTerminalComponent implements OnInit {
       .catch((error: unknown) => {
         console.error('Failed to initialize database:', error);
       });
+
+    // Load the Org → Store → Terminal hierarchy so the active store name,
+    // address and geofence config are available for the receipt and the
+    // automatic store-context check on checkout.
+    this.kioskSettings.load().catch((error: unknown) => {
+      console.warn('[POS] Could not load store settings:', error);
+    });
 
     this.consumeCheckoutHandoff();
   }
@@ -206,11 +217,21 @@ export class PosTerminalComponent implements OnInit {
   }
 
   /**
-   * Opens the checkout overlay
+   * Opens the checkout overlay.
+   * Also fires a geofence check so the receipt and stock adjustment carry the
+   * correct store context. The check is best-effort — a geo error never blocks
+   * the sale.
    */
   openCheckout(): void {
     if (!this.posFacade.isCartEmpty()) {
       this.showCheckout.set(true);
+      void this.geofencing.checkFence().then((status) => {
+        if (status === 'outside') {
+          this.toast.warning(
+            `You appear to be outside the store fence for "${this.kioskSettings.storeName() || 'this store'}". Checkout may be restricted.`
+          );
+        }
+      });
     }
   }
 
