@@ -236,7 +236,7 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
   private map: L.Map | null = null;
   private polyline: L.Polyline | null = null; // preview line while drawing
   private filledPoly: L.Polygon | null = null; // filled polygon layer
-  private vertexMarkers: L.CircleMarker[] = [];
+  private vertexMarkers: L.Marker[] = [];
   private drawingVertices: LatLng[] = [];
   private mapClickHandler: ((e: L.LeafletMouseEvent) => void) | null = null;
 
@@ -272,10 +272,10 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
         this.onMapClick(e.latlng);
       });
     };
-    this.map.on('click', this.mapClickHandler);
-    this.map.on('dblclick', this.onMapDblClick.bind(this));
+    this.map!.on('click', this.mapClickHandler);
+    this.map!.on('dblclick', this.onMapDblClick.bind(this));
     // Prevent default zoom-on-dblclick while drawing
-    this.map.doubleClickZoom.disable();
+    this.map!.doubleClickZoom.disable();
   }
 
   cancelDrawing(): void {
@@ -296,7 +296,7 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
     this.locateError.set('');
     try {
       const pos = await getCurrentPosition();
-      this.map.setView([pos.lat, pos.lng], 17);
+      this.map!.setView([pos.lat, pos.lng], 17);
     } catch (err) {
       this.locateError.set(err instanceof Error ? err.message : 'Location unavailable');
     } finally {
@@ -313,7 +313,7 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
     this.L = leafletModule.default ?? leafletModule;
 
     // Fix the missing marker icon path that Leaflet has in bundler environments
-    delete (this.L.Icon.Default.prototype as Record<string, unknown>)['_getIconUrl'];
+    delete (this.L.Icon.Default.prototype as unknown as Record<string, unknown>)['_getIconUrl'];
     this.L.Icon.Default.mergeOptions({
       iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
       iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
@@ -344,17 +344,19 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
       zoom = 17;
     }
 
-    this.map = L.map(this.mapEl.nativeElement, {
+    this.map = L!.map(this.mapEl.nativeElement, {
       center,
       zoom,
       zoomControl: true,
     });
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 20,
-      attribution:
-        '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(this.map);
+    L!
+      .tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 20,
+        attribution:
+          '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      })
+      .addTo(this.map);
   }
 
   private renderSavedPolygon(): void {
@@ -364,30 +366,32 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
     const L = this.L;
     const latlngs = saved.map((v) => [v.lat, v.lng] as [number, number]);
 
-    this.filledPoly = L.polygon(latlngs, {
-      color: '#2563eb',
-      weight: 2,
-      fillColor: '#3b82f6',
-      fillOpacity: 0.18,
-    }).addTo(this.map);
+    this.filledPoly = L!
+      .polygon(latlngs, {
+        color: '#2563eb',
+        weight: 2,
+        fillColor: '#3b82f6',
+        fillOpacity: 0.18,
+      })
+      .addTo(this.map!);
 
     // Draggable vertex markers
     saved.forEach((v, idx) => {
       this.addVertexMarker(v, idx);
     });
 
-    this.map.fitBounds(this.filledPoly.getBounds(), { padding: [30, 30] });
+    this.map!.fitBounds(this.filledPoly.getBounds(), { padding: [30, 30] });
   }
 
   private addVertexMarker(v: LatLng, idx: number): void {
     const L = this.L;
-    const icon = L.divIcon({
+    const icon = L!.divIcon({
       className: 'fence-vertex-marker',
       iconSize: [14, 14],
       iconAnchor: [7, 7],
     });
 
-    const marker = L.marker([v.lat, v.lng], { icon, draggable: true }).addTo(this.map);
+    const marker = L!.marker([v.lat, v.lng], { icon, draggable: true }).addTo(this.map!);
 
     marker.on('dragend', () => {
       this.zone.run(() => {
@@ -425,12 +429,12 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
     // Add a temporary dot marker
     const L = this.L;
     const isFirst = this.drawingVertices.length === 1;
-    const icon = L.divIcon({
+    const icon = L!.divIcon({
       className: `fence-vertex-marker${isFirst ? ' fence-close-marker' : ''}`,
       iconSize: [14, 14],
       iconAnchor: [7, 7],
     });
-    const m = L.marker([v.lat, v.lng], { icon }).addTo(this.map);
+    const m = L!.marker([v.lat, v.lng], { icon }).addTo(this.map!);
     this.vertexMarkers.push(m);
   }
 
@@ -445,9 +449,9 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.polyline) {
       this.polyline.setLatLngs(pts);
     } else {
-      this.polyline = L.polyline(pts, { color: '#2563eb', weight: 2, dashArray: '6 4' }).addTo(
-        this.map
-      );
+      this.polyline = L!
+        .polyline(pts, { color: '#2563eb', weight: 2, dashArray: '6 4' })
+        .addTo(this.map!);
     }
   }
 
@@ -461,25 +465,27 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
     // Re-render as a filled polygon with draggable markers
     verts.forEach((v, idx) => this.addVertexMarker(v, idx));
     const L = this.L;
-    this.filledPoly = L.polygon(
-      verts.map((v) => [v.lat, v.lng] as [number, number]),
-      { color: '#2563eb', weight: 2, fillColor: '#3b82f6', fillOpacity: 0.18 }
-    ).addTo(this.map);
+    this.filledPoly = L!
+      .polygon(
+        verts.map((v) => [v.lat, v.lng] as [number, number]),
+        { color: '#2563eb', weight: 2, fillColor: '#3b82f6', fillOpacity: 0.18 }
+      )
+      .addTo(this.map!);
 
-    this.map.fitBounds(this.filledPoly.getBounds(), { padding: [30, 30] });
+    this.map!.fitBounds(this.filledPoly.getBounds(), { padding: [30, 30] });
   }
 
   private stopDrawing(): void {
     if (this.mapClickHandler) {
-      this.map.off('click', this.mapClickHandler);
+      this.map!.off('click', this.mapClickHandler);
       this.mapClickHandler = null;
     }
-    this.map.off('dblclick');
-    this.map.doubleClickZoom.enable();
+    this.map!.off('dblclick');
+    this.map!.doubleClickZoom.enable();
     this.drawing.set(false);
 
     if (this.polyline) {
-      this.map.removeLayer(this.polyline);
+      this.map!.removeLayer(this.polyline);
       this.polyline = null;
     }
     this.drawingVertices = [];
