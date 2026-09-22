@@ -103,7 +103,7 @@ export const environment = {
   // *secret* is sensitive, and that lives in the relay's Code Engine secret,
   // never here.
   appId: {
-    enabled: true,
+    enabled: false,
     region: 'us-south',
     tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
     staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',

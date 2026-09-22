@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { Page, expect } from '@playwright/test';
 
 /**
  * stubLiveSyncEndpoints
@@ -82,21 +82,17 @@ export async function loginAsAdmin(page: Page): Promise<void> {
   // Step 2: Fill credentials and submit.
   await page.fill('[data-testid="input-email"]', 'admin@capy-pos.local');
   await page.fill('[data-testid="input-password"]', 'admin1234');
+  // Wait for Angular to process the form values and enable the submit button.
+  await page.waitForSelector('[data-testid="btn-login"]:not([disabled])', { timeout: 5000 });
   await page.click('[data-testid="btn-login"]');
 
   // Step 3: Wait for the Angular router to redirect off /login.
-  await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
-
-  // Belt-and-suspenders: wait for the app navigation to render, confirming
-  // the Angular router has settled on a protected route.
-  await Promise.race([
-    page
-      .locator('[data-testid="navigation-desktop"]')
-      .waitFor({ state: 'visible', timeout: 15000 })
-      .catch(() => null),
-    page
-      .locator('[data-testid="navigation"]')
-      .waitFor({ state: 'visible', timeout: 15000 })
-      .catch(() => null),
-  ]);
+  // Poll the URL so we tolerate fast redirects that complete before
+  // waitForURL can attach its listener.
+  await expect
+    .poll(() => new URL(page.url()).pathname, {
+      message: 'expected router to leave /login',
+      timeout: 15000,
+    })
+    .not.toContain('/login');
 }
