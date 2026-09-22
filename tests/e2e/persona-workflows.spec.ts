@@ -92,7 +92,7 @@ async function getNavLink(page: Page, testId: string) {
 test.describe('Navigation Accessibility - All Features Reachable', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto('/');
+    await page.goto('/pos');
     // Wait for either mobile or desktop nav to be visible
     await waitForNavigation(page);
   });
@@ -346,13 +346,13 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
   });
 
   test('manager can access reports from navigation', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/pos');
     await clickNavLink(page, 'nav-reports');
     await expect(page).toHaveURL(/\/reports/);
   });
 
   test('manager can access transaction history from navigation', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/pos');
     await clickNavLink(page, 'nav-history');
     await expect(page).toHaveURL(/\/history/);
   });
@@ -370,20 +370,20 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
   });
 
   test('manager can access inventory to check stock levels', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/pos');
     await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
   });
 
   test('manager can access agent monitor dashboard', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/pos');
     await clickNavLink(page, 'nav-dashboard');
     await expect(page).toHaveURL(/\/dashboard/);
   });
 
   test('manager workflow: check reports then review transactions', async ({ page }) => {
     // Full manager workflow
-    await page.goto('/');
+    await page.goto('/pos');
 
     // Step 1: Check reports
     await clickNavLink(page, 'nav-reports');
@@ -410,7 +410,7 @@ test.describe('Persona: Carlos the Manager - Reports & Oversight', () => {
 test.describe('Persona: Ana the Inventory Clerk - Inventory Management', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto('/');
+    await page.goto('/pos');
     await clickNavLink(page, 'nav-inventory');
     await expect(page).toHaveURL(/\/inventory/);
   });
@@ -460,7 +460,7 @@ test.describe('Cross-Feature Navigation Integrity', () => {
   });
 
   test('can navigate through all features sequentially', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/pos');
 
     const routes = [
       { nav: 'nav-pos', url: '/pos' },
@@ -589,7 +589,7 @@ test.describe('Bug Regression Tests', () => {
   });
 
   test('BUG-002: Transaction History accessible from navigation', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/pos');
     await waitForNavigation(page);
 
     // Transaction History link MUST exist in navigation
