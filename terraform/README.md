@@ -25,7 +25,8 @@ template kept for reference and is not applied by this root module — see
 | `ibm_code_engine_secret.appid_secret`             | `APPID_CLIENT_SECRET`, `APPID_MANAGEMENT_APIKEY`, `APPID_CUSTOMER_CLIENT_SECRET`, one per app that sets `needs_appid_secret`. |
 | `ibm_code_engine_secret.checkout`                 | PayPal secret and versioned checkout HMAC keyrings.                                                                           |
 | `ibm_code_engine_job.checkout_migration`          | Cloudant-only, idempotent checkout-index migration.                                                                           |
-| `ibm_code_engine_job.checkout_reconciliation`     | Bounded lease-fenced checkout recovery worker.                                                                                |
+| `ibm_code_engine_job.loyalty_migration`           | Manager-only ledger-history and completed-checkout loyalty-due index migration.                                               |
+| `ibm_code_engine_job.checkout_reconciliation`     | Writer-scoped bounded checkout and loyalty recovery worker.                                                                   |
 | `ibm_code_engine_app.apps`                        | `for_each` over `var.services`.                                                                                               |
 
 The apps are a `for_each` rather than one resource block per service on purpose:
@@ -62,31 +63,35 @@ state. Per-environment deploys are separate workspaces/state files with differen
 
 Set these as `TF_VAR_*` environment variables (never in a committed `.tfvars`):
 
-| Variable                                          | Required                              | Default             | Notes                                                                                                                                                                                                 |
-| ------------------------------------------------- | ------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ibmcloud_api_key`                                | always                                | —                   | Sensitive. Also used as the registry pull password.                                                                                                                                                   |
-| `anthropic_api_key`                               | if any service `needs_model_key`      | `""`                | Sensitive. Bound as a secret, never as a literal env var.                                                                                                                                             |
-| `anthropic_base_url`                              | no                                    | `""`                | Route model calls through a gateway (e.g. an IBM litellm proxy) instead of the real API. Not sensitive — a literal env var. `anthropic_api_key` must be shaped for whichever endpoint this points at. |
-| `session_jwt_secret`                              | if any service `needs_session_secret` | `""`                | Sensitive. Must match `getJwtSecret()` — see the auth note below.                                                                                                                                     |
-| `frontend_origins`                                | if any service `pins_cors_origins`    | production defaults | List of `scheme://host[:port]`, no trailing slash.                                                                                                                                                    |
-| `paypal_client_id`                                | if any service `needs_checkout`       | `""`                | PayPal REST client id; not secret.                                                                                                                                                                    |
-| `paypal_client_secret`                            | if any service `needs_checkout`       | `""`                | Sensitive; bound through Code Engine secrets only.                                                                                                                                                    |
-| `paypal_expected_merchant_id`                     | if any service `needs_checkout`       | `""`                | Merchant id checked against provider facts.                                                                                                                                                           |
-| `checkout_store_id`                               | if any service `needs_checkout`       | `""`                | Trusted store id bound into every checkout.                                                                                                                                                           |
-| `checkout_*_hmac_keys`                            | if any service `needs_checkout`       | `{}`                | Sensitive versioned keyrings; retain old versions through retention.                                                                                                                                  |
-| `checkout_currency` / `checkout_tax_basis_points` | if checkout enabled                   | `""` / `-1`         | Explicit production pricing policy.                                                                                                                                                                   |
-| `checkout_reconciliation_schedule`                | no                                    | `*/5 * * * *`       | Applied out of band; Terraform provider has no cron resource.                                                                                                                                         |
-| `checkout_reconciliation_time_zone`               | no                                    | `UTC`               | IANA time zone for the out-of-band cron subscription.                                                                                                                                                 |
-| `appid_region`                                    | if any service `needs_appid_secret`   | `us-south`          | Not sensitive.                                                                                                                                                                                        |
-| `appid_tenant_id`                                 | if any service `needs_appid_secret`   | `""`                | Not sensitive — matches `environment.*.ts`'s `appId.tenantId`.                                                                                                                                        |
-| `appid_client_id`                                 | if any service `needs_appid_secret`   | `""`                | Not sensitive — matches `environment.*.ts`'s `appId.staffClientId`.                                                                                                                                   |
-| `appid_client_secret`                             | if any service `needs_appid_secret`   | `""`                | Sensitive. The App ID staff application's client secret.                                                                                                                                              |
-| `region`                                          | no                                    | `us-south`          |                                                                                                                                                                                                       |
-| `resource_group_name`                             | no                                    | `Default`           |                                                                                                                                                                                                       |
-| `project_name`                                    | no                                    | `capy-pos`          | Code Engine project name.                                                                                                                                                                             |
-| `cr_namespace`                                    | no                                    | `capy-pos-3223793`  | Registry namespace holding every image — globally unique across every IBM Cloud account in the region, so the default carries this account's number.                                                  |
-| `image_tag`                                       | always                                | —                   | Explicit immutable tag applied to every service that does not override it; `latest` is rejected.                                                                                                      |
-| `services`                                        | no                                    | 5 apps              | See below.                                                                                                                                                                                            |
+| Variable                                          | Required                                               | Default             | Notes                                                                                                                                                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------ | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ibmcloud_api_key`                                | always                                                 | —                   | Sensitive. Also used as the registry pull password.                                                                                                                                                   |
+| `anthropic_api_key`                               | if any service `needs_model_key`                       | `""`                | Sensitive. Bound as a secret, never as a literal env var.                                                                                                                                             |
+| `anthropic_base_url`                              | no                                                     | `""`                | Route model calls through a gateway (e.g. an IBM litellm proxy) instead of the real API. Not sensitive — a literal env var. `anthropic_api_key` must be shaped for whichever endpoint this points at. |
+| `session_jwt_secret`                              | if any service `needs_session_secret`                  | `""`                | Sensitive. Must match `getJwtSecret()` — see the auth note below.                                                                                                                                     |
+| `frontend_origins`                                | if any service `pins_cors_origins`                     | production defaults | List of `scheme://host[:port]`, no trailing slash.                                                                                                                                                    |
+| `paypal_client_id`                                | if any service `needs_checkout`                        | `""`                | PayPal REST client id; not secret.                                                                                                                                                                    |
+| `paypal_client_secret`                            | if any service `needs_checkout`                        | `""`                | Sensitive; bound through Code Engine secrets only.                                                                                                                                                    |
+| `paypal_expected_merchant_id`                     | if any service `needs_checkout`                        | `""`                | Merchant id checked against provider facts.                                                                                                                                                           |
+| `checkout_store_id`                               | if any service `needs_checkout`                        | `""`                | Trusted store id bound into every checkout.                                                                                                                                                           |
+| `checkout_*_hmac_keys`                            | if any service `needs_checkout`                        | `{}`                | Sensitive versioned keyrings; retain old versions through retention.                                                                                                                                  |
+| `checkout_currency` / `checkout_tax_basis_points` | if checkout enabled                                    | `""` / `-1`         | Explicit production pricing policy.                                                                                                                                                                   |
+| `checkout_reconciliation_schedule`                | no                                                     | `*/5 * * * *`       | Applied out of band; Terraform provider has no cron resource.                                                                                                                                         |
+| `checkout_reconciliation_time_zone`               | no                                                     | `UTC`               | IANA time zone for the out-of-band cron subscription.                                                                                                                                                 |
+| `checkout_v2_writes_enabled`                      | no                                                     | `false`             | Keep false for the compatibility release; enable only after every instance reads V1 and V2.                                                                                                           |
+| `customer_loyalty_enabled`                        | no                                                     | `false`             | Requires V2 writes and all loyalty storage/index/recovery/operations gates.                                                                                                                           |
+| `appid_region`                                    | if any service `needs_appid_secret` or verifies App ID | `us-south`          | Not sensitive.                                                                                                                                                                                        |
+| `appid_customer_client_id`                        | if customer verification is enabled                    | `""`                | Non-secret customer audience. Bound to `capy-pos-api`; does not widen staff authorization.                                                                                                            |
+| `appid_customer_client_secret`                    | customer token relay only                              | `""`                | Sensitive. Never bound to `capy-pos-api`, migration, or reconciliation.                                                                                                                               |
+| `appid_tenant_id`                                 | if any service `needs_appid_secret`                    | `""`                | Not sensitive — matches `environment.*.ts`'s `appId.tenantId`.                                                                                                                                        |
+| `appid_client_id`                                 | if any service `needs_appid_secret`                    | `""`                | Not sensitive — matches `environment.*.ts`'s `appId.staffClientId`.                                                                                                                                   |
+| `appid_client_secret`                             | if any service `needs_appid_secret`                    | `""`                | Sensitive. The App ID staff application's client secret.                                                                                                                                              |
+| `region`                                          | no                                                     | `us-south`          |                                                                                                                                                                                                       |
+| `resource_group_name`                             | no                                                     | `Default`           |                                                                                                                                                                                                       |
+| `project_name`                                    | no                                                     | `capy-pos`          | Code Engine project name.                                                                                                                                                                             |
+| `cr_namespace`                                    | no                                                     | `capy-pos-3223793`  | Registry namespace holding every image — globally unique across every IBM Cloud account in the region, so the default carries this account's number.                                                  |
+| `image_tag`                                       | always                                                 | —                   | Explicit immutable tag applied to every service that does not override it; `latest` is rejected.                                                                                                      |
+| `services`                                        | no                                                     | 5 apps              | See below.                                                                                                                                                                                            |
 
 There is **no `app_name` variable**. The frontend used to be a single hardcoded app
 named by `var.app_name`; it is now the `capy-pos-app` key in `var.services`. Rename
@@ -101,7 +106,7 @@ services = {
   capy-pos-app            = { image_port = 8080 }
   capy-vision-proxy       = { image_port = 8787, needs_model_key = true, needs_session_secret = true, needs_appid_verification = true, pins_cors_origins = true }
   capy-clerk-agent-relay  = { image_port = 8789, needs_model_key = true, needs_session_secret = true, needs_appid_verification = true, pins_cors_origins = true }
-  capy-pos-api            = { image_port = 8790, needs_session_secret = true, needs_appid_verification = true, needs_cloudant = true, needs_checkout = true, pins_cors_origins = true }
+  capy-pos-api            = { image_port = 8790, needs_session_secret = true, needs_appid_verification = true, needs_customer_verification = true, needs_customer_loyalty = true, needs_cloudant = true, needs_checkout = true, pins_cors_origins = true }
   capy-appid-token-relay  = { image_port = 8792, needs_appid_secret = true, pins_cors_origins = true }
 }
 ```
@@ -124,11 +129,17 @@ services = {
   `capy-appid-token-relay` sets this. Unlike pos-api, this service also sets
   `pins_cors_origins` — it is not a one-pass, deploy-alone-first target; it needs
   `frontend_origins` set the same as the two model-key proxies do.
-- `needs_appid_verification` — binds the same three literals as
+- `needs_appid_verification` — binds the same three staff literals as
   `needs_appid_secret`, but never the client secret: for a service that
   _verifies_ App ID's RS256 access tokens (`pos-api` and the two proxies)
-  rather than minting them. All three env vars are optional in practice —
-  unset, the service verifies HS256 only, its original behaviour.
+  rather than minting them. It remains the generic staff audience.
+- `needs_customer_verification` — additionally binds only the non-secret
+  `APPID_CUSTOMER_CLIENT_ID` to `capy-pos-api` for its dedicated customer verifier.
+  It never binds `APPID_CUSTOMER_CLIENT_SECRET` and never adds the customer audience
+  to staff `authorize()`.
+- `needs_customer_loyalty` — declares the profile/ledger database environment,
+  compatibility/V2 flags, loyalty index migration, and reconciliation storage. It
+  requires customer verification, checkout, and Writer-scoped Cloudant access.
 - `image_tag`, `scale_*`, `env` — optional per-service overrides. Image-tag overrides
   must also be explicit immutable tags; `latest` is rejected. `env` merges last, so it
   can override `NODE_ENV`.
@@ -144,7 +155,9 @@ services = {
 | `pos_api_url`                       | Base for `apiUrl`.                                         |
 | `appid_token_relay_url`             | Base for `appId.relayUrl`; append `/appid/token`.          |
 | `checkout_migration_jobs`           | Checkout migration job names keyed by service.             |
+| `loyalty_migration_jobs`            | Loyalty migration job names keyed by service.              |
 | `checkout_reconciliation_jobs`      | Checkout reconciliation job names keyed by service.        |
+| `loyalty_reconciliation_jobs`       | Loyalty reconciliation job names keyed by service.         |
 | `checkout_reconciliation_schedule`  | Out-of-band reconciliation cron expression.                |
 | `checkout_reconciliation_time_zone` | Out-of-band reconciliation cron time zone.                 |
 | `project_id`                        | Code Engine project id, for `ibmcloud ce project select`.  |
@@ -302,17 +315,54 @@ been applied through it, then it is safe to delete.
 `capy-pos-app`. Renaming that key in `var.services` without adding a matching `moved`
 block is a destroy-and-recreate, and the new URL invalidates `frontend_origins`.
 
-## Checkout jobs and scheduler
+## Batch 4 compatibility rollout
 
-Terraform creates two Code Engine jobs for every service that sets both
-`needs_checkout` and `needs_cloudant`:
+Batch 4 is deliberately a two-release rollout because older checkout and transaction
+parsers reject additional fields:
+
+1. Deploy a reviewed compatibility image that reads V1 and V2 while still writing V1.
+   Keep both `checkout_v2_writes_enabled=false` and `customer_loyalty_enabled=false`.
+2. Provision `customer-profiles` and `loyalty-ledger`, then run both idempotent
+   migration jobs. Verify mixed-version reads and that rollback to the compatibility
+   image works.
+3. Only after **every** running instance is on the compatibility image, set
+   `checkout_v2_writes_enabled=true` and deploy.
+4. Set `customer_loyalty_enabled=true` only after authenticated reads, exactly-once
+   settlement, loyalty reconciliation, privacy projections, monitoring, retention,
+   rebuild, and incident runbooks are approved.
+
+After any V2 record exists, the rollback floor is the compatibility image. Never roll
+back to a V1-only parser. Turning either flag off stops new V2/loyalty work as defined
+by the application but does not make existing V2 documents readable by old code.
+
+The profile database is a rebuildable projection. The ledger database is the
+append-only award history. Runtime and reconciliation receive only the Writer key;
+only migration receives Manager. `capy-pos-api` receives the public customer client
+id for verification, never the customer client secret. That secret remains exclusive
+to `capy-appid-token-relay`.
+
+These declarations and instructions do not apply Terraform, deploy an image, submit a
+job, create/update a schedule, or enable production loyalty. Every one of those is an
+explicit reviewed operation.
+
+## Checkout and loyalty jobs and scheduler
+
+Terraform creates checkout jobs for every service that sets both `needs_checkout`
+and `needs_cloudant`, plus a loyalty migration job when it sets
+`needs_customer_loyalty`:
 
 - `capy-pos-api-checkout-migration` runs only the idempotent Cloudant Mango-index
   migration. It receives the Manager Cloudant credential needed to create an index,
   but no PayPal or checkout-HMAC secrets.
-- `capy-pos-api-checkout-reconciliation` runs the bounded, lease-fenced checkout
-  state machine with the Writer Cloudant credential. Its application deadline defaults
-  to 240 seconds, below the Code Engine job timeout of 300 seconds.
+- `capy-pos-api-loyalty-migration` creates and verifies the loyalty-ledger
+  customer/sequence index and the completed-checkout loyalty-due index. It receives
+  the Manager credential but no App ID, PayPal, checkout-HMAC, or customer secrets.
+- `capy-pos-api-checkout-reconciliation` runs the bounded, lease-fenced payment
+  state machine with PayPal and checkout-HMAC secrets.
+- `capy-pos-api-loyalty-reconciliation` separately runs the completed-checkout
+  loyalty obligations with only the Writer Cloudant credential. It receives no App ID,
+  PayPal, checkout-HMAC, or customer client secret. Both jobs default to a 240-second
+  application deadline below the 300-second Code Engine timeout.
 
 The IBM Terraform provider version used here exposes `ibm_code_engine_job`, but no
 Code Engine cron-subscription resource. Scheduling is therefore an explicit
@@ -322,17 +372,28 @@ Terraform:
 ```bash
 ibmcloud ce project select --id "$(terraform output -raw project_id)"
 MIGRATION_JOB="$(terraform output -json checkout_migration_jobs | jq -r '.["capy-pos-api"]')"
+LOYALTY_MIGRATION_JOB="$(terraform output -json loyalty_migration_jobs | jq -r '.["capy-pos-api"]')"
 RECONCILIATION_JOB="$(terraform output -json checkout_reconciliation_jobs | jq -r '.["capy-pos-api"]')"
+LOYALTY_RECONCILIATION_JOB="$(terraform output -json loyalty_reconciliation_jobs | jq -r '.["capy-pos-api"]')"
 RECONCILIATION_SCHEDULE="$(terraform output -raw checkout_reconciliation_schedule)"
 RECONCILIATION_TIME_ZONE="$(terraform output -raw checkout_reconciliation_time_zone)"
 
-# Run the idempotent migration once after creating or changing its index.
+# Run both idempotent migrations after creating or changing their indexes and
+# before enabling V2 writes or loyalty.
 ibmcloud ce jobrun submit --job "$MIGRATION_JOB" --wait
+ibmcloud ce jobrun submit --job "$LOYALTY_MIGRATION_JOB" --wait
 
 # Create the reconciliation schedule once from the reviewed Terraform inputs.
 ibmcloud ce subscription cron create \
   --name "$RECONCILIATION_JOB" \
   --destination "$RECONCILIATION_JOB" \
+  --destination-type job \
+  --schedule "$RECONCILIATION_SCHEDULE" \
+  --time-zone "$RECONCILIATION_TIME_ZONE"
+
+ibmcloud ce subscription cron create \
+  --name "$LOYALTY_RECONCILIATION_JOB" \
+  --destination "$LOYALTY_RECONCILIATION_JOB" \
   --destination-type job \
   --schedule "$RECONCILIATION_SCHEDULE" \
   --time-zone "$RECONCILIATION_TIME_ZONE"

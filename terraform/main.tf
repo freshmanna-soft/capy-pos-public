@@ -44,13 +44,14 @@ locals {
   # The apps that hold the model key, the apps that verify a session token, and the
   # apps that talk to Cloudant. Derived once so the secret resources and the env
   # bindings below cannot drift apart from each other.
-  model_key_services       = { for name, service in var.services : name => service if service.needs_model_key }
-  session_guarded_services = { for name, service in var.services : name => service if service.needs_session_secret }
-  cloudant_services        = { for name, service in var.services : name => service if service.needs_cloudant }
-  appid_secret_services    = { for name, service in var.services : name => service if service.needs_appid_secret }
-  internal_secret_services = { for name, service in var.services : name => service if service.needs_internal_secret }
-  checkout_services        = { for name, service in var.services : name => service if service.needs_checkout }
-  checkout_job_services    = { for name, service in var.services : name => service if service.needs_checkout && service.needs_cloudant }
+  model_key_services        = { for name, service in var.services : name => service if service.needs_model_key }
+  session_guarded_services  = { for name, service in var.services : name => service if service.needs_session_secret }
+  cloudant_services         = { for name, service in var.services : name => service if service.needs_cloudant }
+  appid_secret_services     = { for name, service in var.services : name => service if service.needs_appid_secret }
+  internal_secret_services  = { for name, service in var.services : name => service if service.needs_internal_secret }
+  checkout_services         = { for name, service in var.services : name => service if service.needs_checkout }
+  checkout_job_services     = { for name, service in var.services : name => service if service.needs_checkout && service.needs_cloudant }
+  customer_loyalty_services = { for name, service in var.services : name => service if service.needs_customer_loyalty }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
   # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses. Empty until
@@ -89,10 +90,10 @@ locals {
         APPID_TENANT_ID = var.appid_tenant_id
         APPID_CLIENT_ID = var.appid_client_id
       } : {},
-      # The CUSTOMER application's client id (epic #261 item 25). Only the relay that
-      # actually exchanges a customer grant needs it — pos-api and the two proxies verify
-      # tokens and never mint them, so giving them a second audience would only invite a
-      # customer token into a staff path.
+      # The CUSTOMER application's client id (epic #261 item 25). The relay needs it
+      # to exchange customer grants. The dedicated pos-api customer verifier also needs
+      # the same public id below, but its separate flag and code path do not widen the
+      # generic staff verifier or expose either application's secret.
       #
       # Bound only when non-empty, and its secret half is guarded by a precondition
       # below: `customer-token.ts` refuses to serve unless BOTH exist, so a half-set pair
@@ -101,6 +102,18 @@ locals {
       # services crash-looping invisibly for ~10 hours during Phase 5.
       service.needs_appid_secret && var.appid_customer_client_id != "" ? {
         APPID_CUSTOMER_CLIENT_ID = var.appid_customer_client_id
+      } : {},
+      # Customer token verification is a separate boundary from staff authorize().
+      # Bind only the customer's public audience id, only to the explicitly opted-in
+      # pos-api service. APPID_CUSTOMER_CLIENT_SECRET remains relay-only below.
+      service.needs_customer_verification ? {
+        APPID_CUSTOMER_CLIENT_ID = var.appid_customer_client_id
+      } : {},
+      service.needs_customer_loyalty ? {
+        CLOUDANT_CUSTOMER_PROFILES_DB = "customer-profiles"
+        CLOUDANT_LOYALTY_LEDGER_DB    = "loyalty-ledger"
+        CHECKOUT_V2_WRITES_ENABLED    = tostring(var.checkout_v2_writes_enabled)
+        CUSTOMER_LOYALTY_ENABLED      = tostring(var.customer_loyalty_enabled)
       } : {},
       # Only the two *callers* of pos-api's GET /internal/roles need to know
       # where it lives — pos-api itself reads the shared roles document
@@ -315,6 +328,20 @@ resource "ibm_cloudant_database" "checkouts" {
   instance_crn = ibm_cloudant.store.crn
 }
 
+# Authenticated self-checkout loyalty is intentionally isolated from the financial
+# transaction store. Profiles are a rebuildable projection; the ledger is the
+# append-only source of award history. Both stay provisioned while feature flags
+# remain false so the compatibility release can be deployed and verified first.
+resource "ibm_cloudant_database" "customer_profiles" {
+  db           = "customer-profiles"
+  instance_crn = ibm_cloudant.store.crn
+}
+
+resource "ibm_cloudant_database" "loyalty_ledger" {
+  db           = "loyalty-ledger"
+  instance_crn = ibm_cloudant.store.crn
+}
+
 locals {
   # `credentials_json` + jsondecode over the flat `credentials` map: IBM's own
   # resource_key docs document both, and jsondecode reads correctly whether a
@@ -483,9 +510,74 @@ resource "ibm_code_engine_job" "checkout_migration" {
   depends_on = [ibm_cloudant_database.checkouts]
 }
 
-# Reconciliation runs the same lease-fenced, idempotent state machine as client
-# completion. This resource defines the bounded job; the provider has no cron
-# subscription resource, so the post-apply schedule is documented in README.md.
+# Batch 4 migration owns two more indexes: customer history by contiguous
+# sequence in the ledger database, and completed checkouts whose independent
+# loyalty obligation is due. It receives Manager only for index creation and no
+# App ID, PayPal, checkout-HMAC, or customer client secrets.
+resource "ibm_code_engine_job" "loyalty_migration" {
+  for_each = local.customer_loyalty_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-loyalty-migration"
+
+  image_reference = "us.icr.io/${var.cr_namespace}/${each.key}:${coalesce(each.value.image_tag, var.image_tag)}"
+  image_secret    = ibm_code_engine_secret.cr_secret.name
+
+  run_commands                       = ["node"]
+  run_arguments                      = ["dist/pos-api/src/loyalty-migration-job.js"]
+  run_compute_resource_token_enabled = false
+  run_mode                           = "task"
+  run_service_account                = "none"
+  scale_cpu_limit                    = var.checkout_job_cpu_limit
+  scale_memory_limit                 = var.checkout_job_memory_limit
+  scale_max_execution_time           = var.checkout_migration_max_execution_seconds
+  scale_retry_limit                  = var.checkout_migration_retry_limit
+
+  dynamic "run_env_variables" {
+    for_each = {
+      NODE_ENV                   = "production"
+      CLOUDANT_CHECKOUTS_DB      = "checkouts"
+      CLOUDANT_LOYALTY_LEDGER_DB = "loyalty-ledger"
+    }
+
+    content {
+      type  = "literal"
+      name  = run_env_variables.key
+      value = run_env_variables.value
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = toset(["CLOUDANT_URL", "CLOUDANT_APIKEY"])
+
+    content {
+      type      = "secret_key_reference"
+      name      = run_env_variables.key
+      key       = run_env_variables.key
+      reference = ibm_code_engine_secret.cloudant_migration_creds[each.key].name
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        length(var.appid_customer_client_id) > 0 &&
+        (!var.customer_loyalty_enabled || var.checkout_v2_writes_enabled)
+      )
+      error_message = "Customer verification needs appid_customer_client_id, and customer_loyalty_enabled requires checkout_v2_writes_enabled."
+    }
+  }
+
+  depends_on = [
+    ibm_cloudant_database.checkouts,
+    ibm_cloudant_database.customer_profiles,
+    ibm_cloudant_database.loyalty_ledger,
+  ]
+}
+
+# Payment reconciliation runs the lease-fenced, idempotent checkout state machine.
+# Loyalty uses a separate job below so profile/ledger outages cannot consume the
+# payment recovery worker's bounded execution budget.
 resource "ibm_code_engine_job" "checkout_reconciliation" {
   for_each = local.checkout_job_services
 
@@ -506,27 +598,35 @@ resource "ibm_code_engine_job" "checkout_reconciliation" {
   scale_retry_limit                  = var.checkout_reconciliation_retry_limit
 
   dynamic "run_env_variables" {
-    for_each = {
-      NODE_ENV                         = "production"
-      CLOUDANT_CHECKOUTS_DB            = "checkouts"
-      CLOUDANT_PRODUCTS_DB             = "products"
-      CLOUDANT_TRANSACTIONS_DB         = "transactions"
-      CHECKOUT_STORE_ID                = var.checkout_store_id
-      PAYPAL_EXPECTED_MERCHANT_ID      = var.paypal_expected_merchant_id
-      PAYPAL_CLIENT_ID                 = var.paypal_client_id
-      PAYPAL_ENVIRONMENT               = var.paypal_environment
-      PAYPAL_TIMEOUT_MS                = tostring(var.paypal_timeout_ms)
-      CHECKOUT_CURRENCY                = var.checkout_currency
-      CHECKOUT_TAX_BASIS_POINTS        = tostring(var.checkout_tax_basis_points)
-      CHECKOUT_MAX_ITEM_QUANTITY       = tostring(var.checkout_max_item_quantity)
-      CHECKOUT_MAX_AGGREGATE_QUANTITY  = tostring(var.checkout_max_aggregate_quantity)
-      CHECKOUT_MAX_TOTAL_MINOR_UNITS   = tostring(var.checkout_max_total_minor_units)
-      CHECKOUT_IDEMPOTENCY_KEY_VERSION = var.checkout_idempotency_key_version
-      CHECKOUT_CAPABILITY_KEY_VERSION  = var.checkout_capability_key_version
-      CHECKOUT_WORKER_MAX_CHECKOUTS    = tostring(var.checkout_worker_max_checkouts)
-      CHECKOUT_WORKER_PAGE_SIZE        = tostring(var.checkout_worker_page_size)
-      CHECKOUT_WORKER_MAX_DURATION_MS  = tostring(var.checkout_worker_max_duration_ms)
-    }
+    for_each = merge(
+      {
+        NODE_ENV                         = "production"
+        CLOUDANT_CHECKOUTS_DB            = "checkouts"
+        CLOUDANT_PRODUCTS_DB             = "products"
+        CLOUDANT_TRANSACTIONS_DB         = "transactions"
+        CHECKOUT_STORE_ID                = var.checkout_store_id
+        PAYPAL_EXPECTED_MERCHANT_ID      = var.paypal_expected_merchant_id
+        PAYPAL_CLIENT_ID                 = var.paypal_client_id
+        PAYPAL_ENVIRONMENT               = var.paypal_environment
+        PAYPAL_TIMEOUT_MS                = tostring(var.paypal_timeout_ms)
+        CHECKOUT_CURRENCY                = var.checkout_currency
+        CHECKOUT_TAX_BASIS_POINTS        = tostring(var.checkout_tax_basis_points)
+        CHECKOUT_MAX_ITEM_QUANTITY       = tostring(var.checkout_max_item_quantity)
+        CHECKOUT_MAX_AGGREGATE_QUANTITY  = tostring(var.checkout_max_aggregate_quantity)
+        CHECKOUT_MAX_TOTAL_MINOR_UNITS   = tostring(var.checkout_max_total_minor_units)
+        CHECKOUT_IDEMPOTENCY_KEY_VERSION = var.checkout_idempotency_key_version
+        CHECKOUT_CAPABILITY_KEY_VERSION  = var.checkout_capability_key_version
+        CHECKOUT_WORKER_MAX_CHECKOUTS    = tostring(var.checkout_worker_max_checkouts)
+        CHECKOUT_WORKER_PAGE_SIZE        = tostring(var.checkout_worker_page_size)
+        CHECKOUT_WORKER_MAX_DURATION_MS  = tostring(var.checkout_worker_max_duration_ms)
+      },
+      each.value.needs_customer_loyalty ? {
+        CLOUDANT_CUSTOMER_PROFILES_DB = "customer-profiles"
+        CLOUDANT_LOYALTY_LEDGER_DB    = "loyalty-ledger"
+        CHECKOUT_V2_WRITES_ENABLED    = tostring(var.checkout_v2_writes_enabled)
+        CUSTOMER_LOYALTY_ENABLED      = tostring(var.customer_loyalty_enabled)
+      } : {},
+    )
 
     content {
       type  = "literal"
@@ -580,7 +680,83 @@ resource "ibm_code_engine_job" "checkout_reconciliation" {
     }
   }
 
-  depends_on = [ibm_code_engine_job.checkout_migration]
+  depends_on = [
+    ibm_code_engine_job.checkout_migration,
+    ibm_code_engine_job.loyalty_migration,
+    ibm_cloudant_database.customer_profiles,
+    ibm_cloudant_database.loyalty_ledger,
+  ]
+}
+
+resource "ibm_code_engine_job" "loyalty_reconciliation" {
+  for_each = local.customer_loyalty_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-loyalty-reconciliation"
+
+  image_reference = "us.icr.io/${var.cr_namespace}/${each.key}:${coalesce(each.value.image_tag, var.image_tag)}"
+  image_secret    = ibm_code_engine_secret.cr_secret.name
+
+  run_commands                       = ["node"]
+  run_arguments                      = ["dist/pos-api/src/loyalty-reconciliation-job.js"]
+  run_compute_resource_token_enabled = false
+  run_mode                           = "task"
+  run_service_account                = "none"
+  scale_cpu_limit                    = var.checkout_job_cpu_limit
+  scale_memory_limit                 = var.checkout_job_memory_limit
+  scale_max_execution_time           = var.checkout_reconciliation_max_execution_seconds
+  scale_retry_limit                  = var.checkout_reconciliation_retry_limit
+
+  dynamic "run_env_variables" {
+    for_each = {
+      NODE_ENV                       = "production"
+      CLOUDANT_CHECKOUTS_DB          = "checkouts"
+      CLOUDANT_CUSTOMER_PROFILES_DB  = "customer-profiles"
+      CLOUDANT_LOYALTY_LEDGER_DB     = "loyalty-ledger"
+      LOYALTY_WORKER_MAX_CHECKOUTS   = tostring(var.checkout_worker_max_checkouts)
+      LOYALTY_WORKER_PAGE_SIZE       = tostring(var.checkout_worker_page_size)
+      LOYALTY_WORKER_MAX_DURATION_MS = tostring(var.checkout_worker_max_duration_ms)
+    }
+
+    content {
+      type  = "literal"
+      name  = run_env_variables.key
+      value = run_env_variables.value
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = toset(["CLOUDANT_URL", "CLOUDANT_APIKEY"])
+
+    content {
+      type      = "secret_key_reference"
+      name      = run_env_variables.key
+      key       = run_env_variables.key
+      reference = ibm_code_engine_secret.cloudant_creds[each.key].name
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        var.checkout_worker_max_checkouts > 0 &&
+        var.checkout_worker_max_checkouts <= 1000 &&
+        var.checkout_worker_page_size > 0 &&
+        var.checkout_worker_page_size <= 100 &&
+        var.checkout_worker_max_duration_ms > 0 &&
+        var.checkout_worker_max_duration_ms <= 900000 &&
+        var.checkout_worker_max_duration_ms < var.checkout_reconciliation_max_execution_seconds * 1000
+      )
+      error_message = "Loyalty worker bounds are invalid, or its deadline does not leave room before the Code Engine timeout."
+    }
+  }
+
+  depends_on = [
+    ibm_code_engine_job.loyalty_migration,
+    ibm_cloudant_database.checkouts,
+    ibm_cloudant_database.customer_profiles,
+    ibm_cloudant_database.loyalty_ledger,
+  ]
 }
 
 # Code Engine Applications
@@ -752,6 +928,21 @@ resource "ibm_code_engine_app" "apps" {
   # secret resource of their own to hang it from. The condition short-circuits only
   # for services that do not expose a cross-origin browser API.
   lifecycle {
+    precondition {
+      condition = (
+        !each.value.needs_customer_verification ||
+        length(var.appid_customer_client_id) > 0
+      )
+      error_message = "${each.key} enables customer verification, so it needs non-secret TF_VAR_appid_customer_client_id. The customer client secret remains bound only to appid-token-relay."
+    }
+    precondition {
+      condition = (
+        !each.value.needs_customer_loyalty ||
+        !var.customer_loyalty_enabled ||
+        var.checkout_v2_writes_enabled
+      )
+      error_message = "customer_loyalty_enabled requires checkout_v2_writes_enabled after the compatibility release has reached every instance."
+    }
     precondition {
       condition     = !each.value.pins_cors_origins || local.allowed_origins != ""
       error_message = <<-EOT

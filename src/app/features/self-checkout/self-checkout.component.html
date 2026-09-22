@@ -7,12 +7,32 @@
     <p class="font-data text-[10px] uppercase tracking-[0.22em] text-kelp">Capy-POS</p>
     <div class="flex flex-wrap items-center justify-end gap-2">
       @if (currentCustomer.isAuthenticated()) {
-        <span
-          class="max-w-48 truncate text-xs text-kelp"
-          data-testid="self-checkout-customer-email"
-        >
-          {{ currentCustomer.email() }}
-        </span>
+        <div class="flex min-w-0 flex-col items-end gap-0.5">
+          <span
+            class="max-w-48 truncate text-xs text-kelp"
+            data-testid="self-checkout-customer-email"
+          >
+            {{ currentCustomer.email() }}
+          </span>
+          @if (customerLoyalty.projection(); as loyalty) {
+            @if (loyalty.status === 'available') {
+              <span
+                class="font-data text-[10px] uppercase tracking-[0.14em] text-yuzu"
+                data-testid="self-checkout-customer-loyalty"
+              >
+                {{ loyalty.pointsBalance }} points · {{ loyalty.tier }}
+              </span>
+            } @else {
+              <span class="text-[10px] text-kelp" data-testid="self-checkout-loyalty-unavailable">
+                Loyalty balance unavailable
+              </span>
+            }
+          } @else if (customerLoyalty.unavailable()) {
+            <span class="text-[10px] text-kelp" data-testid="self-checkout-loyalty-unavailable">
+              Loyalty balance unavailable
+            </span>
+          }
+        </div>
         <button
           type="button"
           (click)="signOut()"

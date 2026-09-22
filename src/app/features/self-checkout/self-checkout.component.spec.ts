@@ -9,6 +9,7 @@ import { PAY_ROUTE, SIGN_IN_ROUTE, SIGN_UP_ROUTE } from './self-checkout-routes'
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
 import { SelfCheckoutComponent } from './self-checkout.component';
+import { CurrentCustomerLoyaltyService } from '@core/application/auth/current-customer-loyalty.service';
 
 /**
  * The shell's contract is small but load-bearing: it has to render as a
@@ -20,9 +21,11 @@ import { SelfCheckoutComponent } from './self-checkout.component';
  */
 describe('SelfCheckoutComponent', () => {
   const navigate = vi.fn();
+  let loyaltyProjection: unknown;
 
   beforeEach(() => {
     navigate.mockClear();
+    loyaltyProjection = null;
 
     TestBed.configureTestingModule({
       imports: [SelfCheckoutComponent],
@@ -36,6 +39,10 @@ describe('SelfCheckoutComponent', () => {
           },
         },
         CurrentCustomerService,
+        {
+          provide: CurrentCustomerLoyaltyService,
+          useValue: { projection: () => loyaltyProjection, unavailable: () => false },
+        },
         { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
         {
           provide: BarcodeScannerService,
@@ -105,6 +112,27 @@ describe('SelfCheckoutComponent', () => {
 
     expect(shell?.className).toContain('bg-onsen-deep');
     expect(shell?.className).toContain('text-steam');
+  });
+
+  it('shows the server loyalty projection for a signed-in customer', () => {
+    const currentCustomer = TestBed.inject(CurrentCustomerService);
+    currentCustomer.setSession({
+      customerId: 'customer-1',
+      email: 'shopper@example.com',
+      tenantId: 'default-tenant',
+      roles: ['customer'],
+      permissions: [],
+      accessToken: 'customer-token',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    loyaltyProjection = { status: 'available', pointsBalance: 1250, tier: 'silver' };
+
+    const loyalty: HTMLElement | null = render().nativeElement.querySelector(
+      '[data-testid="self-checkout-customer-loyalty"]'
+    );
+
+    expect(loyalty?.textContent).toContain('1250 points');
+    expect(loyalty?.textContent).toContain('silver');
   });
 
   it('offers returning customers the sign-in route', () => {

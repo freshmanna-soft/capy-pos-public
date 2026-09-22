@@ -8,6 +8,15 @@ const T0 = '2026-09-18T12:00:00.000Z';
 const T1 = '2026-09-18T12:01:00.000Z';
 const T2 = '2026-09-18T12:02:00.000Z';
 
+const CUSTOMER_A = Object.freeze({
+  kind: 'customer',
+  issuer: 'https://us-south.appid.cloud.ibm.com/oauth/v4/tenant',
+  subject: 'customer-a',
+  tenantId: 'default-tenant',
+  customerKey: 'customer-key-a',
+  keyVersion: 'sha256-v1',
+});
+
 function checkout(overrides = {}) {
   return {
     id: 'checkout-1',
@@ -55,6 +64,16 @@ function checkout(overrides = {}) {
     expiresAt: T2,
     ...overrides,
   };
+}
+
+function checkoutV2(overrides = {}) {
+  return checkout({
+    schemaVersion: 'v2',
+    requestFingerprintVersion: 'customer-binding-v2',
+    customerBinding: { kind: 'guest' },
+    loyalty: { status: 'not-applicable' },
+    ...overrides,
+  });
 }
 
 function context(seed = [], digest = (input) => Buffer.from(input).toString('base64url')) {
@@ -182,6 +201,91 @@ describe('checkout document persistence', () => {
     await assert.rejects(() => store.create({ ...checkout(), browserPaymentStatus: 'paid' }));
   });
 
+  it('reads strict V1 and V2 records while preserving the compatibility write floor', async () => {
+    const { store } = context();
+    assert.equal(await store.create(checkout({ id: 'checkout-v1' })), 'created');
+    assert.equal(
+      await store.create(checkoutV2({ id: 'checkout-v2', customerBinding: CUSTOMER_A })),
+      'created'
+    );
+    assert.equal('schemaVersion' in (await store.read('checkout-v1')).document, false);
+    assert.deepEqual((await store.read('checkout-v2')).document.customerBinding, CUSTOMER_A);
+
+    await assert.rejects(() =>
+      store.create(checkout({ id: 'checkout-partial-v2', schemaVersion: 'v2' }))
+    );
+    await assert.rejects(() =>
+      store.create(checkoutV2({ id: 'checkout-unknown-version', schemaVersion: 'v3' }))
+    );
+    await assert.rejects(() =>
+      store.create(
+        checkoutV2({
+          id: 'checkout-extra-customer',
+          customerBinding: { ...CUSTOMER_A, email: 'not-persisted@example.test' },
+        })
+      )
+    );
+  });
+
+  it('keeps V2 version and customer ownership immutable across compare-and-swap', async () => {
+    const { store } = context();
+    await store.create(checkoutV2({ id: 'checkout-v2', customerBinding: CUSTOMER_A }));
+    const current = await store.read('checkout-v2');
+    await assert.rejects(() =>
+      store.compareAndSwap(
+        'checkout-v2',
+        { ...current.document, customerBinding: { ...CUSTOMER_A, subject: 'customer-b' } },
+        current.revision
+      )
+    );
+    await assert.rejects(() => {
+      const {
+        schemaVersion: _schema,
+        requestFingerprintVersion: _fingerprint,
+        customerBinding: _binding,
+        loyalty: _loyalty,
+        ...v1
+      } = current.document;
+      return store.compareAndSwap('checkout-v2', v1, current.revision);
+    });
+  });
+
+  it('requires V2 receipts to carry matching versions', async () => {
+    const completed = checkoutV2({
+      id: 'checkout-v2-complete',
+      customerBinding: CUSTOMER_A,
+      state: CheckoutState.COMPLETED,
+      paypalOrderId: 'order',
+      paypalAuthorizationId: 'authorization',
+      paypalCaptureId: 'capture',
+      nextActionAt: null,
+      updatedAt: T1,
+    });
+    const receipt = {
+      transactionId: 'transaction',
+      checkoutId: completed.id,
+      quote: completed.quote,
+      paypalCaptureId: 'capture',
+      completedAt: T1,
+      schemaVersion: 'v2',
+      requestFingerprintVersion: 'customer-binding-v2',
+    };
+    const { store } = context();
+    assert.equal(await store.create({ ...completed, receipt }), 'created');
+    await assert.rejects(() =>
+      store.create({
+        ...completed,
+        id: 'checkout-v2-missing-receipt-version',
+        receipt: {
+          ...receipt,
+          checkoutId: 'checkout-v2-missing-receipt-version',
+          schemaVersion: undefined,
+          requestFingerprintVersion: undefined,
+        },
+      })
+    );
+  });
+
   it('compares receipt quotes structurally rather than by property insertion order', async () => {
     const base = checkout({
       id: 'checkout-complete',
@@ -282,6 +386,66 @@ describe('checkout uniqueness claims', () => {
         checkoutId: 'checkout-b',
       }),
       { outcome: 'conflict', checkoutId: 'checkout-a' }
+    );
+  });
+
+  it('allows only guest replay of legacy item-only claims', async () => {
+    const { store } = context();
+    const legacy = {
+      keyHash: 'legacy-key',
+      keyVersion: 'v1',
+      requestFingerprint: 'items-only',
+      checkoutId: 'checkout-legacy',
+      nowIso: T0,
+    };
+    assert.equal((await store.claimIdempotency(legacy)).outcome, 'claimed');
+    assert.deepEqual(
+      await store.lookupIdempotency({
+        keyHash: legacy.keyHash,
+        keyVersion: legacy.keyVersion,
+        requestFingerprint: legacy.requestFingerprint,
+        customerBinding: { kind: 'guest' },
+      }),
+      { outcome: 'replay', checkoutId: 'checkout-legacy' }
+    );
+    assert.deepEqual(
+      await store.lookupIdempotency({
+        keyHash: legacy.keyHash,
+        keyVersion: legacy.keyVersion,
+        requestFingerprint: legacy.requestFingerprint,
+        requestFingerprintVersion: 'customer-binding-v2',
+        customerBinding: CUSTOMER_A,
+      }),
+      { outcome: 'conflict', checkoutId: 'checkout-legacy' }
+    );
+  });
+
+  it('binds V2 claims to the exact immutable guest or customer principal', async () => {
+    const { store } = context();
+    const input = {
+      keyHash: 'v2-key',
+      keyVersion: 'v1',
+      requestFingerprint: 'items-plus-customer',
+      requestFingerprintVersion: 'customer-binding-v2',
+      customerBinding: CUSTOMER_A,
+      checkoutId: 'checkout-v2',
+      nowIso: T0,
+    };
+    assert.equal((await store.claimIdempotency(input)).outcome, 'claimed');
+    assert.equal((await store.lookupIdempotency(input)).outcome, 'replay');
+    assert.deepEqual(
+      await store.lookupIdempotency({
+        ...input,
+        customerBinding: { ...CUSTOMER_A, subject: 'customer-b' },
+      }),
+      { outcome: 'conflict', checkoutId: 'checkout-v2' }
+    );
+    assert.deepEqual(
+      await store.lookupIdempotency({
+        ...input,
+        customerBinding: { kind: 'guest' },
+      }),
+      { outcome: 'conflict', checkoutId: 'checkout-v2' }
     );
   });
 

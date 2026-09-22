@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { PAY_ROUTE, SIGN_IN_ROUTE, SIGN_UP_ROUTE } from './self-checkout-routes';
 import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
+import { CurrentCustomerLoyaltyService } from '@core/application/auth/current-customer-loyalty.service';
 import { SELF_CHECKOUT_TITLE } from './self-checkout-palette';
 import { SelfCheckoutScanComponent } from './self-checkout-scan.component';
 
@@ -43,6 +44,7 @@ import { SelfCheckoutScanComponent } from './self-checkout-scan.component';
 export class SelfCheckoutComponent {
   private readonly router = inject(Router);
   protected readonly currentCustomer = inject(CurrentCustomerService);
+  protected readonly customerLoyalty = inject(CurrentCustomerLoyaltyService);
 
   protected readonly title = SELF_CHECKOUT_TITLE;
 

@@ -23,6 +23,14 @@ const CONFIG = {
   paypalEnvironment: 'sandbox',
   paypalTimeoutMs: 1_000,
 };
+const CUSTOMER = Object.freeze({
+  issuer: 'https://us-south.appid.cloud.ibm.com/oauth/v4/tenant',
+  subject: 'customer-a',
+  tenantId: 'default-tenant',
+  customerKey: 'customer-key-a',
+  keyVersion: 'sha256-v1',
+});
+
 const SECRETS = {
   idempotencyHmacKeys: {
     v1: 'idempotency-test-key-that-is-at-least-32-characters',
@@ -190,7 +198,7 @@ function context(options = {}) {
     products,
     transactions,
     paypal,
-    config: CONFIG,
+    config: { ...CONFIG, ...options.config },
     secrets: SECRETS,
     nowIso: options.nowIso ?? (() => T0),
     newId: options.newId ?? (() => ids.shift() ?? 'unused-id-that-is-long-enough'),
@@ -479,6 +487,44 @@ describe('checkout orchestration create flow', () => {
     );
     assert.equal(ctx.paypal.calls.filter(([name]) => name === 'create').length, 1);
   });
+
+  it('keeps compatibility-only guests on V1 and refuses authenticated writes before activation', async () => {
+    const guest = context();
+    const created = await createCheckout(guest);
+    assert.equal(
+      'schemaVersion' in (await guest.checkouts.read(created.checkoutId)).document,
+      false
+    );
+
+    const authenticated = context();
+    await assert.rejects(
+      authenticated.service.create(
+        { items: [{ productId: 'p-1', quantity: 1 }] },
+        'idempotency-key-that-is-long-enough',
+        CUSTOMER
+      ),
+      (error) => error instanceof CheckoutServiceError && error.code === 'provider-unavailable'
+    );
+    assert.equal(authenticated.paypal.calls.length, 0);
+  });
+
+  it('binds V2 idempotency to the explicit customer identity', async () => {
+    const ctx = context({ config: { checkoutV2WritesEnabled: true } });
+    await ctx.service.create(
+      { items: [{ productId: 'p-1', quantity: 1 }] },
+      'idempotency-key-that-is-long-enough',
+      CUSTOMER
+    );
+    await assert.rejects(
+      ctx.service.create(
+        { items: [{ productId: 'p-1', quantity: 1 }] },
+        'idempotency-key-that-is-long-enough',
+        { ...CUSTOMER, subject: 'customer-b', customerKey: 'customer-key-b' }
+      ),
+      (error) => error instanceof CheckoutServiceError && error.code === 'idempotency-conflict'
+    );
+    assert.equal(ctx.paypal.calls.filter(([name]) => name === 'create').length, 1);
+  });
 });
 
 describe('checkout orchestration completion', () => {
@@ -497,6 +543,54 @@ describe('checkout orchestration completion', () => {
     assert.deepEqual(replay.receipt, completed.receipt);
     assert.equal(ctx.paypal.calls.filter(([name]) => name === 'capture').length, 1);
     assert.equal((await ctx.transactions.list()).length, 1);
+  });
+
+  it('completes a customer sale with a durable public-safe loyalty obligation', async () => {
+    const ctx = context({
+      config: { checkoutV2WritesEnabled: true, customerLoyaltyEnabled: true },
+    });
+    const created = await ctx.service.create(
+      { items: [{ productId: 'p-1', quantity: 1 }] },
+      'idempotency-key-that-is-long-enough',
+      CUSTOMER
+    );
+
+    const completed = await ctx.service.complete(created.checkoutId, created.checkoutToken);
+
+    assert.equal(completed.state, 'completed');
+    assert.deepEqual(completed.loyalty, {
+      status: 'pending',
+      pointsEarned: 10,
+      policyVersion: 'self-checkout-usd-v1',
+    });
+    assert.equal(JSON.stringify(completed).includes('customer-key-a'), false);
+    const checkout = (await ctx.checkouts.read(created.checkoutId)).document;
+    assert.equal(checkout.loyalty.customerKey, 'customer-key-a');
+    assert.equal(checkout.loyalty.nextActionAt, T0);
+    const [transaction] = await ctx.transactions.list();
+    assert.deepEqual(transaction.customerBinding, {
+      customerKey: 'customer-key-a',
+      keyVersion: 'sha256-v1',
+    });
+    assert.equal('subject' in transaction.customerBinding, false);
+  });
+
+  it('finalizes a zero-point customer award without ledger work', async () => {
+    const ctx = context({
+      products: new MemoryStore([product({ price: 0.5 })]),
+      config: { checkoutV2WritesEnabled: true, customerLoyaltyEnabled: true },
+    });
+    const created = await ctx.service.create(
+      { items: [{ productId: 'p-1', quantity: 1 }] },
+      'idempotency-key-that-is-long-enough',
+      CUSTOMER
+    );
+    const completed = await ctx.service.complete(created.checkoutId, created.checkoutToken);
+    assert.deepEqual(completed.loyalty, {
+      status: 'awarded',
+      pointsEarned: 0,
+      policyVersion: 'self-checkout-usd-v1',
+    });
   });
 
   it('does not authorize before PayPal reports customer approval', async () => {

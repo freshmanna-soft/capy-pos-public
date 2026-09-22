@@ -40,7 +40,9 @@ import type { CheckoutInventoryMarkers } from './checkout-inventory.ts';
 import {
   productAvailableStock,
   productHasActiveReservations,
+  publicCheckoutSaleTransaction,
   type CheckoutSaleTransactionDocument,
+  type PublicCheckoutSaleTransactionDocument,
 } from './checkout-fulfillment.ts';
 
 /** The catalogue document. Field-for-field what `create-product/index.js` writes. */
@@ -82,6 +84,16 @@ export interface LegacyTransactionDocument extends StoredDocument {
 
 /** Existing staff sales and new basket-level checkout sales share the history collection. */
 export type TransactionDocument = LegacyTransactionDocument | CheckoutSaleTransactionDocument;
+
+/**
+ * Staff transaction history must never expose internal customer/loyalty bindings.
+ * V2 checkout records may carry a minimal `customerBinding` for server-side
+ * settlement, so the HTTP response is an explicit projection rather than a raw
+ * Cloudant document.
+ */
+export type PublicTransactionDocument =
+  | LegacyTransactionDocument
+  | PublicCheckoutSaleTransactionDocument;
 
 /**
  * The one document `GET /internal/roles` serves — every role name this
@@ -494,15 +506,24 @@ function publicProduct(product: ProductDocument): PublicProductDocument {
  */
 async function listTransactions(
   deps: ApiDeps
-): Promise<{ transactions: readonly TransactionDocument[]; count: number }> {
-  const transactions = [...(await deps.transactions.list())].sort((left, right) => {
-    const leftMs = Date.parse(right.timestamp);
-    const rightMs = Date.parse(left.timestamp);
-    return (
-      (Number.isNaN(leftMs) ? -Infinity : leftMs) - (Number.isNaN(rightMs) ? -Infinity : rightMs)
-    );
-  });
+): Promise<{ transactions: readonly PublicTransactionDocument[]; count: number }> {
+  const transactions = [...(await deps.transactions.list())]
+    .sort((left, right) => {
+      const leftMs = Date.parse(right.timestamp);
+      const rightMs = Date.parse(left.timestamp);
+      return (
+        (Number.isNaN(leftMs) ? -Infinity : leftMs) - (Number.isNaN(rightMs) ? -Infinity : rightMs)
+      );
+    })
+    .map(publicTransaction);
   return { transactions, count: transactions.length };
+}
+
+/** Strips internal V2 checkout ownership fields before staff history leaves the API. */
+function publicTransaction(transaction: TransactionDocument): PublicTransactionDocument {
+  return 'kind' in transaction && transaction.kind === 'checkout-sale'
+    ? publicCheckoutSaleTransaction(transaction)
+    : transaction;
 }
 
 async function createProduct(rawBody: unknown, deps: ApiDeps): Promise<ApiResponse> {

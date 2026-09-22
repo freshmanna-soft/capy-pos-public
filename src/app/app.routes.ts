@@ -15,6 +15,9 @@ import { PAYPAL_CHECKOUT } from '@core/application/ports/paypal-checkout.port';
 import { SelfCheckoutHttpAdapter } from '@core/infrastructure/payments/self-checkout-http.adapter';
 import { PayPalV6CheckoutAdapter } from '@core/infrastructure/payments/paypal-v6-checkout.adapter';
 import { SelfCheckoutAttemptStore } from '@core/infrastructure/payments/self-checkout-attempt.store';
+import { CUSTOMER_LOYALTY_GATEWAY } from '@core/application/ports/customer-loyalty-gateway.port';
+import { CurrentCustomerLoyaltyService } from '@core/application/auth/current-customer-loyalty.service';
+import { CustomerLoyaltyHttpAdapter } from '@core/infrastructure/loyalty/customer-loyalty-http.adapter';
 
 export const routes: Routes = [
   {
@@ -115,6 +118,8 @@ export const routes: Routes = [
       CartService,
       PosFacade,
       { provide: SELF_CHECKOUT_GATEWAY, useClass: SelfCheckoutHttpAdapter },
+      { provide: CUSTOMER_LOYALTY_GATEWAY, useClass: CustomerLoyaltyHttpAdapter },
+      CurrentCustomerLoyaltyService,
       { provide: PAYPAL_CHECKOUT, useClass: PayPalV6CheckoutAdapter },
       SelfCheckoutAttemptStore,
     ],

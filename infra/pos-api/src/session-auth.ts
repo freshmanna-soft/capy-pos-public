@@ -96,7 +96,8 @@
  * unconfigured deployment or a read that has never once succeeded — see its
  * own doc comment below.
  */
-import { createHmac, createPublicKey, timingSafeEqual, verify as verifyRsaSignature } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { verifyAppIdJwt } from './appid-jwt.ts';
 
 /**
  * The multi-tenant id App ID's own tokens are stamped with, since this pilot is
@@ -150,9 +151,9 @@ export type Permission = (typeof Permission)[keyof typeof Permission];
  * signature.
  */
 export interface RolesReader {
-  read(
-    id: string
-  ): Promise<{ readonly document: { readonly roles: Readonly<Record<string, readonly string[]>> } } | null>;
+  read(id: string): Promise<{
+    readonly document: { readonly roles: Readonly<Record<string, readonly string[]>> };
+  } | null>;
 }
 
 /** What App ID's own token endpoint requires this API to know to verify one. */
@@ -353,54 +354,9 @@ export async function verifyAppIdAccessToken(
   config: AppIdVerificationConfig,
   nowSeconds: number
 ): Promise<SessionClaims | null> {
-  const parts = token.split('.');
-  if (parts.length !== 3) {
-    return null;
-  }
-  const [encodedHeader, encodedPayload, signature] = parts as [string, string, string];
-
-  const header = decodeJson(encodedHeader);
-  if (header === null || header['alg'] !== 'RS256') {
-    return null;
-  }
-
-  const kid = header['kid'];
-  if (typeof kid !== 'string' || kid.length === 0) {
-    return null;
-  }
-
-  const jwk = await findJwk(kid, config);
-  if (jwk === null) {
-    return null;
-  }
-
-  if (!rs256SignatureMatches(`${encodedHeader}.${encodedPayload}`, signature, jwk)) {
-    return null;
-  }
-
-  const payload = decodeJson(encodedPayload);
-  if (payload === null) {
-    return null;
-  }
-
-  const expiresAt = payload['exp'];
-  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= nowSeconds) {
-    return null;
-  }
-  const notBefore = payload['nbf'];
-  if (typeof notBefore === 'number' && Number.isFinite(notBefore) && notBefore > nowSeconds) {
-    return null;
-  }
-
-  // Pinned the same way `AppIdAuthAdapter.verifyAccessToken()` pins them
-  // client-side — a token from a different tenant, or minted for a different
-  // application, must not verify here just because the signature is real.
-  if (payload['iss'] !== issuerFor(config)) {
-    return null;
-  }
-  if (!audienceMatches(payload['aud'], config.audience)) {
-    return null;
-  }
+  const payload = await verifyAppIdJwt(token, config, nowSeconds);
+  if (payload === null) return null;
+  const expiresAt = payload['exp'] as number;
 
   const operatorId = payload['sub'];
   if (typeof operatorId !== 'string' || operatorId.length === 0) {
@@ -418,18 +374,6 @@ export async function verifyAppIdAccessToken(
     permissions,
     expiresAt,
   };
-}
-
-function issuerFor(config: AppIdVerificationConfig): string {
-  return `https://${config.region}.appid.cloud.ibm.com/oauth/v4/${config.tenantId}`;
-}
-
-/** `aud` is an array on a real App ID token, confirmed by decoding one — but a string is accepted too, defensively. */
-function audienceMatches(aud: unknown, expected: string): boolean {
-  if (typeof aud === 'string') {
-    return aud === expected;
-  }
-  return Array.isArray(aud) && aud.includes(expected);
 }
 
 /**
@@ -509,8 +453,10 @@ const ROLES_DOC_ID = 'role-permissions';
  */
 const ROLES_CACHE_TTL_MS = 5 * 60 * 1000;
 
-let rolesCache: { readonly data: Readonly<Record<string, readonly string[]>>; readonly fetchedAtMs: number } | null =
-  null;
+let rolesCache: {
+  readonly data: Readonly<Record<string, readonly string[]>>;
+  readonly fetchedAtMs: number;
+} | null = null;
 
 /**
  * Resolve the current role → permission mapping: the shared document when
@@ -543,7 +489,9 @@ async function resolvedRolePermissions(
 }
 
 /** `null` covers both "no document yet" and "the read itself failed" — same one-null contract as the rest of this file. */
-async function readRolesDocument(source: RolesReader): Promise<Readonly<Record<string, readonly string[]>> | null> {
+async function readRolesDocument(
+  source: RolesReader
+): Promise<Readonly<Record<string, readonly string[]>> | null> {
   try {
     const result = await source.read(ROLES_DOC_ID);
     if (result === null) {
@@ -650,94 +598,6 @@ async function resolveAppIdScopes(
   return { roles, permissions: [...permissions] };
 }
 
-interface Jwk {
-  readonly kid: string;
-  readonly kty: string;
-  readonly n: string;
-  readonly e: string;
-}
-
-/** JWKS is immutable per tenant; cache it after the first fetch, same shape as `AppIdAuthAdapter.jwksCache`. */
-let jwksCache: readonly Jwk[] | null = null;
-
-async function findJwk(kid: string, config: AppIdVerificationConfig): Promise<Jwk | null> {
-  if (jwksCache === null) {
-    const fetched = await fetchJwks(config);
-    // A failed fetch is not "an empty JWKS" — leave the cache null (so the next
-    // call retries from scratch) and refuse this one lookup outright, rather
-    // than spending a second attempt that is no more likely to succeed than
-    // the first.
-    if (fetched === null) {
-      return null;
-    }
-    jwksCache = fetched;
-  }
-
-  const hit = jwksCache.find((key) => key.kid === kid);
-  if (hit) {
-    return hit;
-  }
-
-  // Not in the cached set — maybe a fresh rotation. Refetch once, same as
-  // `AppIdAuthAdapter.findJwk()`. If *this* attempt also fails, keep the
-  // existing cache rather than discarding a possibly-still-good one over a
-  // transient blip.
-  const refetched = await fetchJwks(config);
-  if (refetched === null) {
-    return null;
-  }
-  jwksCache = refetched;
-  return jwksCache.find((key) => key.kid === kid) ?? null;
-}
-
-/** `null` means the fetch itself failed — distinct from a successful fetch of zero keys. */
-async function fetchJwks(config: AppIdVerificationConfig): Promise<readonly Jwk[] | null> {
-  let response: Response;
-  try {
-    response = await fetch(`${issuerFor(config)}/publickeys`);
-  } catch (error) {
-    // Not folded into the caller's 401: a JWKS outage means every real App ID
-    // token fails the same way a forged one would, and an operator watching the
-    // logs deserves to tell those two apart even though the caller cannot.
-    console.error('[pos-api] App ID JWKS fetch failed', error);
-    return null;
-  }
-  if (!response.ok) {
-    console.error(`[pos-api] App ID JWKS fetch returned ${response.status}`);
-    return null;
-  }
-  try {
-    const data = (await response.json()) as { keys?: Jwk[] };
-    return data.keys ?? [];
-  } catch (error) {
-    console.error('[pos-api] App ID JWKS response was not valid JSON', error);
-    return null;
-  }
-}
-
-/**
- * RSA signature check for an App ID access token. `createPublicKey` has taken a
- * JWK-shaped public key directly since Node v15.9, and `verify`'s synchronous
- * overload (no callback) returns a boolean rather than throwing on a bad
- * signature — only a malformed key or a malformed signature buffer throws,
- * both caught below and treated as "does not verify", not "crashes the process".
- */
-function rs256SignatureMatches(signingInput: string, signature: string, jwk: Jwk): boolean {
-  let signatureBytes: Buffer;
-  try {
-    signatureBytes = Buffer.from(base64UrlToBase64(signature), 'base64');
-  } catch {
-    return false;
-  }
-
-  try {
-    const publicKey = createPublicKey({ key: { kty: jwk.kty, n: jwk.n, e: jwk.e }, format: 'jwk' });
-    return verifyRsaSignature('RSA-SHA256', Buffer.from(signingInput), publicKey, signatureBytes);
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Constant-time signature comparison.
  *
@@ -788,7 +648,9 @@ function base64UrlToBase64(value: string): string {
 
 /** A claim that should be an array of strings, reduced to exactly that. */
 function stringArray(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : [];
 }
 
 // Made with Bob

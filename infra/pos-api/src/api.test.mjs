@@ -261,6 +261,49 @@ describe('the auth boundary, as the story states it', () => {
     }
   });
 
+  it('strips internal customer ownership from checkout sales in staff history', async () => {
+    const context = deps({
+      transactions: [
+        {
+          id: 'checkout-transaction:Y2hlY2tvdXQtMQ',
+          kind: 'checkout-sale',
+          type: 'sale',
+          schemaVersion: 'v2',
+          checkoutId: 'checkout-1',
+          paypalCaptureId: 'capture-1',
+          storeId: 'store-1',
+          customerBinding: { customerKey: 'private-customer-key', keyVersion: 'sha256-v1' },
+          quote: {
+            currency: 'USD',
+            taxRateBasisPoints: 825,
+            lines: [
+              {
+                productId: 'p-1',
+                productName: 'Oat Milk 1L',
+                quantity: 1,
+                unitPriceMinorUnits: 150,
+                subtotalMinorUnits: 150,
+              },
+            ],
+            subtotalMinorUnits: 150,
+            taxMinorUnits: 12,
+            totalMinorUnits: 162,
+          },
+          timestamp: ISO,
+        },
+      ],
+    });
+
+    const response = await call('GET', '/api/transactions', {}, context);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.count, 1);
+    assert.equal(response.body.transactions[0].checkoutId, 'checkout-1');
+    assert.equal('customerBinding' in response.body.transactions[0], false);
+    assert.equal('schemaVersion' in response.body.transactions[0], false);
+    assert.ok(!JSON.stringify(response.body).includes('private-customer-key'));
+  });
+
   it('leaves health reachable without a credential, for the platform probe', async () => {
     const response = await call('GET', '/api/health', { token: null });
     assert.equal(response.status, 200);

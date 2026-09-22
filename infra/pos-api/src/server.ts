@@ -31,6 +31,13 @@ import { buildCheckoutRuntime, type CheckoutRuntime } from './checkout-runtime.t
 import { CloudantStore } from './cloudant-store.ts';
 import { MemoryStore } from '../../shared/src/document-store.ts';
 import type { DocumentStore } from '../../shared/src/document-store.ts';
+import type { CustomerVerificationConfig } from './customer-auth.ts';
+import {
+  CUSTOMER_LOYALTY_PATH,
+  handleCustomerLoyaltyHttp,
+  type CustomerLoyaltyProfileReader,
+} from './customer-loyalty-http.ts';
+import { CustomerProfileStore, type CustomerProfileDocument } from './customer-profile-store.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8790);
 
@@ -72,10 +79,12 @@ function requireSecret(): string {
  * same way an unset `SESSION_JWT_SECRET` is: "refuse to guess" rather than start
  * a revision that verifies RS256 tokens against the wrong tenant or audience.
  */
-function readAppIdConfig(): { region: string; tenantId: string; audience: string } | undefined {
-  const region = process.env['APPID_REGION'] ?? '';
-  const tenantId = process.env['APPID_TENANT_ID'] ?? '';
-  const audience = process.env['APPID_CLIENT_ID'] ?? '';
+export function readAppIdConfig(
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): { region: string; tenantId: string; audience: string } | undefined {
+  const region = environment['APPID_REGION'] ?? '';
+  const tenantId = environment['APPID_TENANT_ID'] ?? '';
+  const audience = environment['APPID_CLIENT_ID'] ?? '';
 
   // "Configured at all" turns on `tenantId`/`audience` only, not `region`:
   // `region` has one sensible value across this whole estate (`us-south`) and
@@ -96,6 +105,22 @@ function readAppIdConfig(): { region: string; tenantId: string; audience: string
   return { region, tenantId, audience };
 }
 
+/** The customer audience is a separate non-secret verifier input, never a staff audience alias. */
+export function readCustomerAppIdConfig(
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): CustomerVerificationConfig | undefined {
+  const region = environment['APPID_REGION'] ?? '';
+  const tenantId = environment['APPID_TENANT_ID'] ?? '';
+  const audience = environment['APPID_CUSTOMER_CLIENT_ID'] ?? '';
+  if (audience.length === 0) return undefined;
+  if (region.length === 0 || tenantId.length === 0) {
+    throw new Error(
+      'APPID_REGION and APPID_TENANT_ID are required when APPID_CUSTOMER_CLIENT_ID is set.'
+    );
+  }
+  return { region, tenantId, audience };
+}
+
 /**
  * Choose the store from the environment, and refuse to guess.
  *
@@ -108,6 +133,7 @@ interface PosStores {
   readonly products: DocumentStore<ProductDocument>;
   readonly transactions: DocumentStore<TransactionDocument>;
   readonly roles: DocumentStore<RolesDocument>;
+  readonly customerProfiles: DocumentStore<CustomerProfileDocument>;
   readonly cloudant?: { readonly url: string; readonly apiKey: string };
 }
 
@@ -119,7 +145,10 @@ function buildStores(): PosStores {
     const productsDb = process.env['CLOUDANT_PRODUCTS_DB'] ?? 'products';
     const transactionsDb = process.env['CLOUDANT_TRANSACTIONS_DB'] ?? 'transactions';
     const rolesDb = process.env['CLOUDANT_ROLES_DB'] ?? 'roles';
-    console.log(`[pos-api] store: cloudant (${productsDb}, ${transactionsDb}, ${rolesDb})`);
+    const customerProfilesDb = process.env['CLOUDANT_CUSTOMER_PROFILES_DB'] ?? 'customer-profiles';
+    console.log(
+      `[pos-api] store: cloudant (${productsDb}, ${transactionsDb}, ${rolesDb}, ${customerProfilesDb})`
+    );
     const cloudant = { url: url.replace(/\/+$/, ''), apiKey };
     return {
       cloudant,
@@ -135,6 +164,10 @@ function buildStores(): PosStores {
         ...cloudant,
         database: rolesDb,
       }),
+      customerProfiles: new CloudantStore<CustomerProfileDocument>({
+        ...cloudant,
+        database: customerProfilesDb,
+      }),
     };
   }
 
@@ -144,6 +177,7 @@ function buildStores(): PosStores {
       products: new MemoryStore<ProductDocument>(),
       transactions: new MemoryStore<TransactionDocument>(),
       roles: new MemoryStore<RolesDocument>(),
+      customerProfiles: new MemoryStore<CustomerProfileDocument>(),
     };
   }
 
@@ -164,10 +198,17 @@ function readInternalSecret(): string {
   return process.env['INTERNAL_API_SECRET'] ?? '';
 }
 
-function buildRuntimeDeps(): { readonly api: ApiDeps; readonly checkout: CheckoutRuntime } {
+function buildRuntimeDeps(): {
+  readonly api: ApiDeps;
+  readonly checkout: CheckoutRuntime;
+  readonly customerAuth?: CustomerVerificationConfig;
+  readonly customerLoyalty: CustomerLoyaltyProfileReader;
+} {
   const stores = buildStores();
   try {
     return {
+      customerAuth: readCustomerAppIdConfig(),
+      customerLoyalty: new CustomerProfileStore(stores.customerProfiles),
       api: {
         ...stores,
         secret: requireSecret(),
@@ -223,6 +264,8 @@ export function readAllowedOrigins(
 export function createPosRequestHandler(input: {
   readonly api: ApiDeps;
   readonly checkout: CheckoutRuntime;
+  readonly customerAuth?: CustomerVerificationConfig;
+  readonly customerLoyalty?: CustomerLoyaltyProfileReader;
   readonly allowedOrigins: ReadonlySet<string>;
   readonly newTraceId?: () => string;
 }): (req: IncomingMessage, res: ServerResponse) => void {
@@ -234,7 +277,9 @@ export function createPosRequestHandler(input: {
     const cors = corsHeaders(origin, input.allowedOrigins);
     const path = (req.url ?? '/').split('?')[0] ?? '/';
     const checkoutRoute = path.startsWith('/api/self-checkout/checkouts');
-    const responsePolicy = checkoutRoute
+    const customerLoyaltyRoute = path === CUSTOMER_LOYALTY_PATH;
+    const privateCustomerRoute = checkoutRoute || customerLoyaltyRoute;
+    const responsePolicy = privateCustomerRoute
       ? { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }
       : {};
     const send = (status: number, body: unknown, headers: Record<string, string> = {}): void => {
@@ -270,7 +315,7 @@ export function createPosRequestHandler(input: {
     const chunks: Buffer[] = [];
     let received = 0;
     let aborted = false;
-    const maxBodyBytes = checkoutRoute ? MAX_CHECKOUT_BODY_BYTES : MAX_BODY_BYTES;
+    const maxBodyBytes = privateCustomerRoute ? MAX_CHECKOUT_BODY_BYTES : MAX_BODY_BYTES;
 
     req.on('data', (chunk: Buffer) => {
       if (aborted) return;
@@ -299,10 +344,33 @@ export function createPosRequestHandler(input: {
         }
         const internalSecretHeader = req.headers['x-internal-secret'];
         try {
+          if (customerLoyaltyRoute) {
+            const loyaltyResponse =
+              input.customerLoyalty === undefined
+                ? { status: 503, body: { error: 'Customer loyalty is unavailable.' } }
+                : await handleCustomerLoyaltyHttp(
+                    {
+                      method: req.method ?? 'GET',
+                      path,
+                      authorization: req.headers.authorization,
+                    },
+                    {
+                      profiles: input.customerLoyalty,
+                      customerAuth: input.customerAuth,
+                      nowSeconds: input.api.nowSeconds,
+                      nowIso: input.api.nowIso,
+                    }
+                  );
+            if (loyaltyResponse !== null) {
+              send(loyaltyResponse.status, loyaltyResponse.body);
+              return;
+            }
+          }
           const checkoutResponse = await handleCheckoutHttp(
             {
               method: req.method ?? 'GET',
               path,
+              authorization: req.headers.authorization,
               idempotencyKey: singleHeader(req.headers['idempotency-key']),
               checkoutToken: singleHeader(req.headers['x-checkout-token']),
               body,
@@ -311,6 +379,8 @@ export function createPosRequestHandler(input: {
               checkout: input.checkout.service,
               rateLimiter: input.checkout.rateLimiter,
               rateLimitKey: clientRateLimitKey(req),
+              customerAuth: input.customerAuth,
+              nowSeconds: input.api.nowSeconds,
             }
           );
           if (checkoutResponse !== null) {
