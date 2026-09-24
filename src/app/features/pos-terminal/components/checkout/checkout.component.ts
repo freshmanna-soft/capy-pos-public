@@ -16,7 +16,11 @@ import { ProcessCardPaymentUseCase } from '@core/application/use-cases/process-c
 import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
 import { CircuitBreakerService } from '@core/infrastructure/resilience/circuit-breaker.service';
 import { RetryService } from '@core/infrastructure/resilience/retry.service';
-import { PaymentResult, StaffPaymentMethod } from '@core/application/dtos/payment.dto';
+import {
+  PaymentMethod,
+  PaymentResult,
+  StaffPaymentMethod,
+} from '@core/application/dtos/payment.dto';
 import { MERCADOPAGO_PAYMENT_PORT } from '@core/application/ports/mercadopago.port';
 import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
 
@@ -1015,7 +1019,7 @@ export class CheckoutComponent implements OnDestroy {
     | 'retrying'
     | 'error'
   >('select');
-  readonly selectedMethod = signal<StaffPaymentMethod | null>(null);
+  readonly selectedMethod = signal<PaymentMethod | null>(null);
   readonly changeAmount = signal<number>(0);
 
   /**
@@ -1409,7 +1413,7 @@ export class CheckoutComponent implements OnDestroy {
    * emits the result. Shared by the cash/mobile timeout path and the card
    * gateway path so completion behaviour stays identical across methods.
    */
-  private finalizePayment(method: StaffPaymentMethod, transactionId: string): void {
+  private finalizePayment(method: PaymentMethod, transactionId: string): void {
     const result: PaymentResult = {
       method,
       amount: this.cartService.total(),

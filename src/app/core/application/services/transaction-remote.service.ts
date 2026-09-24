@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { CartService } from '@core/application/services/cart.service';
-import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { environment } from '../../../../environments/environment';
 
 /** sessionStorage key used by ShopComponent (ST-2). */

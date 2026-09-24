@@ -450,6 +450,8 @@ export class PosFacade {
       tax: minorUnitsToAmount(quote.taxMinorUnits),
       taxRate: quote.taxRateBasisPoints / 10_000,
       total: minorUnitsToAmount(quote.totalMinorUnits),
+      storeName: '',
+      storeAddress: '',
     };
   }
 

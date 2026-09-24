@@ -89,6 +89,7 @@ export const environment = {
   paypal: {
     enabled: false,
     clientId: 'test-paypal-client-id',
+    environment: 'sandbox' as const,
     preferenceApiUrl: 'http://localhost:8790/api/paypal/order',
   },
 

@@ -113,6 +113,7 @@ export const environment = {
   paypal: {
     enabled: false,
     clientId: '', // Set via environment variable: PAYPAL_CLIENT_ID
+    environment: 'production' as const,
     preferenceApiUrl:
       'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api/paypal/order',
   },

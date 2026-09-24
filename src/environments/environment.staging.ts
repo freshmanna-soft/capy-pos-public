@@ -87,6 +87,7 @@ export const environment = {
   paypal: {
     enabled: false,
     clientId: '', // Set via environment variable: PAYPAL_CLIENT_ID
+    environment: 'sandbox' as const,
     preferenceApiUrl: 'https://api-staging.capy-pos.com/api/paypal/order',
   },
 
