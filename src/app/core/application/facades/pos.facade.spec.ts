@@ -339,6 +339,8 @@ describe('PosFacade', () => {
         tax: 0.77,
         taxRate: 0.085,
         total: 9.77,
+        storeName: '',
+        storeAddress: '',
       });
       expect(mockCartService.clearCart).toHaveBeenCalledOnce();
     });

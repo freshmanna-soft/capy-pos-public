@@ -9,14 +9,14 @@ import {
 } from '@core/domain/entities/transaction.entity';
 import { TransactionBuilder } from '@core/domain/entities/transaction.builder';
 import { EmptyCartException, TransactionPersistenceException } from '@core/application/exceptions';
-import { StaffPaymentMethod } from '@core/application/dtos/payment.dto';
+import { PaymentMethod } from '@core/application/dtos/payment.dto';
 
 /**
  * Request DTO for persisting a transaction
  */
 export interface PersistTransactionRequest {
   /** Payment method used (cash, card, mobile) */
-  paymentMethod: StaffPaymentMethod;
+  paymentMethod: PaymentMethod;
   /** Unique transaction identifier */
   transactionId: string;
   /** Amount tendered by customer (cash payments) */
@@ -36,7 +36,7 @@ export interface PersistTransactionResult {
   /** Transaction ID */
   transactionId: string;
   /** Payment method used */
-  paymentMethod: StaffPaymentMethod;
+  paymentMethod: PaymentMethod;
   /** Timestamp of persistence */
   timestamp: Date;
   /** Error message if persistence failed */

@@ -25,10 +25,8 @@ import { CameraService } from '@core/infrastructure/media/camera.service';
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
 import { pickPresentedCode } from '@core/infrastructure/media/barcode-gate';
 import { Product } from '@core/domain/entities/product.entity';
-import {
-  CheckoutComponent,
-  PaymentResult,
-} from '@features/pos-terminal/components/checkout/checkout.component';
+import { CheckoutComponent } from '@features/pos-terminal/components/checkout/checkout.component';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
 import { ReceiptData } from '@core/application/use-cases/generate-receipt.use-case';
 import { CustomerBuilder } from '@core/domain/entities/customer.builder';
