@@ -289,6 +289,22 @@ describe('PosFacade', () => {
       expect(receipt).toBeTruthy();
       expect(mockCartService.clearCart).toHaveBeenCalled();
     });
+
+    it('completes checkout even when stock adjustment throws', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      mockAdjustStock.execute.mockRejectedValue(new Error('IndexedDB gone'));
+
+      const paymentResult = { method: 'cash', amount: 20 };
+      const receipt = await facade.checkout(paymentResult as never);
+
+      expect(receipt).toBeTruthy();
+      expect(mockCartService.clearCart).toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[PosFacade] Stock adjustment failed entirely:',
+        expect.any(Error)
+      );
+      errorSpy.mockRestore();
+    });
   });
 
   describe('server-completed self-checkout', () => {
@@ -412,6 +428,75 @@ describe('PosFacade', () => {
       expect(mockTelemetry.recordCounter).toHaveBeenCalledWith('payments.processed', 1, {
         method: 'paypal',
       });
+    });
+
+    it('still returns a receipt when finalizeServerCheckout audit log rejects', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const mockAudit = { log: vi.fn().mockReturnValue(Promise.reject(new Error('audit down'))) };
+      const mockTelemetry = { recordCounter: vi.fn(), recordGauge: vi.fn() };
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          PosFacade,
+          { provide: CartService, useValue: mockCartService },
+          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
+          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
+          { provide: DexieDatabase, useValue: mockDb },
+          { provide: CustomerService, useValue: mockCustomers },
+          { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
+          { provide: EventBusService, useValue: mockEventBus },
+          { provide: AuditLogService, useValue: mockAudit },
+          { provide: TelemetryService, useValue: mockTelemetry },
+        ],
+      });
+      const scopedFacade = TestBed.inject(PosFacade);
+
+      const receipt = scopedFacade.finalizeServerCheckout(serverReceipt, 0);
+      // Flush the fire-and-forget rejection so its .catch runs.
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(receipt).toBeTruthy();
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[PosFacade] Self-checkout audit log failed:',
+        expect.any(Error)
+      );
+      errorSpy.mockRestore();
+    });
+
+    it('still returns a receipt when finalizeServerCheckout telemetry throws', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const mockAudit = { log: vi.fn().mockResolvedValue(undefined) };
+      const mockTelemetry = {
+        recordCounter: vi.fn(() => {
+          throw new Error('telemetry down');
+        }),
+        recordGauge: vi.fn(),
+      };
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          PosFacade,
+          { provide: CartService, useValue: mockCartService },
+          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
+          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
+          { provide: DexieDatabase, useValue: mockDb },
+          { provide: CustomerService, useValue: mockCustomers },
+          { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
+          { provide: EventBusService, useValue: mockEventBus },
+          { provide: AuditLogService, useValue: mockAudit },
+          { provide: TelemetryService, useValue: mockTelemetry },
+        ],
+      });
+      const scopedFacade = TestBed.inject(PosFacade);
+
+      const receipt = scopedFacade.finalizeServerCheckout(serverReceipt, 0);
+
+      expect(receipt).toBeTruthy();
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[PosFacade] Self-checkout telemetry failed:',
+        expect.any(Error)
+      );
+      errorSpy.mockRestore();
     });
   });
 

@@ -705,6 +705,97 @@ describe('ShopComponent — handleCreateAccount', () => {
 // handlePaymentComplete — checkout error path (line 1013)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// openCheckout with customer + closeCheckout
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — openCheckout and closeCheckout', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.resetTestingModule();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('openCheckout attaches customer when kioskCustomer is set', () => {
+    const fakeCustomer = { id: 'cust-42', email: 'k@shop.com' } as never;
+    const { component, cart, fixture } = setup();
+    const kioskCustomer = fixture.debugElement.injector.get(KioskCustomerService);
+    (kioskCustomer.customer as ReturnType<typeof signal>).set(fakeCustomer);
+    const facade = fixture.debugElement.injector.get(PosFacade);
+
+    cart.isEmpty.set(false);
+    component.openCheckout();
+
+    expect(facade.attachCustomerDirectly).toHaveBeenCalledWith(fakeCustomer);
+    expect(component.showCheckout()).toBe(true);
+  });
+
+  it('closeCheckout hides checkout and detaches customer', () => {
+    const { component, fixture } = setup();
+    const facade = fixture.debugElement.injector.get(PosFacade);
+
+    component.showCheckout.set(true);
+    component.closeCheckout();
+
+    expect(component.showCheckout()).toBe(false);
+    expect(facade.detachCustomer).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handlePaymentComplete — happy path
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — handlePaymentComplete happy path', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.resetTestingModule();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('shows receipt and clears checkout state on successful payment', async () => {
+    const fakeReceipt = {
+      payment: { method: 'cash', amount: 5, transactionId: 'tx-ok', timestamp: new Date() },
+      items: [],
+      currency: 'USD',
+      subtotal: 5,
+      tax: 0,
+      taxRate: 0,
+      total: 5,
+      storeName: 'Test Store',
+      storeAddress: '',
+    } as never;
+
+    const { component, fixture } = setup();
+    const facade = fixture.debugElement.injector.get(PosFacade);
+    (facade.checkout as ReturnType<typeof vi.fn>).mockResolvedValue(fakeReceipt);
+
+    component.showCheckout.set(true);
+    component.handlePaymentComplete({
+      method: 'cash',
+      amount: 5,
+      transactionId: 'tx-ok',
+      timestamp: new Date(),
+    });
+    await flushMicrotasks();
+
+    expect(component.checkoutError()).toBeNull();
+    expect(component.receiptData()).toEqual(fakeReceipt);
+    expect(component.showCheckout()).toBe(false);
+    expect(component.showReceipt()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handlePaymentComplete — checkout error path (line 1013)
+// ---------------------------------------------------------------------------
+
 describe('ShopComponent — handlePaymentComplete checkout error', () => {
   beforeEach(() => {
     vi.useFakeTimers();
