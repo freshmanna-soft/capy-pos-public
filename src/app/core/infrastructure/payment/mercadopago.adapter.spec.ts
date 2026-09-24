@@ -217,6 +217,207 @@ describe('MercadoPagoAdapter', () => {
     });
   });
 
+  describe('createWalletBrick()', () => {
+    /** Fake preference creation response. */
+    function makeWalletBackendResponse(id = 'pref-456'): Response {
+      return {
+        ok: true,
+        json: () => Promise.resolve({ id, initPoint: `https://mp.com/checkout/${id}` }),
+      } as unknown as Response;
+    }
+
+    /**
+     * Build a fetch stub that:
+     *  - call 0  → returns the preference creation 200 (POST to .../preference)
+     *  - call 1+ → returns the status poll result (GET to .../preference/:id)
+     */
+    function makeFetchSequence(
+      prefResponse: Response,
+      pollStatuses: string[]
+    ): ReturnType<typeof vi.fn> {
+      let pollIdx = 0;
+      return vi.fn().mockImplementation(async (url: string) => {
+        if (typeof url === 'string' && url.includes('/preference/')) {
+          // Status poll call
+          const status = pollStatuses[pollIdx] ?? 'not_found';
+          pollIdx++;
+          return { ok: true, json: async () => ({ status }) };
+        }
+        // Preference creation call
+        return prefResponse;
+      });
+    }
+
+    it('POSTs mode:wallet, mounts Wallet Brick, resolves approved after poll', async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal(
+        'fetch',
+        makeFetchSequence(makeWalletBackendResponse(), ['not_found', 'approved'])
+      );
+
+      mockBricksCreate.mockImplementation(
+        async (_b: string, _t: string, settings: { callbacks: { onSubmit: () => void } }) => {
+          settings.callbacks.onSubmit(); // simulate buyer clicking Pay
+          return mockController;
+        }
+      );
+
+      const resultPromise = adapter.createWalletBrick(99, 'mp-wallet-container');
+
+      // Advance past the first poll interval (2 s) → 'not_found', then second → 'approved'
+      await vi.advanceTimersByTimeAsync(2100);
+      await vi.advanceTimersByTimeAsync(2100);
+      const result = await resultPromise;
+
+      // fetch call 0 was the preference POST
+      const [url, init] = (vi.mocked(fetch) as ReturnType<typeof vi.fn>).mock.calls[0] as [
+        string,
+        RequestInit,
+      ];
+      expect(url).toContain('preference');
+      expect(JSON.parse(init.body as string)).toMatchObject({ mode: 'wallet', amount: 99 });
+
+      expect(mockBricksCreate).toHaveBeenCalledWith(
+        'wallet',
+        'mp-wallet-container',
+        expect.any(Object)
+      );
+      expect(result.status).toBe('approved');
+      expect(result.preferenceId).toBe('pref-456');
+      expect(result.amount).toBe(99);
+
+      vi.useRealTimers();
+    });
+
+    it('uses redirectMode:blank so MP checkout opens in a new tab', async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal('fetch', makeFetchSequence(makeWalletBackendResponse(), ['approved']));
+
+      mockBricksCreate.mockImplementation(
+        async (_b: string, _t: string, settings: { callbacks: { onSubmit: () => void } }) => {
+          settings.callbacks.onSubmit();
+          return mockController;
+        }
+      );
+
+      const p = adapter.createWalletBrick(99, 'mp-wallet-container');
+      await vi.advanceTimersByTimeAsync(2100);
+      await p;
+
+      const callSettings = mockBricksCreate.mock.calls[0][2] as {
+        initialization: { redirectMode: string };
+      };
+      expect(callSettings.initialization.redirectMode).toBe('blank');
+
+      vi.useRealTimers();
+    });
+
+    it('calls onPollingStarted when the buyer clicks Pay', async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal('fetch', makeFetchSequence(makeWalletBackendResponse(), ['approved']));
+
+      mockBricksCreate.mockImplementation(
+        async (_b: string, _t: string, settings: { callbacks: { onSubmit: () => void } }) => {
+          settings.callbacks.onSubmit();
+          return mockController;
+        }
+      );
+
+      const onPollingStarted = vi.fn();
+      const p = adapter.createWalletBrick(99, 'mp-wallet-container', onPollingStarted);
+      await vi.advanceTimersByTimeAsync(2100);
+      await p;
+
+      expect(onPollingStarted).toHaveBeenCalledOnce();
+
+      vi.useRealTimers();
+    });
+
+    it('rejects on rejected payment status', async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal('fetch', makeFetchSequence(makeWalletBackendResponse(), ['rejected']));
+
+      mockBricksCreate.mockImplementation(
+        async (_b: string, _t: string, settings: { callbacks: { onSubmit: () => void } }) => {
+          settings.callbacks.onSubmit();
+          return mockController;
+        }
+      );
+
+      const p = adapter.createWalletBrick(50, 'mp-wallet-container');
+      // Pre-attach a no-op catch so the promise is marked as "handled" before
+      // vi.advanceTimersByTimeAsync fires the interval and calls reject().
+      // Without this, Node/Vitest sees an unhandled rejection in the window
+      // between the reject() call and the await expect(p).rejects line.
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      const handled = p.catch(() => {});
+
+      await vi.advanceTimersByTimeAsync(2100);
+      await handled;
+
+      await expect(p).rejects.toThrow('rejected');
+
+      vi.useRealTimers();
+    });
+
+    it('503 from backend → rejects with "not configured" message', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ error: 'MercadoPago is not configured on this server.' }),
+        } as unknown as Response)
+      );
+
+      await expect(adapter.createWalletBrick(50, 'mp-wallet-container')).rejects.toThrow(
+        'Set MP_ACCESS_TOKEN'
+      );
+    });
+
+    it('502 from backend → rejects with the backend error message', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 502,
+          json: () => Promise.resolve({ error: 'MercadoPago preference creation failed.' }),
+        } as unknown as Response)
+      );
+
+      await expect(adapter.createWalletBrick(50, 'mp-wallet-container')).rejects.toThrow(
+        'MercadoPago preference failed: MercadoPago preference creation failed.'
+      );
+    });
+
+    it('rejects when fetch throws (network error)', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+
+      await expect(adapter.createWalletBrick(50, 'mp-wallet-container')).rejects.toThrow(
+        'Is it running?'
+      );
+    });
+
+    it('rejects when the Wallet Brick fires a critical error', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeWalletBackendResponse()));
+
+      mockBricksCreate.mockImplementation(
+        async (
+          _b: string,
+          _t: string,
+          settings: { callbacks: { onError: (e: { type: string; message: string }) => void } }
+        ) => {
+          settings.callbacks.onError({ type: 'critical', message: 'Wallet SDK exploded' });
+          return mockController;
+        }
+      );
+
+      await expect(adapter.createWalletBrick(50, 'mp-wallet-container')).rejects.toThrow(
+        'Wallet SDK exploded'
+      );
+    });
+  });
+
   describe('destroy()', () => {
     it('calls controller.unmount() when a brick is active', async () => {
       mockBricksCreate.mockImplementation(

@@ -542,6 +542,9 @@ export class KioskSplashComponent implements OnInit, OnDestroy {
       const newCustomer = new CustomerBuilder()
         .withEmail(email)
         .withName(email.split('@')[0]) // best-effort display name from email prefix
+        // Phone is intentionally empty: the kiosk registration form only asks for
+        // an email address. Customer.validate() treats phone as optional so this
+        // is valid — no "phone is required" error will be thrown.
         .withPhone('')
         .withStatus(CustomerStatus.ACTIVE)
         .withTier(CustomerTier.BRONZE)

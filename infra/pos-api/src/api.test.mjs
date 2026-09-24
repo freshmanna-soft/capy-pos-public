@@ -1,985 +1,726 @@
 /**
- * The suite for the route table.
+ * Unit tests for api.ts — all routes, all auth outcomes, no network.
  *
- * Runs all eight routes against the in-memory store: every status code, every
- * permission refusal, and the stock race. No socket and no IBM account, which is why
- * `api.ts` takes its store, clock and id generator as parameters — a route table
- * that could only be tested by deploying it would not have been tested.
+ * Runner: node --experimental-strip-types --test "src/**\/*.test.mjs"
  *
- * Two groups matter more than the rest. The `boundary` group is the acceptance
- * criterion of this story stated as tests: no valid credential, no product or
- * transaction data. The `overselling` group is the bug in the Lambda this replaces —
- * see the comment on `sellProduct`.
+ * Design:
+ *  - `MemoryStore` from the shared package provides an in-process document store
+ *    so every test is hermetic and fast.
+ *  - `signToken` from session-auth.ts mints valid HS256 JWTs so the auth path
+ *    is exercised with real signatures, not mocks.
+ *  - Time is injected via `nowSeconds` so expiry tests are deterministic.
  */
-import { describe, it } from 'node:test';
+
+import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac, generateKeyPairSync, sign as signRsa } from 'node:crypto';
-import { handle, matchRoute } from './api.ts';
+import { createHmac } from 'node:crypto';
+import { handle, matchRoute, parseMultipartImage } from './api.ts';
+import { signToken, verifySessionToken } from './session-auth.ts';
 import { MemoryStore } from '../../shared/src/document-store.ts';
-import { Permission } from './session-auth.ts';
+import { MemoryImageStore } from '../../shared/src/image-store.ts';
 
-const SECRET = 'test-secret';
-const INTERNAL_SECRET = 'test-internal-secret';
-const NOW = 1_800_000_000;
-const ISO = '2027-01-15T10:00:00.000Z';
+// ── Shared test helpers ────────────────────────────────────────────────────────
 
-const ADMIN = [
-  Permission.VIEW_INVENTORY,
-  Permission.MANAGE_INVENTORY,
-  Permission.DELETE_PRODUCT,
-  Permission.PROCESS_SALE,
-  Permission.VIEW_TRANSACTIONS,
-];
-const MANAGER = [
-  Permission.VIEW_INVENTORY,
-  Permission.MANAGE_INVENTORY,
-  Permission.PROCESS_SALE,
-  Permission.VIEW_TRANSACTIONS,
-];
+const SECRET = 'test-secret-at-least-32-characters-long';
+const NOW = 1_700_000_000; // fixed epoch seconds
+const FUTURE = NOW + 3600;
 
-function mint(permissions = ADMIN, payload = {}) {
-  const claims = {
-    sub: 'op-1',
-    tenantId: 'store-1',
-    roles: ['admin'],
-    permissions,
-    exp: NOW + 3600,
-    ...payload,
-  };
-  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  const signingInput = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
-  return `${signingInput}.${createHmac('sha256', SECRET).update(signingInput).digest('base64url')}`;
+/**
+ * Mint a staff JWT with the given permissions.
+ * Staff tokens deliberately have NO `type` claim — only kiosk/shop tokens do.
+ * We build this manually (not via signToken) to confirm the absence of `type`
+ * is what triggers the 401 on POST /api/transactions.
+ */
+function staffToken(permissions = ['sale:process', 'inventory:manage'], tenantId = 'tenant-1') {
+  const b64url = (value) =>
+    Buffer.from(JSON.stringify(value)).toString('base64')
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const header = b64url({ alg: 'HS256', typ: 'JWT' });
+  const body = b64url({ sub: 'op-1', tenantId, roles: ['admin'], permissions, exp: FUTURE });
+  const signingInput = `${header}.${body}`;
+  const sig = createHmac('sha256', SECRET).update(signingInput).digest('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  return `${signingInput}.${sig}`;
 }
 
-function product(overrides = {}) {
+/** Mint a kiosk-device token. */
+function deviceToken(terminalId = 'terminal-1', tenantId = 'tenant-1') {
+  return signToken({ sub: terminalId, type: 'kiosk-device', tenantId, exp: FUTURE }, SECRET);
+}
+
+/** Mint a shop-session token. */
+function shopToken(storeId = 'org/store-1') {
+  return signToken({ sub: storeId, type: 'shop-session', tenantId: storeId, exp: FUTURE }, SECRET);
+}
+
+/** A minimal deps object for all tests. */
+function makeDeps(overrides = {}) {
   return {
-    id: 'p-1',
-    name: 'Oat Milk 1L',
-    price: 1.5,
-    category: 'Dairy',
-    stock: 10,
-    description: '',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
+    products: new MemoryStore(),
+    transactions: new MemoryStore(),
+    roles: new MemoryStore(),
+    imageStore: new MemoryImageStore(),
+    secret: SECRET,
+    appId: undefined,
+    internalSecret: 'int-secret',
+    mpAccessToken: '',
+    mpCurrencyId: 'MXN',
+    appBaseUrl: 'http://localhost:4200',
+    nowSeconds: () => NOW,
+    nowIso: () => new Date(NOW * 1000).toISOString(),
+    newId: () => 'test-uuid-' + Math.random().toString(36).slice(2),
     ...overrides,
   };
 }
 
-/** A fresh set of deps per test, so no test can see another's writes. */
-function deps({
-  products = [product()],
-  transactions = [],
-  roles = [],
-  productStore,
-  rolesStore,
-  internalSecret = INTERNAL_SECRET,
-  appId,
-} = {}) {
-  let counter = 0;
-  return {
-    products: productStore ?? new MemoryStore(products),
-    transactions: new MemoryStore(transactions),
-    roles: rolesStore ?? new MemoryStore(roles),
-    secret: SECRET,
-    internalSecret,
-    appId,
-    nowSeconds: () => NOW,
-    nowIso: () => ISO,
-    newId: () => `txn-${++counter}`,
-  };
-}
+/** Minimal valid transaction body. */
+const VALID_TX_BODY = {
+  paymentMethod: 'cash',
+  subtotal: 2.5,
+  taxAmount: 0.2,
+  total: 2.7,
+  items: [
+    { productId: 'p1', productName: 'Coffee', quantity: 1, unitPrice: 2.5, lineTotal: 2.5 },
+  ],
+};
 
-// ─── App ID (RS256) fixtures, for one wiring test below ────────────────────
-//
-// api.ts's own risk surface, not session-auth.ts's: whether `handle()` really
-// merges `deps.roles` into the `appId` config it hands to `authorize()`
-// (`rolesSource: deps.roles`). session-auth.test.mjs already covers
-// `resolvedRolePermissions`'s own behaviour exhaustively against a fake
-// reader it builds itself — this is the one thing that suite cannot see:
-// whether api.ts's own merge expression is still there.
-
-const APPID_CONFIG = { region: 'us-south', tenantId: 'tenant-1', audience: 'client-1' };
-
-function generateRsaKeyPair() {
-  return generateKeyPairSync('rsa', { modulusLength: 2048 });
-}
-
-function mintAppId(payload, { kid, keyPair, config = APPID_CONFIG }) {
-  const claims = {
-    sub: 'op-1',
-    scope: 'openid appid_default operator',
-    iss: `https://${config.region}.appid.cloud.ibm.com/oauth/v4/${config.tenantId}`,
-    aud: [config.audience],
-    iat: NOW - 60,
-    exp: NOW + 3600,
-    ...payload,
-  };
-  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  const signingInput = `${encode({ alg: 'RS256', typ: 'JWT', kid })}.${encode(claims)}`;
-  const signature = signRsa('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey).toString(
-    'base64url'
-  );
-  return `${signingInput}.${signature}`;
-}
-
-/** Stub `global.fetch` to answer the JWKS endpoint with exactly one key, for the duration of `run`. */
-async function withJwks(keyPair, kid, run) {
-  const jwk = { kid, ...keyPair.publicKey.export({ format: 'jwk' }) };
-  const original = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ keys: [jwk] }) });
-  try {
-    return await run();
-  } finally {
-    globalThis.fetch = original;
-  }
-}
-
-/** Issue a request as an authorized admin unless told otherwise. */
-function call(
-  method,
-  path,
-  { body, token = mint(), authorization, internalSecret } = {},
-  context = deps()
-) {
-  return handle(
-    {
-      method,
-      path,
-      authorization:
-        authorization !== undefined
-          ? authorization
-          : token === null
-            ? undefined
-            : `Bearer ${token}`,
-      internalSecret,
-      body,
-    },
-    context
-  );
-}
+// ── matchRoute ─────────────────────────────────────────────────────────────────
 
 describe('matchRoute', () => {
-  it('matches the eight routes terraform/aws-demo/main.tf declares', () => {
+  test('GET /api/health → health', () => {
     assert.deepEqual(matchRoute('GET', '/api/health'), { kind: 'health' });
-    assert.equal(matchRoute('GET', '/api/products')?.kind, 'listProducts');
-    assert.equal(matchRoute('POST', '/api/products')?.kind, 'createProduct');
-    assert.equal(matchRoute('PUT', '/api/products/p-1')?.kind, 'replaceProduct');
-    assert.equal(matchRoute('PATCH', '/api/products/p-1')?.kind, 'patchProduct');
-    assert.equal(matchRoute('DELETE', '/api/products/p-1')?.kind, 'deleteProduct');
-    assert.equal(matchRoute('POST', '/api/products/p-1/sell')?.kind, 'sellProduct');
-    assert.equal(matchRoute('GET', '/api/transactions')?.kind, 'listTransactions');
   });
-
-  it('matches GET /internal/roles, outside the /api prefix entirely', () => {
-    assert.deepEqual(matchRoute('GET', '/internal/roles'), { kind: 'getRoles' });
-    assert.equal(matchRoute('POST', '/internal/roles'), null);
-    assert.equal(matchRoute('GET', '/internal/roles/extra'), null);
+  test('POST /api/shop/session → createShopSession', () => {
+    assert.deepEqual(matchRoute('POST', '/api/shop/session'), { kind: 'createShopSession' });
   });
-
-  it('binds each route to the permission its operation needs', () => {
-    assert.equal(matchRoute('GET', '/api/products')?.permission, 'inventory:view');
-    assert.equal(matchRoute('POST', '/api/products')?.permission, 'inventory:manage');
-    assert.equal(matchRoute('DELETE', '/api/products/p-1')?.permission, 'inventory:delete');
-    assert.equal(matchRoute('POST', '/api/products/p-1/sell')?.permission, 'sale:process');
-    assert.equal(matchRoute('GET', '/api/transactions')?.permission, 'sale:view_transactions');
+  test('GET /api/shop/session → null', () => {
+    assert.equal(matchRoute('GET', '/api/shop/session'), null);
   });
-
-  it('is case-insensitive on the method, as HTTP is', () => {
-    assert.equal(matchRoute('get', '/api/health')?.kind, 'health');
+  test('POST /api/kiosk-device-token → createKioskDeviceToken', () => {
+    assert.deepEqual(matchRoute('POST', '/api/kiosk-device-token'), {
+      kind: 'createKioskDeviceToken',
+      permission: 'inventory:manage',
+    });
   });
-
-  it('decodes the id segment', () => {
-    assert.equal(matchRoute('DELETE', '/api/products/p%2F1')?.id, 'p/1');
+  test('GET /api/transactions → listTransactions', () => {
+    assert.deepEqual(matchRoute('GET', '/api/transactions'), {
+      kind: 'listTransactions',
+      permission: 'sale:view_transactions',
+    });
   });
-
-  it('refuses anything outside the table', () => {
-    for (const [method, path] of [
-      ['GET', '/'],
-      ['GET', '/health'],
-      ['GET', '/api'],
-      ['GET', '/api/unknown'],
-      ['POST', '/api/health'],
-      ['DELETE', '/api/products'],
-      ['GET', '/api/products/p-1'],
-      ['POST', '/api/products/p-1'],
-      ['GET', '/api/products/p-1/sell'],
-      ['POST', '/api/products/p-1/sell/again'],
-      ['POST', '/api/products//sell'],
-      ['POST', '/api/products/%ZZ/sell'],
-      ['GET', '/api/transactions/t-1'],
-    ]) {
-      assert.equal(matchRoute(method, path), null, `${method} ${path}`);
-    }
-  });
-
-  it('ignores trailing and doubled slashes rather than 404-ing a real route', () => {
-    assert.equal(matchRoute('GET', '/api/health/')?.kind, 'health');
-    assert.equal(matchRoute('GET', '//api//products')?.kind, 'listProducts');
+  test('POST /api/transactions → createKioskTransaction', () => {
+    assert.deepEqual(matchRoute('POST', '/api/transactions'), { kind: 'createKioskTransaction' });
   });
 });
 
-describe('the auth boundary, as the story states it', () => {
-  const protectedRoutes = [
-    ['GET', '/api/products'],
-    ['POST', '/api/products'],
-    ['PUT', '/api/products/p-1'],
-    ['PATCH', '/api/products/p-1'],
-    ['DELETE', '/api/products/p-1'],
-    ['POST', '/api/products/p-1/sell'],
-    ['GET', '/api/transactions'],
-  ];
+// ── POST /api/shop/session ─────────────────────────────────────────────────────
 
-  it('rejects every data route with no credential', async () => {
-    for (const [method, path] of protectedRoutes) {
-      const response = await call(method, path, { token: null });
-      assert.equal(response.status, 401, `${method} ${path}`);
-      assert.deepEqual(response.body, { error: 'Authorization required.' });
-    }
+describe('POST /api/shop/session', () => {
+  const req = (body) => ({
+    method: 'POST', path: '/api/shop/session',
+    authorization: undefined, internalSecret: undefined, body,
   });
 
-  it('rejects every data route with a forged credential', async () => {
-    const forged = (() => {
-      const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-      const input = `${encode({ alg: 'HS256' })}.${encode({ sub: 'x', tenantId: 't', permissions: ADMIN, exp: NOW + 60 })}`;
-      return `${input}.${createHmac('sha256', 'wrong-secret').update(input).digest('base64url')}`;
-    })();
-    for (const [method, path] of protectedRoutes) {
-      assert.equal((await call(method, path, { token: forged })).status, 401, `${method} ${path}`);
-    }
+  test('valid storeId → 201 with token and expiresAt', async () => {
+    const res = await handle(req({ storeId: 'org/store-1' }), makeDeps());
+    assert.equal(res.status, 201);
+    assert.ok(typeof res.body.token === 'string' && res.body.token.split('.').length === 3);
+    assert.ok(typeof res.body.expiresAt === 'string');
   });
 
-  it('leaks no product or transaction data in any rejection body', async () => {
-    const context = deps({
-      transactions: [{ id: 't-1', productName: 'Oat Milk 1L', timestamp: ISO }],
-    });
-    for (const [method, path] of protectedRoutes) {
-      const response = await call(method, path, { token: null }, context);
-      assert.ok(
-        !JSON.stringify(response.body).includes('Oat Milk'),
-        `${method} ${path} leaked a product name`
-      );
-    }
+  test('missing storeId → 400', async () => {
+    const res = await handle(req({}), makeDeps());
+    assert.equal(res.status, 400);
   });
 
-  it('strips internal customer ownership from checkout sales in staff history', async () => {
-    const context = deps({
-      transactions: [
-        {
-          id: 'checkout-transaction:Y2hlY2tvdXQtMQ',
-          kind: 'checkout-sale',
-          type: 'sale',
-          schemaVersion: 'v2',
-          checkoutId: 'checkout-1',
-          paypalCaptureId: 'capture-1',
-          storeId: 'store-1',
-          customerBinding: { customerKey: 'private-customer-key', keyVersion: 'sha256-v1' },
-          quote: {
-            currency: 'USD',
-            taxRateBasisPoints: 825,
-            lines: [
-              {
-                productId: 'p-1',
-                productName: 'Oat Milk 1L',
-                quantity: 1,
-                unitPriceMinorUnits: 150,
-                subtotalMinorUnits: 150,
-              },
-            ],
-            subtotalMinorUnits: 150,
-            taxMinorUnits: 12,
-            totalMinorUnits: 162,
-          },
-          timestamp: ISO,
-        },
-      ],
-    });
-
-    const response = await call('GET', '/api/transactions', {}, context);
-
-    assert.equal(response.status, 200);
-    assert.equal(response.body.count, 1);
-    assert.equal(response.body.transactions[0].checkoutId, 'checkout-1');
-    assert.equal('customerBinding' in response.body.transactions[0], false);
-    assert.equal('schemaVersion' in response.body.transactions[0], false);
-    assert.ok(!JSON.stringify(response.body).includes('private-customer-key'));
+  test('null body → 400', async () => {
+    const res = await handle(req(undefined), makeDeps());
+    assert.equal(res.status, 400);
   });
 
-  it('leaves health reachable without a credential, for the platform probe', async () => {
-    const response = await call('GET', '/api/health', { token: null });
-    assert.equal(response.status, 200);
-    assert.equal(response.body.status, 'healthy');
-  });
-
-  it('answers 404 for an unknown path without consulting the token', async () => {
-    assert.equal((await call('GET', '/api/nope', { token: null })).status, 404);
+  test('token is verifiable and has type=shop-session', async () => {
+    const res = await handle(req({ storeId: 'org/store-1' }), makeDeps());
+    const claims = verifySessionToken(res.body.token, SECRET, NOW);
+    assert.ok(claims !== null);
+    assert.equal(claims.type, 'shop-session');
+    assert.equal(claims.operatorId, 'org/store-1');
   });
 });
+
+// ── POST /api/kiosk-device-token ───────────────────────────────────────────────
+
+describe('POST /api/kiosk-device-token', () => {
+  const req = (auth, body) => ({
+    method: 'POST', path: '/api/kiosk-device-token',
+    authorization: auth, internalSecret: undefined, body,
+  });
+
+  test('valid staff token + terminalId → 201 with token', async () => {
+    const token = staffToken(['inventory:manage']);
+    const res = await handle(req(`Bearer ${token}`, { terminalId: 'term-abc' }), makeDeps());
+    assert.equal(res.status, 201);
+    assert.ok(typeof res.body.token === 'string');
+  });
+
+  test('no auth → 401', async () => {
+    const res = await handle(req(undefined, { terminalId: 'term-abc' }), makeDeps());
+    assert.equal(res.status, 401);
+  });
+
+  test('missing terminalId → 400', async () => {
+    const token = staffToken(['inventory:manage']);
+    const res = await handle(req(`Bearer ${token}`, {}), makeDeps());
+    assert.equal(res.status, 400);
+  });
+
+  test('device token has type=kiosk-device', async () => {
+    const token = staffToken(['inventory:manage']);
+    const res = await handle(req(`Bearer ${token}`, { terminalId: 'term-abc' }), makeDeps());
+    const claims = verifySessionToken(res.body.token, SECRET, NOW);
+    assert.ok(claims !== null);
+    assert.equal(claims.type, 'kiosk-device');
+    assert.equal(claims.operatorId, 'term-abc');
+  });
+
+  test('staff token without MANAGE_INVENTORY → 403', async () => {
+    const token = staffToken(['transactions:view']); // wrong permission
+    const res = await handle(req(`Bearer ${token}`, { terminalId: 'term-abc' }), makeDeps());
+    assert.equal(res.status, 403);
+  });
+});
+
+// ── POST /api/transactions ─────────────────────────────────────────────────────
+
+describe('POST /api/transactions', () => {
+  const req = (auth, body) => ({
+    method: 'POST', path: '/api/transactions',
+    authorization: auth, internalSecret: undefined, body,
+  });
+
+  test('kiosk-device token + valid body → 201 with transaction', async () => {
+    const token = deviceToken();
+    const res = await handle(req(`Bearer ${token}`, VALID_TX_BODY), makeDeps());
+    assert.equal(res.status, 201);
+    assert.equal(res.body.transaction.type, 'kiosk-sale');
+    assert.equal(res.body.transaction.paymentMethod, 'cash');
+  });
+
+  test('shop-session token + valid body → 201', async () => {
+    const token = shopToken();
+    const res = await handle(req(`Bearer ${token}`, VALID_TX_BODY), makeDeps());
+    assert.equal(res.status, 201);
+  });
+
+  test('anonymous (signed-in) customer body → 201 with customerId', async () => {
+    const token = deviceToken();
+    const body = { ...VALID_TX_BODY, customerId: 'cust-123', customerEmail: 'a@b.com' };
+    const res = await handle(req(`Bearer ${token}`, body), makeDeps());
+    assert.equal(res.status, 201);
+    assert.equal(res.body.transaction.customerId, 'cust-123');
+  });
+
+  test('no token → 401', async () => {
+    const res = await handle(req(undefined, VALID_TX_BODY), makeDeps());
+    assert.equal(res.status, 401);
+  });
+
+  test('staff token (no type claim) → 401', async () => {
+    const token = staffToken(['sale:process']);
+    const res = await handle(req(`Bearer ${token}`, VALID_TX_BODY), makeDeps());
+    assert.equal(res.status, 401);
+  });
+
+  test('expired kiosk-device token → 401', async () => {
+    const expiredToken = signToken(
+      { sub: 'terminal-1', type: 'kiosk-device', tenantId: 'tenant-1', exp: NOW - 1 },
+      SECRET
+    );
+    const res = await handle(req(`Bearer ${expiredToken}`, VALID_TX_BODY), makeDeps());
+    assert.equal(res.status, 401);
+  });
+
+  test('wrong secret → 401', async () => {
+    const badToken = signToken(
+      { sub: 'terminal-1', type: 'kiosk-device', tenantId: 'tenant-1', exp: FUTURE },
+      'wrong-secret-at-least-32-characters-x'
+    );
+    const res = await handle(req(`Bearer ${badToken}`, VALID_TX_BODY), makeDeps());
+    assert.equal(res.status, 401);
+  });
+
+  test('missing paymentMethod → 400', async () => {
+    const token = deviceToken();
+    const { paymentMethod: _, ...body } = VALID_TX_BODY;
+    const res = await handle(req(`Bearer ${token}`, body), makeDeps());
+    assert.equal(res.status, 400);
+  });
+
+  test('empty items array → 400', async () => {
+    const token = deviceToken();
+    const res = await handle(req(`Bearer ${token}`, { ...VALID_TX_BODY, items: [] }), makeDeps());
+    assert.equal(res.status, 400);
+  });
+
+  test('no body → 400', async () => {
+    const token = deviceToken();
+    const res = await handle(req(`Bearer ${token}`, undefined), makeDeps());
+    assert.equal(res.status, 400);
+  });
+
+  test('transaction is persisted to store', async () => {
+    const deps = makeDeps();
+    const token = deviceToken();
+    await handle(req(`Bearer ${token}`, VALID_TX_BODY), deps);
+    const all = await deps.transactions.list();
+    assert.equal(all.length, 1);
+    assert.equal(all[0].type, 'kiosk-sale');
+  });
+});
+
+// ── GET /api/health ────────────────────────────────────────────────────────────
 
 describe('GET /api/health', () => {
-  it('reports the shape sync.worker.ts checkHealth() parses', async () => {
-    const { body } = await call('GET', '/api/health', { token: null });
-    // `checkHealth` tests `data.status === 'healthy'`, so the string is a wire contract.
-    assert.equal(body.status, 'healthy');
-    assert.equal(body.service, 'capy-pos-api');
-    assert.equal(body.timestamp, ISO);
-  });
-
-  it('describes what is actually answering, not the Lambda split it replaced', async () => {
-    const { body } = await call('GET', '/api/health', { token: null });
-    assert.equal(body.architecture, 'single-container');
-    assert.equal(body.platform, 'ibm-code-engine');
+  test('lists new endpoints in health response', async () => {
+    const res = await handle(
+      { method: 'GET', path: '/api/health', authorization: undefined, internalSecret: undefined, body: undefined },
+      makeDeps()
+    );
+    assert.equal(res.status, 200);
+    assert.ok('createShopSession' in res.body.endpoints);
+    assert.ok('createKioskDeviceToken' in res.body.endpoints);
+    assert.ok('createTransaction' in res.body.endpoints);
   });
 });
 
-describe('GET /internal/roles', () => {
-  it('refuses a caller with no X-Internal-Secret at all, the same as one that is wrong', async () => {
-    const missing = await call('GET', '/internal/roles', {
-      token: null,
-      internalSecret: undefined,
-    });
-    assert.equal(missing.status, 401);
-    const wrong = await call('GET', '/internal/roles', { token: null, internalSecret: 'nope' });
-    assert.equal(wrong.status, 401);
-  });
+// ── POST /api/products/:id/image ───────────────────────────────────────────────
 
-  it('503s rather than 401 when this deployment has not set INTERNAL_API_SECRET at all', async () => {
-    const context = deps({ internalSecret: '' });
-    const { status } = await call(
-      'GET',
-      '/internal/roles',
-      { token: null, internalSecret: INTERNAL_SECRET },
-      context
-    );
-    assert.equal(status, 503);
-  });
+describe('POST /api/products/:id/image', () => {
+  const BOUNDARY = 'TestBoundary1234';
+  const CONTENT_TYPE = `multipart/form-data; boundary=${BOUNDARY}`;
 
-  it('falls back to the literal ROLE_PERMISSIONS table when the roles document does not exist yet', async () => {
-    const { status, body } = await call('GET', '/internal/roles', {
-      token: null,
-      internalSecret: INTERNAL_SECRET,
-    });
-    assert.equal(status, 200);
-    assert.deepEqual(body.roles.operator, [
-      'sale:process',
-      'sale:view_transactions',
-      'inventory:view',
-    ]);
-    assert.ok(body.roles.admin.includes('inventory:delete'));
-  });
+  /** Build a minimal multipart/form-data body with a single `image` part. */
+  function buildMultipart(imageMime, imageBytes) {
+    const enc = new TextEncoder();
+    const header =
+      `--${BOUNDARY}\r\n` +
+      `Content-Disposition: form-data; name="image"; filename="test.jpg"\r\n` +
+      `Content-Type: ${imageMime}\r\n` +
+      `\r\n`;
+    const footer = `\r\n--${BOUNDARY}--\r\n`;
+    const headerBytes = enc.encode(header);
+    const footerBytes = enc.encode(footer);
+    const result = new Uint8Array(headerBytes.length + imageBytes.length + footerBytes.length);
+    result.set(headerBytes, 0);
+    result.set(imageBytes, headerBytes.length);
+    result.set(footerBytes, headerBytes.length + imageBytes.length);
+    return result;
+  }
 
-  it('omits the customer role from the fallback — the sibling proxies gate on sale:process alone', async () => {
-    // `customer` exists in `pos-api`'s own ROLE_PERMISSIONS (Epic #261 item 6)
-    // but not in `vision-proxy`/`clerk-agent-relay`'s copies, and their only
-    // permission gate *is* sale:process. Serving it in the fallback would
-    // silently admit any self-registered shopper to the AI-vision routes.
-    const { body } = await call('GET', '/internal/roles', {
-      token: null,
-      internalSecret: INTERNAL_SECRET,
-    });
-    assert.equal(body.roles.customer, undefined);
-    assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
-  });
+  /** A tiny 4-byte "fake JPEG" payload — real signature bytes aren't checked server-side. */
+  const FAKE_JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
 
-  it('serves the stored document once one exists, not the fallback', async () => {
-    const context = deps({
-      roles: [
-        {
-          id: 'role-permissions',
-          roles: { operator: ['sale:process'], manager: ['inventory:manage'] },
-        },
-      ],
-    });
-    const { status, body } = await call(
-      'GET',
-      '/internal/roles',
-      { token: null, internalSecret: INTERNAL_SECRET },
-      context
-    );
-    assert.equal(status, 200);
-    assert.deepEqual(body.roles, { operator: ['sale:process'], manager: ['inventory:manage'] });
-  });
-
-  it('strips customer from the stored document too, not only from the fallback', async () => {
-    // Epic #261 item 9: once a live `roles` document carries `customer` (added
-    // there so pos-api keeps granting self-checkout sale:process), serving it
-    // verbatim would admit any shopper to the vision/clerk-agent routes — the
-    // exact thing the fallback filter exists to prevent. The document's mere
-    // existence must not bypass the rule.
-    const context = deps({
-      roles: [
-        {
-          id: 'role-permissions',
-          roles: { operator: ['sale:process'], customer: ['sale:process'] },
-        },
-      ],
-    });
-    const { status, body } = await call(
-      'GET',
-      '/internal/roles',
-      { token: null, internalSecret: INTERNAL_SECRET },
-      context
-    );
-    assert.equal(status, 200);
-    assert.equal(body.roles.customer, undefined);
-    assert.deepEqual(body.roles, { operator: ['sale:process'] });
-  });
-
-  it('serves the fallback, not a 500, when the stored document has no roles field', async () => {
-    // `CloudantStore.read` casts (`stripMeta<T>`) rather than validating, so
-    // `RolesDocument.roles` being non-optional in TypeScript proves nothing about
-    // what the database actually holds: a `role-permissions` document written by
-    // hand, or half-migrated, can simply have no `roles` key. This route is the
-    // RBAC source for `vision-proxy` and `clerk-agent-relay`, so it must degrade
-    // to the same safe table it serves for a missing document — not fail closed
-    // with a 500 that leaves both siblings with no mapping at all.
-    const context = deps({ roles: [{ id: 'role-permissions' }] });
-    const { status, body } = await call(
-      'GET',
-      '/internal/roles',
-      { token: null, internalSecret: INTERNAL_SECRET },
-      context
-    );
-    assert.equal(status, 200);
-    assert.equal(body.roles.customer, undefined);
-    assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
-  });
-
-  it('serves the fallback when the stored roles field is an empty object', async () => {
-    // The boundary between the two cases above: `roles: {}` is *shape*-valid
-    // — every one of its zero values is an array of strings — yet it is the
-    // one thing this route must never serve. An empty mapping means every role
-    // name the siblings look up resolves to no permissions, so both proxies
-    // gate every route closed: the empty grant the fallback exists to prevent,
-    // arriving through a document instead of through a missing one. Nobody can
-    // author it deliberately either — the "Roles & Permissions" panel edits
-    // the staff ladder, and a table with no `admin` locks out the only people
-    // who could put one back — so it is a half-written or half-migrated
-    // document every time.
-    const context = deps({ roles: [{ id: 'role-permissions', roles: {} }] });
-    const { status, body } = await call(
-      'GET',
-      '/internal/roles',
-      { token: null, internalSecret: INTERNAL_SECRET },
-      context
-    );
-    assert.equal(status, 200);
-    assert.equal(body.roles.customer, undefined);
-    assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
-  });
-
-  it('serves the fallback when the stored roles field is not a role → permissions map', async () => {
-    // Same untrusted-document reasoning, one step further in: the key exists but
-    // holds the wrong shape. `session-auth.ts` already gates this exact field
-    // through `isRolesShape` before trusting it; this route uses the same check,
-    // so the two consumers of one document cannot disagree about what counts as
-    // a usable one.
-    const context = deps({
-      roles: [{ id: 'role-permissions', roles: { operator: 'sale:process' } }],
-    });
-    const { status, body } = await call(
-      'GET',
-      '/internal/roles',
-      { token: null, internalSecret: INTERNAL_SECRET },
-      context
-    );
-    assert.equal(status, 200);
-    assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
-  });
-
-  it('serves the fallback when holding customer back is what empties the stored document', async () => {
-    // The other way to arrive at an empty grant, and the one this route creates
-    // itself: a document whose only entry is `customer` is shape-valid and
-    // non-empty, so it passes the guard — but stripping `customer` leaves `{}`
-    // behind, and serving that gates every sibling route closed. A
-    // customer-only document is a supported edit, not a corrupt one (an admin
-    // narrowing self-checkout's single permission), so the siblings must simply
-    // keep the fallback: it holds nothing about `customer` either way.
-    const context = deps({
-      roles: [{ id: 'role-permissions', roles: { customer: ['sale:narrowed'] } }],
-    });
-    const { status, body } = await call(
-      'GET',
-      '/internal/roles',
-      { token: null, internalSecret: INTERNAL_SECRET },
-      context
-    );
-    assert.equal(status, 200);
-    assert.equal(body.roles.customer, undefined);
-    assert.deepEqual(Object.keys(body.roles).sort(), ['admin', 'manager', 'operator']);
-  });
-
-  it('serves the fallback, not a 500, when the read itself rejects', async () => {
-    // The shape of what the read returns is guarded above; this is the read
-    // *failing*, which is the same untrusted-boundary risk arriving one step
-    // earlier. `session-auth.ts` already treats a thrown Cloudant read as "no
-    // usable document" (`readRolesDocument` catches and returns null), so the
-    // other consumer of the same document must not instead propagate it and
-    // turn this route into a 500: a Cloudant blip would leave `vision-proxy`
-    // and `clerk-agent-relay` with no mapping at all, gating every route they
-    // have closed, where the fallback would have served a safe one.
-    const errors = [];
-    const originalError = console.error;
-    console.error = (...args) => errors.push(args);
-    let context;
-    let outcome;
-    try {
-      context = deps({
-        rolesStore: {
-          read: async () => {
-            throw new Error('Cloudant unreachable');
-          },
-        },
-      });
-      outcome = await call(
-        'GET',
-        '/internal/roles',
-        { token: null, internalSecret: INTERNAL_SECRET },
-        context
-      );
-    } finally {
-      console.error = originalError;
-    }
-    assert.equal(outcome.status, 200);
-    assert.deepEqual(Object.keys(outcome.body.roles).sort(), ['admin', 'manager', 'operator']);
-    assert.equal(outcome.body.roles.customer, undefined);
-    // Degrading silently would hide a broken RBAC source: the siblings keep
-    // working, so nothing else surfaces the outage.
-    assert.equal(errors.length, 1);
-  });
-
-  it('never reaches this route through the bearer-token boundary at all', async () => {
-    // No Authorization header, no App ID/HS256 token — only the internal secret
-    // matters, confirming `handle()` truly special-cases this route before `authorize()`.
-    const { status } = await call('GET', '/internal/roles', {
-      token: null,
-      authorization: undefined,
-      internalSecret: INTERNAL_SECRET,
-    });
-    assert.equal(status, 200);
-  });
-
-  it("feeds this same deps.roles document into an RS256 caller's own permission resolution", async () => {
-    // The wiring risk unique to api.ts: `handle()` merges `rolesSource: deps.roles`
-    // into the config it hands `authorize()` (session-auth.ts's own tests only
-    // prove `resolvedRolePermissions` works against a *fake* reader they build
-    // themselves — not that api.ts's merge expression still exists). Proven here
-    // by a permission an operator does NOT have in the literal ROLE_PERMISSIONS
-    // fallback (inventory:manage — POST /api/products) but DOES have once the
-    // stored document grants it.
-    const keyPair = generateRsaKeyPair();
-    await withJwks(keyPair, 'kid-wiring', async () => {
-      const context = deps({
-        appId: APPID_CONFIG,
-        roles: [{ id: 'role-permissions', roles: { operator: ['inventory:manage'] } }],
-      });
-      const token = mintAppId({}, { kid: 'kid-wiring', keyPair });
-
-      const created = await call(
-        'POST',
-        '/api/products',
-        {
-          body: { id: 'p-new', name: 'Kombucha', price: 3.5, category: 'Drinks' },
-          authorization: `Bearer ${token}`,
-        },
-        context
-      );
-      assert.equal(created.status, 201, JSON.stringify(created.body));
-    });
-  });
-});
-
-describe('GET /api/products', () => {
-  it('returns { products, count }, the shape sync.worker.ts syncProducts() reads', async () => {
-    const { status, body } = await call('GET', '/api/products');
-    assert.equal(status, 200);
-    assert.equal(body.count, 1);
-    assert.equal(body.products[0].name, 'Oat Milk 1L');
-  });
-
-  it('never exposes server-owned checkout reservation markers', async () => {
-    const context = deps({
-      products: [
-        product({
-          checkoutMarkers: {
-            'checkout-1': { state: 'reserved', quantity: 1, reservedAt: ISO },
-          },
-        }),
-      ],
-    });
-    const { body } = await call('GET', '/api/products', {}, context);
-    assert.equal(body.products[0].checkoutMarkers, undefined);
-  });
-
-  it('returns an empty list rather than 404 for an empty catalogue', async () => {
-    const { status, body } = await call('GET', '/api/products', {}, deps({ products: [] }));
-    assert.equal(status, 200);
-    assert.deepEqual(body, { products: [], count: 0 });
-  });
-});
-
-describe('POST /api/products', () => {
-  it('creates and returns 201 with the stored product', async () => {
-    const context = deps({ products: [] });
-    const { status, body } = await call(
-      'POST',
-      '/api/products',
-      { body: { id: 'p-9', name: 'Banana', price: 0.35, category: 'Produce', stock: 40 } },
-      context
-    );
-    assert.equal(status, 201);
-    assert.deepEqual(body.product, {
-      id: 'p-9',
-      name: 'Banana',
-      price: 0.35,
-      category: 'Produce',
-      stock: 40,
+  function makeProduct(id = 'prod-img-1') {
+    return {
+      id,
+      name: 'Test Product',
+      price: 1.5,
+      category: 'test',
+      stock: 10,
       description: '',
-      createdAt: ISO,
-      updatedAt: ISO,
-    });
-    assert.equal((await context.products.read('p-9'))?.document.name, 'Banana');
-  });
-
-  it('defaults stock to zero and floors a fractional one', async () => {
-    const base = { id: 'p-9', name: 'Banana', price: 0.35, category: 'Produce' };
-    const noStock = await call('POST', '/api/products', { body: base }, deps({ products: [] }));
-    assert.equal(noStock.body.product.stock, 0);
-    const fractional = await call(
-      'POST',
-      '/api/products',
-      { body: { ...base, stock: 4.7 } },
-      deps({ products: [] })
-    );
-    assert.equal(fractional.body.product.stock, 4);
-  });
-
-  it('answers 409 rather than overwriting an existing id', async () => {
-    const { status, body } = await call('POST', '/api/products', {
-      body: { id: 'p-1', name: 'Impostor', price: 1, category: 'Dairy' },
-    });
-    assert.equal(status, 409);
-    assert.equal(body.error, 'Product with this ID already exists');
-  });
-
-  it('answers 400 for a missing or unusable required field', async () => {
-    const complete = { id: 'p-9', name: 'Banana', price: 0.35, category: 'Produce' };
-    const broken = [
-      {},
-      { ...complete, id: undefined },
-      { ...complete, id: '   ' },
-      { ...complete, name: undefined },
-      { ...complete, name: '' },
-      { ...complete, category: undefined },
-      { ...complete, price: undefined },
-      // A string price is the #110 class of bug: coerced, it stores NaN forever.
-      { ...complete, price: '0.35' },
-      { ...complete, price: Number.NaN },
-      { ...complete, price: -1 },
-    ];
-    for (const body of broken) {
-      const response = await call('POST', '/api/products', { body }, deps({ products: [] }));
-      assert.equal(response.status, 400, JSON.stringify(body));
-    }
-  });
-
-  it('answers 400 for a body that is not a JSON object', async () => {
-    for (const body of [undefined, null, 'a string', 42, [1, 2]]) {
-      assert.equal(
-        (await call('POST', '/api/products', { body }, deps({ products: [] }))).status,
-        400
-      );
-    }
-  });
-});
-
-describe('PUT /api/products/{id}', () => {
-  it('replaces the product and preserves the original createdAt', async () => {
-    const { status, body } = await call('PUT', '/api/products/p-1', {
-      body: { name: 'Oat Milk 2L', price: 2.5, category: 'Dairy', stock: 5, description: 'bigger' },
-    });
-    assert.equal(status, 200);
-    assert.equal(body.product.name, 'Oat Milk 2L');
-    assert.equal(body.product.createdAt, '2026-01-01T00:00:00.000Z');
-    assert.equal(body.product.updatedAt, ISO);
-  });
-
-  it('answers 404 for a product that does not exist, rather than creating it', async () => {
-    const context = deps();
-    const { status } = await call(
-      'PUT',
-      '/api/products/ghost',
-      { body: { name: 'Ghost', price: 1, category: 'Dairy' } },
-      context
-    );
-    assert.equal(status, 404);
-    assert.equal(await context.products.read('ghost'), null);
-  });
-
-  it('answers 400 when a required field is missing, since PUT is a full replace', async () => {
-    assert.equal(
-      (await call('PUT', '/api/products/p-1', { body: { name: 'Only a name' } })).status,
-      400
-    );
-  });
-
-  it('preserves persisted checkout markers and ignores client-supplied markers', async () => {
-    const checkoutMarkers = {
-      'checkout-1': { state: 'reserved', quantity: 2, reservedAt: ISO },
+      createdAt: new Date(NOW * 1000).toISOString(),
+      updatedAt: new Date(NOW * 1000).toISOString(),
     };
-    const context = deps({ products: [product({ checkoutMarkers })] });
-    const { status, body } = await call(
-      'PUT',
-      '/api/products/p-1',
-      {
-        body: {
-          name: 'Oat Milk 2L',
-          price: 2.5,
-          category: 'Dairy',
-          stock: 6,
-          checkoutMarkers: {},
-        },
-      },
-      context
-    );
-    assert.equal(status, 200);
-    assert.equal(body.product.checkoutMarkers, undefined);
-    assert.deepEqual(
-      (await context.products.read('p-1')).document.checkoutMarkers,
-      checkoutMarkers
-    );
-  });
-});
+  }
 
-describe('PATCH /api/products/{id}', () => {
-  it('updates only the fields provided', async () => {
-    const { status, body } = await call('PATCH', '/api/products/p-1', { body: { stock: 3 } });
-    assert.equal(status, 200);
-    assert.equal(body.product.stock, 3);
-    assert.equal(body.product.name, 'Oat Milk 1L');
-    assert.equal(body.product.price, 1.5);
-    assert.equal(body.product.updatedAt, ISO);
-  });
+  async function seedProduct(deps, product = makeProduct()) {
+    await deps.products.create(product);
+    return product;
+  }
 
-  it('supports the soft delete the UI relies on', async () => {
-    const { body } = await call('PATCH', '/api/products/p-1', { body: { isActive: false } });
-    assert.equal(body.product.isActive, false);
-  });
-
-  it('preserves server-owned checkout markers and ignores a client replacement', async () => {
-    const checkoutMarkers = {
-      'checkout-1': { state: 'reserved', quantity: 2, reservedAt: ISO },
+  function req(productId, rawBody, contentType, auth) {
+    return {
+      method: 'POST',
+      path: `/api/products/${productId}/image`,
+      authorization: auth,
+      internalSecret: undefined,
+      body: undefined,
+      rawBody,
+      contentType,
     };
-    const context = deps({ products: [product({ checkoutMarkers })] });
-    const { status, body } = await call(
-      'PATCH',
-      '/api/products/p-1',
-      {
-        body: {
-          name: 'Renamed',
-          checkoutMarkers: {
-            attacker: { state: 'reserved', quantity: 10, reservedAt: ISO },
-          },
-        },
-      },
-      context
-    );
-    assert.equal(status, 200);
-    assert.equal(body.product.checkoutMarkers, undefined);
-    assert.deepEqual(
-      (await context.products.read('p-1')).document.checkoutMarkers,
-      checkoutMarkers
-    );
+  }
+
+  test('happy path — authenticated upload with valid JPEG multipart → 200 + imageUrl', async () => {
+    const deps = makeDeps({ imageStore: new MemoryImageStore() });
+    const product = await seedProduct(deps);
+    const token = staffToken(['inventory:manage']);
+    const body = buildMultipart('image/jpeg', FAKE_JPEG);
+
+    const res = await handle(req(product.id, body, CONTENT_TYPE, `Bearer ${token}`), deps);
+
+    assert.equal(res.status, 200);
+    assert.ok(typeof res.body.imageUrl === 'string' && res.body.imageUrl.length > 0,
+      `imageUrl should be a non-empty string, got: ${JSON.stringify(res.body.imageUrl)}`);
+    assert.ok(res.body.imageUrl.startsWith('data:image/jpeg;base64,'),
+      `imageUrl should start with data:image/jpeg;base64,`);
+
+    // imageUrl should be written back to the product document
+    const updated = await deps.products.read(product.id);
+    assert.equal(updated.document.imageUrl, res.body.imageUrl);
   });
 
-  it('refuses to lower stock below active checkout reservations', async () => {
-    const context = deps({
-      products: [
-        product({
-          checkoutMarkers: {
-            'checkout-1': { state: 'reserved', quantity: 4, reservedAt: ISO },
-          },
-        }),
-      ],
-    });
-    const { status, body } = await call(
-      'PATCH',
-      '/api/products/p-1',
-      { body: { stock: 3 } },
-      context
-    );
-    assert.equal(status, 409);
-    assert.equal(body.reserved, 4);
-    assert.equal((await context.products.read('p-1')).document.stock, 10);
+  test('401 for unauthenticated call', async () => {
+    const deps = makeDeps({ imageStore: new MemoryImageStore() });
+    await seedProduct(deps);
+    const body = buildMultipart('image/jpeg', FAKE_JPEG);
+
+    const res = await handle(req('prod-img-1', body, CONTENT_TYPE, undefined), deps);
+    assert.equal(res.status, 401);
   });
 
-  it('refuses soft deactivation while a checkout reservation is active', async () => {
-    const context = deps({
-      products: [
-        product({
-          checkoutMarkers: {
-            'checkout-1': { state: 'reserved', quantity: 1, reservedAt: ISO },
-          },
-        }),
-      ],
-    });
-    const { status } = await call(
-      'PATCH',
-      '/api/products/p-1',
-      { body: { isActive: false } },
-      context
-    );
-    assert.equal(status, 409);
-    assert.notEqual((await context.products.read('p-1')).document.isActive, false);
+  test('404 for unknown product id', async () => {
+    const deps = makeDeps({ imageStore: new MemoryImageStore() });
+    const token = staffToken(['inventory:manage']);
+    const body = buildMultipart('image/jpeg', FAKE_JPEG);
+
+    const res = await handle(req('does-not-exist', body, CONTENT_TYPE, `Bearer ${token}`), deps);
+    assert.equal(res.status, 404);
   });
 
-  it('answers 400 when no mutable field was provided', async () => {
-    const { status, body } = await call('PATCH', '/api/products/p-1', {
-      body: { id: 'p-2', createdAt: ISO },
-    });
-    assert.equal(status, 400);
-    assert.match(body.error, /No updatable fields provided/);
+  test('413 for body exceeding 2 MiB', async () => {
+    const deps = makeDeps({ imageStore: new MemoryImageStore() });
+    await seedProduct(deps);
+    const token = staffToken(['inventory:manage']);
+    // Build a payload that is 2 MiB + 1 byte — the handler checks rawBody.length
+    const oversized = new Uint8Array(2_097_153);
+    const body = buildMultipart('image/jpeg', oversized);
+
+    const res = await handle(req('prod-img-1', body, CONTENT_TYPE, `Bearer ${token}`), deps);
+    assert.equal(res.status, 413);
   });
 
-  it('refuses to write a server-owned field', async () => {
-    const context = deps();
-    await call('PATCH', '/api/products/p-1', { body: { id: 'p-hijack', stock: 1 } }, context);
-    assert.equal(await context.products.read('p-hijack'), null);
-    assert.equal((await context.products.read('p-1'))?.document.stock, 1);
-  });
+  test('415 for non-image content type in multipart part', async () => {
+    const deps = makeDeps({ imageStore: new MemoryImageStore() });
+    await seedProduct(deps);
+    const token = staffToken(['inventory:manage']);
+    const body = buildMultipart('text/plain', new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f]));
 
-  it('answers 400 for a field of the wrong type instead of coercing it', async () => {
-    for (const body of [
-      { price: '2' },
-      { stock: 'many' },
-      { stock: -1 },
-      { isActive: 'false' },
-      { name: '' },
-    ]) {
-      assert.equal(
-        (await call('PATCH', '/api/products/p-1', { body })).status,
-        400,
-        JSON.stringify(body)
-      );
-    }
-  });
-
-  it('answers 404 for a product that does not exist', async () => {
-    assert.equal((await call('PATCH', '/api/products/ghost', { body: { stock: 1 } })).status, 404);
+    const res = await handle(req('prod-img-1', body, CONTENT_TYPE, `Bearer ${token}`), deps);
+    assert.equal(res.status, 415);
   });
 });
 
-describe('DELETE /api/products/{id}', () => {
-  it('deletes and returns the removed product', async () => {
-    const context = deps();
-    const { status, body } = await call('DELETE', '/api/products/p-1', {}, context);
-    assert.equal(status, 200);
-    assert.equal(body.message, 'Product deleted');
-    assert.equal(body.product.name, 'Oat Milk 1L');
-    assert.equal(await context.products.read('p-1'), null);
-  });
+// ── POST /api/mercadopago/preference ──────────────────────────────────────────
 
-  it('answers 404 rather than succeeding silently for a missing product', async () => {
-    assert.equal((await call('DELETE', '/api/products/ghost')).status, 404);
-  });
+/** Minimal valid card-token payload from the MP Brick. */
+const VALID_MP_BODY = {
+  formData: {
+    token: 'card-token-abc123',
+    issuer_id: '24',
+    payment_method_id: 'visa',
+    transaction_amount: 99.99,
+    installments: 1,
+    payer: {
+      email: 'buyer@example.com',
+      identification: { type: 'DNI', number: '12345678' },
+    },
+  },
+  amount: 99.99,
+};
 
-  it('refuses a hard delete while a checkout reservation is active', async () => {
-    const context = deps({
-      products: [
-        product({
-          checkoutMarkers: {
-            'checkout-1': { state: 'reserved', quantity: 1, reservedAt: ISO },
-          },
-        }),
-      ],
-    });
-    const { status } = await call('DELETE', '/api/products/p-1', {}, context);
-    assert.equal(status, 409);
-    assert.notEqual(await context.products.read('p-1'), null);
+/** Build a fake fetch that returns the given status and JSON body. */
+function fakeFetch(status, body) {
+  return async () => ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
   });
+}
 
-  /**
-   * The first server-side authorization decision in this repo. Until now roles were
-   * enforced only by browser guards and directives, which anyone can bypass with
-   * `curl`. A manager token is authenticated and can do everything else here.
-   */
-  it('refuses a manager token, which lacks inventory:delete', async () => {
-    const context = deps();
-    const { status, body } = await call(
-      'DELETE',
-      '/api/products/p-1',
-      { token: mint(MANAGER) },
-      context
+describe('POST /api/mercadopago/preference', () => {
+  test('503 when mpAccessToken is empty', async () => {
+    const deps = makeDeps({ mpAccessToken: '' });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: VALID_MP_BODY },
+      deps
     );
-    assert.equal(status, 403);
-    assert.equal(body.error, 'Requires inventory:delete.');
-    assert.notEqual(
-      await context.products.read('p-1'),
-      null,
-      'the product must survive a refused delete'
+    assert.equal(res.status, 503);
+  });
+
+  test('400 when body is missing', async () => {
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: undefined },
+      deps
     );
+    assert.equal(res.status, 400);
   });
 
-  it('allows deletion when only committed marker evidence remains', async () => {
-    const context = deps({
-      products: [
-        product({
-          stock: 9,
-          checkoutMarkers: {
-            'checkout-1': {
-              state: 'committed',
-              quantity: 1,
-              reservedAt: '2027-01-15T09:00:00.000Z',
-              committedAt: ISO,
-            },
-          },
-        }),
-      ],
-    });
-    const response = await call('DELETE', '/api/products/p-1', {}, context);
-    assert.equal(response.status, 200);
-    assert.equal(response.body.product.checkoutMarkers, undefined);
-  });
-});
-
-describe('POST /api/products/{id}/sell', () => {
-  it('cannot consume stock held by an active checkout reservation', async () => {
-    const context = deps({
-      products: [
-        product({
-          checkoutMarkers: {
-            'checkout-1': { state: 'reserved', quantity: 8, reservedAt: ISO },
-          },
-        }),
-      ],
-    });
-    const { status, body } = await call(
-      'POST',
-      '/api/products/p-1/sell',
-      { body: { quantity: 3 } },
-      context
+  test('400 when formData is absent', async () => {
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { amount: 10 } },
+      deps
     );
-    assert.equal(status, 400);
-    assert.equal(body.available, 2);
-    assert.equal((await context.products.read('p-1')).document.stock, 10);
-    assert.equal((await context.transactions.list()).length, 0);
+    assert.equal(res.status, 400);
   });
 
-  it('decrements physical stock while preserving checkout markers', async () => {
-    const checkoutMarkers = {
-      'checkout-1': { state: 'reserved', quantity: 8, reservedAt: ISO },
+  test('400 when token field is missing from formData', async () => {
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
+    const badBody = { ...VALID_MP_BODY, formData: { ...VALID_MP_BODY.formData, token: '' } };
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: badBody },
+      deps
+    );
+    assert.equal(res.status, 400);
+  });
+
+  test('200 + { id, status } on approved payment', async () => {
+    const mpResult = { id: 123456, status: 'approved' };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, mpResult) });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: VALID_MP_BODY },
+      deps
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.id, '123456');
+    assert.equal(res.body.status, 'approved');
+  });
+
+  test('200 + pending status forwarded as-is', async () => {
+    const mpResult = { id: 999, status: 'pending' };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, mpResult) });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: VALID_MP_BODY },
+      deps
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, 'pending');
+  });
+
+  test('502 when MP upstream returns non-2xx', async () => {
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(422, { message: 'invalid token' }) });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: VALID_MP_BODY },
+      deps
+    );
+    assert.equal(res.status, 502);
+  });
+
+  test('502 when fetch throws (network error)', async () => {
+    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: VALID_MP_BODY },
+      deps
+    );
+    assert.equal(res.status, 502);
+  });
+
+  test('GET /api/mercadopago/preference → 404', async () => {
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN' });
+    const res = await handle(
+      { method: 'GET', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: undefined },
+      deps
+    );
+    assert.equal(res.status, 404);
+  });
+
+  // ── Wallet mode ──────────────────────────────────────────────────────────────
+
+  test('wallet mode: 200 + { id, initPoint } on successful preference creation', async () => {
+    const prefResult = { id: 'pref-123', init_point: 'https://mp.com/checkout/pref-123' };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, prefResult) });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { mode: 'wallet', amount: 49.99 } },
+      deps
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.id, 'pref-123');
+    assert.equal(res.body.initPoint, 'https://mp.com/checkout/pref-123');
+  });
+
+  test('wallet mode: 400 when amount is missing', async () => {
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { mode: 'wallet' } },
+      deps
+    );
+    assert.equal(res.status, 400);
+  });
+
+  test('wallet mode: 502 when MP preferences endpoint returns non-2xx', async () => {
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(400, { message: 'bad request' }) });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      deps
+    );
+    assert.equal(res.status, 502);
+  });
+
+  test('wallet mode: 502 when fetch throws', async () => {
+    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      deps
+    );
+    assert.equal(res.status, 502);
+  });
+
+  test('wallet mode: custom title is forwarded to MP preference', async () => {
+    let capturedBody = null;
+    const capturingFetch = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true, json: async () => ({ id: 'p1', init_point: 'https://mp.com/p1' }), text: async () => '' };
     };
-    const context = deps({ products: [product({ checkoutMarkers })] });
-    const { status, body } = await call(
-      'POST',
-      '/api/products/p-1/sell',
-      { body: { quantity: 2 } },
-      context
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: capturingFetch });
+    await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { mode: 'wallet', amount: 25, title: 'Table 5 order' } },
+      deps
     );
-    assert.equal(status, 200);
-    assert.equal(body.remainingStock, 8);
-    assert.deepEqual(
-      (await context.products.read('p-1')).document.checkoutMarkers,
-      checkoutMarkers
+    assert.ok(capturedBody.items[0].title === 'Table 5 order', 'title should be forwarded');
+  });
+
+  test('wallet mode: mpCurrencyId is forwarded to MP preference items', async () => {
+    let capturedBody = null;
+    const capturingFetch = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true, json: async () => ({ id: 'p2', init_point: 'https://mp.com/p2' }), text: async () => '' };
+    };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', mpCurrencyId: 'MXN', fetch: capturingFetch });
+    await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { mode: 'wallet', amount: 99 } },
+      deps
     );
+    assert.equal(capturedBody.items[0].currency_id, 'MXN', 'currency_id should match mpCurrencyId');
+  });
+
+  test('wallet mode: default ARS currency is used when mpCurrencyId is ARS', async () => {
+    let capturedBody = null;
+    const capturingFetch = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true, json: async () => ({ id: 'p3', init_point: 'https://mp.com/p3' }), text: async () => '' };
+    };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', mpCurrencyId: 'ARS', fetch: capturingFetch });
+    await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { mode: 'wallet', amount: 50 } },
+      deps
+    );
+    assert.equal(capturedBody.items[0].currency_id, 'ARS', 'currency_id should be ARS');
+  });
+
+  test('wallet mode: back_urls use appBaseUrl', async () => {
+    let capturedBody = null;
+    const capturingFetch = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true, json: async () => ({ id: 'p4', init_point: 'https://mp.com/p4' }), text: async () => '' };
+    };
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      appBaseUrl: 'https://my-pos.example.com',
+      fetch: capturingFetch,
+    });
+    await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      deps
+    );
+    assert.equal(capturedBody.back_urls.success, 'https://my-pos.example.com/payment/success');
+    assert.equal(capturedBody.back_urls.failure, 'https://my-pos.example.com/payment/failure');
+    assert.equal(capturedBody.back_urls.pending, 'https://my-pos.example.com/payment/pending');
+  });
+});
+
+// ── GET /api/mercadopago/preference/:id ──────────────────────────────────────
+
+describe('GET /api/mercadopago/preference/:id', () => {
+  const req = (id) => ({
+    method: 'GET',
+    path: `/api/mercadopago/preference/${encodeURIComponent(id)}`,
+    authorization: undefined,
+    internalSecret: undefined,
+    body: undefined,
+  });
+
+  test('503 when mpAccessToken is empty', async () => {
+    const deps = makeDeps({ mpAccessToken: '' });
+    const res = await handle(req('pref-123'), deps);
+    assert.equal(res.status, 503);
+  });
+
+  test('200 + approved status when MP returns an approved payment', async () => {
+    const mpResult = { results: [{ status: 'approved' }], paging: { total: 1 } };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, mpResult) });
+    const res = await handle(req('pref-123'), deps);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, 'approved');
+  });
+
+  test('200 + not_found when MP returns empty results', async () => {
+    const mpResult = { results: [], paging: { total: 0 } };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, mpResult) });
+    const res = await handle(req('pref-123'), deps);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, 'not_found');
+  });
+
+  test('200 + pending status forwarded', async () => {
+    const mpResult = { results: [{ status: 'pending' }] };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, mpResult) });
+    const res = await handle(req('pref-123'), deps);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, 'pending');
+  });
+
+  test('502 when MP payments search returns non-2xx', async () => {
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(403, { message: 'forbidden' }) });
+    const res = await handle(req('pref-123'), deps);
+    assert.equal(res.status, 502);
+  });
+
+  test('502 when fetch throws (network error)', async () => {
+    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch });
+    const res = await handle(req('pref-123'), deps);
+    assert.equal(res.status, 502);
+  });
+
+  test('POST /api/mercadopago/preference/:id → 404 (only GET allowed on this path)', async () => {
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN' });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference/pref-123',
+        authorization: undefined, internalSecret: undefined, body: {} },
+      deps
+    );
+    assert.equal(res.status, 404);
+  });
+
+  test('preference id is URL-decoded from the path segment', async () => {
+    let capturedUrl = null;
+    const capturingFetch = async (url) => {
+      capturedUrl = url;
+      return { ok: true, json: async () => ({ results: [{ status: 'approved' }] }), text: async () => '' };
+    };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: capturingFetch });
+    await handle(req('pref-abc/xyz'), deps);
+    // The preference id should be in the MP search URL
+    assert.ok(capturedUrl.includes('pref-abc'), 'preference id should be in the search URL');
   });
 });

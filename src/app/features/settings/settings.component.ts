@@ -8,10 +8,13 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
+import { Permission } from '@core/domain/auth';
 import { LowStockSettingsService } from '@core/application/services/low-stock-settings.service';
 import {
   KioskSettingsService,
   StoreRecord,
+  TerminalRecord,
   LatLng,
 } from '@core/application/services/kiosk-settings.service';
 import { TerminalMode } from '@core/domain/auth/terminal-id.value-object';
@@ -30,6 +33,7 @@ import {
 } from '@core/application/auth/ports/quick-auth.port';
 import { PasskeySummaryDto } from '@core/application/auth/dtos/quick-auth.dto';
 import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webauthn/pin-policy';
+import { environment } from '../../../environments/environment';
 
 /**
  * Settings Component
@@ -305,11 +309,16 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
           </p>
         </div>
 
-        <!-- Active-terminal banner -->
+        <!-- Active-terminal banner + launch button -->
         <div class="active-terminal-banner" data-testid="active-terminal-banner">
           <span class="atb-label">This device is running as</span>
           <strong class="atb-id">{{ kioskSettings.terminalId() }}</strong>
           <span class="atb-store">{{ kioskSettings.storeName() || 'Unnamed store' }}</span>
+          @if (canUseKiosk()) {
+            <button class="btn-launch-kiosk" (click)="launchKiosk()" data-testid="btn-launch-kiosk">
+              🏧 Open Kiosk Terminal
+            </button>
+          }
         </div>
 
         <!-- ── Org list ─────────────────────────────────────────────────── -->
@@ -516,6 +525,44 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
                           </select>
                         </label>
                       </div>
+                      <!-- Device token section (kiosk mode only) -->
+                      @if (terminal.mode === 'kiosk') {
+                        <div class="device-token-row">
+                          @if (terminal.deviceToken) {
+                            <span
+                              class="device-token-chip"
+                              [attr.data-testid]="'device-token-chip-' + terminal.terminalId"
+                              title="{{ terminal.deviceToken }}"
+                              >🔑 Token set</span
+                            >
+                          } @else {
+                            <span class="device-token-chip device-token-chip--missing"
+                              >⚠️ No token</span
+                            >
+                          }
+                          <button
+                            class="btn-token"
+                            [disabled]="tokenBusy(terminal.terminalId)"
+                            (click)="generateDeviceToken(terminal)"
+                            [attr.data-testid]="'btn-generate-token-' + terminal.terminalId"
+                          >
+                            {{
+                              tokenBusy(terminal.terminalId)
+                                ? 'Generating…'
+                                : terminal.deviceToken
+                                  ? 'Regenerate'
+                                  : 'Generate token'
+                            }}
+                          </button>
+                          @if (tokenError(terminal.terminalId)) {
+                            <span
+                              class="device-token-error"
+                              [attr.data-testid]="'token-error-' + terminal.terminalId"
+                              >{{ tokenError(terminal.terminalId) }}</span
+                            >
+                          }
+                        </div>
+                      }
                       <button
                         class="btn-icon btn-danger"
                         title="Delete terminal"
@@ -952,6 +999,22 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
         color: #374151;
         margin-left: auto;
       }
+      .btn-launch-kiosk {
+        margin-left: 0.75rem;
+        padding: 0.25rem 0.75rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        background: #1d4ed8;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .btn-launch-kiosk:hover {
+        background: #1e40af;
+      }
 
       .entity-card {
         margin-top: 1rem;
@@ -1178,6 +1241,49 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
         background: #fef2f2;
       }
 
+      .device-token-row {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        flex-wrap: wrap;
+        margin-top: 0.125rem;
+      }
+      .device-token-chip {
+        font-size: 0.7rem;
+        font-weight: 500;
+        padding: 0.1rem 0.4rem;
+        border-radius: 4px;
+        background: #dcfce7;
+        color: #166534;
+        white-space: nowrap;
+      }
+      .device-token-chip--missing {
+        background: #fef9c3;
+        color: #854d0e;
+      }
+      .btn-token {
+        padding: 0.2rem 0.5rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+        background: none;
+        border: 1px solid #7c3aed;
+        color: #7c3aed;
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-token:hover:not(:disabled) {
+        background: #f5f3ff;
+      }
+      .btn-token:disabled {
+        opacity: 0.5;
+        cursor: wait;
+      }
+      .device-token-error {
+        font-size: 0.7rem;
+        color: #b91c1c;
+      }
+
       .btn-add {
         display: block;
         width: 100%;
@@ -1312,6 +1418,7 @@ export class SettingsComponent implements OnInit {
   private readonly quickAuthAdmin = inject(QUICK_AUTH_ADMIN_PORT);
   private readonly quickAuth = inject(QUICK_AUTH_GATEWAY);
   private readonly currentUser = inject(CurrentUserService);
+  private readonly router = inject(Router);
 
   readonly minPinLength = MIN_PIN_LENGTH;
   readonly maxPinLength = MAX_PIN_LENGTH;
@@ -1329,6 +1436,8 @@ export class SettingsComponent implements OnInit {
   /** Nothing here can be set up for nobody — see QuickAuthAdminPort. */
   readonly signedIn = computed(() => this.currentUser.operatorId() !== null);
   readonly busy = computed(() => this.enrolling() || this.savingPin());
+  /** True when the current operator holds USE_KIOSK — gates the launch button. */
+  readonly canUseKiosk = computed(() => this.currentUser.hasPermission(Permission.USE_KIOSK));
 
   readonly lowStockSettings = inject(LowStockSettingsService);
   readonly kioskSettings = inject(KioskSettingsService);
@@ -1338,6 +1447,18 @@ export class SettingsComponent implements OnInit {
   readonly saveSuccess = signal(false);
   readonly saveError = signal<string | null>(null);
   readonly hierarchySaved = signal(false);
+
+  /** Per-terminal busy state for device-token generation. Key = terminalId. */
+  private readonly _tokenBusy = signal<Record<string, boolean>>({});
+  /** Per-terminal error message for device-token generation. Key = terminalId. */
+  private readonly _tokenError = signal<Record<string, string>>({});
+
+  tokenBusy(terminalId: string): boolean {
+    return this._tokenBusy()[terminalId] ?? false;
+  }
+  tokenError(terminalId: string): string | null {
+    return this._tokenError()[terminalId] ?? null;
+  }
 
   /** Set of store IDs whose fence map panel is currently expanded. */
   private readonly _openFenceMaps = signal<Set<string>>(new Set());
@@ -1634,35 +1755,23 @@ export class SettingsComponent implements OnInit {
     this._flash();
   }
 
-  async updateTerminalLabel(
-    terminal: import('@core/application/services/kiosk-settings.service').TerminalRecord,
-    label: string
-  ): Promise<void> {
+  async updateTerminalLabel(terminal: TerminalRecord, label: string): Promise<void> {
     await this.kioskSettings.saveTerminal({ ...terminal, label: label.trim() });
     this._flash();
   }
 
-  async setTerminalMode(
-    terminal: import('@core/application/services/kiosk-settings.service').TerminalRecord,
-    mode: TerminalMode
-  ): Promise<void> {
+  async setTerminalMode(terminal: TerminalRecord, mode: TerminalMode): Promise<void> {
     await this.kioskSettings.saveTerminal({ ...terminal, mode });
     this._flash();
   }
 
-  async setMpOverride(
-    terminal: import('@core/application/services/kiosk-settings.service').TerminalRecord,
-    value: string
-  ): Promise<void> {
+  async setMpOverride(terminal: TerminalRecord, value: string): Promise<void> {
     const override = value === 'auto' ? null : value === 'on';
     await this.kioskSettings.saveTerminal({ ...terminal, mercadopagoEnabled: override });
     this._flash();
   }
 
-  async setPaypalOverride(
-    terminal: import('@core/application/services/kiosk-settings.service').TerminalRecord,
-    value: string
-  ): Promise<void> {
+  async setPaypalOverride(terminal: TerminalRecord, value: string): Promise<void> {
     const override = value === 'auto' ? null : value === 'on';
     await this.kioskSettings.saveTerminal({ ...terminal, paypalEnabled: override });
     this._flash();
@@ -1676,5 +1785,52 @@ export class SettingsComponent implements OnInit {
   async confirmDeleteTerminal(terminalId: string): Promise<void> {
     if (!confirm('Delete this terminal?')) return;
     await this.kioskSettings.deleteTerminal(terminalId);
+  }
+
+  /**
+   * Call `POST /api/kiosk-device-token` with the staff JWT and save the returned
+   * token to the terminal record in Dexie.
+   *
+   * Requires the operator to be signed in (staff JWT on session).
+   */
+  async generateDeviceToken(terminal: TerminalRecord): Promise<void> {
+    const accessToken = this.currentUser.session()?.accessToken;
+    if (!accessToken) {
+      this._tokenError.update((e) => ({ ...e, [terminal.terminalId]: 'Not signed in' }));
+      return;
+    }
+
+    this._tokenBusy.update((b) => ({ ...b, [terminal.terminalId]: true }));
+    this._tokenError.update((e) => ({ ...e, [terminal.terminalId]: '' }));
+
+    try {
+      const response = await fetch(`${environment.apiUrl}/kiosk-device-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ terminalId: terminal.terminalId }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const { token } = (await response.json()) as { token: string };
+      await this.kioskSettings.saveTerminal({ ...terminal, deviceToken: token });
+      this._flash();
+    } catch (err) {
+      this._tokenError.update((e) => ({
+        ...e,
+        [terminal.terminalId]: err instanceof Error ? err.message : 'Failed',
+      }));
+    } finally {
+      this._tokenBusy.update((b) => ({ ...b, [terminal.terminalId]: false }));
+    }
+  }
+  /** Navigate to the kiosk splash screen for this terminal. */
+  launchKiosk(): void {
+    void this.router.navigate(['/kiosk']);
   }
 }

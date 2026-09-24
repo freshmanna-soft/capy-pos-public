@@ -232,11 +232,11 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private zone = inject(NgZone);
 
-  private L: typeof L | null = null;
+  private L!: typeof L;
   private map: L.Map | null = null;
   private polyline: L.Polyline | null = null; // preview line while drawing
   private filledPoly: L.Polygon | null = null; // filled polygon layer
-  private vertexMarkers: L.CircleMarker[] = [];
+  private vertexMarkers: L.Marker[] = [];
   private drawingVertices: LatLng[] = [];
   private mapClickHandler: ((e: L.LeafletMouseEvent) => void) | null = null;
 

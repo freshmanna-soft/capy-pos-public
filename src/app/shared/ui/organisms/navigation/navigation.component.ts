@@ -252,10 +252,12 @@ export class NavigationComponent {
   readonly isKioskRoute = toSignal(
     this.router.events.pipe(
       filter((e): e is NavigationEnd => e instanceof NavigationEnd),
-      map((e) => e.urlAfterRedirects.startsWith('/kiosk')),
-      startWith(this.router.url.startsWith('/kiosk'))
+      map(
+        (e) => e.urlAfterRedirects.startsWith('/kiosk') || e.urlAfterRedirects.startsWith('/shop')
+      ),
+      startWith(this.router.url.startsWith('/kiosk') || this.router.url.startsWith('/shop'))
     ),
-    { initialValue: this.router.url.startsWith('/kiosk') }
+    { initialValue: this.router.url.startsWith('/kiosk') || this.router.url.startsWith('/shop') }
   );
 
   /** Full catalogue of navigation items (before RBAC filtering). */

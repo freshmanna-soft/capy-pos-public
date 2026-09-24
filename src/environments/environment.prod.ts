@@ -50,6 +50,9 @@ export const environment = {
   clerkAgentApiUrl:
     'https://capy-clerk-agent-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/clerk/agent',
 
+  // Product image upload path, appended to apiUrl: POST `${apiUrl}${imageApiPath}/${productId}/image`
+  imageApiPath: '/products',
+
   // Database
   databaseName: 'capy_pos_prod',
   enableOfflineMode: true,

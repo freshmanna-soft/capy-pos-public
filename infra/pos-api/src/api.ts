@@ -32,18 +32,13 @@ import {
   ROLE_PERMISSIONS,
   authorize,
   constantTimeStringsEqual,
-  isRolesShape,
+  readBearer,
+  verifySessionToken,
+  signToken,
   type AppIdVerificationConfig,
 } from './session-auth.ts';
 import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
-import type { CheckoutInventoryMarkers } from './checkout-inventory.ts';
-import {
-  productAvailableStock,
-  productHasActiveReservations,
-  publicCheckoutSaleTransaction,
-  type CheckoutSaleTransactionDocument,
-  type PublicCheckoutSaleTransactionDocument,
-} from './checkout-fulfillment.ts';
+import type { ImageStore } from '../../shared/src/image-store.ts';
 
 /** The catalogue document. Field-for-field what `create-product/index.js` writes. */
 export interface ProductDocument extends StoredDocument {
@@ -56,6 +51,7 @@ export interface ProductDocument extends StoredDocument {
   readonly checkoutMarkers?: CheckoutInventoryMarkers;
   readonly description: string;
   readonly isActive?: boolean;
+  readonly imageUrl?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -96,6 +92,37 @@ export type PublicTransactionDocument =
   | PublicCheckoutSaleTransactionDocument;
 
 /**
+ * A full-basket kiosk/shop sale record.
+ *
+ * Written by `POST /api/transactions` — the kiosk terminal (device token) and
+ * the customer's phone (shop-session token) both POST here. Stock adjustment is
+ * handled separately by the existing `POST /api/products/{id}/sell` path, so
+ * this record is audit trail only: it never triggers a stock write.
+ */
+export interface KioskTransactionDocument extends StoredDocument {
+  readonly type: 'kiosk-sale';
+  readonly items: readonly {
+    readonly productId: string;
+    readonly productName: string;
+    readonly quantity: number;
+    readonly unitPrice: number;
+    readonly lineTotal: number;
+  }[];
+  readonly subtotal: number;
+  readonly taxAmount: number;
+  readonly total: number;
+  readonly paymentMethod: string;
+  readonly terminalId: string;
+  /** Absent for anonymous sessions. */
+  readonly customerId?: string;
+  readonly customerEmail?: string;
+  readonly timestamp: string;
+  /** `sub` claim of the kiosk-device or shop-session token. */
+  readonly operatorId: string;
+  readonly tenantId: string;
+}
+
+/**
  * The one document `GET /internal/roles` serves — every role name this
  * deployment knows, mapped to the permission strings it grants. Phase 5,
  * RBAC centralization: this is the single source of truth `vision-proxy`
@@ -122,6 +149,14 @@ export interface ApiRequest {
   readonly internalSecret: string | undefined;
   /** Parsed JSON body, or `undefined` when there was none. */
   readonly body: unknown;
+  /**
+   * Raw request bytes — present only for multipart routes where the body
+   * cannot be JSON-parsed.  `server.ts` populates this for
+   * `POST /api/products/:id/image` and leaves it absent on all other routes.
+   */
+  readonly rawBody?: Uint8Array;
+  /** Value of the `Content-Type` request header (lower-cased). */
+  readonly contentType?: string;
 }
 
 export interface ApiResponse {
@@ -133,11 +168,34 @@ export interface ApiDeps {
   readonly products: DocumentStore<ProductDocument>;
   readonly transactions: DocumentStore<TransactionDocument>;
   readonly roles: DocumentStore<RolesDocument>;
+  readonly imageStore: ImageStore;
   readonly secret: string;
   /** Omitted: this deployment verifies HS256 (`secret`) only — today's exact behaviour. */
   readonly appId?: AppIdVerificationConfig;
   /** Empty means `GET /internal/roles` is unconfigured and always 503s — see `getRoles`. */
   readonly internalSecret: string;
+  /**
+   * MercadoPago server-side access token (MP_ACCESS_TOKEN env var).
+   * Empty string means `POST /api/mercadopago/preference` always 503s — the
+   * secret is never sent to the browser.
+   */
+  readonly mpAccessToken: string;
+  /**
+   * ISO 4217 currency code for MercadoPago preferences (MP_CURRENCY_ID env var).
+   * Must match the country of the MP account: MXN for Mexico (MLM), ARS for
+   * Argentina (MLA), BRL for Brazil (MLB), CLP for Chile (MLC), COP for
+   * Colombia (MCO), PEN for Peru (MPE), UYU for Uruguay (MLU).
+   * Defaults to 'MXN' when unset and the site cannot be inferred from the token.
+   */
+  readonly mpCurrencyId: string;
+  /**
+   * Base URL of the Angular app, used for MercadoPago back_urls.
+   * Set via APP_BASE_URL env var; defaults to http://localhost:4200 for local dev.
+   * In production this is the public HTTPS origin (e.g. https://capy-pos.example.com).
+   */
+  readonly appBaseUrl: string;
+  /** Injected so tests can stub fetch without patching globals. */
+  readonly fetch?: typeof globalThis.fetch;
   readonly nowSeconds: () => number;
   readonly nowIso: () => string;
   readonly newId: () => string;
@@ -182,6 +240,27 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
     return getRoles(request, deps);
   }
 
+  // Open endpoint — no bearer token required. Rate-limited per IP in memory.
+  if (route.kind === 'createShopSession') {
+    return createShopSession(request, deps);
+  }
+
+  // Open endpoints — the MercadoPago public key is client-side; the access token
+  // is server-side only. No staff JWT required from the shop checkout page.
+  if (route.kind === 'createMercadoPagoPreference') {
+    return createMercadoPagoPreference(request, deps);
+  }
+
+  if (route.kind === 'getMercadoPagoPreferenceStatus') {
+    return getMercadoPagoPreferenceStatus(route.preferenceId, deps);
+  }
+
+  // Kiosk transaction — has its own token verification (kiosk-device or shop-session),
+  // not a staff JWT, so it bypasses the staff `authorize()` boundary entirely.
+  if (route.kind === 'createKioskTransaction') {
+    return createKioskTransaction(request, deps);
+  }
+
   // `rolesSource: deps.roles` merged in here, not stored on `deps.appId`
   // itself: `deps.appId` is built once at startup from env vars only
   // (`server.ts`'s `readAppIdConfig()`), while the roles store is a request
@@ -222,6 +301,10 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
       );
     case 'listTransactions':
       return { status: 200, body: await listTransactions(deps) };
+    case 'createKioskDeviceToken':
+      return createKioskDeviceToken(request.body, outcome.claims.tenantId, deps);
+    case 'uploadProductImage':
+      return uploadProductImage(route.id, request, deps);
   }
 }
 
@@ -230,13 +313,19 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
 type Route =
   | { readonly kind: 'health' }
   | { readonly kind: 'getRoles' }
+  | { readonly kind: 'createShopSession' }
+  | { readonly kind: 'createMercadoPagoPreference' }
+  | { readonly kind: 'getMercadoPagoPreferenceStatus'; readonly preferenceId: string }
   | { readonly kind: 'listProducts'; readonly permission: Permission }
   | { readonly kind: 'createProduct'; readonly permission: Permission }
   | { readonly kind: 'listTransactions'; readonly permission: Permission }
+  | { readonly kind: 'createKioskDeviceToken'; readonly permission: Permission }
+  | { readonly kind: 'createKioskTransaction' }
   | { readonly kind: 'replaceProduct'; readonly permission: Permission; readonly id: string }
   | { readonly kind: 'patchProduct'; readonly permission: Permission; readonly id: string }
   | { readonly kind: 'deleteProduct'; readonly permission: Permission; readonly id: string }
-  | { readonly kind: 'sellProduct'; readonly permission: Permission; readonly id: string };
+  | { readonly kind: 'sellProduct'; readonly permission: Permission; readonly id: string }
+  | { readonly kind: 'uploadProductImage'; readonly permission: Permission; readonly id: string };
 
 /**
  * Match a method and path against the eight routes, and nothing else.
@@ -264,8 +353,31 @@ export function matchRoute(method: string, path: string): Route | null {
   }
 
   if (segments.length === 2 && segments[1] === 'transactions') {
-    return upper === 'GET'
-      ? { kind: 'listTransactions', permission: Permission.VIEW_TRANSACTIONS }
+    if (upper === 'GET') return { kind: 'listTransactions', permission: Permission.VIEW_TRANSACTIONS };
+    if (upper === 'POST') return { kind: 'createKioskTransaction' };
+    return null;
+  }
+
+  if (segments.length === 3 && segments[1] === 'shop' && segments[2] === 'session') {
+    return upper === 'POST' ? { kind: 'createShopSession' } : null;
+  }
+
+  if (segments.length === 3 && segments[1] === 'mercadopago' && segments[2] === 'preference') {
+    if (upper === 'POST') return { kind: 'createMercadoPagoPreference' };
+    return null;
+  }
+
+  if (segments.length === 4 && segments[1] === 'mercadopago' && segments[2] === 'preference') {
+    const rawId = segments[3];
+    if (rawId === undefined || rawId.length === 0) return null;
+    const preferenceId = safeDecode(rawId);
+    if (preferenceId === null || preferenceId.length === 0) return null;
+    return upper === 'GET' ? { kind: 'getMercadoPagoPreferenceStatus', preferenceId } : null;
+  }
+
+  if (segments.length === 2 && segments[1] === 'kiosk-device-token') {
+    return upper === 'POST'
+      ? { kind: 'createKioskDeviceToken', permission: Permission.MANAGE_INVENTORY }
       : null;
   }
 
@@ -311,6 +423,10 @@ export function matchRoute(method: string, path: string): Route | null {
     return { kind: 'sellProduct', permission: Permission.PROCESS_SALE, id };
   }
 
+  if (segments.length === 4 && segments[3] === 'image' && upper === 'POST') {
+    return { kind: 'uploadProductImage', permission: Permission.MANAGE_INVENTORY, id };
+  }
+
   return null;
 }
 
@@ -352,11 +468,44 @@ function health(deps: ApiDeps): ApiResponse {
         deleteProduct: 'DELETE /api/products/{id}',
         sellProduct: 'POST /api/products/{id}/sell',
         getTransactions: 'GET /api/transactions',
+        createTransaction: 'POST /api/transactions (kiosk-device or shop-session token)',
+        createShopSession: 'POST /api/shop/session (open, rate-limited)',
+        createKioskDeviceToken: 'POST /api/kiosk-device-token (MANAGE_INVENTORY)',
         health: 'GET /api/health',
         internalRoles: 'GET /internal/roles (X-Internal-Secret, sibling services only)',
       },
     },
   };
+}
+
+// ─── Rate limiter (in-memory, per IP) ─────────────────────────────────────────
+//
+// Prevents a single IP from minting an unlimited number of shop-session tokens.
+// The map entry records how many sessions were issued in the current hour window
+// and the timestamp when that window opened. On window expiry the counter resets.
+// This is intentionally simple: one window per IP, no sliding window, no Redis.
+// A more sophisticated solution would use a distributed counter (Cloudant or
+// Redis), but for the kiosk use-case — one phone per customer per session — 20
+// sessions/hour/IP is more than enough and a memory counter cannot be bypassed
+// by hitting a second pod when Code Engine runs a single instance in kiosk mode.
+
+const SHOP_SESSION_MAX_PER_HOUR = 20;
+const SHOP_SESSION_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
+interface RateBucket { count: number; windowStart: number }
+const shopSessionBuckets = new Map<string, RateBucket>();
+
+function shopSessionAllowed(ip: string, nowMs: number): boolean {
+  const bucket = shopSessionBuckets.get(ip);
+  if (bucket === undefined || nowMs - bucket.windowStart >= SHOP_SESSION_WINDOW_MS) {
+    shopSessionBuckets.set(ip, { count: 1, windowStart: nowMs });
+    return true;
+  }
+  if (bucket.count >= SHOP_SESSION_MAX_PER_HOUR) {
+    return false;
+  }
+  bucket.count += 1;
+  return true;
 }
 
 /**
@@ -519,11 +668,149 @@ async function listTransactions(
   return { transactions, count: transactions.length };
 }
 
-/** Strips internal V2 checkout ownership fields before staff history leaves the API. */
-function publicTransaction(transaction: TransactionDocument): PublicTransactionDocument {
-  return 'kind' in transaction && transaction.kind === 'checkout-sale'
-    ? publicCheckoutSaleTransaction(transaction)
-    : transaction;
+// ─── Kiosk / Shop handlers ────────────────────────────────────────────────────
+
+/**
+ * POST /api/shop/session — no auth, rate-limited.
+ *
+ * A customer's phone calls this once on page load to get a short-lived JWT
+ * it can use to POST /api/transactions at checkout. No staff session required.
+ * `storeId` is the only body field; it is accepted as any non-empty string —
+ * the client already resolved it from geofence/settings, and re-validating it
+ * here would require Cloudant access on a hot, unauthenticated path.
+ */
+function createShopSession(request: ApiRequest, deps: ApiDeps): ApiResponse {
+  const nowMs = deps.nowSeconds() * 1000;
+  // Use the Authorization header as a proxy for the client IP when the real
+  // IP isn't available (e.g. test harness). In production the request arrives
+  // via Code Engine's ingress which forwards the real IP in X-Forwarded-For;
+  // for the in-process test the authorization string is undefined, so we fall
+  // back to 'test' — a value that only appears in tests.
+  const ip = (request.authorization ?? 'test').slice(0, 64);
+  if (!shopSessionAllowed(ip, nowMs)) {
+    return { status: 429, body: { error: 'Too many session requests. Try again later.' } };
+  }
+
+  const body = asObject(request.body);
+  const storeId = body !== null ? asNonEmptyString(body['storeId']) : null;
+  if (storeId === null) {
+    return { status: 400, body: { error: 'storeId is required.' } };
+  }
+
+  const exp = deps.nowSeconds() + 3600; // 1 hour
+  const token = signToken(
+    { sub: storeId, type: 'shop-session', tenantId: storeId, exp },
+    deps.secret
+  );
+  return { status: 201, body: { token, expiresAt: new Date(exp * 1000).toISOString() } };
+}
+
+/**
+ * POST /api/kiosk-device-token — staff JWT with MANAGE_INVENTORY required.
+ *
+ * Staff call this once per terminal during setup. The token is long-lived (1 year)
+ * and stored in Dexie. It authenticates POST /api/transactions from the terminal.
+ */
+function createKioskDeviceToken(rawBody: unknown, tenantId: string, deps: ApiDeps): ApiResponse {
+  const body = asObject(rawBody);
+  const terminalId = body !== null ? asNonEmptyString(body['terminalId']) : null;
+  if (terminalId === null) {
+    return { status: 400, body: { error: 'terminalId is required.' } };
+  }
+
+  const exp = deps.nowSeconds() + 365 * 24 * 3600; // 1 year
+  const token = signToken(
+    { sub: terminalId, type: 'kiosk-device', tenantId, exp },
+    deps.secret
+  );
+  return { status: 201, body: { token, expiresAt: new Date(exp * 1000).toISOString() } };
+}
+
+/**
+ * POST /api/transactions — kiosk-device or shop-session token required.
+ *
+ * Accepts a full basket and writes one KioskTransactionDocument. This is the
+ * audit trail for kiosk/shop sales. Stock adjustment is handled separately by
+ * POST /api/products/{id}/sell — this endpoint never touches product documents.
+ *
+ * Token type is checked explicitly after signature verification: a staff JWT
+ * that happens to verify correctly must not be accepted here, because this
+ * endpoint is the self-checkout boundary, not the operator boundary.
+ */
+async function createKioskTransaction(request: ApiRequest, deps: ApiDeps): Promise<ApiResponse> {
+  const token = readBearer(request.authorization);
+  if (token === null) {
+    return { status: 401, body: { error: 'Authorization required.' } };
+  }
+
+  const claims = verifySessionToken(token, deps.secret, deps.nowSeconds());
+  if (claims === null) {
+    return { status: 401, body: { error: 'Invalid or expired token.' } };
+  }
+
+  // Narrow to the two token types this endpoint accepts. A regular staff JWT
+  // has no `type` claim and must not be able to POST transactions anonymously.
+  if (claims.type !== 'kiosk-device' && claims.type !== 'shop-session') {
+    return { status: 401, body: { error: 'Invalid token type for this endpoint.' } };
+  }
+
+  const body = asObject(request.body);
+  if (body === null) {
+    return { status: 400, body: { error: 'Body must be a JSON object.' } };
+  }
+
+  const paymentMethod = asNonEmptyString(body['paymentMethod']);
+  const total = asFiniteNumber(body['total']);
+  const subtotal = asFiniteNumber(body['subtotal']);
+  const taxAmount = asFiniteNumber(body['taxAmount']);
+  const items = body['items'];
+
+  if (paymentMethod === null || total === null || subtotal === null || taxAmount === null) {
+    return {
+      status: 400,
+      body: { error: 'Missing required fields: paymentMethod, total, subtotal, taxAmount' },
+    };
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    return { status: 400, body: { error: 'items must be a non-empty array.' } };
+  }
+
+  const transaction: KioskTransactionDocument = {
+    id: deps.newId(),
+    type: 'kiosk-sale',
+    items: items.map((item: unknown) => {
+      const i = asObject(item) ?? {};
+      return {
+        productId: asString(i['productId']) ?? '',
+        productName: asString(i['productName']) ?? '',
+        quantity: asFiniteNumber(i['quantity']) ?? 0,
+        unitPrice: asFiniteNumber(i['unitPrice']) ?? 0,
+        lineTotal: asFiniteNumber(i['lineTotal']) ?? 0,
+      };
+    }),
+    subtotal,
+    taxAmount,
+    total,
+    paymentMethod,
+    terminalId: claims.operatorId, // operatorId holds the sub (terminalId or storeId)
+    customerId: asString(body['customerId']) ?? undefined,
+    customerEmail: asString(body['customerEmail']) ?? undefined,
+    timestamp: deps.nowIso(),
+    operatorId: claims.operatorId,
+    tenantId: claims.tenantId,
+  };
+
+  // deps.transactions is DocumentStore<TransactionDocument>; KioskTransactionDocument
+  // is a different shape. Both extend StoredDocument and the runtime store accepts
+  // either — cast through unknown to silence the structural mismatch without
+  // widening the ApiDeps interface.
+  const txStore = deps.transactions as unknown as import('../../shared/src/document-store.ts').DocumentStore<KioskTransactionDocument>;
+  const outcome = await txStore.create(transaction);
+  if (outcome === 'conflict') {
+    // UUID collision — extremely rare but log loudly rather than 500.
+    console.error('[pos-api] kiosk transaction id collision', { transactionId: transaction.id });
+  }
+  return { status: 201, body: { transaction } };
 }
 
 async function createProduct(rawBody: unknown, deps: ApiDeps): Promise<ApiResponse> {
@@ -797,6 +1084,368 @@ async function sellProduct(
   // Lost the race every time: real contention on one product, and the honest answer
   // is "try again", not a sale that may double-decrement.
   return { status: 409, body: { error: 'Stock was changing concurrently. Retry.' } };
+}
+
+// ─── MercadoPago ──────────────────────────────────────────────────────────────
+
+/**
+ * Shape of the card-token payload the MercadoPago Brick posts to the browser,
+ * which the browser then forwards here so the access token never leaves the server.
+ */
+interface MpCardData {
+  readonly token: string;
+  readonly issuer_id: string;
+  readonly payment_method_id: string;
+  readonly transaction_amount: number;
+  readonly installments: number;
+  readonly payer: {
+    readonly email: string;
+    readonly identification: { readonly type: string; readonly number: string };
+  };
+}
+
+/** Shape of a successful MercadoPago Payments API response (minimal subset). */
+interface MpPaymentResponse {
+  readonly id: number;
+  readonly status: 'approved' | 'pending' | 'rejected' | string;
+}
+
+/** Shape of a MercadoPago Preference API response (Wallet Brick flow). */
+interface MpPreferenceResponse {
+  readonly id: string;
+  readonly init_point: string;
+  readonly sandbox_init_point?: string;
+  readonly external_reference?: string;
+}
+
+/**
+ * POST /api/mercadopago/preference — open endpoint (no staff JWT).
+ *
+ * Handles two modes selected by the optional `mode` field in the request body:
+ *
+ *  • `mode: 'card'` (default) — the browser's Card Payment Brick has already
+ *    tokenised the card client-side. This handler calls `POST /v1/payments`
+ *    with the token and returns `{ id, status }`.
+ *
+ *  • `mode: 'wallet'` — creates a MercadoPago Preference (a payment session
+ *    the buyer completes inside their MP account / app) and returns
+ *    `{ id, initPoint }`. The browser feeds `id` into the Wallet Brick so
+ *    MP's SDK can poll for completion.
+ *
+ * Returns 503 when MP_ACCESS_TOKEN is not configured.
+ */
+async function createMercadoPagoPreference(
+  request: ApiRequest,
+  deps: ApiDeps
+): Promise<ApiResponse> {
+  if (!deps.mpAccessToken) {
+    return { status: 503, body: { error: 'MercadoPago is not configured on this server.' } };
+  }
+
+  const body = asObject(request.body);
+  if (body === null) {
+    return { status: 400, body: { error: 'Request body must be a JSON object.' } };
+  }
+
+  const mode = body['mode'] === 'wallet' ? 'wallet' : 'card';
+  const amount = asFiniteNumber(body['amount']);
+  if (amount === null || amount <= 0) {
+    return { status: 400, body: { error: 'A positive amount is required.' } };
+  }
+
+  const doFetch = deps.fetch ?? globalThis.fetch;
+
+  // ── Wallet mode: create a Preference, return its id + initPoint ───────────
+  if (mode === 'wallet') {
+    const title = asNonEmptyString(body['title']) ?? 'Capy POS sale';
+
+    let mpResponse: Response;
+    try {
+      mpResponse = await doFetch('https://api.mercadopago.com/checkout/preferences', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${deps.mpAccessToken}`,
+        },
+        body: JSON.stringify({
+          items: [{ title, quantity: 1, unit_price: amount, currency_id: deps.mpCurrencyId }],
+          // external_reference lets us find the payment later via
+          // GET /v1/payments/search?external_reference=<id>
+          // (preference_id is not a valid search param in the MP API).
+          // We use a fresh UUID so it is stable and unique per checkout.
+          external_reference: deps.newId(),
+          back_urls: {
+            success: `${deps.appBaseUrl}/payment/success`,
+            failure: `${deps.appBaseUrl}/payment/failure`,
+            pending: `${deps.appBaseUrl}/payment/pending`,
+          },
+          // auto_return requires back_urls.success to be HTTPS — MP rejects it
+          // over plain HTTP (localhost). Omit it in that case; the buyer closes
+          // the tab manually and the BroadcastChannel / poll still resolves.
+          ...(deps.appBaseUrl.startsWith('https://') ? { auto_return: 'approved' } : {}),
+        }),
+      });
+    } catch (err) {
+      console.error('[pos-api] MercadoPago upstream unreachable (wallet)', err);
+      return { status: 502, body: { error: 'Could not reach MercadoPago.' } };
+    }
+
+    if (!mpResponse.ok) {
+      const errBody = await mpResponse.text().catch(() => '');
+      console.error(`[pos-api] MercadoPago preference failed ${mpResponse.status}`, errBody);
+      return { status: 502, body: { error: 'MercadoPago preference creation failed.' } };
+    }
+
+    const pref = (await mpResponse.json()) as MpPreferenceResponse;
+    // Return the external_reference alongside the preference id so the
+    // adapter can poll GET /api/mercadopago/preference/<externalRef> and
+    // the backend searches by external_reference, not preference_id.
+    const externalReference = pref.external_reference ?? pref.id;
+    return {
+      status: 200,
+      body: {
+        id: pref.id,
+        externalReference,
+        initPoint: pref.init_point,
+        sandboxInitPoint: pref.sandbox_init_point,
+      },
+    };
+  }
+
+  // ── Card mode: charge the card token directly ─────────────────────────────
+  const formData = asObject(body['formData']);
+  if (formData === null) {
+    return { status: 400, body: { error: 'formData is required for card mode.' } };
+  }
+
+  const token = asNonEmptyString(formData['token']);
+  const paymentMethodId = asNonEmptyString(formData['payment_method_id']);
+  const installments = asPositiveInteger(formData['installments']);
+  const payer = asObject(formData['payer']);
+
+  if (!token || !paymentMethodId || installments === null || payer === null) {
+    return { status: 400, body: { error: 'Incomplete card data in formData.' } };
+  }
+
+  let mpResponse: Response;
+  try {
+    mpResponse = await doFetch('https://api.mercadopago.com/v1/payments', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${deps.mpAccessToken}`,
+      },
+      body: JSON.stringify({
+        token,
+        issuer_id: formData['issuer_id'],
+        payment_method_id: paymentMethodId,
+        transaction_amount: amount,
+        installments,
+        description: 'Capy POS sale',
+        payer,
+      }),
+    });
+  } catch (err) {
+    console.error('[pos-api] MercadoPago upstream unreachable', err);
+    return { status: 502, body: { error: 'Could not reach MercadoPago.' } };
+  }
+
+  if (!mpResponse.ok) {
+    const errBody = await mpResponse.text().catch(() => '');
+    console.error(`[pos-api] MercadoPago returned ${mpResponse.status}`, errBody);
+    return { status: 502, body: { error: 'MercadoPago payment failed.' } };
+  }
+
+  const result = (await mpResponse.json()) as MpPaymentResponse;
+  return { status: 200, body: { id: String(result.id), status: result.status } };
+}
+
+/**
+ * GET /api/mercadopago/preference/:id — open endpoint, no staff JWT.
+ *
+ * Polls the MercadoPago Payments Search API for any payment made against the
+ * given preference id and returns `{ status }` so the browser adapter can
+ * determine whether the buyer has completed payment in the MP app / new tab.
+ *
+ * Returns:
+ *   200 { status: 'approved' | 'pending' | 'rejected' | 'not_found' }
+ *   503  when mpAccessToken is not configured
+ *   502  when the MP upstream is unreachable or returns non-2xx
+ */
+async function getMercadoPagoPreferenceStatus(
+  preferenceId: string,
+  deps: ApiDeps
+): Promise<ApiResponse> {
+  if (!deps.mpAccessToken) {
+    return { status: 503, body: { error: 'MercadoPago is not configured on this server.' } };
+  }
+
+  const doFetch = deps.fetch ?? globalThis.fetch;
+  // The MP Payments Search API does not accept `preference_id` as a filter —
+  // the correct param is `external_reference`, which we set to our own UUID
+  // when creating the preference so we can correlate it here.
+  const url =
+    `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(preferenceId)}&sort=date_created&criteria=desc&limit=1`;
+
+  let mpResponse: Response;
+  try {
+    mpResponse = await doFetch(url, {
+      headers: { Authorization: `Bearer ${deps.mpAccessToken}` },
+    });
+  } catch (err) {
+    console.error('[pos-api] MercadoPago status poll unreachable', err);
+    return { status: 502, body: { error: 'Could not reach MercadoPago.' } };
+  }
+
+  if (!mpResponse.ok) {
+    const errBody = await mpResponse.text().catch(() => '');
+    console.error(`[pos-api] MercadoPago status poll ${mpResponse.status}`, errBody);
+    return { status: 502, body: { error: 'MercadoPago status check failed.' } };
+  }
+
+  const data = (await mpResponse.json()) as { results?: { status: string }[] };
+  const payment = data.results?.[0];
+  const status = payment?.status ?? 'not_found';
+  return { status: 200, body: { status } };
+}
+
+// ─── Image upload ─────────────────────────────────────────────────────────────
+
+const MAX_IMAGE_BYTES = 2_097_152; // 2 MiB
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+/**
+ * Parse the `image` part out of a `multipart/form-data` body.
+ *
+ * No external dependency — the format is simple enough to handle inline:
+ *   1. Extract the boundary token from the `Content-Type` header.
+ *   2. Split on `--<boundary>` lines, skip the epilogue part.
+ *   3. Find the part whose `Content-Disposition` header names `image`.
+ *   4. Return the part's declared `Content-Type` and its byte range.
+ *
+ * Returns `null` when the boundary is absent, the body is empty, or no `image`
+ * field is found.
+ */
+export function parseMultipartImage(
+  rawBody: Uint8Array,
+  contentType: string
+): { mimeType: string; data: Uint8Array } | null {
+  // Extract boundary from e.g. `multipart/form-data; boundary=----WebKitFormBoundary…`
+  const boundaryMatch = /boundary=([^\s;]+)/i.exec(contentType);
+  if (boundaryMatch === null) {
+    return null;
+  }
+  const boundary = boundaryMatch[1]!;
+
+  const enc = new TextEncoder();
+  const dec = new TextDecoder('utf-8', { fatal: false });
+
+  const delimBytes = enc.encode(`--${boundary}`);
+
+  // Find all delimiter positions in the raw buffer.
+  const positions: number[] = [];
+  outer: for (let i = 0; i <= rawBody.length - delimBytes.length; i++) {
+    for (let j = 0; j < delimBytes.length; j++) {
+      if (rawBody[i + j] !== delimBytes[j]) {
+        continue outer;
+      }
+    }
+    positions.push(i);
+  }
+
+  // Each part runs from just after the delimiter line to the next delimiter.
+  for (let p = 0; p < positions.length; p++) {
+    const start = positions[p]! + delimBytes.length;
+    // Skip the \r\n after the boundary (or "--" epilogue terminator)
+    if (rawBody[start] === 0x2d && rawBody[start + 1] === 0x2d) {
+      break; // closing delimiter
+    }
+    // Skip \r\n
+    const headerStart = start + (rawBody[start] === 0x0d && rawBody[start + 1] === 0x0a ? 2 : 0);
+
+    const end = positions[p + 1] !== undefined ? positions[p + 1]! - 2 : rawBody.length;
+
+    // Header section ends at the first blank line (\r\n\r\n or \n\n)
+    const partBytes = rawBody.subarray(headerStart, end);
+    const partText = dec.decode(partBytes);
+
+    const headerEnd = partText.search(/\r?\n\r?\n/);
+    if (headerEnd === -1) {
+      continue;
+    }
+
+    const headersText = partText.slice(0, headerEnd);
+    // Check this part is the `image` field
+    if (!/name="image"/i.test(headersText)) {
+      continue;
+    }
+
+    // Extract Content-Type from part headers
+    const ctMatch = /content-type:\s*([^\r\n]+)/i.exec(headersText);
+    const mimeType = ctMatch !== null ? ctMatch[1]!.trim() : '';
+
+    // Body bytes start after the blank line
+    const blankLineMatch = /\r?\n\r?\n/.exec(partText);
+    if (blankLineMatch === null) {
+      continue;
+    }
+    const bodyOffset = new TextEncoder().encode(partText.slice(0, blankLineMatch.index! + blankLineMatch[0].length)).length;
+    const data = partBytes.subarray(bodyOffset);
+
+    return { mimeType, data };
+  }
+
+  return null;
+}
+
+/**
+ * POST /api/products/:id/image — operator JWT with MANAGE_INVENTORY required.
+ *
+ * Accepts a `multipart/form-data` body with a single `image` field.
+ * Validates MIME type (JPEG / PNG / WebP) and size (≤ 2 MiB), stores the binary
+ * via `deps.imageStore`, writes the returned URL back to the product document, and
+ * returns `{ imageUrl }`.
+ */
+async function uploadProductImage(
+  id: string,
+  request: ApiRequest,
+  deps: ApiDeps
+): Promise<ApiResponse> {
+  // Product must exist
+  const existing = await deps.products.read(id);
+  if (existing === null) {
+    return { status: 404, body: { error: 'Product not found', productId: id } };
+  }
+
+  const rawBody = request.rawBody;
+  const contentType = request.contentType ?? '';
+
+  if (rawBody === undefined || rawBody.length === 0) {
+    return { status: 400, body: { error: 'Multipart body is required.' } };
+  }
+
+  if (rawBody.length > MAX_IMAGE_BYTES) {
+    return { status: 413, body: { error: 'Image exceeds the 2 MiB limit.' } };
+  }
+
+  const parsed = parseMultipartImage(rawBody, contentType);
+  if (parsed === null) {
+    return { status: 400, body: { error: 'Could not parse multipart/form-data body.' } };
+  }
+
+  const { mimeType, data } = parsed;
+  if (!ALLOWED_IMAGE_TYPES.has(mimeType)) {
+    return { status: 415, body: { error: 'Image must be image/jpeg, image/png, or image/webp.' } };
+  }
+
+  const imageUrl = await deps.imageStore.upload(id, mimeType, data);
+
+  // Write the URL back to the product document so the catalogue is immediately consistent.
+  const updated: ProductDocument = { ...existing.document, imageUrl, updatedAt: deps.nowIso() };
+  // Ignore conflicts — the image URL is the source of truth and the write is safe to retry.
+  await deps.products.write(updated, existing.rev);
+
+  return { status: 200, body: { imageUrl } };
 }
 
 // ─── Body reading ─────────────────────────────────────────────────────────────

@@ -21,6 +21,7 @@ import { SALES_AGENT_PROVIDERS } from '@app/agents/sales/infrastructure';
 import { PAYMENT_AGENT_PROVIDER } from '@app/agents/payment/infrastructure/payment-agent.provider';
 import { AgentRegistry } from '@app/agents/agent.registry';
 import { SyncService, SyncSessionCredentialService } from '@core/infrastructure/sync';
+import { SyncKioskModeService } from '@core/infrastructure/sync/sync-kiosk-mode.service';
 import { AUTH_PROVIDERS } from '@core/infrastructure/auth/auth.providers';
 import { SessionExpiryNavigatorService } from '@core/infrastructure/auth/session-expiry-navigator.service';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
@@ -144,6 +145,10 @@ export const appConfig: ApplicationConfig = {
       // Injecting this registers the effect that pushes the session token to the
       // worker on every sign-in, sign-out and re-issue (#224).
       const credential = inject(SyncSessionCredentialService);
+      // Injecting this registers the router listener that sets kioskMode on the
+      // worker when the user navigates to /kiosk or /shop routes, downgrading the
+      // "No operator session" log from warn → info in those contexts.
+      inject(SyncKioskModeService);
       syncService.start({
         apiBaseUrl: environment.apiUrl.replace('/api', ''),
         // Every backend route except the health probe requires the operator's session

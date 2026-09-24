@@ -173,9 +173,7 @@ export class CustomerService
     if (!customer.email || customer.email.trim() === '') {
       throw new Error('Customer email is required');
     }
-    if (!customer.phone || customer.phone.trim() === '') {
-      throw new Error('Customer phone is required');
-    }
+    // Phone is optional — kiosk registrations only capture an email address.
   }
 }
 

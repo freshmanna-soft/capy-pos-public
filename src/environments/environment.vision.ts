@@ -64,6 +64,9 @@ export const environment = {
   // answers /clerk/agent.
   clerkAgentApiUrl: 'http://localhost:8789/clerk/agent',
 
+  // Product image upload path, appended to apiUrl: POST `${apiUrl}${imageApiPath}/${productId}/image`
+  imageApiPath: '/products',
+
   // Database
   databaseName: 'capy_pos_dev',
   enableOfflineMode: true,

@@ -114,6 +114,11 @@ export interface SessionClaims {
   readonly tenantId: string;
   readonly roles: readonly string[];
   readonly permissions: readonly string[];
+  /**
+   * Present only on kiosk-device and shop-session tokens; absent on regular
+   * operator JWTs. Consumers that need to distinguish token kinds check this.
+   */
+  readonly type?: string;
   /** `exp`, epoch seconds. */
   readonly expiresAt: number;
 }
@@ -334,12 +339,14 @@ export function verifySessionToken(
     return null;
   }
 
+  const type = typeof payload['type'] === 'string' ? payload['type'] : undefined;
   return {
     operatorId,
     tenantId,
     roles: stringArray(payload['roles']),
     permissions: stringArray(payload['permissions']),
     expiresAt,
+    ...(type !== undefined ? { type } : {}),
   };
 }
 
@@ -605,6 +612,42 @@ async function resolveAppIdScopes(
  * which leaks only the *length* of a forged signature, a value the attacker already
  * chose.
  */
+/**
+ * Sign a minimal HS256 JWT.
+ *
+ * Only the fields the kiosk/shop token contract needs are accepted: `sub`,
+ * `type`, `tenantId`, and `exp`. Everything else is left out on purpose —
+ * keeping the payload small and explicit prevents accidental leakage of
+ * internal claims into externally-visible tokens.
+ *
+ * Exported so `api.ts` can issue shop-session and kiosk-device tokens
+ * with the same key and algorithm that `verifySessionToken` already trusts,
+ * without duplicating the base64url machinery.
+ */
+export function signToken(
+  payload: { sub: string; type: string; tenantId: string; exp: number },
+  secret: string
+): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+  const body = Buffer.from(JSON.stringify(payload))
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+  const signingInput = `${header}.${body}`;
+  const sig = createHmac('sha256', secret)
+    .update(signingInput)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+  return `${signingInput}.${sig}`;
+}
+
 function signatureMatches(signingInput: string, signature: string, secret: string): boolean {
   const expected = createHmac('sha256', secret).update(signingInput).digest();
   let presented: Buffer;

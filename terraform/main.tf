@@ -44,14 +44,12 @@ locals {
   # The apps that hold the model key, the apps that verify a session token, and the
   # apps that talk to Cloudant. Derived once so the secret resources and the env
   # bindings below cannot drift apart from each other.
-  model_key_services        = { for name, service in var.services : name => service if service.needs_model_key }
-  session_guarded_services  = { for name, service in var.services : name => service if service.needs_session_secret }
-  cloudant_services         = { for name, service in var.services : name => service if service.needs_cloudant }
-  appid_secret_services     = { for name, service in var.services : name => service if service.needs_appid_secret }
-  internal_secret_services  = { for name, service in var.services : name => service if service.needs_internal_secret }
-  checkout_services         = { for name, service in var.services : name => service if service.needs_checkout }
-  checkout_job_services     = { for name, service in var.services : name => service if service.needs_checkout && service.needs_cloudant }
-  customer_loyalty_services = { for name, service in var.services : name => service if service.needs_customer_loyalty }
+  model_key_services       = { for name, service in var.services : name => service if service.needs_model_key }
+  session_guarded_services = { for name, service in var.services : name => service if service.needs_session_secret }
+  cloudant_services        = { for name, service in var.services : name => service if service.needs_cloudant }
+  appid_secret_services    = { for name, service in var.services : name => service if service.needs_appid_secret }
+  internal_secret_services = { for name, service in var.services : name => service if service.needs_internal_secret }
+  mercadopago_services     = { for name, service in var.services : name => service if service.needs_mercadopago }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
   # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses. Empty until
@@ -265,6 +263,30 @@ resource "ibm_code_engine_secret" "internal_secret" {
     precondition {
       condition     = length(var.internal_api_secret) > 0
       error_message = "Internal service-to-service calls need TF_VAR_internal_api_secret (generate with openssl rand -hex 32)."
+    }
+  }
+}
+
+# MercadoPago tokens — both test and prod in one secret on capy-pos-api.
+# pos-api's /preference route reads MERCADOPAGO_ACCESS_TOKEN_PROD (real kiosk);
+# /preference/test reads MERCADOPAGO_ACCESS_TOKEN_TEST (GitHub Pages, sandboxes).
+# Keeping them together means one secret rotation, not two separate ones.
+resource "ibm_code_engine_secret" "mercadopago_secret" {
+  for_each = local.mercadopago_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-mercadopago"
+  format     = "generic"
+
+  data = {
+    MERCADOPAGO_ACCESS_TOKEN_TEST = var.mercadopago_access_token_test
+    MERCADOPAGO_ACCESS_TOKEN_PROD = var.mercadopago_access_token_prod
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(var.mercadopago_access_token_test) > 0 && length(var.mercadopago_access_token_prod) > 0
+      error_message = "${each.key} needs both MercadoPago tokens: set TF_VAR_mercadopago_access_token_test and TF_VAR_mercadopago_access_token_prod (never commit them)."
     }
   }
 }
@@ -915,6 +937,28 @@ resource "ibm_code_engine_app" "apps" {
       name      = "INTERNAL_API_SECRET"
       key       = "INTERNAL_API_SECRET"
       reference = ibm_code_engine_secret.internal_secret[0].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_mercadopago ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "MERCADOPAGO_ACCESS_TOKEN_TEST"
+      key       = "MERCADOPAGO_ACCESS_TOKEN_TEST"
+      reference = ibm_code_engine_secret.mercadopago_secret[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_mercadopago ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "MERCADOPAGO_ACCESS_TOKEN_PROD"
+      key       = "MERCADOPAGO_ACCESS_TOKEN_PROD"
+      reference = ibm_code_engine_secret.mercadopago_secret[each.key].name
     }
   }
 

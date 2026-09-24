@@ -805,4 +805,33 @@ describe('InventoryManagementComponent', () => {
       expect(component.searchQuery()).toBe('');
     });
   });
+
+  describe('imageUrl round-trip', () => {
+    it('includes imageUrl in the createProduct request when set', async () => {
+      component.openCreateForm();
+      component.updateFormField('name', 'Latte');
+      component.updateFormField('sku', 'SKU-LAT');
+      component.updateFormField('category', 'Beverages');
+      component.updateFormField('price', 4.0);
+      component.updateFormField('stock', 10);
+      component.updateFormField('imageUrl', 'https://cdn.example.com/latte.jpg');
+
+      await component.saveProduct();
+
+      expect(mockFacade.createProduct).toHaveBeenCalledWith(
+        expect.objectContaining({ imageUrl: 'https://cdn.example.com/latte.jpg' })
+      );
+    });
+
+    it('pre-fills imageUrl when editing a product that has one', () => {
+      const productWithImage: ProductSummaryDTO = {
+        ...mockProducts[0]!,
+        imageUrl: 'https://cdn.example.com/coffee.jpg',
+      };
+
+      component.openEditForm(productWithImage);
+
+      expect(component.formData().imageUrl).toBe('https://cdn.example.com/coffee.jpg');
+    });
+  });
 });

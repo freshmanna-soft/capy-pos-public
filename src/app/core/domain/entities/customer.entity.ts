@@ -195,7 +195,9 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
     if (!this.email || !this.isValidEmail(this.email)) {
       throw new Error('Valid email is required');
     }
-    if (!this.phone || !this.isValidPhone(this.phone)) {
+    // Phone is optional (kiosk registrations capture email only).
+    // When provided it must be a recognisable number format.
+    if (this.phone && !this.isValidPhone(this.phone)) {
       throw new Error('Valid phone number is required');
     }
     if (this.loyaltyPoints < 0) {

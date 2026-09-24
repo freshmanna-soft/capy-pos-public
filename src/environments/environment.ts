@@ -69,6 +69,9 @@ export const environment = {
   // answers /clerk/agent.
   clerkAgentApiUrl: '',
 
+  // Product image upload path, appended to apiUrl: POST `${apiUrl}${imageApiPath}/${productId}/image`
+  imageApiPath: '/products',
+
   // Database
   databaseName: 'capy_pos_dev',
   enableOfflineMode: true,
@@ -132,7 +135,7 @@ export const environment = {
   // using the server-side access token and returns only the preference id.
   mercadopago: {
     enabled: true,
-    publicKey: 'TEST-00000000-0000-0000-0000-000000000000', // replace with real TEST key
+    publicKey: 'APP_USR-6304b4d3-513f-47eb-99bb-91a86ad5ddb4', // replace with real TEST key
     preferenceApiUrl: 'http://localhost:8790/api/mercadopago/preference',
   },
 

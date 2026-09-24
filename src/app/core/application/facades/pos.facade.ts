@@ -23,10 +23,11 @@ import {
   LoyaltyAwardResult,
 } from '@core/application/use-cases/award-loyalty-points.use-case';
 import { Product } from '@core/domain/entities/product.entity';
-import { CustomerTier } from '@core/domain/entities/customer.entity';
+import { Customer, CustomerTier } from '@core/domain/entities/customer.entity';
 import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { ReceiptLine } from '@core/application/dtos/receipt.dto';
 import { SelfCheckoutReceipt } from '@core/application/ports/self-checkout-gateway.port';
+import { TransactionRemoteService } from '@core/application/services/transaction-remote.service';
 
 /**
  * The customer attached to the sale in progress.
@@ -81,6 +82,7 @@ export class PosFacade {
   private readonly telemetry = inject(TelemetryService);
   private readonly customers = inject(CustomerService);
   private readonly awardLoyaltyPoints = inject(AwardLoyaltyPointsUseCase);
+  private readonly transactionRemote = inject(TransactionRemoteService);
 
   /** The customer attached to the sale in progress, if any. */
   private readonly _attachedCustomer = signal<AttachedCustomer | null>(null);
@@ -244,6 +246,33 @@ export class PosFacade {
     return attached;
   }
 
+  /**
+   * Attaches a `Customer` entity directly to the current sale.
+   *
+   * Used by the kiosk shop, which resolves the customer through
+   * `KioskCustomerService` before checkout rather than through a loyalty-code scan.
+   * Fires the same `CUSTOMER_ATTACHED` event so downstream listeners (loyalty,
+   * event-bus monitors) behave identically to the POS path.
+   */
+  attachCustomerDirectly(customer: Customer): void {
+    const attached: AttachedCustomer = {
+      id: customer.id,
+      name: customer.name,
+      loyaltyPoints: customer.loyaltyPoints,
+      tier: customer.tier,
+    };
+    this._attachedCustomer.set(attached);
+
+    this.eventBus.publish(
+      busEvent(
+        EventType.CUSTOMER_ATTACHED,
+        EventSource.POS_FACADE,
+        { customerId: attached.id, tier: attached.tier },
+        'normal'
+      )
+    );
+  }
+
   /** Drops the attached customer, leaving the sale anonymous. */
   detachCustomer(): void {
     this._attachedCustomer.set(null);
@@ -252,16 +281,30 @@ export class PosFacade {
   // ─── Checkout Operations ──────────────────────────────────────────────
 
   /**
-   * Completes a checkout: generates receipt, adjusts stock, awards loyalty points,
-   * clears cart.
+   * Complete a sale.
    *
-   * Stock adjustment and the loyalty award are both best-effort — checkout completes
-   * even if they fail.
+   * @param paymentResult  Payment result from CheckoutComponent.
+   * @param remoteToken    Optional Bearer token for the remote-first write:
+   *                       - Kiosk terminal: device token from KioskSettingsService.
+   *                       - Customer phone (/shop): session token from sessionStorage.
+   *                       - POS terminal (no kiosk): omit — remote write is skipped.
    *
-   * @param paymentResult - The payment result from the checkout component
-   * @returns The generated receipt data
+   * When `remoteToken` is supplied, `POST /api/transactions` is called BEFORE the
+   * cart is cleared. If that call fails, this method throws `RemoteTransactionFailedError`
+   * and the cart is left intact so the customer can retry.
    */
-  async checkout(paymentResult: PaymentResult): Promise<ReceiptData> {
+  async checkout(paymentResult: PaymentResult, remoteToken?: string): Promise<ReceiptData> {
+    // Remote-first write: must succeed before we touch the cart.
+    if (remoteToken) {
+      const customer = this._attachedCustomer();
+      await this.transactionRemote.persistTransaction(
+        paymentResult,
+        remoteToken,
+        customer?.id,
+        undefined // customerEmail not available at facade level
+      );
+    }
+
     // Capture the attached customer BEFORE the sale ends and detaches them
     const attachedCustomer = this._attachedCustomer();
 

@@ -45,6 +45,9 @@ export const environment = {
   clerkAgentApiUrl:
     'https://capy-clerk-agent-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/clerk/agent',
 
+  // Product image upload path, appended to apiUrl: POST `${apiUrl}${imageApiPath}/${productId}/image`
+  imageApiPath: '/products',
+
   // A distinct IndexedDB name, not `capy_pos_prod`: a smoke run is a browser
   // profile in a CI container that never touches a real device, but there is
   // no reason to share a name with the database a real pilot till would use.

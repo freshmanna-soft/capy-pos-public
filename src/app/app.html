@@ -1,8 +1,4 @@
-@if (isKioskRoute()) {
-  <!-- Kiosk routes: full-screen, no nav chrome, no shell padding -->
-  <router-outlet />
-  <app-toast-container />
-} @else {
+@if (showShell()) {
   <div class="flex flex-col min-h-screen md:flex-row md:h-screen md:overflow-hidden">
     <app-navigation />
     <main class="flex-1 overflow-auto bg-gray-100 dark:bg-gray-900 pb-16 md:pb-0">
@@ -11,4 +7,8 @@
     <app-toast-container />
     <app-session-expiry-warning />
   </div>
+} @else {
+  <!-- Full-screen routes: /kiosk, /shop, /login, or unauthenticated -->
+  <router-outlet />
+  <app-toast-container />
 }

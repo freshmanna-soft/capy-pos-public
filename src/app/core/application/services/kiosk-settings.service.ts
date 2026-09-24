@@ -71,6 +71,12 @@ export interface TerminalRecord {
   fenceLat: number | null;
   fenceLng: number | null;
   fenceRadiusMeters: number;
+  /**
+   * Long-lived JWT issued by `POST /api/kiosk-device-token` (staff-generated once).
+   * Required for the remote-first transaction write from a physical kiosk terminal.
+   * Absent on terminals that have not yet been provisioned.
+   */
+  deviceToken?: string;
 }
 
 // ── Settings-table key helpers ───────────────────────────────────────────────
@@ -228,6 +234,14 @@ export class KioskSettingsService {
   readonly fenceLat = computed(() => this.activeTerminal().fenceLat);
   readonly fenceLng = computed(() => this.activeTerminal().fenceLng);
   readonly fenceRadiusMeters = computed(() => this.activeTerminal().fenceRadiusMeters);
+
+  // ── Device token (kiosk physical terminal) ────────────────────────────────
+
+  /**
+   * Long-lived JWT for the active terminal, or `null` when not yet provisioned.
+   * Used by `KioskShopComponent` as the Bearer token for `POST /api/transactions`.
+   */
+  readonly deviceToken = computed<string | null>(() => this.activeTerminal().deviceToken ?? null);
 
   readonly loading = this._loading.asReadonly();
 

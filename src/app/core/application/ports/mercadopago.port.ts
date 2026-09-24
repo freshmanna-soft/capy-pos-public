@@ -15,9 +15,18 @@ export interface MercadoPagoPaymentResult {
 /**
  * MercadoPago payment port — application-layer abstraction.
  *
- * Implementations (real SDK adapter or test stub) are registered via
- * `MERCADOPAGO_PAYMENT_PORT` so the checkout use-case and component never
- * import the infrastructure class directly.
+ * Two payment modes are supported:
+ *
+ *  - **Card Brick** (`createAndRender`) — the buyer types card details into the
+ *    MP iframe. The adapter POSTs the card token to the backend which charges it.
+ *
+ *  - **Wallet Brick** (`createWalletBrick`) — the buyer pays from their existing
+ *    MercadoPago account (the primary payment method in Latin America). The backend
+ *    creates a Preference; the Brick shows a QR / link the buyer completes in the
+ *    MP app. This is the recommended mode for point-of-sale.
+ *
+ * Implementations are registered via `MERCADOPAGO_PAYMENT_PORT` so the checkout
+ * component never imports the infrastructure class directly.
  */
 export interface MercadoPagoPort {
   /**
@@ -33,17 +42,36 @@ export interface MercadoPagoPort {
   loadSdk(): Promise<void>;
 
   /**
-   * Creates a payment preference via the operator backend, mounts the
-   * MercadoPago Payment Brick inside the given DOM container element, and
-   * resolves with the payment result once the buyer completes or cancels.
+   * **Card Brick mode.** The adapter POSTs `{ mode: 'card', formData, amount }`
+   * to the backend, which charges the card token. Resolves when the buyer
+   * completes or rejects.
    *
-   * @param amount   Amount to charge (read from the cart total).
-   * @param containerId  `id` of the DOM element where the Brick will render.
+   * @param amount      Amount to charge (read from the cart total).
+   * @param containerId `id` of the DOM element where the Brick will render.
    */
   createAndRender(amount: number, containerId: string): Promise<MercadoPagoPaymentResult>;
 
   /**
-   * Unmounts the active Brick and cleans up internal state.
+   * **Wallet Brick mode.** Asks the backend to create a MercadoPago Preference
+   * (`mode: 'wallet'`), then mounts the Wallet Brick inside `containerId`.
+   * The buyer logs in to their MP account / scans a QR to pay; the Brick
+   * resolves when MP confirms the payment.
+   *
+   * @param amount      Amount to charge.
+   * @param containerId `id` of the DOM element where the Wallet Brick will render.
+   */
+  /**
+   * Optional callback fired when the buyer clicks Pay and polling begins.
+   * Use it to switch the UI to a "waiting for confirmation" state.
+   */
+  createWalletBrick(
+    amount: number,
+    containerId: string,
+    onPollingStarted?: () => void
+  ): Promise<MercadoPagoPaymentResult>;
+
+  /**
+   * Unmounts any active Brick (Card or Wallet) and cleans up internal state.
    * Should be called when the checkout overlay is closed.
    */
   destroy(): void;

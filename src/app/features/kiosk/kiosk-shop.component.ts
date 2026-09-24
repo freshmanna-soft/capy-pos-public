@@ -31,6 +31,7 @@ import { ReceiptComponent } from '@features/pos-terminal/components/receipt/rece
 import { ReceiptData } from '@core/application/use-cases/generate-receipt.use-case';
 import { PosFacade } from '@core/application/facades';
 import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
+import { KioskCustomerService } from '@features/kiosk/kiosk-customer.service';
 import { GeofencingService } from '@core/application/services/geofencing.service';
 
 /** Poll cadence — matches the clerk's barcode-only mode. */
@@ -630,6 +631,52 @@ const POLL_MS = 150;
       />
     }
 
+    <!-- Checkout error banner — shown when posFacade.checkout() rejects.
+         Cart is preserved so the customer can try again or ask for help. -->
+    @if (checkoutError()) {
+      <div
+        class="fixed inset-x-0 bottom-0 z-[1050] flex items-center justify-between gap-4
+               bg-red-900/95 border-t border-red-700/60 px-6 py-5"
+        role="alert"
+        data-testid="kiosk-checkout-error"
+      >
+        <p class="text-white text-sm font-medium leading-snug">⚠️ {{ checkoutError() }}</p>
+        <button
+          class="flex-shrink-0 px-5 py-2.5 rounded-xl bg-white text-red-900 font-display font-bold text-sm
+                 active:scale-95 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          (click)="checkoutError.set(null); showCheckout.set(true)"
+          data-testid="kiosk-checkout-error-retry"
+        >
+          Try Again
+        </button>
+      </div>
+    }
+
+    <!-- Device-token missing banner — shown when openCheckout() is blocked because
+         this terminal has no provisioned device token. Staff must generate one in
+         Settings → Kiosk & Terminal before customers can check out. -->
+    @if (checkoutTokenMissing()) {
+      <div
+        class="fixed inset-x-0 bottom-0 z-[1050] flex items-center justify-between gap-4
+               bg-amber-900/95 border-t border-amber-700/60 px-6 py-5"
+        role="alert"
+        data-testid="kiosk-checkout-token-missing"
+      >
+        <p class="text-white text-sm font-medium leading-snug">
+          ⚙️ This terminal has no device token yet. Ask a staff member to generate one in
+          <strong>Settings → Kiosk &amp; Terminal</strong>.
+        </p>
+        <button
+          class="flex-shrink-0 px-5 py-2.5 rounded-xl bg-white text-amber-900 font-display font-bold text-sm
+                 active:scale-95 transition-transform focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          (click)="checkoutTokenMissing.set(false)"
+          data-testid="kiosk-checkout-token-missing-dismiss"
+        >
+          Dismiss
+        </button>
+      </div>
+    }
+
     <!-- Receipt overlay — shown after a successful payment.
          A 30 s auto-dismiss timer starts when it appears; the last 10 s are
          shown as a countdown strip so the customer knows it will close. -->
@@ -693,6 +740,13 @@ export class KioskShopComponent implements OnInit, OnDestroy {
   // ── idle-reset timer (shop page) ───────────────────────────────────────────
   /** Seconds remaining before the session auto-resets due to inactivity. */
   readonly idleCountdown = signal(0);
+  /**
+   * Non-null when posFacade.checkout() rejected — displayed in the error banner.
+   * Cart is preserved while this is set so the customer can retry.
+   */
+  readonly checkoutError = signal<string | null>(null);
+  /** True when openCheckout() was blocked because no device token is provisioned. */
+  readonly checkoutTokenMissing = signal(false);
   /** Seconds remaining before the receipt auto-dismisses. */
   readonly receiptCountdown = signal(0);
 
@@ -718,6 +772,7 @@ export class KioskShopComponent implements OnInit, OnDestroy {
   readonly maxQtyPerProduct = MAX_QTY_PER_PRODUCT;
   /** Kiosk settings — loaded on init; drives payment method visibility. */
   readonly kioskSettings = inject(KioskSettingsService);
+  private readonly kioskCustomer = inject(KioskCustomerService);
   private readonly geofencing = inject(GeofencingService);
   private readonly posFacade = inject(PosFacade);
   private readonly injector = inject(Injector);
@@ -961,6 +1016,13 @@ export class KioskShopComponent implements OnInit, OnDestroy {
   async openCheckout(): Promise<void> {
     if (this.cartService.isEmpty()) return;
 
+    // Block checkout if no device token has been provisioned for this terminal.
+    if (!this.kioskSettings.deviceToken()) {
+      this.checkoutTokenMissing.set(true);
+      return;
+    }
+    this.checkoutTokenMissing.set(false);
+
     if (this.kioskSettings.hasFencePolygon()) {
       this.fenceCheckingAtCheckout.set(true);
       try {
@@ -975,47 +1037,49 @@ export class KioskShopComponent implements OnInit, OnDestroy {
       }
     }
 
+    // Attach signed-in customer to the facade so loyalty points are awarded.
+    const customer = this.kioskCustomer.customer();
+    if (customer) {
+      this.posFacade.attachCustomerDirectly(customer);
+    }
+
     this.showCheckout.set(true);
   }
 
   closeCheckout(): void {
     this.showCheckout.set(false);
     this.fenceBlockedAtCheckout.set(false);
+    this.posFacade.detachCustomer();
   }
 
   handlePaymentComplete(result: PaymentResult): void {
-    // Generate receipt + persist transaction + adjust stock via the facade
-    // (same path as the POS terminal). The cart must still be full at this
-    // point — posFacade.checkout() reads it then clears it.
+    // Generate receipt + persist transaction + adjust stock via the facade.
+    // Pass the device token so PosFacade performs the remote-first write
+    // before clearing the cart. If the write fails, checkout() throws and
+    // the .catch() below preserves the cart for retry.
+    const deviceToken = this.kioskSettings.deviceToken() ?? undefined;
     this.posFacade
-      .checkout(result)
+      .checkout(result, deviceToken)
       .then((receipt) => {
+        this.checkoutError.set(null);
         this.receiptData.set(receipt);
         this.showCheckout.set(false);
         this.fenceBlockedAtCheckout.set(false);
         this.clearShopIdleTimers(); // pause shop idle while receipt is visible
         this.showReceipt.set(true);
         this.startReceiptTimer();
+        // Sale is complete — end the customer's session so the next shopper
+        // starts fresh. PosFacade.checkout() already called detachCustomer(),
+        // so only the kiosk-level customer state needs clearing here.
+        this.kioskCustomer.clear();
       })
       .catch(() => {
-        // Fallback: even if persistence fails, still show the receipt with
-        // the data we have rather than silently navigating away.
-        const fallback = {
-          payment: result,
-          items: [...this.cartService.items()],
-          subtotal: this.cartService.subtotal(),
-          tax: this.cartService.tax(),
-          taxRate: this.cartService.taxRate(),
-          total: this.cartService.total(),
-          storeName: this.kioskSettings.storeName() || 'Capy-POS',
-          storeAddress: this.kioskSettings.storeAddress(),
-        };
-        this.receiptData.set(fallback);
-        this.cartService.clearCart();
+        // Persistence failed — do NOT show a receipt and do NOT clear the cart.
+        // The customer can retry or ask a staff member. Cart stays intact.
+        // Detach the customer so a retry re-attaches cleanly via openCheckout().
         this.showCheckout.set(false);
-        this.clearShopIdleTimers();
-        this.showReceipt.set(true);
-        this.startReceiptTimer();
+        this.posFacade.detachCustomer();
+        this.checkoutError.set('Payment could not be saved — please try again or ask a cashier.');
       });
   }
 
@@ -1049,6 +1113,8 @@ export class KioskShopComponent implements OnInit, OnDestroy {
     this.shopIdleTimer = setTimeout(() => {
       this.clearShopIdleTimers();
       this.cartService.clearCart();
+      this.posFacade.detachCustomer();
+      this.kioskCustomer.clear();
       void this.router.navigate(['/kiosk']);
     }, this.shopIdleTimeoutMs);
 
@@ -1139,6 +1205,8 @@ export class KioskShopComponent implements OnInit, OnDestroy {
   executeBack(): void {
     this.showBackConfirm.set(false);
     this.cartService.clearCart();
+    this.posFacade.detachCustomer();
+    this.kioskCustomer.clear();
     void this.router.navigate(['/kiosk']);
   }
 

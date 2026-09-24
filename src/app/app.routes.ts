@@ -18,23 +18,34 @@ import { SelfCheckoutAttemptStore } from '@core/infrastructure/payments/self-che
 import { CUSTOMER_LOYALTY_GATEWAY } from '@core/application/ports/customer-loyalty-gateway.port';
 import { CurrentCustomerLoyaltyService } from '@core/application/auth/current-customer-loyalty.service';
 import { CustomerLoyaltyHttpAdapter } from '@core/infrastructure/loyalty/customer-loyalty-http.adapter';
+import { permissionGuard } from '@core/presentation/guards/permission.guard';
+import { Permission } from '@core/domain/auth';
 
 export const routes: Routes = [
   {
     path: '',
-    redirectTo: 'kiosk',
+    redirectTo: 'shop',
     pathMatch: 'full',
   },
   {
     path: 'kiosk',
+    canActivate: [authGuard, permissionGuard(Permission.USE_KIOSK)],
     loadComponent: () =>
       import('./features/kiosk/kiosk-splash.component').then((m) => m.KioskSplashComponent),
     title: 'Welcome · Capy Shop',
   },
   {
     path: 'kiosk/shop',
+    canActivate: [authGuard, permissionGuard(Permission.USE_KIOSK)],
     loadComponent: () =>
       import('./features/kiosk/kiosk-shop.component').then((m) => m.KioskShopComponent),
+    title: 'Shop · Capy Shop',
+  },
+  {
+    // Customer-phone scan-and-go route — no auth guard, no URL params.
+    // Store is resolved at runtime from geofence / settings / fallback.
+    path: 'shop',
+    loadComponent: () => import('./features/shop/shop.component').then((m) => m.ShopComponent),
     title: 'Shop · Capy Shop',
   },
   {
@@ -262,7 +273,34 @@ export const routes: Routes = [
     title: 'Sign In',
   },
   {
+    // MercadoPago back_url redirect targets. The tab that MP opens is sent
+    // here after checkout; PaymentCallbackComponent broadcasts the result
+    // via BroadcastChannel so the original tab can settle immediately.
+    path: 'payment/success',
+    loadComponent: () =>
+      import('./features/payment-callback/payment-callback.component').then(
+        (m) => m.PaymentCallbackComponent
+      ),
+    title: 'Payment complete',
+  },
+  {
+    path: 'payment/failure',
+    loadComponent: () =>
+      import('./features/payment-callback/payment-callback.component').then(
+        (m) => m.PaymentCallbackComponent
+      ),
+    title: 'Payment failed',
+  },
+  {
+    path: 'payment/pending',
+    loadComponent: () =>
+      import('./features/payment-callback/payment-callback.component').then(
+        (m) => m.PaymentCallbackComponent
+      ),
+    title: 'Payment pending',
+  },
+  {
     path: '**',
-    redirectTo: 'kiosk',
+    redirectTo: 'shop',
   },
 ];

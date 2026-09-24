@@ -18,6 +18,7 @@ export interface CreateProductRequest {
   cost: number;
   stock: number;
   description?: string;
+  imageUrl?: string;
   emoji?: string;
   barcode?: string;
   lowStockThreshold?: number;
@@ -36,6 +37,7 @@ export interface UpdateProductRequest {
   cost?: number;
   stock?: number;
   description?: string;
+  imageUrl?: string;
   emoji?: string;
   barcode?: string;
   lowStockThreshold?: number;
@@ -67,6 +69,7 @@ export interface ProductSummaryDTO {
   isActive: boolean;
   lowStockThreshold: number;
   description: string;
+  imageUrl?: string;
   barcode: string;
   /**
    * Included so the edit form can round-trip it.
@@ -168,7 +171,7 @@ export class ManageInventoryUseCase {
         request.category,
         request.stock,
         request.description,
-        undefined,
+        request.imageUrl,
         request.barcode,
         request.emoji,
         request.lowStockThreshold ?? 10,
@@ -300,6 +303,7 @@ export class ManageInventoryUseCase {
       'cost',
       'stock',
       'description',
+      'imageUrl',
       'emoji',
       'barcode',
       'lowStockThreshold',
@@ -371,6 +375,7 @@ export class ManageInventoryUseCase {
       isActive: product.isActive,
       lowStockThreshold: product.lowStockThreshold,
       description: product.description ?? '',
+      imageUrl: product.imageUrl,
       barcode: product.barcode ?? '',
       reorderQuantity: product.reorderQuantity,
     };
