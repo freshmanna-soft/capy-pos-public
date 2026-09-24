@@ -633,3 +633,121 @@ describe('ShopComponent — receipt and navigation', () => {
     expect(router.navigate as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(['/shop']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// handleCreateAccount — uncovered branches
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — handleCreateAccount', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.resetTestingModule();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('sets authError when email is empty', async () => {
+    const { component } = setup();
+    component.authEmail = '';
+    await component.handleCreateAccount();
+    expect(component.authError()).toBe('Please enter your email address.');
+  });
+
+  it('sets authError when email has no @', async () => {
+    const { component } = setup();
+    component.authEmail = 'notanemail';
+    await component.handleCreateAccount();
+    expect(component.authError()).toBe('Please enter a valid email address.');
+  });
+
+  it('signs in existing customer without creating a new one', async () => {
+    const { component, fixture } = setup();
+    const repo = fixture.debugElement.injector.get(CUSTOMER_REPOSITORY);
+    const existing = { id: 'c1', email: 'a@b.com' } as never;
+    (repo.findByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
+
+    component.authEmail = 'a@b.com';
+    await component.handleCreateAccount();
+
+    expect(repo.create).not.toHaveBeenCalled();
+    expect(component.showAuthModal()).toBe(false);
+  });
+
+  it('creates a new customer when none exists', async () => {
+    const { component, fixture } = setup();
+    const repo = fixture.debugElement.injector.get(CUSTOMER_REPOSITORY);
+    const created = { id: 'c2', email: 'new@b.com' } as never;
+    (repo.findByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (repo.create as ReturnType<typeof vi.fn>).mockResolvedValue(created);
+
+    component.authEmail = 'new@b.com';
+    await component.handleCreateAccount();
+
+    expect(repo.create).toHaveBeenCalled();
+    expect(component.showAuthModal()).toBe(false);
+  });
+
+  it('sets authError on repository exception', async () => {
+    const { component, fixture } = setup();
+    const repo = fixture.debugElement.injector.get(CUSTOMER_REPOSITORY);
+    (repo.findByEmail as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('db down'));
+
+    component.authEmail = 'x@y.com';
+    await component.handleCreateAccount();
+
+    expect(component.authError()).toContain('Could not create account');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handlePaymentComplete — checkout error path (line 1013)
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — handlePaymentComplete checkout error', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.resetTestingModule();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('sets checkoutError when remote persistence fails with an Error', async () => {
+    const { component, fixture } = setup();
+    const facade = fixture.debugElement.injector.get(PosFacade);
+    (facade.checkout as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('network failure'));
+
+    component.showCheckout.set(true);
+    await component.handlePaymentComplete({
+      method: 'mercadopago',
+      amount: 10,
+      transactionId: 'tx-1',
+      timestamp: new Date(),
+    });
+    await flushMicrotasks();
+
+    expect(component.checkoutError()).toContain('network failure');
+    expect(component.showCheckout()).toBe(false);
+  });
+
+  it('sets checkoutError when remote persistence fails with a non-Error', async () => {
+    const { component, fixture } = setup();
+    const facade = fixture.debugElement.injector.get(PosFacade);
+    (facade.checkout as ReturnType<typeof vi.fn>).mockRejectedValue('string error');
+
+    component.showCheckout.set(true);
+    await component.handlePaymentComplete({
+      method: 'mercadopago',
+      amount: 10,
+      transactionId: 'tx-2',
+      timestamp: new Date(),
+    });
+    await flushMicrotasks();
+
+    expect(component.checkoutError()).toContain('please try again');
+    expect(component.showCheckout()).toBe(false);
+  });
+});

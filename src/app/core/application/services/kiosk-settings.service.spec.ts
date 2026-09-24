@@ -376,3 +376,27 @@ describe('KioskSettingsService', () => {
     });
   });
 });
+
+describe('KioskSettingsService — activeOrg computed', () => {
+  let service: KioskSettingsService;
+
+  beforeEach(() => {
+    const { mockDb } = buildMockDb();
+    TestBed.configureTestingModule({
+      providers: [KioskSettingsService, { provide: DexieDatabase, useValue: mockDb }],
+    });
+    service = TestBed.inject(KioskSettingsService);
+  });
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('returns defaultOrg when no orgs are loaded (no-match fallback)', () => {
+    // No data loaded — _orgs is empty, so the ?? defaultOrg() branch fires.
+    expect(service.activeOrg().orgId).toBe('default-org');
+  });
+
+  it('still returns a valid org after load (exercises the find() branch)', async () => {
+    await service.load();
+    expect(service.activeOrg()).toBeDefined();
+    expect(typeof service.activeOrg().orgId).toBe('string');
+  });
+});
