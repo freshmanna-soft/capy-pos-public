@@ -14,8 +14,9 @@ export default defineConfig({
   /* Fail the build on CI if you accidentally left test.only in the source code */
   forbidOnly: !!process.env.CI,
 
-  /* Retry on CI only */
-  retries: process.env.CI ? 2 : 0,
+  /* Retry: 2 on CI, 1 locally (guards against resource-contention flakes after the
+     unit-test run that precedes e2e in the pre-push hook). */
+  retries: process.env.CI ? 2 : 1,
 
   /* Opt out of parallel tests on CI */
   workers: process.env.CI ? 1 : undefined,
@@ -75,7 +76,11 @@ export default defineConfig({
     command: 'npm run start',
     url: 'http://localhost:4200',
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
+    // 180 s: the pre-push hook runs unit tests first (~90 s); by the time
+    // Playwright starts the Angular dev server the machine is under load, so
+    // the default 120 s window is too tight. 180 s gives comfortable headroom
+    // without wasting significant time when the server starts normally (~5 s).
+    timeout: 180 * 1000,
   },
 });
 
