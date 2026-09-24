@@ -233,7 +233,8 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
   private zone = inject(NgZone);
 
   private L!: typeof L;
-  private map: L.Map | null = null;
+  private map!: L.Map;
+  private mapDestroyed = false;
   private polyline: L.Polyline | null = null; // preview line while drawing
   private filledPoly: L.Polygon | null = null; // filled polygon layer
   private vertexMarkers: L.Marker[] = [];
@@ -251,9 +252,9 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    if (this.map) {
+    if (!this.mapDestroyed && this.map) {
+      this.mapDestroyed = true;
       this.map.remove();
-      this.map = null;
     }
   }
 
@@ -313,7 +314,7 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
     this.L = leafletModule.default ?? leafletModule;
 
     // Fix the missing marker icon path that Leaflet has in bundler environments
-    delete (this.L.Icon.Default.prototype as Record<string, unknown>)['_getIconUrl'];
+    delete (this.L.Icon.Default.prototype as unknown as Record<string, unknown>)['_getIconUrl'];
     this.L.Icon.Default.mergeOptions({
       iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
       iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
