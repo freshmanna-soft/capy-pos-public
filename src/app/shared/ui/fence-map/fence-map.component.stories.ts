@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/angular';
 import { FenceMapComponent } from './fence-map.component';
+import type { LatLng } from '@core/application/services/kiosk-settings.service';
 
 /**
  * FenceMapComponent Stories
@@ -19,21 +20,17 @@ type Story = StoryObj<FenceMapComponent>;
 
 export const NoFence: Story = {
   args: {
-    polygon: [],
-    centerLat: 40.7128,
-    centerLng: -74.006,
+    initialPolygon: [] as LatLng[],
   },
 };
 
 export const WithFence: Story = {
   args: {
-    polygon: [
+    initialPolygon: [
       { lat: 40.715, lng: -74.009 },
       { lat: 40.715, lng: -74.003 },
       { lat: 40.711, lng: -74.003 },
       { lat: 40.711, lng: -74.009 },
-    ],
-    centerLat: 40.713,
-    centerLng: -74.006,
+    ] as LatLng[],
   },
 };
