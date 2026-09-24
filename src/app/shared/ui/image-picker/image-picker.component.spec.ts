@@ -185,6 +185,62 @@ describe('ImagePickerComponent', () => {
     expect(host.emittedUrls).toContain('https://example.com/img.jpg');
   });
 
+  it('does nothing on onUrlCommit when the URL is blank', () => {
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+
+    picker.onUrlCommit('   ');
+
+    httpMock.expectNone(() => true);
+    expect(host.emittedUrls).toHaveLength(0);
+  });
+
+  it('sets uploadError when the HTTP upload fails', () => {
+    const file = makeFile('photo.jpg', 'image/jpeg', 512 * 1024);
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+
+    picker.onFileSelected(makeChangeEvent(file));
+    fixture.detectChanges();
+
+    const expectedUrl = `${environment.apiUrl}${environment.imageApiPath}/prod-001/image`;
+    const req = httpMock.expectOne(expectedUrl);
+    req.error(new ProgressEvent('error'), { status: 500 });
+    fixture.detectChanges();
+
+    expect(picker.uploadError()).toContain('failed');
+    expect(picker.uploading()).toBe(false);
+  });
+
+  it('sets uploadError when captureFrame returns null', async () => {
+    // captureFrame is already stubbed to return null in beforeEach.
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+
+    await picker.captureFromCamera();
+    fixture.detectChanges();
+
+    expect(picker.uploadError()).toContain('Camera capture failed');
+    expect(picker.cameraActive()).toBe(false);
+  });
+
+  it('does nothing when onFileSelected fires with no file in the input', () => {
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+    const event = { target: { files: [] } } as unknown as Event;
+
+    picker.onFileSelected(event);
+
+    httpMock.expectNone(() => true);
+    expect(picker.uploadError()).toBeNull();
+  });
+
+  it('stops camera when captureFromCamera is called while camera is already active', async () => {
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+    picker.cameraActive.set(true);
+
+    await picker.captureFromCamera();
+
+    expect(cameraStop).toHaveBeenCalled();
+    expect(picker.cameraActive()).toBe(false);
+  });
+
   // -------------------------------------------------------------------------
   // Test 5 — captureFromCamera → captureFrame called → POST → emits URL
   // -------------------------------------------------------------------------

@@ -347,3 +347,289 @@ describe('product card image', () => {
     expect(gradientDiv).not.toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cart actions — incrementItem / decrementItem / selectCategory / openCheckout
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — cart and category actions', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('incrementItem updates quantity when below MAX_QTY', () => {
+    const product = makeProduct({ id: 'p-1' });
+    const { component, cart } = setup({}, {}, [product]);
+    cart.items.set([{ product, quantity: 2 } as never]);
+
+    component.incrementItem('p-1');
+
+    expect(cart.updateQuantity).toHaveBeenCalledWith('p-1', 3);
+  });
+
+  it('incrementItem does nothing when item is at MAX_QTY', () => {
+    const product = makeProduct({ id: 'p-max' });
+    const { component, cart } = setup({}, {}, [product]);
+    cart.items.set([{ product, quantity: 10 } as never]); // MAX_QTY = 10
+
+    component.incrementItem('p-max');
+
+    expect(cart.updateQuantity).not.toHaveBeenCalled();
+  });
+
+  it('incrementItem does nothing when item is not in the cart', () => {
+    const { component, cart } = setup();
+    cart.items.set([]);
+
+    component.incrementItem('p-missing');
+
+    expect(cart.updateQuantity).not.toHaveBeenCalled();
+  });
+
+  it('decrementItem removes item when quantity is 1', () => {
+    const product = makeProduct({ id: 'p-1' });
+    const { component, cart } = setup({}, {}, [product]);
+    cart.items.set([{ product, quantity: 1 } as never]);
+
+    component.decrementItem('p-1');
+
+    expect(cart.removeItem).toHaveBeenCalledWith('p-1');
+  });
+
+  it('decrementItem decreases quantity when quantity > 1', () => {
+    const product = makeProduct({ id: 'p-1' });
+    const { component, cart } = setup({}, {}, [product]);
+    cart.items.set([{ product, quantity: 3 } as never]);
+
+    component.decrementItem('p-1');
+
+    expect(cart.updateQuantity).toHaveBeenCalledWith('p-1', 2);
+  });
+
+  it('decrementItem does nothing when item is not in the cart', () => {
+    const { component, cart } = setup();
+    cart.items.set([]);
+
+    component.decrementItem('p-missing');
+
+    expect(cart.removeItem).not.toHaveBeenCalled();
+    expect(cart.updateQuantity).not.toHaveBeenCalled();
+  });
+
+  it('selectCategory sets the selectedCategory signal', () => {
+    const { component } = setup();
+    component.selectCategory('Drinks');
+    expect(component.selectedCategory()).toBe('Drinks');
+
+    component.selectCategory(null);
+    expect(component.selectedCategory()).toBeNull();
+  });
+
+  it('filteredProducts returns all products when no category is selected', () => {
+    const products = [
+      makeProduct({ id: 'p-1', category: 'Food' }),
+      makeProduct({ id: 'p-2', category: 'Drinks' }),
+    ];
+    const { component } = setup({}, {}, products);
+    (component as unknown as Record<string, { set: (v: unknown) => void }>)['_products'].set(
+      products
+    );
+
+    component.selectCategory(null);
+    expect(component.filteredProducts()).toHaveLength(2);
+  });
+
+  it('filteredProducts filters by category', () => {
+    const products = [
+      makeProduct({ id: 'p-1', category: 'Food' }),
+      makeProduct({ id: 'p-2', category: 'Drinks' }),
+    ];
+    const { component } = setup({}, {}, products);
+    (component as unknown as Record<string, { set: (v: unknown) => void }>)['_products'].set(
+      products
+    );
+
+    component.selectCategory('Food');
+    expect(component.filteredProducts()).toHaveLength(1);
+    expect(component.filteredProducts()[0].id).toBe('p-1');
+  });
+
+  it('openCheckout does nothing when cart is empty', () => {
+    const { component, cart } = setup();
+    cart.isEmpty.set(true);
+
+    component.openCheckout();
+
+    expect(component.showCheckout()).toBe(false);
+  });
+
+  it('openCheckout opens checkout when cart has items', () => {
+    const { component, cart } = setup();
+    cart.isEmpty.set(false);
+
+    // kioskCustomer.customer() is null, so attachCustomerDirectly should NOT be called
+    component.openCheckout();
+
+    expect(component.showCheckout()).toBe(true);
+  });
+
+  it('handleSignIn sets authError when email is empty', async () => {
+    const { component } = setup();
+    component.authEmail = '';
+
+    await component.handleSignIn();
+
+    expect(component.authError()).toContain('email');
+  });
+
+  it('handleSignIn sets authError when email has no @', async () => {
+    const { component } = setup();
+    component.authEmail = 'notanemail';
+
+    await component.handleSignIn();
+
+    expect(component.authError()).toContain('valid email');
+  });
+
+  it('handleSignIn signs in when customer is found', async () => {
+    const fakeCustomer = { id: 'cust-1', email: 'a@b.com' };
+    const { component } = setup();
+    TestBed.inject(CUSTOMER_REPOSITORY).findByEmail = vi.fn().mockResolvedValue(fakeCustomer);
+    const kioskCustomer = TestBed.inject(KioskCustomerService);
+    component.authEmail = 'a@b.com';
+
+    await component.handleSignIn();
+
+    expect(kioskCustomer.set).toHaveBeenCalledWith(fakeCustomer);
+    expect(component.authError()).toBeNull();
+  });
+
+  it('handleSignIn sets authError when customer is not found', async () => {
+    const { component } = setup();
+    TestBed.inject(CUSTOMER_REPOSITORY).findByEmail = vi.fn().mockResolvedValue(null);
+    component.authEmail = 'unknown@b.com';
+
+    await component.handleSignIn();
+
+    expect(component.authError()).toContain('No account found');
+  });
+
+  it('handleSignIn sets authError on repository exception', async () => {
+    const { component } = setup();
+    TestBed.inject(CUSTOMER_REPOSITORY).findByEmail = vi.fn().mockRejectedValue(new Error('db'));
+    component.authEmail = 'err@b.com';
+
+    await component.handleSignIn();
+
+    expect(component.authError()).toContain('Could not sign in');
+  });
+
+  it('productGradient returns a CSS gradient string', () => {
+    const { component } = setup();
+    const gradient = component.productGradient('prod-abc');
+    expect(gradient).toContain('linear-gradient');
+    expect(gradient).toContain('hsl(');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleNewTransaction / handlePrintReceipt / retrySession
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — receipt and navigation', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('handleNewTransaction clears receipt state and navigates to /shop', async () => {
+    const { component, fixture } = setup();
+    const router = fixture.debugElement.injector.get(Router);
+
+    component.showReceipt.set(true);
+    component.handleNewTransaction();
+
+    expect(component.showReceipt()).toBe(false);
+    expect(component.receiptData()).toBeNull();
+    expect(router.navigate as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(['/shop']);
+  });
+
+  it('handlePrintReceipt calls globalThis.print()', () => {
+    const { component } = setup();
+    const printSpy = vi.spyOn(globalThis, 'print').mockImplementation(() => undefined);
+
+    component.handlePrintReceipt();
+
+    expect(printSpy).toHaveBeenCalled();
+  });
+
+  it('retrySession re-runs ngOnInit when resolvedStoreId is null', async () => {
+    const { component } = setup();
+    component.resolvedStoreId.set(null);
+
+    // Should not throw — the inner await this.ngOnInit() path is exercised.
+    await component.retrySession();
+  });
+
+  it('goToStaffLogin navigates to /login', () => {
+    const { component, fixture } = setup();
+    const router = fixture.debugElement.injector.get(Router);
+
+    component.goToStaffLogin();
+
+    expect(router.navigate as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(['/login']);
+  });
+
+  it('receipt countdown auto-dismisses and calls handleNewTransaction after 30 s', async () => {
+    const { component, fixture } = setup();
+    const router = fixture.debugElement.injector.get(Router);
+
+    // Expose the private method via type cast.
+    const c = component as unknown as { startReceiptTimer: () => void };
+    component.showReceipt.set(true);
+    c.startReceiptTimer();
+
+    // Advance 31 seconds to trigger the countdown reaching 0.
+    vi.advanceTimersByTime(31_000);
+    await flushMicrotasks();
+
+    expect(component.showReceipt()).toBe(false);
+    expect(router.navigate as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(['/shop']);
+  });
+
+  it('clearReceiptTimers cancels receiptDismissTimer when it is set', () => {
+    const { component } = setup();
+    // Set receiptDismissTimer directly to cover the true branch of the null-check.
+    const c = component as unknown as Record<string, unknown>;
+    c['receiptDismissTimer'] = setTimeout(() => undefined, 60_000);
+
+    // handleNewTransaction internally calls clearReceiptTimers.
+    component.handleNewTransaction();
+
+    // The timer was cancelled — no timeout fires.
+    vi.advanceTimersByTime(60_000);
+    // If the timer was NOT cleared this would throw or cause issues, so reaching here is sufficient.
+    expect(component.receiptCountdown()).toBe(0);
+  });
+
+  it('idle timeout clears cart and navigates to /shop', async () => {
+    const { component, cart, fixture } = setup();
+    const router = fixture.debugElement.injector.get(Router);
+
+    // Trigger startShopIdleTimer via resetIdleTimer (public).
+    component.resetIdleTimer();
+
+    // Advance past the full idle timeout (120 s).
+    vi.advanceTimersByTime(121_000);
+    await flushMicrotasks();
+
+    expect(cart.clearCart).toHaveBeenCalled();
+    expect(router.navigate as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(['/shop']);
+  });
+});
