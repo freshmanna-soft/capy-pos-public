@@ -11,6 +11,7 @@ import { AuditLogService } from '@core/infrastructure/audit/audit-log.service';
 import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 import { CustomerService } from '@core/application/services/customer.service';
 import { AwardLoyaltyPointsUseCase } from '@core/application/use-cases/award-loyalty-points.use-case';
+import { TransactionRemoteService } from '@core/application/services/transaction-remote.service';
 import { Product } from '@core/domain/entities/product.entity';
 import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
 import { SelfCheckoutReceipt } from '@core/application/ports/self-checkout-gateway.port';
@@ -99,6 +100,10 @@ describe('PosFacade', () => {
         { provide: CustomerService, useValue: mockCustomers },
         { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
         { provide: EventBusService, useValue: mockEventBus },
+        {
+          provide: TransactionRemoteService,
+          useValue: { persistTransaction: vi.fn().mockResolvedValue(undefined) },
+        },
       ],
     });
 
@@ -836,6 +841,72 @@ describe('PosFacade', () => {
     });
   });
 
+  describe('attachCustomerDirectly', () => {
+    it('publishes CUSTOMER_ATTACHED event with id and tier', () => {
+      const customer = new Customer({
+        id: 'direct-cust-1',
+        name: 'Direct User',
+        email: 'd@example.com',
+        phone: '+1000000000',
+        status: CustomerStatus.ACTIVE,
+        loyaltyPoints: 100,
+        tier: CustomerTier.BRONZE,
+        loyaltyCode: 'CAPY-DIRECT01',
+      });
+
+      facade.attachCustomerDirectly(customer);
+
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: EventType.CUSTOMER_ATTACHED,
+          payload: expect.objectContaining({
+            customerId: 'direct-cust-1',
+            tier: CustomerTier.BRONZE,
+          }),
+        })
+      );
+      expect(facade.attachedCustomer()?.id).toBe('direct-cust-1');
+    });
+  });
+
+  describe('checkout with remoteToken', () => {
+    it('calls persistTransaction before clearing the cart when a token is supplied', async () => {
+      const mockTransactionRemote = TestBed.inject(TransactionRemoteService);
+      const payment = { method: 'cash', amount: 10, transactionId: 'TXN-RT' };
+
+      await facade.checkout(payment as never, 'bearer-token');
+
+      expect(mockTransactionRemote.persistTransaction).toHaveBeenCalledWith(
+        payment,
+        'bearer-token',
+        undefined, // customer?.id when no customer is attached
+        undefined
+      );
+      expect(mockCartService.clearCart).toHaveBeenCalled();
+    });
+  });
+
+  describe('serverCheckoutReceiptData — invalid date', () => {
+    it('throws when completedAt is not a valid ISO timestamp', () => {
+      const badReceipt: SelfCheckoutReceipt = {
+        transactionId: 'bad-tx',
+        checkoutId: 'bad-checkout',
+        paypalCaptureId: 'bad-capture',
+        completedAt: 'not-a-date',
+        quote: {
+          currency: 'USD',
+          taxRateBasisPoints: 0,
+          lines: [],
+          subtotalMinorUnits: 0,
+          taxMinorUnits: 0,
+          totalMinorUnits: 0,
+        },
+      };
+
+      expect(() => facade.serverCheckoutReceiptData(badReceipt)).toThrow('invalid completion time');
+    });
+  });
+
   describe('database initialization', () => {
     it('should delegate initializeDatabase to DexieDatabase', async () => {
       await facade.initializeDatabase();
@@ -874,6 +945,7 @@ describe('PosFacade cartRevision over the real CartService', () => {
         { provide: EventBusService, useValue: { publish: vi.fn() } },
         { provide: AuditLogService, useValue: { log: vi.fn() } },
         { provide: TelemetryService, useValue: { recordCounter: vi.fn() } },
+        { provide: TransactionRemoteService, useValue: { persistTransaction: vi.fn() } },
       ],
     });
     facade = TestBed.inject(PosFacade);

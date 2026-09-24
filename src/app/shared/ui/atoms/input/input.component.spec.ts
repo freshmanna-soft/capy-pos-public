@@ -161,4 +161,51 @@ describe('InputComponent (atom)', () => {
 
     expect(field().value).toBe('');
   });
+
+  describe('inputClasses — size and suffix branches', () => {
+    it('adds size class when size is sm', () => {
+      fixture.componentRef.setInput('size', 'sm');
+      fixture.detectChanges();
+      expect(component.inputClasses()).toContain('input-sm');
+    });
+
+    it('adds size class when size is lg', () => {
+      fixture.componentRef.setInput('size', 'lg');
+      fixture.detectChanges();
+      expect(component.inputClasses()).toContain('input-lg');
+    });
+
+    it('does not add size class when size is md (default)', () => {
+      fixture.detectChanges();
+      expect(component.inputClasses()).not.toContain('input-md');
+    });
+
+    it('adds pr-8 class when suffix is provided', () => {
+      fixture.componentRef.setInput('suffix', '$');
+      fixture.detectChanges();
+      expect(component.inputClasses()).toContain('pr-8');
+    });
+
+    it('does not add pr-8 when no suffix', () => {
+      fixture.detectChanges();
+      expect(component.inputClasses()).not.toContain('pr-8');
+    });
+  });
+
+  describe('badInput validity — skips emit when input is incomplete', () => {
+    it('does not emit a value when the input has badInput validity', () => {
+      fixture.componentRef.setInput('type', 'number');
+      fixture.detectChanges();
+
+      const seen: unknown[] = [];
+      component.valueChange.subscribe((v) => seen.push(v));
+
+      // Simulate a badInput event (e.g. "4." not yet a valid number)
+      const input = field();
+      Object.defineProperty(input, 'validity', { value: { badInput: true }, configurable: true });
+      input.dispatchEvent(new Event('input'));
+
+      expect(seen).toHaveLength(0);
+    });
+  });
 });

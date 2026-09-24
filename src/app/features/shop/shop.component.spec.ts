@@ -842,3 +842,186 @@ describe('ShopComponent — handlePaymentComplete checkout error', () => {
     expect(component.showCheckout()).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// acquireSession / retrySession — fetch paths (lines 895-900, 913, 937)
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — acquireSession and retrySession', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.resetTestingModule();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function setupNoSession(
+    fetchResponse: { ok: boolean; json?: () => Promise<unknown> } = {
+      ok: true,
+      json: () => Promise.resolve({ token: 'new-token', expiresAt: '' }),
+    }
+  ) {
+    const camera = makeCamera();
+    const scanner = makeScanner();
+    const cart = makeCartStub();
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(fetchResponse));
+    vi.stubGlobal('sessionStorage', {
+      getItem: vi.fn().mockReturnValue(null), // no existing session
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+
+    TestBed.configureTestingModule({
+      imports: [ShopComponent],
+      providers: [
+        { provide: Router, useValue: { navigate: vi.fn() } },
+        { provide: CartService, useValue: cart },
+        { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
+        {
+          provide: KioskSettingsService,
+          useValue: {
+            load: vi.fn().mockResolvedValue(undefined),
+            stores: signal([{ storeId: 'store-1', name: 'Test Store' }]),
+            storeId: signal('store-1'),
+            storeName: signal('Test Store'),
+            storeAddress: signal(''),
+            terminals: signal([]),
+            hasFencePolygon: vi.fn().mockReturnValue(false),
+            setActiveTerminal: vi.fn(),
+            mercadopagoActive: signal(false),
+          },
+        },
+        {
+          provide: GeofencingService,
+          useValue: { checkFence: vi.fn().mockResolvedValue('inside'), reset: vi.fn() },
+        },
+        {
+          provide: KioskCustomerService,
+          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
+        },
+        {
+          provide: PosFacade,
+          useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
+        },
+        { provide: BarcodeScannerService, useValue: scanner },
+        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
+      ],
+    });
+    TestBed.overrideComponent(ShopComponent, {
+      remove: { providers: [CameraService] },
+      add: { providers: [{ provide: CameraService, useValue: camera }] },
+    });
+
+    const fixture = TestBed.createComponent(ShopComponent);
+    const component = fixture.componentInstance;
+    return { fixture, component, cart };
+  }
+
+  it('acquireSession succeeds: stores token and transitions to shopping view', async () => {
+    const { component } = setupNoSession();
+    // ngOnInit triggers acquireSession since there is no existing session token
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    expect(component.view()).toBe('shopping');
+  });
+
+  it('acquireSession with response.ok = false sets session-error view', async () => {
+    const { component } = setupNoSession({ ok: false });
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    expect(component.view()).toBe('session-error');
+    expect(component.sessionError()).toContain('Session request failed');
+  });
+
+  it('retrySession with a known storeId calls acquireSession again', async () => {
+    const { component } = setupNoSession();
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    component.resolvedStoreId.set('store-1');
+    await component.retrySession();
+    await flushMicrotasks();
+
+    expect(component.view()).toBe('shopping');
+  });
+
+  it('loadProducts catch path sets isLoading to false on error', async () => {
+    const camera = makeCamera();
+    const scanner = makeScanner();
+    const cart = makeCartStub();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ token: 'tok', expiresAt: '' }),
+      })
+    );
+    vi.stubGlobal('sessionStorage', {
+      getItem: vi.fn().mockReturnValue(null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+
+    TestBed.configureTestingModule({
+      imports: [ShopComponent],
+      providers: [
+        { provide: Router, useValue: { navigate: vi.fn() } },
+        { provide: CartService, useValue: cart },
+        {
+          provide: ProductService,
+          useValue: { getActiveProducts: vi.fn().mockRejectedValue(new Error('db down')) },
+        },
+        {
+          provide: KioskSettingsService,
+          useValue: {
+            load: vi.fn().mockResolvedValue(undefined),
+            stores: signal([{ storeId: 'store-1', name: 'Test Store' }]),
+            storeId: signal('store-1'),
+            storeName: signal('Test Store'),
+            storeAddress: signal(''),
+            terminals: signal([]),
+            hasFencePolygon: vi.fn().mockReturnValue(false),
+            setActiveTerminal: vi.fn(),
+            mercadopagoActive: signal(false),
+          },
+        },
+        {
+          provide: GeofencingService,
+          useValue: { checkFence: vi.fn().mockResolvedValue('inside'), reset: vi.fn() },
+        },
+        {
+          provide: KioskCustomerService,
+          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
+        },
+        {
+          provide: PosFacade,
+          useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
+        },
+        { provide: BarcodeScannerService, useValue: scanner },
+        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
+      ],
+    });
+    TestBed.overrideComponent(ShopComponent, {
+      remove: { providers: [CameraService] },
+      add: { providers: [{ provide: CameraService, useValue: camera }] },
+    });
+
+    const fixture = TestBed.createComponent(ShopComponent);
+    const component = fixture.componentInstance;
+
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(component.isLoading()).toBe(false);
+  });
+});

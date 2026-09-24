@@ -126,4 +126,29 @@ describe('CurrentCustomerLoyaltyService', () => {
     expect(customer.isAuthenticated()).toBe(true);
     expect(loyalty.projection()).toBeNull();
   });
+
+  it('refresh() reloads the projection when a session is active', async () => {
+    const read = vi.fn().mockResolvedValue(projection);
+    const { customer, loyalty } = setup(read);
+
+    customer.setSession(session('customer-a'));
+    TestBed.tick();
+    await vi.waitFor(() => expect(loyalty.projection()).toEqual(projection));
+
+    // Change the server value and trigger a refresh
+    const updated = { ...projection, pointsBalance: 999 };
+    read.mockResolvedValue(updated);
+    loyalty.refresh();
+    await vi.waitFor(() => expect(loyalty.projection()).toEqual(updated));
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it('refresh() when session is null does nothing', () => {
+    const read = vi.fn();
+    const { loyalty } = setup(read);
+    // No session set — session() is null
+    loyalty.refresh();
+    // refresh() early-returns without calling load when session is null
+    expect(read).not.toHaveBeenCalled();
+  });
 });
