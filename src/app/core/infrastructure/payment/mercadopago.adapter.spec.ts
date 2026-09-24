@@ -218,6 +218,10 @@ describe('MercadoPagoAdapter', () => {
   });
 
   describe('createWalletBrick()', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
     /** Fake preference creation response. */
     function makeWalletBackendResponse(id = 'pref-456'): Response {
       return {
@@ -333,9 +337,23 @@ describe('MercadoPagoAdapter', () => {
       vi.useRealTimers();
     });
 
-    it('rejects on rejected payment status', async () => {
-      vi.useFakeTimers();
-      vi.stubGlobal('fetch', makeFetchSequence(makeWalletBackendResponse(), ['rejected']));
+    it('rejects on rejected payment status (broadcast channel)', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeWalletBackendResponse()));
+
+      // Capture the BroadcastChannel instance created inside the adapter so we
+      // can dispatch a message on it synchronously.
+      let capturedChannel: { onmessage: ((e: MessageEvent) => void) | null } | null = null;
+      vi.stubGlobal(
+        'BroadcastChannel',
+        class {
+          onmessage: ((e: MessageEvent) => void) | null = null;
+          constructor() {
+            capturedChannel = this; // eslint-disable-line @typescript-eslint/no-this-alias
+          }
+          // eslint-disable-next-line @typescript-eslint/no-empty-function
+          close() {}
+        }
+      );
 
       mockBricksCreate.mockImplementation(
         async (_b: string, _t: string, settings: { callbacks: { onSubmit: () => void } }) => {
@@ -345,19 +363,17 @@ describe('MercadoPagoAdapter', () => {
       );
 
       const p = adapter.createWalletBrick(50, 'mp-wallet-container');
-      // Pre-attach a no-op catch so the promise is marked as "handled" before
-      // vi.advanceTimersByTimeAsync fires the interval and calls reject().
-      // Without this, Node/Vitest sees an unhandled rejection in the window
-      // between the reject() call and the await expect(p).rejects line.
-      // eslint-disable-next-line @typescript-eslint/no-empty-function
-      const handled = p.catch(() => {});
+      // Drain the microtask queue: loadSdk() + fetch + bricks().create() are all
+      // async, so several await-ticks are needed before onSubmit fires and
+      // listenForCallback() registers the BroadcastChannel.
+      await new Promise((r) => setTimeout(r, 0));
 
-      await vi.advanceTimersByTimeAsync(2100);
-      await handled;
+      // Simulate the back-url redirect posting a 'rejected' result.
+      capturedChannel!.onmessage!({
+        data: { paymentId: 'pay-rej', status: 'rejected', preferenceId: 'pref-456' },
+      } as unknown as MessageEvent);
 
       await expect(p).rejects.toThrow('rejected');
-
-      vi.useRealTimers();
     });
 
     it('503 from backend → rejects with "not configured" message', async () => {
