@@ -153,11 +153,28 @@ export async function buildAdminToken(): Promise<string> {
  */
 export async function loginAsAdmin(page: Page): Promise<void> {
   // Step 0: Isolate from the live AWS API before any navigation triggers sync.
+  // Also stub /api/shop/session: the root '/' route redirects to /shop, which
+  // calls acquireSession() on boot. Without the stub it hits the live API (or a
+  // local server that isn't running) and can return 429 / connection refused,
+  // showing an error screen instead of the POS terminal.
   await stubLiveSyncEndpoints(page);
+  await page.route(
+    (url) => url.pathname.endsWith('/api/shop/session'),
+    (route) =>
+      route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          token: 'e2e-shop-session-token',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+      }),
+  );
 
   // Step 1: Boot the app so Dexie runs seedRbacDefaults() (APP_INITIALIZER).
-  // We don't care that we'll land on /login — the redirect is expected.
-  await page.goto('/');
+  // Navigate to /login directly — this avoids the root '/' → /shop redirect
+  // that would trigger acquireSession() before the token is injected.
+  await page.goto('/login');
   await page.waitForLoadState('networkidle', { timeout: 20000 });
 
   // Step 2: Mint and inject the admin token directly into sessionStorage.
@@ -167,8 +184,10 @@ export async function loginAsAdmin(page: Page): Promise<void> {
     ['capy_pos_access_token', token],
   );
 
-  // Step 3: Navigate to / again — auth guard now finds the valid token.
-  await page.goto('/');
+  // Step 3: Navigate to /pos — the auth guard finds the valid token and lets
+  // through. Going to /pos (not '/') avoids the '/' → /shop redirect which
+  // would trigger ShopComponent.acquireSession() again.
+  await page.goto('/pos');
   await page.waitForURL((url) => !url.pathname.startsWith('/login'), { timeout: 15000 });
 
   // Step 4: Confirm the Angular router has settled on a protected route by
