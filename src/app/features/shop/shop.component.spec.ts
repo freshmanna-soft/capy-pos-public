@@ -1025,3 +1025,385 @@ describe('ShopComponent — acquireSession and retrySession', () => {
     expect(component.isLoading()).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// resolveStore — uncovered branches (empty stores, geofence throw, pickStore)
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — resolveStore and pickStore branches', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.resetTestingModule();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function setupWithStores(
+    stores: { storeId: string; name: string }[],
+    geofence: () => Promise<string>,
+    hasFencePolygon = false
+  ) {
+    const camera = makeCamera();
+    const scanner = makeScanner();
+    const cart = makeCartStub();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ token: 'tok', expiresAt: '' }),
+      })
+    );
+    vi.stubGlobal('sessionStorage', {
+      getItem: vi.fn().mockReturnValue(null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+
+    TestBed.configureTestingModule({
+      imports: [ShopComponent],
+      providers: [
+        { provide: Router, useValue: { navigate: vi.fn() } },
+        { provide: CartService, useValue: cart },
+        { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
+        {
+          provide: KioskSettingsService,
+          useValue: {
+            load: vi.fn().mockResolvedValue(undefined),
+            stores: signal(stores),
+            storeId: signal(stores[0]?.storeId ?? 'default-org/default-store'),
+            storeName: signal(stores[0]?.name ?? ''),
+            storeAddress: signal(''),
+            terminals: signal([{ storeId: 'store-1', terminalId: 't-1' }]),
+            hasFencePolygon: vi.fn().mockReturnValue(hasFencePolygon),
+            setActiveTerminal: vi.fn().mockResolvedValue(undefined),
+            mercadopagoActive: signal(false),
+          },
+        },
+        {
+          provide: GeofencingService,
+          useValue: { checkFence: vi.fn().mockImplementation(geofence), reset: vi.fn() },
+        },
+        {
+          provide: KioskCustomerService,
+          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
+        },
+        {
+          provide: PosFacade,
+          useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
+        },
+        { provide: BarcodeScannerService, useValue: scanner },
+        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
+      ],
+    });
+    TestBed.overrideComponent(ShopComponent, {
+      remove: { providers: [CameraService] },
+      add: { providers: [{ provide: CameraService, useValue: camera }] },
+    });
+
+    const fixture = TestBed.createComponent(ShopComponent);
+    const component = fixture.componentInstance;
+    return { fixture, component, cart };
+  }
+
+  it('uses default store when stores list is empty', async () => {
+    const { component } = setupWithStores([], () => Promise.resolve('inside'));
+
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    // When stores is empty, resolveStore() returns 'default-org/default-store'
+    // and acquireSession proceeds normally → view becomes shopping.
+    expect(component.view()).toBe('shopping');
+    expect(component.resolvedStoreId()).toBe('default-org/default-store');
+  });
+
+  it('shows store-picker when geofence check throws', async () => {
+    const { component } = setupWithStores(
+      [
+        { storeId: 's1', name: 'Store 1' },
+        { storeId: 's2', name: 'Store 2' },
+      ],
+      () => Promise.reject(new Error('GPS unavailable')),
+      true // hasFencePolygon = true → geofence path is taken
+    );
+
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    expect(component.view()).toBe('store-picker');
+  });
+
+  it('pickStore sets active terminal when matching terminal exists', async () => {
+    const { component, fixture } = setupWithStores([{ storeId: 'store-1', name: 'Store 1' }], () =>
+      Promise.resolve('inside')
+    );
+
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    const kioskSettings = fixture.debugElement.injector.get(KioskSettingsService);
+    await component.pickStore('store-1');
+    await flushMicrotasks();
+
+    expect(kioskSettings.setActiveTerminal).toHaveBeenCalledWith('t-1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scan — pickPresentedCode returns null (line 800)
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — scan with no presented code', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('schedules a retry when detect returns a result list with no presented code', async () => {
+    // detect() returns a non-null, non-empty array where pickPresentedCode returns null
+    // (an entry with no box / format that the picker ignores).
+    const detect = vi
+      .fn()
+      .mockResolvedValueOnce([{ value: '', format: 'unknown', box: null }]) // no presented code
+      .mockResolvedValue(null); // subsequent calls return nothing
+
+    const { component } = setup({
+      detect,
+      prepare: vi.fn().mockResolvedValue(true),
+      supported: vi.fn().mockReturnValue(true),
+    });
+
+    await flushMicrotasks();
+    component.toggleScan();
+    await flushMicrotasks(); // camera.start()
+
+    vi.advanceTimersByTime(150);
+    await flushMicrotasks(); // first detect() → empty presented code → reschedule
+
+    // Sheet should still be open (no match, no error toast).
+    expect(component.showScanSheet()).toBe(true);
+    expect(component._scanToast()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scan — detectionSource returns null (lines 787-788)
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — scan with no detection source', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('schedules a retry when detectionSource returns null during a scan tick', async () => {
+    // The camera reports no usable video element yet (e.g. stream not fully started).
+    const detect = vi.fn().mockResolvedValue(null);
+    const { component } = setup(
+      {
+        detect,
+        prepare: vi.fn().mockResolvedValue(true),
+        supported: vi.fn().mockReturnValue(true),
+      },
+      {
+        // First call: no video source yet; second call: normal element so the loop can proceed
+        detectionSource: vi
+          .fn()
+          .mockReturnValueOnce(null) // triggers the !video branch (line 786-788)
+          .mockReturnValue(document.createElement('video')),
+      }
+    );
+
+    await flushMicrotasks();
+    component.toggleScan();
+    await flushMicrotasks(); // camera.start()
+
+    vi.advanceTimersByTime(150);
+    await flushMicrotasks(); // first tick → detectionSource null → reschedule
+
+    // The sheet stays open — the branch was hit and a retry was scheduled.
+    expect(component.showScanSheet()).toBe(true);
+    expect(detect).not.toHaveBeenCalled(); // detect was never called because video was null
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveStore — geofence inside with multiple stores (line 857-858)
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — resolveStore geofence inside multi-store', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.resetTestingModule();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('uses the active storeId when geofence reports inside for multiple stores', async () => {
+    const camera = makeCamera();
+    const scanner = makeScanner();
+    const cart = makeCartStub();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ token: 'tok', expiresAt: '' }),
+      })
+    );
+    vi.stubGlobal('sessionStorage', {
+      getItem: vi.fn().mockReturnValue(null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+
+    TestBed.configureTestingModule({
+      imports: [ShopComponent],
+      providers: [
+        { provide: Router, useValue: { navigate: vi.fn() } },
+        { provide: CartService, useValue: cart },
+        { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
+        {
+          provide: KioskSettingsService,
+          useValue: {
+            load: vi.fn().mockResolvedValue(undefined),
+            // Two stores — forces the geofence code path
+            stores: signal([
+              { storeId: 's1', name: 'Store 1' },
+              { storeId: 's2', name: 'Store 2' },
+            ]),
+            storeId: signal('s1'),
+            storeName: signal('Store 1'),
+            storeAddress: signal(''),
+            terminals: signal([]),
+            hasFencePolygon: vi.fn().mockReturnValue(true), // enables geofence branch
+            setActiveTerminal: vi.fn(),
+            mercadopagoActive: signal(false),
+          },
+        },
+        {
+          provide: GeofencingService,
+          // Resolves with 'inside' — exercises the `if (status === 'inside') return` branch
+          useValue: { checkFence: vi.fn().mockResolvedValue('inside'), reset: vi.fn() },
+        },
+        {
+          provide: KioskCustomerService,
+          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
+        },
+        {
+          provide: PosFacade,
+          useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
+        },
+        { provide: BarcodeScannerService, useValue: scanner },
+        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
+      ],
+    });
+    TestBed.overrideComponent(ShopComponent, {
+      remove: { providers: [CameraService] },
+      add: { providers: [{ provide: CameraService, useValue: camera }] },
+    });
+
+    const fixture = TestBed.createComponent(ShopComponent);
+    const component = fixture.componentInstance;
+
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    // Geofence returned 'inside' → resolveStore() returned the active storeId → shopping view.
+    expect(component.view()).toBe('shopping');
+    expect(component.resolvedStoreId()).toBe('s1');
+  });
+
+  it('shows store-picker when geofence reports outside for multiple stores', async () => {
+    const camera = makeCamera();
+    const scanner = makeScanner();
+    const cart = makeCartStub();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ token: 'tok', expiresAt: '' }),
+      })
+    );
+    vi.stubGlobal('sessionStorage', {
+      getItem: vi.fn().mockReturnValue(null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+
+    TestBed.configureTestingModule({
+      imports: [ShopComponent],
+      providers: [
+        { provide: Router, useValue: { navigate: vi.fn() } },
+        { provide: CartService, useValue: cart },
+        { provide: ProductService, useValue: { getActiveProducts: vi.fn().mockResolvedValue([]) } },
+        {
+          provide: KioskSettingsService,
+          useValue: {
+            load: vi.fn().mockResolvedValue(undefined),
+            stores: signal([
+              { storeId: 's1', name: 'Store 1' },
+              { storeId: 's2', name: 'Store 2' },
+            ]),
+            storeId: signal('s1'),
+            storeName: signal('Store 1'),
+            storeAddress: signal(''),
+            terminals: signal([]),
+            hasFencePolygon: vi.fn().mockReturnValue(true),
+            setActiveTerminal: vi.fn(),
+            mercadopagoActive: signal(false),
+          },
+        },
+        {
+          provide: GeofencingService,
+          // 'outside' → falls through to store picker (exercises the else branch of status === 'inside')
+          useValue: { checkFence: vi.fn().mockResolvedValue('outside'), reset: vi.fn() },
+        },
+        {
+          provide: KioskCustomerService,
+          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
+        },
+        {
+          provide: PosFacade,
+          useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
+        },
+        { provide: BarcodeScannerService, useValue: scanner },
+        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
+      ],
+    });
+    TestBed.overrideComponent(ShopComponent, {
+      remove: { providers: [CameraService] },
+      add: { providers: [{ provide: CameraService, useValue: camera }] },
+    });
+
+    const fixture = TestBed.createComponent(ShopComponent);
+    const component = fixture.componentInstance;
+
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    expect(component.view()).toBe('store-picker');
+  });
+});

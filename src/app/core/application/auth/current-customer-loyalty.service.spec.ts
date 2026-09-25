@@ -151,4 +151,35 @@ describe('CurrentCustomerLoyaltyService', () => {
     // refresh() early-returns without calling load when session is null
     expect(read).not.toHaveBeenCalled();
   });
+
+  it('pointsBalance() and tier() return null when no projection is loaded', () => {
+    const { loyalty } = setup();
+    // No session, no projection — both derived computeds should return null.
+    expect(loyalty.pointsBalance()).toBeNull();
+    expect(loyalty.tier()).toBeNull();
+  });
+
+  it('ignores a gateway error from a stale load (catch branch: isCurrent returns false)', async () => {
+    // Simulates: load starts for customer-a, then customer changes, then the
+    // in-flight request rejects. The catch branch that checks isCurrent() before
+    // setting unavailable must be exercised via a session switch mid-flight.
+    const customerA = deferred<typeof projection>();
+    const read = vi.fn().mockReturnValueOnce(customerA.promise);
+    const { customer, loyalty } = setup(read);
+
+    customer.setSession(session('customer-a'));
+    TestBed.tick();
+
+    // Switch to a different customer, invalidating the in-flight generation.
+    customer.setSession(session('customer-b'));
+    TestBed.tick();
+
+    // Reject the stale request — the catch block's isCurrent() check should
+    // prevent unavailable from being set.
+    customerA.reject(new Error('network'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(loyalty.unavailable()).toBe(false);
+  });
 });

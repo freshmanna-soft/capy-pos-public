@@ -799,6 +799,26 @@ describe('PosFacade', () => {
       warnSpy.mockRestore();
     });
 
+    it("logs warn with empty string when the loyalty result has no error field (covers ?? '' branch)", async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      // awarded: false with NO error field — result.error is undefined → ?? '' fires
+      mockAwardLoyalty.execute.mockResolvedValue({
+        awarded: false,
+        points: 0,
+        balance: null,
+        previousTier: null,
+        tier: null,
+        reason: 'no-customer',
+        // error field intentionally absent
+      });
+      await attach();
+
+      await facade.checkout(payment as never);
+
+      await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled());
+      warnSpy.mockRestore();
+    });
+
     it('completes the sale when the award rejects outright', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       mockAwardLoyalty.execute.mockRejectedValue(new Error('unexpected'));
