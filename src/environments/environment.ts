@@ -105,8 +105,14 @@ export const environment = {
   // Cognito's pool/client ids are committed in plaintext; only the client
   // *secret* is sensitive, and that lives in the relay's Code Engine secret,
   // never here.
+  // IBM Cloud App ID — opt-in. Set `enabled: true` only when the relay is
+  // running locally (`npm run start:relay` in a second terminal). Leaving it
+  // false keeps `ng serve` working without the relay, which is the normal dev
+  // workflow. E2E tests (Playwright) bypass auth entirely via sessionStorage
+  // injection (see tests/e2e/helpers/auth.ts) so they don't need the relay
+  // regardless of this flag.
   appId: {
-    enabled: true,
+    enabled: false,
     region: 'us-south',
     tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
     staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
