@@ -1,5 +1,6 @@
 import { test, expect, ConsoleMessage } from '@playwright/test';
 import { KioskPage } from './helpers/kiosk';
+import { loginAsAdmin } from './helpers/auth';
 
 /**
  * Kiosk E2E Tests — Physical Terminal Flow
@@ -21,7 +22,10 @@ test.describe('Kiosk — Physical terminal checkout', () => {
 
   test.beforeEach(async ({ page }) => {
     kiosk = new KioskPage(page);
-    await kiosk.setup(); // stubs live sync + POST /api/transactions
+    // loginAsAdmin stubs sync + shop session, injects JWT, lands on /pos.
+    // kiosk.setup() adds the POST /api/transactions stub on top.
+    await loginAsAdmin(page);
+    await kiosk.setup();
   });
 
   // ── Scenario 1: Anonymous checkout ──────────────────────────────────────────

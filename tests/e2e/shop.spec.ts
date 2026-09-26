@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { KioskPage, stubShopSessionEndpoint, stubTransactionEndpoint } from './helpers/kiosk';
-import { stubLiveSyncEndpoints } from './helpers/auth';
+import { loginAsAdmin, stubLiveSyncEndpoints } from './helpers/auth';
 
 /**
  * Shop E2E Tests — Customer Phone (Scan & Go) Flow
@@ -25,16 +25,22 @@ import { stubLiveSyncEndpoints } from './helpers/auth';
  * No running backend is required.
  */
 
-/** ST-2 is done: /shop (ShopComponent) exists and has no auth guard. */
-const SHOP_ROUTE = '/shop';
+/**
+ * The kiosk shop route — auth-guarded (operator session required).
+ * loginAsAdmin() in beforeEach establishes that session via sessionStorage
+ * injection before navigating here.
+ */
+const SHOP_ROUTE = '/kiosk/shop';
 
 test.describe('Shop — Customer phone self-checkout flow', () => {
   let kiosk: KioskPage;
 
   test.beforeEach(async ({ page }) => {
     kiosk = new KioskPage(page);
-    // Stub all remote endpoints before the first navigation
-    await stubLiveSyncEndpoints(page);
+    // loginAsAdmin stubs sync endpoints + shop session, injects the JWT, and
+    // lands on /pos. The subsequent page.goto(SHOP_ROUTE) then passes the auth
+    // guard because the token is already in sessionStorage.
+    await loginAsAdmin(page);
     await stubTransactionEndpoint(page);
     await stubShopSessionEndpoint(page);
   });
