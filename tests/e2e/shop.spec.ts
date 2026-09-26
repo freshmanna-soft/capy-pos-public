@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { KioskPage, seedKioskDeviceToken, stubShopSessionEndpoint, stubTransactionEndpoint } from './helpers/kiosk';
+import { KioskPage, seedKioskCustomer, seedKioskDeviceToken, stubShopSessionEndpoint, stubTransactionEndpoint } from './helpers/kiosk';
 import { loginAsAdmin, stubLiveSyncEndpoints } from './helpers/auth';
 
 /**
@@ -45,6 +45,8 @@ test.describe('Shop — Customer phone self-checkout flow', () => {
     await stubShopSessionEndpoint(page);
     // Seed a device token so openCheckout() does not show the "no token" banner.
     await seedKioskDeviceToken(page);
+    // Seed a customer for admin@capy-pos.local so sign-in flow finds an account.
+    await seedKioskCustomer(page);
   });
 
   // ── Scenario 1: Anonymous checkout ──────────────────────────────────────────

@@ -136,6 +136,49 @@ export async function seedKioskDeviceToken(page: Page): Promise<void> {
 }
 
 /**
+ * seedKioskCustomer
+ *
+ * Writes a customer record for `admin@capy-pos.local` into the Dexie
+ * `customers` table so that the kiosk splash sign-in flow finds an existing
+ * account rather than showing "No account found". Must be called after
+ * loginAsAdmin() so APP_INITIALIZER has created the customers table.
+ */
+export async function seedKioskCustomer(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    return new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open('CapyPOSDB');
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('customers')) {
+          db.close();
+          resolve();
+          return;
+        }
+        const tx = db.transaction('customers', 'readwrite');
+        const store = tx.objectStore('customers');
+        const put = store.put({
+          id: 'customer-e2e-admin',
+          tenantId: 'default-tenant',
+          name: 'Admin Customer',
+          email: 'admin@capy-pos.local',
+          phone: '',
+          status: 'active',
+          loyaltyPoints: 0,
+          tier: 'bronze',
+          country: 'US',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+        put.onerror = () => reject(put.error);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+  });
+}
+
+/**
  * stubTransactionEndpoint
  *
  * Intercepts POST /api/transactions and replies 201 so tests never need a
