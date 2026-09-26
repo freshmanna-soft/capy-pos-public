@@ -1,5 +1,5 @@
 import { test, expect, ConsoleMessage } from '@playwright/test';
-import { KioskPage } from './helpers/kiosk';
+import { KioskPage, seedKioskDeviceToken } from './helpers/kiosk';
 import { loginAsAdmin } from './helpers/auth';
 
 /**
@@ -26,6 +26,8 @@ test.describe('Kiosk — Physical terminal checkout', () => {
     // kiosk.setup() adds the POST /api/transactions stub on top.
     await loginAsAdmin(page);
     await kiosk.setup();
+    // Seed a device token so openCheckout() does not show the "no token" banner.
+    await seedKioskDeviceToken(page);
   });
 
   // ── Scenario 1: Anonymous checkout ──────────────────────────────────────────

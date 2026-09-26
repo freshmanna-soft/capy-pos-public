@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { KioskPage, stubShopSessionEndpoint, stubTransactionEndpoint } from './helpers/kiosk';
+import { KioskPage, seedKioskDeviceToken, stubShopSessionEndpoint, stubTransactionEndpoint } from './helpers/kiosk';
 import { loginAsAdmin, stubLiveSyncEndpoints } from './helpers/auth';
 
 /**
@@ -43,6 +43,8 @@ test.describe('Shop — Customer phone self-checkout flow', () => {
     await loginAsAdmin(page);
     await stubTransactionEndpoint(page);
     await stubShopSessionEndpoint(page);
+    // Seed a device token so openCheckout() does not show the "no token" banner.
+    await seedKioskDeviceToken(page);
   });
 
   // ── Scenario 1: Anonymous checkout ──────────────────────────────────────────

@@ -79,6 +79,62 @@ export async function seedKioskDexie(page: Page): Promise<void> {
 }
 
 /**
+ * seedKioskDeviceToken
+ *
+ * Writes a fake device token into the Dexie `settings` table so that
+ * KioskShopComponent.openCheckout() does not show the "no device token"
+ * banner. Must be called AFTER the app has booted (APP_INITIALIZER has run
+ * and created the settings table), i.e. after loginAsAdmin().
+ *
+ * Row schema mirrors KioskSettingsService._put():
+ *   { id, key, value: JSON.stringify(terminalRecord), updatedAt }
+ *
+ * The key `terminal:default-org/default-store/default-terminal` matches
+ * DEFAULT_TERMINAL_ID in kiosk-settings.service.ts.
+ */
+export async function seedKioskDeviceToken(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    return new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open('capy-pos-db');
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('settings')) {
+          db.close();
+          resolve();
+          return;
+        }
+        const id = 'terminal:default-org/default-store/default-terminal';
+        const tx = db.transaction('settings', 'readwrite');
+        const store = tx.objectStore('settings');
+        const put = store.put({
+          id,
+          key: id,
+          value: JSON.stringify({
+            orgId: 'default-org',
+            storeId: 'default-org/default-store',
+            terminalId: 'default-org/default-store/default-terminal',
+            label: 'E2E terminal',
+            mode: 'kiosk',
+            mercadopagoEnabled: null,
+            paypalEnabled: null,
+            fenceEnabled: false,
+            fenceLat: null,
+            fenceLng: null,
+            fenceRadiusMeters: 200,
+            deviceToken: 'e2e-device-token',
+          }),
+          updatedAt: new Date(),
+        });
+        put.onerror = () => reject(put.error);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+  });
+}
+
+/**
  * stubTransactionEndpoint
  *
  * Intercepts POST /api/transactions and replies 201 so tests never need a
