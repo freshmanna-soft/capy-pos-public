@@ -39,9 +39,12 @@ export type { ReceiptData } from '@core/application/dtos/receipt.dto';
         <div class="receipt-body">
           <!-- Store Info -->
           <div class="store-info">
-            <span class="store-name">🦫 Capy-POS</span>
+            <span class="store-name">🦫 {{ data().storeName }}</span>
             <span class="store-date">{{ data().payment.timestamp | date: 'medium' }}</span>
           </div>
+          @if (data().storeAddress) {
+            <p class="store-address">📍 {{ data().storeAddress }}</p>
+          }
 
           <div class="divider"></div>
 
@@ -127,6 +130,13 @@ export type { ReceiptData } from '@core/application/dtos/receipt.dto';
   `,
   styles: [
     `
+      .store-address {
+        font-size: 0.75rem;
+        color: #6b7280;
+        margin: 0.125rem 0 0;
+        text-align: center;
+      }
+
       .receipt-overlay {
         position: fixed;
         inset: 0;

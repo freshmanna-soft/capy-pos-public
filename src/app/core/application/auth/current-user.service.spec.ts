@@ -245,6 +245,14 @@ describe('CurrentUserService', () => {
       expect(service.memberships().isEmpty).toBe(true);
     });
 
+    it('principalRoles returns active-role array when an active membership is present', () => {
+      // Line 151 — the `if (active) return [active]` truthy arm.
+      service.setSession(sessionWithMemberships); // has tenantId: 'store-a', memberships: [{…}]
+      const roles = service.principalRoles();
+      expect(roles.length).toBe(1);
+      expect(roles[0].name).toBe('admin');
+    });
+
     it('principalRoles reconstructs built-in AND custom roles from session claims without an active membership', () => {
       service.setSession({
         ...baseSession,
@@ -261,6 +269,21 @@ describe('CurrentUserService', () => {
       expect(roles.find((r) => r.name === 'kiosk')?.hasPermission(Permission.PROCESS_SALE)).toBe(
         true
       );
+    });
+
+    it('principalRoles handles a session missing permissions/roles fields (covers ?? [] branches)', () => {
+      // setSession with no roles or permissions keys — both `?? []` fallbacks fire.
+      service.setSession({
+        operatorId: 'op-sparse',
+        tenantId: 'store-a',
+        accessToken: 'tok',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        // roles and permissions are intentionally absent
+      } as AuthSessionDto);
+
+      // principalRoles reads `s.roles ?? []` and `s.permissions ?? []`
+      const roles = service.principalRoles();
+      expect(Array.isArray(roles)).toBe(true);
     });
 
     it('falls back to session roles/permissions when the memberships claim is malformed', () => {
@@ -482,6 +505,27 @@ describe('CurrentUserService', () => {
   });
 
   // ── hydrate ────────────────────────────────────────────────────────────
+
+  describe('unauthenticated computed signals', () => {
+    it('operatorId() is null when not authenticated', () => {
+      expect(service.operatorId()).toBeNull();
+    });
+
+    it('roles() returns empty array when not authenticated and no active role', () => {
+      // No session set — _session() is null, activeRole() is null, so the ?? []
+      // fallback in the roles() computed is reached.
+      expect(service.roles()).toEqual([]);
+    });
+
+    it('permissions() returns empty array when not authenticated', () => {
+      expect(service.permissions()).toEqual([]);
+    });
+
+    it('principalRoles() returns empty array when not authenticated', () => {
+      // Line 153-155 — the `if (!s) return []` branch.
+      expect(service.principalRoles()).toEqual([]);
+    });
+  });
 
   describe('hydrate()', () => {
     it('sets activeTenantId from the stored session', async () => {

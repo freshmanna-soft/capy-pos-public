@@ -120,7 +120,7 @@ test.describe('Low Stock Alerts - Persona: Ana the Inventory Clerk', () => {
 
   test('Ana can configure threshold then check dashboard for alerts', async ({ page }) => {
     // Step 1: Navigate to settings
-    await page.goto('/');
+    await page.goto('/pos');
     await page.click('[data-testid="nav-settings"]:visible');
     await expect(page).toHaveURL(/\/settings/);
 

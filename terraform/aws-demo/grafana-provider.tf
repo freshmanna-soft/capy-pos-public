@@ -44,11 +44,40 @@ variable "grafana_cw_secret_key" {
   sensitive   = true
 }
 
+# --- OTLP export (Lambdas → Grafana Cloud Tempo) ---------------------------
+variable "grafana_otlp_endpoint" {
+  description = "Grafana Cloud OTLP gateway base URL (telemetry.js appends /v1/traces)."
+  type        = string
+  default     = "https://otlp-gateway-prod-us-east-3.grafana.net/otlp"
+}
+
+variable "grafana_otlp_instance_id" {
+  description = "Grafana Cloud OTLP instance ID (the Basic-auth username). Empty = export unauthenticated (dropped)."
+  type        = string
+  default     = ""
+}
+
+variable "grafana_otlp_token" {
+  description = "Grafana Cloud OTLP token (Cloud Access Policy, traces:write). The Basic-auth password."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 locals {
   # Whether a token/keys are present is not itself secret — unwrap so these can
   # drive count and a (URL-only, token-free) output without tainting them.
   grafana_enabled       = nonsensitive(var.grafana_api_token != "")
   cloudwatch_in_grafana = nonsensitive(var.grafana_api_token != "" && var.grafana_cw_access_key != "" && var.grafana_cw_secret_key != "")
+
+  # OTLP export env shared by every Lambda. telemetry.js reads these and builds
+  # the HTTP Basic auth header from instance_id:token.
+  otel_env = {
+    OTEL_EXPORTER_OTLP_ENDPOINT = var.grafana_otlp_endpoint
+    GRAFANA_OTLP_INSTANCE_ID    = var.grafana_otlp_instance_id
+    GRAFANA_OTLP_TOKEN          = var.grafana_otlp_token
+    ENVIRONMENT                 = "production"
+  }
 }
 
 provider "grafana" {

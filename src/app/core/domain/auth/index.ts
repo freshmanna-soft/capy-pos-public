@@ -34,5 +34,10 @@ export type { TenantMembershipJSON } from '@core/domain/auth/tenant-membership.v
 export { TenantMembership } from '@core/domain/auth/tenant-membership.value-object';
 export { TenantMembershipSet, TenantIsolationError } from '@core/domain/auth/tenant-membership-set';
 
+// Org → Store → Terminal hierarchy
+export { OrgId } from '@core/domain/auth/org-id.value-object';
+export { StoreId } from '@core/domain/auth/store-id.value-object';
+export { TerminalId, TerminalMode } from '@core/domain/auth/terminal-id.value-object';
+
 // Authorization service
 export { AuthorizationService, AuthorizationError } from '@core/domain/auth/authorization.service';

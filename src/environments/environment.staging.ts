@@ -8,6 +8,7 @@ export const environment = {
 
   // See environment.ts — decoupled from `production` on purpose.
   allowSeededAdmin: true,
+  geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration
   apiUrl: 'https://api-staging.capy-pos.com/api',
@@ -36,6 +37,9 @@ export const environment = {
   // relay can be pointed at without repointing `apiUrl` at a service that only
   // answers /clerk/agent.
   clerkAgentApiUrl: '',
+
+  // Product image upload path, appended to apiUrl: POST `${apiUrl}${imageApiPath}/${productId}/image`
+  imageApiPath: '/products',
 
   // Database
   databaseName: 'capy_pos_staging',
@@ -72,11 +76,19 @@ export const environment = {
     enabled: true,
   },
 
-  // Public browser configuration only. Never add a PayPal client secret here.
+  // MercadoPago — disabled for staging until keys are provisioned.
+  mercadopago: {
+    enabled: false,
+    publicKey: '', // Set via environment variable: MERCADOPAGO_PUBLIC_KEY
+    preferenceApiUrl: 'https://api-staging.capy-pos.com/api/mercadopago/preference',
+  },
+
+  // PayPal — disabled for staging until keys are provisioned.
   paypal: {
     enabled: false,
-    clientId: '', // Set to the sandbox public client ID when rollout is approved
+    clientId: '', // Set via environment variable: PAYPAL_CLIENT_ID
     environment: 'sandbox' as const,
+    preferenceApiUrl: 'https://api-staging.capy-pos.com/api/paypal/order',
   },
 
   // Feature Flags
@@ -90,6 +102,8 @@ export const environment = {
     // flag, not aiVision: that one governs paying the model to *look*, and the two
     // switch on independently.
     clerkAgent: false,
+    // Kiosk self-checkout mode — disabled in staging until validated.
+    kiosk: false,
   },
 
   // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but

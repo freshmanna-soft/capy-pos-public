@@ -214,7 +214,7 @@ test.describe('S4-5 Scenario 1: Inventory CRUD Workflow - Carlos the Manager', (
 test.describe('S4-5 Scenario 2: Customer CRUD Workflow - Carlos the Manager', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto('/');
+    await page.goto('/pos');
   });
 
   test('Carlos can navigate to Customers and view all customers', async ({ page }) => {
@@ -345,7 +345,7 @@ test.describe('S4-5 Scenario 3: Stock Adjustment After Sale', () => {
 
   test('stock level is reduced after Maria completes a sale', async ({ page }) => {
     // Step 1: Navigate to POS first to initialize seed data
-    await page.goto('/');
+    await page.goto('/pos');
     await page.click('[data-testid="nav-pos"]:visible');
     await expect(page.locator('[data-testid="pos-terminal"]')).toBeVisible();
     await page.waitForTimeout(1500); // Wait for seed data initialization
@@ -507,7 +507,7 @@ test.describe('S4-5 Scenario 4: Low Stock Alert Visibility - Carlos the Manager'
   });
 
   test('low stock widget is visible on Dashboard', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/pos');
 
     // Navigate to Dashboard
     await page.click('[data-testid="nav-dashboard"]:visible');

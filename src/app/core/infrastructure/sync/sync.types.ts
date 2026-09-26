@@ -110,6 +110,19 @@ export interface SyncWorkerConfig {
    * `performSync` and `refuseUnauthorizedPush` in `sync.worker.ts`.
    */
   sessionToken?: string;
+  /**
+   * When true the session token is intentionally absent (kiosk / customer-phone
+   * context — no staff JWT is ever present while a customer is shopping).
+   *
+   * `refuseUnauthorizedPush` drops its log from `console.warn` to `console.info`
+   * in kiosk mode so the browser console does not alarm operators with noise that
+   * is expected and harmless.  The worker behaviour is otherwise unchanged: stock
+   * decrements are queued and will flush on the next authorised staff session.
+   *
+   * Set by `SyncKioskModeService` via `UPDATE_CONFIG` when the router is on a
+   * `/kiosk` or `/shop` route.
+   */
+  kioskMode?: boolean;
   syncIntervalMs: number; // How often to sync (default: 30s)
   circuitBreaker: {
     failureThreshold: number;

@@ -29,6 +29,7 @@ export const environment = {
 
   // The one flag this file exists to flip. See environment.ts.
   allowSeededAdmin: true,
+  geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration — identical to environment.prod.ts. The smoke suite
   // exercises the real production backends on purpose, same as `start:prod`
@@ -43,6 +44,9 @@ export const environment = {
   clerkAgentApiPath: '/clerk/agent',
   clerkAgentApiUrl:
     'https://capy-clerk-agent-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/clerk/agent',
+
+  // Product image upload path, appended to apiUrl: POST `${apiUrl}${imageApiPath}/${productId}/image`
+  imageApiPath: '/products',
 
   // A distinct IndexedDB name, not `capy_pos_prod`: a smoke run is a browser
   // profile in a CI container that never touches a real device, but there is
@@ -78,10 +82,22 @@ export const environment = {
     enabled: true,
   },
 
+  // MercadoPago — mirrors environment.prod.ts values so the smoke bundle is
+  // structurally identical to the prod one; payment flows are not exercised by
+  // the smoke suite but the fields must be present for the build to succeed.
+  mercadopago: {
+    enabled: true,
+    publicKey: '',
+    preferenceApiUrl:
+      'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api/mercadopago/preference',
+  },
+
   paypal: {
     enabled: false,
     clientId: '',
     environment: 'sandbox' as const,
+    preferenceApiUrl:
+      'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api/paypal/order',
   },
 
   features: {
@@ -91,6 +107,8 @@ export const environment = {
     offlineMode: true,
     aiVision: true,
     clerkAgent: true,
+    // Kiosk self-checkout mode — mirrors prod.
+    kiosk: true,
   },
 
   clerkVoice: {

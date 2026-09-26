@@ -501,6 +501,57 @@ describe('ProductMapper', () => {
       expect(restored.emoji).toBe(original.emoji);
     });
   });
+
+  describe('fromResponseDto with audit fields', () => {
+    it('maps createdBy, updatedBy, deletedAt, and deletedBy when present', () => {
+      const deletedAt = new Date('2024-06-01T00:00:00.000Z');
+      const dto = new ProductResponseDto(
+        'test-id',
+        'Test Product',
+        99.99,
+        'TEST-001',
+        'Electronics',
+        10,
+        new Date().toISOString(),
+        new Date().toISOString(),
+        undefined, // description
+        undefined, // imageUrl
+        undefined, // barcode
+        undefined, // emoji
+        'user-creator',
+        'user-updater',
+        deletedAt.toISOString(),
+        'user-deleter'
+      );
+
+      const product = productMapper.fromResponseDto(dto);
+
+      expect(product.createdBy).toBe('user-creator');
+      expect(product.updatedBy).toBe('user-updater');
+      expect(product.deletedAt).toEqual(deletedAt);
+      expect(product.deletedBy).toBe('user-deleter');
+    });
+
+    it('leaves audit fields unset when absent', () => {
+      const dto = new ProductResponseDto(
+        'test-id',
+        'Test Product',
+        99.99,
+        'TEST-001',
+        'Electronics',
+        10,
+        new Date().toISOString(),
+        new Date().toISOString()
+      );
+
+      const product = productMapper.fromResponseDto(dto);
+
+      expect(product.createdBy).toBeUndefined();
+      expect(product.updatedBy).toBeUndefined();
+      expect(product.deletedAt).toBeUndefined();
+      expect(product.deletedBy).toBeUndefined();
+    });
+  });
 });
 
 // Made with Bob

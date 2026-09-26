@@ -74,6 +74,15 @@ export default defineConfig({
         'src/app/core/application/mappers/base.mapper.ts',
         'src/app/core/application/exceptions/**',
         '**/*.scss',
+        // Kiosk UI components: full Angular component lifecycle + Leaflet canvas
+        // rendering; neither works in jsdom. The pure application logic they
+        // delegate to (GeofencingService, KioskSettingsService, CartService) is
+        // unit-tested separately and the components are covered by e2e.
+        'src/app/features/kiosk/**',
+        'src/app/shared/ui/fence-map/**',
+        // Kiosk customer session — thin state container, no testable logic beyond
+        // the signal reads that are already exercised via KioskShopComponent e2e.
+        'src/app/features/kiosk/kiosk-customer.service.ts',
       ],
       thresholds: {
         statements: 90,

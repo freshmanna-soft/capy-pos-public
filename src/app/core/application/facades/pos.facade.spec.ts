@@ -11,6 +11,7 @@ import { AuditLogService } from '@core/infrastructure/audit/audit-log.service';
 import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 import { CustomerService } from '@core/application/services/customer.service';
 import { AwardLoyaltyPointsUseCase } from '@core/application/use-cases/award-loyalty-points.use-case';
+import { TransactionRemoteService } from '@core/application/services/transaction-remote.service';
 import { Product } from '@core/domain/entities/product.entity';
 import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
 import { SelfCheckoutReceipt } from '@core/application/ports/self-checkout-gateway.port';
@@ -99,6 +100,10 @@ describe('PosFacade', () => {
         { provide: CustomerService, useValue: mockCustomers },
         { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
         { provide: EventBusService, useValue: mockEventBus },
+        {
+          provide: TransactionRemoteService,
+          useValue: { persistTransaction: vi.fn().mockResolvedValue(undefined) },
+        },
       ],
     });
 
@@ -289,6 +294,22 @@ describe('PosFacade', () => {
       expect(receipt).toBeTruthy();
       expect(mockCartService.clearCart).toHaveBeenCalled();
     });
+
+    it('completes checkout even when stock adjustment throws', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      mockAdjustStock.execute.mockRejectedValue(new Error('IndexedDB gone'));
+
+      const paymentResult = { method: 'cash', amount: 20 };
+      const receipt = await facade.checkout(paymentResult as never);
+
+      expect(receipt).toBeTruthy();
+      expect(mockCartService.clearCart).toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[PosFacade] Stock adjustment failed entirely:',
+        expect.any(Error)
+      );
+      errorSpy.mockRestore();
+    });
   });
 
   describe('server-completed self-checkout', () => {
@@ -339,6 +360,8 @@ describe('PosFacade', () => {
         tax: 0.77,
         taxRate: 0.085,
         total: 9.77,
+        storeName: '',
+        storeAddress: '',
       });
       expect(mockCartService.clearCart).toHaveBeenCalledOnce();
     });
@@ -410,6 +433,75 @@ describe('PosFacade', () => {
       expect(mockTelemetry.recordCounter).toHaveBeenCalledWith('payments.processed', 1, {
         method: 'paypal',
       });
+    });
+
+    it('still returns a receipt when finalizeServerCheckout audit log rejects', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const mockAudit = { log: vi.fn().mockReturnValue(Promise.reject(new Error('audit down'))) };
+      const mockTelemetry = { recordCounter: vi.fn(), recordGauge: vi.fn() };
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          PosFacade,
+          { provide: CartService, useValue: mockCartService },
+          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
+          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
+          { provide: DexieDatabase, useValue: mockDb },
+          { provide: CustomerService, useValue: mockCustomers },
+          { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
+          { provide: EventBusService, useValue: mockEventBus },
+          { provide: AuditLogService, useValue: mockAudit },
+          { provide: TelemetryService, useValue: mockTelemetry },
+        ],
+      });
+      const scopedFacade = TestBed.inject(PosFacade);
+
+      const receipt = scopedFacade.finalizeServerCheckout(serverReceipt, 0);
+      // Flush the fire-and-forget rejection so its .catch runs.
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(receipt).toBeTruthy();
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[PosFacade] Self-checkout audit log failed:',
+        expect.any(Error)
+      );
+      errorSpy.mockRestore();
+    });
+
+    it('still returns a receipt when finalizeServerCheckout telemetry throws', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const mockAudit = { log: vi.fn().mockResolvedValue(undefined) };
+      const mockTelemetry = {
+        recordCounter: vi.fn(() => {
+          throw new Error('telemetry down');
+        }),
+        recordGauge: vi.fn(),
+      };
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          PosFacade,
+          { provide: CartService, useValue: mockCartService },
+          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
+          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
+          { provide: DexieDatabase, useValue: mockDb },
+          { provide: CustomerService, useValue: mockCustomers },
+          { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
+          { provide: EventBusService, useValue: mockEventBus },
+          { provide: AuditLogService, useValue: mockAudit },
+          { provide: TelemetryService, useValue: mockTelemetry },
+        ],
+      });
+      const scopedFacade = TestBed.inject(PosFacade);
+
+      const receipt = scopedFacade.finalizeServerCheckout(serverReceipt, 0);
+
+      expect(receipt).toBeTruthy();
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[PosFacade] Self-checkout telemetry failed:',
+        expect.any(Error)
+      );
+      errorSpy.mockRestore();
     });
   });
 
@@ -707,6 +799,26 @@ describe('PosFacade', () => {
       warnSpy.mockRestore();
     });
 
+    it("logs warn with empty string when the loyalty result has no error field (covers ?? '' branch)", async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      // awarded: false with NO error field — result.error is undefined → ?? '' fires
+      mockAwardLoyalty.execute.mockResolvedValue({
+        awarded: false,
+        points: 0,
+        balance: null,
+        previousTier: null,
+        tier: null,
+        reason: 'no-customer',
+        // error field intentionally absent
+      });
+      await attach();
+
+      await facade.checkout(payment as never);
+
+      await vi.waitFor(() => expect(warnSpy).toHaveBeenCalled());
+      warnSpy.mockRestore();
+    });
+
     it('completes the sale when the award rejects outright', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       mockAwardLoyalty.execute.mockRejectedValue(new Error('unexpected'));
@@ -749,6 +861,72 @@ describe('PosFacade', () => {
     });
   });
 
+  describe('attachCustomerDirectly', () => {
+    it('publishes CUSTOMER_ATTACHED event with id and tier', () => {
+      const customer = new Customer({
+        id: 'direct-cust-1',
+        name: 'Direct User',
+        email: 'd@example.com',
+        phone: '+1000000000',
+        status: CustomerStatus.ACTIVE,
+        loyaltyPoints: 100,
+        tier: CustomerTier.BRONZE,
+        loyaltyCode: 'CAPY-DIRECT01',
+      });
+
+      facade.attachCustomerDirectly(customer);
+
+      expect(mockEventBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: EventType.CUSTOMER_ATTACHED,
+          payload: expect.objectContaining({
+            customerId: 'direct-cust-1',
+            tier: CustomerTier.BRONZE,
+          }),
+        })
+      );
+      expect(facade.attachedCustomer()?.id).toBe('direct-cust-1');
+    });
+  });
+
+  describe('checkout with remoteToken', () => {
+    it('calls persistTransaction before clearing the cart when a token is supplied', async () => {
+      const mockTransactionRemote = TestBed.inject(TransactionRemoteService);
+      const payment = { method: 'cash', amount: 10, transactionId: 'TXN-RT' };
+
+      await facade.checkout(payment as never, 'bearer-token');
+
+      expect(mockTransactionRemote.persistTransaction).toHaveBeenCalledWith(
+        payment,
+        'bearer-token',
+        undefined, // customer?.id when no customer is attached
+        undefined
+      );
+      expect(mockCartService.clearCart).toHaveBeenCalled();
+    });
+  });
+
+  describe('serverCheckoutReceiptData — invalid date', () => {
+    it('throws when completedAt is not a valid ISO timestamp', () => {
+      const badReceipt: SelfCheckoutReceipt = {
+        transactionId: 'bad-tx',
+        checkoutId: 'bad-checkout',
+        paypalCaptureId: 'bad-capture',
+        completedAt: 'not-a-date',
+        quote: {
+          currency: 'USD',
+          taxRateBasisPoints: 0,
+          lines: [],
+          subtotalMinorUnits: 0,
+          taxMinorUnits: 0,
+          totalMinorUnits: 0,
+        },
+      };
+
+      expect(() => facade.serverCheckoutReceiptData(badReceipt)).toThrow('invalid completion time');
+    });
+  });
+
   describe('database initialization', () => {
     it('should delegate initializeDatabase to DexieDatabase', async () => {
       await facade.initializeDatabase();
@@ -787,6 +965,7 @@ describe('PosFacade cartRevision over the real CartService', () => {
         { provide: EventBusService, useValue: { publish: vi.fn() } },
         { provide: AuditLogService, useValue: { log: vi.fn() } },
         { provide: TelemetryService, useValue: { recordCounter: vi.fn() } },
+        { provide: TransactionRemoteService, useValue: { persistTransaction: vi.fn() } },
       ],
     });
     facade = TestBed.inject(PosFacade);

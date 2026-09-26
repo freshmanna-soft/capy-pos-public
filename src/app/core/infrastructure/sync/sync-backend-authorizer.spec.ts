@@ -88,6 +88,17 @@ describe('sync backend authorizer handler (#206)', () => {
     it('denies when no Authorization header is present', async () => {
       await expect(handler(event())).resolves.toEqual({ isAuthorized: false });
     });
+
+    it('denies when the event has no headers object at all', async () => {
+      // API Gateway normally guarantees a headers map but the authorizer must
+      // not throw when called with a minimal event (e.g. a direct Lambda invoke).
+      await expect(
+        handler({
+          routeKey: 'GET /api/products',
+          requestContext: { http: { sourceIp: '1.2.3.4' } },
+        })
+      ).resolves.toEqual({ isAuthorized: false });
+    });
   });
 
   describe('token comparison', () => {

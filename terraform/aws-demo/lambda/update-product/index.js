@@ -10,7 +10,7 @@
  * existing product (use POST /api/products to create).
  */
 
-const { initTelemetry, flushTelemetry } = require('./shared/telemetry');
+const { initTelemetry, withSpan, instrument, flushTelemetry } = require('./shared/telemetry');
 const { GetCommand, PutCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('./shared/dynamodb');
 const { log, response } = require('./shared/logger');
@@ -22,7 +22,7 @@ const PRODUCTS_TABLE = process.env.PRODUCTS_TABLE;
 // hard-deleting products that transaction history still references.
 const MUTABLE_FIELDS = ['name', 'price', 'category', 'stock', 'description', 'isActive'];
 
-exports.handler = async (event) => {
+const baseHandler = async (event) => {
   const productId = event.pathParameters?.id;
   const method = event.requestContext?.http?.method || 'PATCH';
 
@@ -133,3 +133,5 @@ async function patchProduct(productId, body) {
   log('info', 'Product patched successfully', { productId });
   return response(200, { product: result.Attributes });
 }
+
+exports.handler = instrument('PATCH /api/products/{id}', baseHandler);

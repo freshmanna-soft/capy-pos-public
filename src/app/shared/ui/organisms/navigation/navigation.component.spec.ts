@@ -1,6 +1,7 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
-import { Router } from '@angular/router';
+import { NavigationEnd, Router } from '@angular/router';
 import { RouterTestingModule } from '@angular/router/testing';
+import { Subject } from 'rxjs';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NavigationComponent } from './navigation.component';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
@@ -79,5 +80,65 @@ describe('NavigationComponent — sign out', () => {
 
     expect(gateway.signOut).toHaveBeenCalled();
     expect(navigateSpy).toHaveBeenCalledWith(['/login']);
+  });
+
+  it('toggleCollapse toggles the collapsed signal', () => {
+    const comp = fixture.componentInstance;
+    expect(comp.collapsed()).toBe(false);
+    comp.toggleCollapse();
+    expect(comp.collapsed()).toBe(true);
+    comp.toggleCollapse();
+    expect(comp.collapsed()).toBe(false);
+  });
+
+  it('closeMobileMenu sets mobileMenuOpen to false', () => {
+    const comp = fixture.componentInstance;
+    comp.toggleMobileMenu();
+    expect(comp.mobileMenuOpen()).toBe(true);
+    comp.closeMobileMenu();
+    expect(comp.mobileMenuOpen()).toBe(false);
+  });
+
+  it('hides navigation chrome when on a kiosk route', () => {
+    const router = TestBed.inject(Router);
+    vi.spyOn(router, 'url', 'get').mockReturnValue('/kiosk');
+    // Re-create the component so isKioskRoute() initialValue picks up /kiosk.
+    fixture = TestBed.createComponent(NavigationComponent);
+    fixture.detectChanges();
+
+    expect(html(fixture).querySelector('[data-testid="navigation"]')).toBeNull();
+    expect(html(fixture).querySelector('[data-testid="navigation-desktop"]')).toBeNull();
+  });
+
+  it('isKioskRoute updates reactively via router NavigationEnd events', () => {
+    const router = TestBed.inject(Router);
+    const eventsSubject = new Subject<NavigationEnd>();
+    vi.spyOn(router, 'events', 'get').mockReturnValue(eventsSubject.asObservable() as never);
+
+    // Re-create the fixture so the toSignal pipe subscribes to our stubbed events.
+    fixture = TestBed.createComponent(NavigationComponent);
+    fixture.detectChanges();
+
+    // Initially shows the nav (not on /kiosk).
+    expect(html(fixture).querySelector('[data-testid="navigation"]')).not.toBeNull();
+
+    // Emit a NavigationEnd to a kiosk route — covers the /kiosk branch.
+    eventsSubject.next(new NavigationEnd(1, '/kiosk', '/kiosk'));
+    fixture.detectChanges();
+
+    expect(html(fixture).querySelector('[data-testid="navigation"]')).toBeNull();
+    expect(html(fixture).querySelector('[data-testid="navigation-desktop"]')).toBeNull();
+
+    // Navigate to a non-kiosk route — nav should reappear.
+    eventsSubject.next(new NavigationEnd(2, '/pos', '/pos'));
+    fixture.detectChanges();
+
+    expect(html(fixture).querySelector('[data-testid="navigation"]')).not.toBeNull();
+
+    // Emit a NavigationEnd to a /shop route — covers the second branch of the || operator.
+    eventsSubject.next(new NavigationEnd(3, '/shop', '/shop'));
+    fixture.detectChanges();
+
+    expect(html(fixture).querySelector('[data-testid="navigation"]')).toBeNull();
   });
 });

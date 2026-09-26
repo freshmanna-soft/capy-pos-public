@@ -93,7 +93,7 @@ describe('SettingsComponent', () => {
         { provide: ThemeService, useValue: mockThemeService },
         { provide: QUICK_AUTH_ADMIN_PORT, useValue: mockQuickAuthAdmin },
         { provide: QUICK_AUTH_GATEWAY, useValue: mockQuickAuth },
-        { provide: CurrentUserService, useValue: { operatorId } },
+        { provide: CurrentUserService, useValue: { operatorId, hasPermission: () => false } },
       ],
     }).compileComponents();
 

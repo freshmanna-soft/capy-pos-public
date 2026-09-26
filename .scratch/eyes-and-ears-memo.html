@@ -1,0 +1,743 @@
+<title>Eyes & Ears</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340..900;1,9..144,340..900&family=Work+Sans:ital,wght@0,300..700;1,300..700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    /* Onsen Counter, on paper — same identity as /clerk, rendered for a memo, not a stage. */
+    --paper: #EDEEE9;
+    --surface: #F7F7F3;
+    --surface-raised: #FFFFFF;
+    --ink: #1C2321;
+    --ink-soft: #4B534F;
+    --ink-faint: #7A8380;
+    --rule: #C9CDBE;
+    --rule-strong: #A9AE9C;
+    --teal: #1F3A38;
+    --teal-soft: #35564F;
+    --accent: #B87A0F;
+    --accent-ink: #6B4708;
+    --sev-high: #A5453A;
+    --sev-med: #8A6A2E;
+    --sev-low: #4F6E5C;
+    --sev-high-bg: #F3E3E0;
+    --sev-med-bg: #F1E7D2;
+    --sev-low-bg: #E3EAE2;
+    --font-display: "Fraunces", "Iowan Old Style", ui-serif, Georgia, serif;
+    --font-body: "Work Sans", -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #14100E;
+      --surface: #1C1613;
+      --surface-raised: #221A16;
+      --ink: #EDE7DC;
+      --ink-soft: #B9AF9F;
+      --ink-faint: #857C6F;
+      --rule: #3A322C;
+      --rule-strong: #4C4238;
+      --teal: #4E8C7A;
+      --teal-soft: #6BA593;
+      --accent: #F0B429;
+      --accent-ink: #FFDD8A;
+      --sev-high: #D97C6E;
+      --sev-med: #D6B25C;
+      --sev-low: #7FAB93;
+      --sev-high-bg: #2B1A17;
+      --sev-med-bg: #2A2417;
+      --sev-low-bg: #1A241E;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #14100E;
+    --surface: #1C1613;
+    --surface-raised: #221A16;
+    --ink: #EDE7DC;
+    --ink-soft: #B9AF9F;
+    --ink-faint: #857C6F;
+    --rule: #3A322C;
+    --rule-strong: #4C4238;
+    --teal: #4E8C7A;
+    --teal-soft: #6BA593;
+    --accent: #F0B429;
+    --accent-ink: #FFDD8A;
+    --sev-high: #D97C6E;
+    --sev-med: #D6B25C;
+    --sev-low: #7FAB93;
+    --sev-high-bg: #2B1A17;
+    --sev-med-bg: #2A2417;
+    --sev-low-bg: #1A241E;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+    padding: 0 20px 96px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+
+  a { color: var(--teal-soft); text-decoration-thickness: 1px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .page {
+    max-width: 740px;
+    margin: 0 auto;
+  }
+
+  /* ── Masthead ─────────────────────────────────────────────────────── */
+
+  .masthead {
+    padding: 72px 0 40px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 48px;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--teal-soft);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+
+  .eyebrow::before {
+    content: "";
+    width: 22px;
+    height: 1px;
+    background: var(--accent);
+  }
+
+  h1.title {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    font-weight: 620;
+    font-size: clamp(2.6rem, 7vw, 4.1rem);
+    line-height: 0.98;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 20px;
+    color: var(--ink);
+  }
+
+  .title em {
+    font-style: italic;
+    font-weight: 480;
+    color: var(--accent-ink);
+  }
+
+  .deck {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 1.28rem;
+    line-height: 1.42;
+    color: var(--ink-soft);
+    max-width: 34em;
+    text-wrap: balance;
+    margin: 0 0 32px;
+  }
+
+  .meta-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px 36px;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    color: var(--ink-faint);
+  }
+
+  .meta-strip dt {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+  }
+
+  .meta-strip dd {
+    margin: 3px 0 0;
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+
+  /* ── Section scaffolding ──────────────────────────────────────────── */
+
+  section { margin-bottom: 76px; }
+  section:last-of-type { margin-bottom: 0; }
+
+  .section-eyebrow {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .section-eyebrow .tag {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+
+  .section-eyebrow::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+  }
+
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 560;
+    font-size: 1.9rem;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+    margin: 0 0 18px;
+    color: var(--ink);
+  }
+
+  .prose { max-width: 66ch; }
+  .prose p { margin: 0 0 1.1em; }
+  .prose p:last-child { margin-bottom: 0; }
+
+  .prose code, code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    color: var(--teal-soft);
+  }
+
+  /* ── Scenario ─────────────────────────────────────────────────────── */
+
+  .scene {
+    background: var(--surface);
+    border-left: 3px solid var(--teal);
+    border-radius: 2px;
+    padding: 28px 32px;
+    margin-top: 28px;
+    max-width: 66ch;
+  }
+
+  .scene p { margin: 0 0 1.05em; }
+  .scene p:last-child { margin-bottom: 0; }
+
+  .scene .lede {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--ink-faint);
+    letter-spacing: 0.03em;
+    margin-bottom: 16px;
+  }
+
+  .beat {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 3px;
+    display: inline-block;
+    margin: 0.2em 0.4em 0.2em 0;
+  }
+
+  .beat.today { color: var(--sev-med); background: var(--sev-med-bg); }
+  .beat.proposed { color: var(--sev-low); background: var(--sev-low-bg); }
+
+  .payoff {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px dashed var(--rule-strong);
+    font-style: italic;
+    color: var(--ink-soft);
+    font-family: var(--font-display);
+    font-size: 1.08rem;
+  }
+
+  /* ── Premortem cards ──────────────────────────────────────────────── */
+
+  .risks { display: flex; flex-direction: column; gap: 14px; }
+
+  .risk {
+    background: var(--surface);
+    border-radius: 3px;
+    padding: 20px 24px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 20px;
+    align-items: start;
+  }
+
+  .risk[data-severity="high"] { border-left: 3px solid var(--sev-high); }
+  .risk[data-severity="medium"] { border-left: 3px solid var(--sev-med); }
+  .risk[data-severity="low"] { border-left: 3px solid var(--sev-low); }
+
+  .risk .chip {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+    align-self: start;
+    margin-top: 3px;
+  }
+
+  .risk[data-severity="high"] .chip { color: var(--sev-high); background: var(--sev-high-bg); }
+  .risk[data-severity="medium"] .chip { color: var(--sev-med); background: var(--sev-med-bg); }
+  .risk[data-severity="low"] .chip { color: var(--sev-low); background: var(--sev-low-bg); }
+
+  .risk h3 {
+    font-family: var(--font-body);
+    font-size: 1.06rem;
+    font-weight: 650;
+    margin: 0 0 6px;
+    color: var(--ink);
+  }
+
+  .risk p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 0.94rem;
+    max-width: 58ch;
+  }
+
+  .risk .note {
+    grid-column: 2;
+    margin-top: 10px;
+    padding-left: 14px;
+    border-left: 2px solid var(--rule-strong);
+    font-size: 0.88rem;
+    color: var(--ink-faint);
+  }
+
+  .risk .note b { color: var(--ink-soft); font-weight: 600; }
+
+  @media (max-width: 540px) {
+    .risk { grid-template-columns: 1fr; }
+    .risk .note { grid-column: 1; }
+  }
+
+  /* ── Cost tables ──────────────────────────────────────────────────── */
+
+  .table-wrap { overflow-x: auto; margin: 28px 0; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    min-width: 560px;
+  }
+
+  thead th {
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 500;
+    padding: 0 14px 10px;
+    border-bottom: 1px solid var(--rule-strong);
+  }
+
+  tbody td {
+    padding: 14px 14px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  tbody tr[data-recommended] { background: var(--sev-low-bg); }
+  tbody tr[data-recommended] td:first-child { position: relative; }
+
+  .approach-name { font-weight: 650; color: var(--ink); }
+  .approach-sub { display: block; font-size: 0.82rem; color: var(--ink-faint); margin-top: 2px; }
+
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .num.zero { color: var(--sev-low); font-weight: 600; }
+
+  .rec-flag {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sev-low);
+    font-weight: 700;
+    display: block;
+    margin-top: 3px;
+  }
+
+  .worked-example {
+    background: var(--surface);
+    border: 1px dashed var(--rule-strong);
+    border-radius: 3px;
+    padding: 20px 24px;
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    max-width: 66ch;
+    margin-top: 24px;
+  }
+
+  .worked-example .label {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: block;
+    margin-bottom: 10px;
+  }
+
+  .worked-example code { display: block; margin: 6px 0; }
+
+  .infra-note {
+    max-width: 66ch;
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .infra-note p { margin: 0 0 1em; color: var(--ink-soft); }
+  .infra-note p:last-child { margin-bottom: 0; }
+
+  /* ── Sustainability callout ───────────────────────────────────────── */
+
+  .callout {
+    background: var(--teal);
+    color: #EFE9DD;
+    border-radius: 4px;
+    padding: 32px 36px;
+    max-width: 68ch;
+  }
+
+  :root[data-theme="light"] .callout,
+  :root:not([data-theme="dark"]):not([data-theme="light"]) .callout {
+    color: #F3EFE4;
+  }
+
+  .callout .headline {
+    font-family: var(--font-display);
+    font-style: italic;
+    font-weight: 500;
+    font-size: 1.3rem;
+    line-height: 1.4;
+    margin: 0 0 22px;
+    text-wrap: balance;
+    opacity: 0.96;
+  }
+
+  .callout ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .callout li {
+    padding-left: 22px;
+    position: relative;
+    font-size: 0.94rem;
+    line-height: 1.55;
+    opacity: 0.92;
+  }
+
+  .callout li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .callout .caveat {
+    margin-top: 22px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(239, 233, 221, 0.22);
+    font-size: 0.86rem;
+    opacity: 0.8;
+    font-style: italic;
+  }
+
+  /* ── Closing ──────────────────────────────────────────────────────── */
+
+  .closing {
+    margin-top: 76px;
+    padding-top: 32px;
+    border-top: 2px solid var(--ink);
+  }
+
+  .closing .label {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    margin-bottom: 14px;
+    display: block;
+  }
+
+  .closing p {
+    max-width: 62ch;
+    font-size: 1.05rem;
+    color: var(--ink-soft);
+    margin: 0 0 1em;
+  }
+
+  .closing p:last-child { margin-bottom: 0; }
+  .closing strong { color: var(--ink); font-weight: 650; }
+
+  footer.colophon {
+    margin-top: 56px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+    text-align: center;
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="eyebrow">Capy Clerk · Decision Memo</div>
+    <h1 class="title">Eyes <em>&amp;</em> Ears</h1>
+    <p class="deck">What the till should do the moment vision and voice both have half an answer — instead of the yuzu quietly refusing to ripen.</p>
+    <dl class="meta-strip">
+      <div><dt>Scope</dt><dd>Near-tie path, candidate-ranking.ts</dd></div>
+      <div><dt>Status</dt><dd>Proposal — not yet built</dd></div>
+      <div><dt>Prepared</dt><dd>2026-08-30</dd></div>
+      <div><dt>Reads against</dt><dd>capy-pos / infra/vision-proxy</dd></div>
+    </dl>
+  </header>
+
+  <section id="the-moment">
+    <div class="section-eyebrow"><span class="tag">The moment</span></div>
+    <h2>A near-tie is a refusal today, on purpose</h2>
+    <div class="prose">
+      <p><code>candidate-ranking.ts</code> caps a top candidate below the 0.85 auto-add threshold whenever it lands within 0.05 of the runner-up — deliberately. Sorting a near-tie still produces a winner, and that winner is array order, which is to say chance. Refusing to guess is the correct call.</p>
+      <p>But refusing isn't the same as helping — and in this pilot there's no one to hand the refusal to. Capy Clerk runs self-checkout on each coworker's own phone, honor-system-adjacent, with nobody behind a counter. A near-tie just sits there: the yuzu holds at amber, nothing gets added, and the only person who can notice is whoever's holding the phone, mid-errand, with no cashier to flag it to. The proposal is narrow — when the two channels already wired into this till, a look and a listen, each have half an answer, let them finish each other's sentence instead of one of them staying silent.</p>
+    </div>
+  </section>
+
+  <section id="scenario">
+    <div class="section-eyebrow"><span class="tag">Persona scenario</span></div>
+    <h2>Maria, alone at the snack bar on her break</h2>
+    <div class="prose">
+      <p>Maria doesn't run the till — nobody does. She just opens it on her own phone the way everyone here does, points the camera, and expects it to work without her having to think about it.</p>
+    </div>
+    <div class="scene">
+      <p class="lede">12:47 PM · no one else at the snack bar · a pastry, still in its wax bag, held up to her phone</p>
+      <p>The frame settles. FrameGate captures. Vision comes back with two names, eight hundredths of a point apart: <em>Banana Bread</em>, 0.54, and <em>Coffee Cake</em>, 0.52. Close enough that either is plausible, and close enough that picking one anyway would just be picking randomly with confidence.</p>
+      <p><span class="beat today">Today</span>Nothing happens. The yuzu hangs at amber and won't ripen. There's no cashier to catch it — just Maria, her phone, and an item that quietly isn't in her cart. She doesn't necessarily notice; she's on a break, not proofreading a receipt. She may just walk off with it, not dishonestly, just because the till never said anything was wrong.</p>
+      <p><span class="beat proposed">Proposed</span>The capybara tilts and asks once — <em>"Banana bread, or the coffee cake?"</em> — with both names on her own screen in case her phone's mic is losing to the office. Maria: <em>"Banana bread."</em> <code>rankLabelsBySpokenWords</code> resolves it against the two candidates already on screen, not the whole catalogue. The ripple lands. She pays and heads back to her desk.</p>
+      <p class="payoff">Same near-tie, twice. One version fails silently, with no one around to catch it. The other costs one sentence and closes the loop on the sale itself — not just the convenience of it.</p>
+    </div>
+  </section>
+
+  <section id="premortem">
+    <div class="section-eyebrow"><span class="tag">Premortem — it shipped, it's been live a month, what broke</span></div>
+    <h2>Eight ways this goes wrong before it goes right</h2>
+    <div class="risks">
+
+      <div class="risk" data-severity="high">
+        <span class="chip">High</span>
+        <div>
+          <h3>Confidently wrong, with no second set of eyes</h3>
+          <p>Speech recognition mishears "banana" as "vanilla" in a busy kitchen, and the till resolves against the wrong candidate with no visible doubt at all. In a staffed till this is annoying; self-checkout has no cashier, however inattentive, to catch it — the wrong charge lands on one specific coworker with no reconciliation step to surface it.</p>
+          <div class="note"><b>Design constraint:</b> the resolved answer needs the same confidence bar the vision side already enforces. Reuse <code>rankLabelsBySpokenWords</code>'s coverage tie-break rather than a bare string match, and fall back to the on-screen tap if the spoken answer doesn't clear it.</div>
+        </div>
+      </div>
+
+      <div class="risk" data-severity="high">
+        <span class="chip">High</span>
+        <div>
+          <h3>The mic doesn't know it's being asked a question</h3>
+          <p>A disambiguation question and a general voice command ("add a sandwich") arrive on the same channel. Without a dedicated pending-answer state, an unrelated utterance in the answer window gets misread as the response.</p>
+          <div class="note"><b>Design constraint:</b> needs its own intent state, the way checkout, mute, and mic-off already have one — not folded into the general keyword parser as one more case.</div>
+        </div>
+      </div>
+
+      <div class="risk" data-severity="high">
+        <span class="chip">High</span>
+        <div>
+          <h3>A phone is not a till, and the till's controls assume one</h3>
+          <p><code>V</code>/<code>A</code>/<code>Q</code> are keyboard shortcuts. There's no keyboard on a phone, and a pending question can be killed by things a fixed till never had to survive: the screen timing out, a text notification backgrounding the tab, the browser suspending <code>getUserMedia</code> to save battery — all mid-sentence, all silent.</p>
+          <div class="note"><b>Design constraint:</b> the switches need touch affordances, not just relabeled shortcuts, and the pending-disambiguation state needs to survive (or cleanly cancel on) a background/foreground cycle — a phone backgrounding itself is the mobile equivalent of the <code>watchTrackLoss</code> race below, and it will happen far more often than a till operator hitting a hotkey mid-flow.</div>
+        </div>
+      </div>
+
+      <div class="risk" data-severity="medium">
+        <span class="chip">Medium</span>
+        <div>
+          <h3>Asking too often defeats the point</h3>
+          <p>If the 0.05 near-tie band is even slightly too generous for the real catalogue, disambiguation fires on ties an experienced eye would call obvious. There's no rush to speed through here — the cost is personal irritation, item by item, for whoever's just trying to grab a granola bar and get back to their desk. Annoy them enough and they stop trusting the self-checkout and start asking a coworker to "just spot them one," which is exactly the trust the honor system depends on.</p>
+          <div class="note"><b>Design constraint:</b> <code>RecognitionLogService</code> already logs tier, confidence, and every correction. Measure the real near-tie rate before shipping — don't tune the threshold from a guess.</div>
+        </div>
+      </div>
+
+      <div class="risk" data-severity="medium">
+        <span class="chip">Medium</span>
+        <div>
+          <h3>Every phone is a different camera and a different room</h3>
+          <p>One fixed till means one lens, one mount, one ambient noise floor. Self-checkout on personal phones means recognition accuracy now varies by whoever's holding it — an old phone's camera, a hand that's shaking slightly, the kitchen's fridge hum versus a quiet hallway.</p>
+          <div class="note"><b>Design constraint:</b> the near-tie rate is not one number any more — it should be watched per device class where the logging allows it, not assumed uniform from whatever hardware this was built and tested against.</div>
+        </div>
+      </div>
+
+      <div class="risk" data-severity="low">
+        <span class="chip">Low</span>
+        <div>
+          <h3>A second paid call hiding inside "just make it smarter"</h3>
+          <p>The first ask for free-form phrasing or more than two candidates is reasonable. Routed through the agentic tier, every resolution quietly becomes a second model call stacked on the look that already happened.</p>
+          <div class="note"><b>Design constraint:</b> ship the templated, keyword-only path as the default (see Cost, below) and treat an agentic upgrade as its own costed decision — not a silent one. (This is also exactly the gap a trained closed-set classifier — see the follow-on plan — is meant to close from the other direction.)</div>
+        </div>
+      </div>
+
+      <div class="risk" data-severity="medium">
+        <span class="chip">Medium</span>
+        <div>
+          <h3>This project's proven blind spot: screenshot-shaped bugs</h3>
+          <p>Every real capybara/HUD defect found so far — the frozen opening pose, the NaN-gradient crash, the camera that quietly turned itself back on — was caught by looking at the screen, not by a passing test suite. A joint voice-and-vision state machine, now running on mobile Safari and Chrome instead of one desktop build, is exactly this shape of bug again, with more browsers to be wrong on.</p>
+          <div class="note"><b>Design constraint:</b> budget a manual look-and-listen pass through the actual disambiguation flow on real phones, not just unit coverage on the parser or a desktop e2e run.</div>
+        </div>
+      </div>
+
+      <div class="risk" data-severity="low">
+        <span class="chip">Low</span>
+        <div>
+          <h3>Nobody's watching the register any more, and that's bigger than disambiguation</h3>
+          <p>This feature assumes the general shape of "no cashier" was already accepted for the pilot. Worth stating plainly rather than absorbing quietly: any till behavior that used to lean on "someone will notice" — an obviously-wrong total, a double-add, a stuck cart — inherits the same gap. Disambiguation is the sharpest edge of it, not the whole of it.</p>
+          <div class="note"><b>Design constraint:</b> out of scope for this memo, but worth its own pass — what else in the checkout flow quietly assumed a human was standing there.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section id="cost">
+    <div class="section-eyebrow"><span class="tag">Value &amp; cost — cloud services</span></div>
+    <h2>The recommended path costs nothing extra to run</h2>
+    <div class="prose">
+      <p>An existing look on <code>capy-vision-proxy</code> already runs on Claude Opus 5 and already costs roughly <strong>$0.009</strong> per look, image included. The question is only what a disambiguation <em>on top of</em> that look should cost.</p>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Approach</th>
+            <th>Marginal cost / resolution</th>
+            <th>New model call</th>
+            <th>New infrastructure</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="approach-name">Do nothing</span><span class="approach-sub">today's behavior</span></td>
+            <td class="num zero">$0.000</td>
+            <td>No</td>
+            <td>No — but the item is lost until a manual override</td>
+          </tr>
+          <tr data-recommended>
+            <td><span class="approach-name">Templated + keyword match</span><span class="approach-sub">reuses <code>rankLabelsBySpokenWords</code><span class="rec-flag">Recommended</span></span></td>
+            <td class="num zero">$0.000</td>
+            <td>No</td>
+            <td>No</td>
+          </tr>
+          <tr>
+            <td><span class="approach-name">Agentic — Claude Opus 5</span><span class="approach-sub">via clerk-agent-relay</span></td>
+            <td class="num">≈ $0.0040</td>
+            <td>Yes, one extra</td>
+            <td>No — reuses an already-deployed service</td>
+          </tr>
+          <tr>
+            <td><span class="approach-name">Agentic — Claude Sonnet 5</span><span class="approach-sub">if the relay were tuned lighter for this one turn</span></td>
+            <td class="num">≈ $0.0024</td>
+            <td>Yes, one extra</td>
+            <td>No</td>
+          </tr>
+          <tr>
+            <td><span class="approach-name">Agentic — Claude Haiku 4.5</span><span class="approach-sub">cheapest tier that could plausibly handle it</span></td>
+            <td class="num">≈ $0.0008</td>
+            <td>Yes, one extra</td>
+            <td>No</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="worked-example">
+      <span class="label">Illustrative only — inputs to confirm, not measurements</span>
+      Agentic estimates assume a short, catalogue-scoped turn: ~300 input tokens (candidate names + transcript) and ~100 output tokens, at published per-million-token rates (Opus 5 $5 / $25, Sonnet 5 $3 / $15, Haiku 4.5 $1 / $5, input/output).
+      <code>300 × $5/1M + 100 × $25/1M ≈ $0.004 (Opus 5)</code>
+      For scale: at an assumed 8% near-tie rate on 4,000 looks/day, that's ~320 resolutions/day — <span class="num zero">$0/month</span> on the recommended path, or ≈ <span class="num">$38/month per till</span> on Opus-5-agentic. Confirm the real near-tie rate from <code>RecognitionLogService</code> before trusting either number.
+    </div>
+
+    <div class="infra-note">
+      <p><strong>Why "cloud services" cost is mostly a non-question here.</strong> The recommended path adds no new Code Engine app, no new Terraform resource, and no new container — it's a client-side resolution against data <code>capy-vision-proxy</code> already returned. Even the agentic fallback only calls a service that's already live and already provisioned at <code>scale_min_instances: 0</code>. Tonight's decision to commit fully to IBM Code Engine over AWS (#221 / #224 / #225) means this sits on infrastructure already paid for by request, not a new line item on the estate.</p>
+      <p>One open question, not a blocker: if the agentic path is ever routed through IBM's own model gateway (<code>ANTHROPIC_BASE_URL</code> → <code>api.servicesessentials.ibm.com</code>, already wired for exactly this kind of routing decision), the effective per-token rate may differ from Anthropic's direct pricing above. Not confirmed this session — worth a real quote before committing spend to that path.</p>
+    </div>
+  </section>
+
+  <section id="sustainability">
+    <div class="section-eyebrow"><span class="tag">Sustainability — exec summary</span></div>
+    <h2>Net effect on the carbon footprint: negligible, by design</h2>
+    <div class="callout">
+      <p class="headline">Not negligible by luck — the recommended path was chosen so the common case adds zero model calls, and the fallback only reuses compute the estate already pays for whether or not it fires.</p>
+      <ul>
+        <li>The recommended path adds no model call at all — a near-tie resolves from data the look already paid for, matched the same client-side way a spoken product name already is. Zero marginal compute, for the common case.</li>
+        <li>Even the agentic fallback reuses <code style="color:inherit;border-color:rgba(239,233,221,0.35);background:rgba(0,0,0,0.15)">clerk-agent-relay</code>, a service already scaled to zero between requests. IBM Code Engine's serverless model means this feature's footprint tracks actual use, not provisioned capacity — no new always-on server, no new idle draw.</li>
+        <li>Voice in and out both run client-side on hardware already powered on for the shift (the browser's own speech APIs) — strictly less compute than routing the same exchange through a cloud speech service.</li>
+        <li>For scale, not precision: independent research on LLM inference generally places a single query somewhere from a fraction of a gram to a few grams of CO₂e, depending on model size and the hardware behind it — not an Anthropic-specific figure, and not verified this session. At this feature's realistic volume (a minority of looks, not every look), even the high end of that range stays immaterial next to a shop's existing draw — lighting, refrigeration, the till itself running the full shift regardless.</li>
+      </ul>
+      <p class="caveat">If this ever needs to move from directional to defensible for an actual sustainability report, the right source is IBM's own Cloud Carbon Calculator run against the real Code Engine project — not an estimate layered on top of this memo.</p>
+    </div>
+  </section>
+
+  <div class="closing">
+    <span class="label">Recommendation</span>
+    <p><strong>Ship the templated path first.</strong> It costs nothing to run, touches no new infrastructure, and reuses a matcher (<code>rankLabelsBySpokenWords</code>) already proven in production for exactly this kind of voice-to-candidate resolution.</p>
+    <p>Before it ships: solve the mic-state conflict (Premortem #2) — that's the one risk here that isn't a tuning problem, it's a design problem. Instrument the real near-tie rate via <code>RecognitionLogService</code> before ever touching the 0.05 threshold, and don't let "make it smarter" quietly become the agentic tier without its own costed decision.</p>
+  </div>
+
+  <footer class="colophon">Capy Clerk — engineering note — not yet built</footer>
+
+</div>

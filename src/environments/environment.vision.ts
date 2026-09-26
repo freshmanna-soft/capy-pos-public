@@ -34,6 +34,7 @@ export const environment = {
 
   // See environment.ts — decoupled from `production` on purpose.
   allowSeededAdmin: true,
+  geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration
   //
@@ -62,6 +63,9 @@ export const environment = {
   // relay can be pointed at without repointing `apiUrl` at a service that only
   // answers /clerk/agent.
   clerkAgentApiUrl: 'http://localhost:8789/clerk/agent',
+
+  // Product image upload path, appended to apiUrl: POST `${apiUrl}${imageApiPath}/${productId}/image`
+  imageApiPath: '/products',
 
   // Database
   databaseName: 'capy_pos_dev',
@@ -103,10 +107,19 @@ export const environment = {
     enabled: true,
   },
 
+  // MercadoPago — disabled in the vision dev build; no payment flow is
+  // exercised when this target is in use (it exists purely for AI recognition).
+  mercadopago: {
+    enabled: false,
+    publicKey: '',
+    preferenceApiUrl: 'http://localhost:8790/api/mercadopago/preference',
+  },
+
   paypal: {
     enabled: false,
     clientId: '',
     environment: 'sandbox' as const,
+    preferenceApiUrl: 'http://localhost:8790/api/paypal/order',
   },
 
   // Feature Flags
@@ -120,6 +133,8 @@ export const environment = {
     // flag, not aiVision: that one governs paying the model to *look*, and the two
     // switch on independently.
     clerkAgent: true,
+    // Kiosk self-checkout mode — off for the vision dev build.
+    kiosk: false,
   },
 
   // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but

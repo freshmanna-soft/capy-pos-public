@@ -15,6 +15,9 @@ import { CartItem } from '@core/application/services/cart.service.interface';
  * }
  * ```
  */
+/** Maximum quantity of a single product a customer can add per transaction. */
+export const MAX_QTY_PER_PRODUCT = 10;
+
 @Injectable({
   providedIn: 'root',
 })
@@ -81,10 +84,13 @@ export class CartService {
     const existingItemIndex = currentItems.findIndex((item) => item.product.id === product.id);
 
     if (existingItemIndex >= 0) {
-      // Product exists: increase quantity and move to end of list
+      // Product exists: increase quantity up to the lower of stock and MAX_QTY_PER_PRODUCT.
+      const current = currentItems[existingItemIndex].quantity;
+      const ceiling = Math.min(product.stock, MAX_QTY_PER_PRODUCT);
+      if (current >= ceiling) return;
       const updatedItem = {
         ...currentItems[existingItemIndex],
-        quantity: currentItems[existingItemIndex].quantity + 1,
+        quantity: current + 1,
       };
       const updatedItems = [
         ...currentItems.slice(0, existingItemIndex),
@@ -111,6 +117,8 @@ export class CartService {
     if (itemIndex === -1) {
       throw new Error(`Product with ID ${productId} not found in cart`);
     }
+
+    if (currentItems[itemIndex].quantity >= MAX_QTY_PER_PRODUCT) return;
 
     const updatedItems = [...currentItems];
     updatedItems[itemIndex] = {

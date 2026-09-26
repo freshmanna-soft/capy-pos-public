@@ -137,6 +137,7 @@ describe('ManageInventoryUseCase', () => {
       cost: 5.0,
       stock: 100,
       description: 'A new product',
+      imageUrl: 'https://example.com/pizza.jpg',
       emoji: '🍕',
       barcode: 'BAR-NEW',
     };
@@ -187,6 +188,7 @@ describe('ManageInventoryUseCase', () => {
         category: 'Food',
         price: 9.99,
         stock: 100,
+        imageUrl: 'https://example.com/pizza.jpg',
       });
       mockRepository['create'].mockResolvedValue(createdProduct);
       mockRepository['getCategories'].mockResolvedValue(['Beverages', 'Food']);
@@ -199,6 +201,36 @@ describe('ManageInventoryUseCase', () => {
       expect(mockRepository['create']).toHaveBeenCalledTimes(1);
       expect(useCase.products()).toHaveLength(1);
       expect(useCase.categories()).toEqual(['Beverages', 'Food']);
+    });
+
+    it('should pass imageUrl through to the Product constructor', async () => {
+      mockRepository['create'].mockImplementation(async (product: Product) => {
+        expect(product.imageUrl).toBe('https://example.com/pizza.jpg');
+        return product;
+      });
+      mockRepository['getCategories'].mockResolvedValue(['Food']);
+
+      const result = await useCase.createProduct(validRequest);
+
+      expect(result?.imageUrl).toBe('https://example.com/pizza.jpg');
+      expect(mockRepository['create']).toHaveBeenCalledTimes(1);
+    });
+
+    it('should produce a summary without imageUrl when none provided', async () => {
+      const requestWithoutImage: CreateProductRequest = {
+        name: 'Plain Product',
+        sku: 'SKU-PLAIN',
+        category: 'Food',
+        price: 5.0,
+        cost: 2.0,
+        stock: 10,
+      };
+      mockRepository['create'].mockImplementation(async (product: Product) => product);
+      mockRepository['getCategories'].mockResolvedValue(['Food']);
+
+      const result = await useCase.createProduct(requestWithoutImage);
+
+      expect(result?.imageUrl).toBeUndefined();
     });
 
     it('should use default lowStockThreshold and reorderQuantity', async () => {
@@ -304,6 +336,37 @@ describe('ManageInventoryUseCase', () => {
       expect(result?.name).toBe('New Name');
       expect(result?.price).toBe(7.0);
       expect(useCase.products()[0].name).toBe('New Name');
+    });
+
+    it('should apply imageUrl when provided in the update request', async () => {
+      const existing = createMockProduct({ id: 'p1', name: 'Coffee' });
+      mockRepository['findById'].mockResolvedValue(existing);
+      mockRepository['update'].mockImplementation(async (_id: string, entity: Product) => entity);
+      mockRepository['getCategories'].mockResolvedValue(['Beverages']);
+
+      const result = await useCase.updateProduct({
+        id: 'p1',
+        imageUrl: 'https://cdn.example.com/coffee.png',
+      });
+
+      expect(result?.imageUrl).toBe('https://cdn.example.com/coffee.png');
+      const updateCall = mockRepository['update'].mock.calls[0];
+      expect((updateCall[1] as Product).imageUrl).toBe('https://cdn.example.com/coffee.png');
+    });
+
+    it('should preserve an existing imageUrl when update request omits it', async () => {
+      const existing = createMockProduct({
+        id: 'p1',
+        name: 'Coffee',
+        imageUrl: 'https://cdn.example.com/coffee.png',
+      });
+      mockRepository['findById'].mockResolvedValue(existing);
+      mockRepository['update'].mockImplementation(async (_id: string, entity: Product) => entity);
+      mockRepository['getCategories'].mockResolvedValue(['Beverages']);
+
+      const result = await useCase.updateProduct({ id: 'p1', name: 'Espresso' });
+
+      expect(result?.imageUrl).toBe('https://cdn.example.com/coffee.png');
     });
 
     it('should return null if product not found', async () => {

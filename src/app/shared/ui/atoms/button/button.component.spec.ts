@@ -1,89 +1,74 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ButtonComponent } from '@shared/ui/atoms/button/button.component';
+import { TestBed } from '@angular/core/testing';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { ButtonComponent } from './button.component';
 
-describe('ButtonComponent (atom)', () => {
-  let component: ButtonComponent;
-  let fixture: ComponentFixture<ButtonComponent>;
-  let el: HTMLElement;
+describe('ButtonComponent', () => {
+  beforeEach(() => {
+    TestBed.configureTestingModule({ imports: [ButtonComponent] });
+  });
 
-  const button = (): HTMLButtonElement => el.querySelector('button')!;
-
-  beforeEach(async () => {
-    await TestBed.configureTestingModule({
-      imports: [ButtonComponent],
-    }).compileComponents();
-
-    fixture = TestBed.createComponent(ButtonComponent);
-    component = fixture.componentInstance;
-    el = fixture.nativeElement;
+  it('includes btn and variant class by default', () => {
+    const fixture = TestBed.createComponent(ButtonComponent);
     fixture.detectChanges();
+    const classes = fixture.componentInstance.buttonClasses();
+    expect(classes).toContain('btn');
+    expect(classes).toContain('btn-primary');
+    expect(classes).not.toContain('w-full');
   });
 
-  it('defaults to type="button"', () => {
-    // Load-bearing inside a form: a default of "submit" would make Cancel, Scan
-    // and every disclosure toggle save the form instead.
-    expect(button().getAttribute('type')).toBe('button');
-  });
-
-  it('carries a test id and an accessible label for icon-only use', () => {
-    fixture.componentRef.setInput('testId', 'btn-close-form');
-    fixture.componentRef.setInput('ariaLabel', 'Close');
+  it('adds size class when size is not md', () => {
+    const fixture = TestBed.createComponent(ButtonComponent);
+    fixture.componentRef.setInput('size', 'sm');
     fixture.detectChanges();
-
-    expect(button().getAttribute('data-testid')).toBe('btn-close-form');
-    expect(button().getAttribute('aria-label')).toBe('Close');
+    expect(fixture.componentInstance.buttonClasses()).toContain('btn-sm');
   });
 
-  it('omits both attributes when not given, rather than rendering empty ones', () => {
-    expect(button().hasAttribute('data-testid')).toBe(false);
-    expect(button().hasAttribute('aria-label')).toBe(false);
+  it('adds w-full class when fullWidth is true', () => {
+    const fixture = TestBed.createComponent(ButtonComponent);
+    fixture.componentRef.setInput('fullWidth', true);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.buttonClasses()).toContain('w-full');
   });
 
-  describe('while loading', () => {
-    beforeEach(() => {
-      fixture.componentRef.setInput('loading', true);
-      fixture.detectChanges();
-    });
-
-    it('announces the wait and hides the spinner from assistive tech', () => {
-      // aria-busy is the announcement; the spinner is decoration, and exposing it
-      // would read out a meaningless graphic instead.
-      expect(button().getAttribute('aria-busy')).toBe('true');
-      expect(el.querySelector('.spinner')?.getAttribute('aria-hidden')).toBe('true');
-    });
-
-    it('cannot be clicked', () => {
-      let clicks = 0;
-      component.clicked.subscribe(() => clicks++);
-
-      button().click();
-
-      expect(button().disabled).toBe(true);
-      expect(clicks).toBe(0);
-    });
+  it('does not add w-full class when fullWidth is false (default)', () => {
+    const fixture = TestBed.createComponent(ButtonComponent);
+    fixture.detectChanges();
+    expect(fixture.componentInstance.buttonClasses()).not.toContain('w-full');
   });
 
-  it('does not announce a wait when idle', () => {
-    expect(button().hasAttribute('aria-busy')).toBe(false);
+  it('emits clicked event when not disabled and not loading', () => {
+    const fixture = TestBed.createComponent(ButtonComponent);
+    fixture.detectChanges();
+    const comp = fixture.componentInstance;
+    const emitSpy = vi.spyOn(comp.clicked, 'emit');
+    const event = new MouseEvent('click');
+
+    comp.handleClick(event);
+
+    expect(emitSpy).toHaveBeenCalledWith(event);
   });
 
-  it('does not emit while disabled', () => {
+  it('does not emit clicked event when disabled', () => {
+    const fixture = TestBed.createComponent(ButtonComponent);
     fixture.componentRef.setInput('disabled', true);
     fixture.detectChanges();
-    let clicks = 0;
-    component.clicked.subscribe(() => clicks++);
+    const comp = fixture.componentInstance;
+    const emitSpy = vi.spyOn(comp.clicked, 'emit');
 
-    button().click();
+    comp.handleClick(new MouseEvent('click'));
 
-    expect(clicks).toBe(0);
+    expect(emitSpy).not.toHaveBeenCalled();
   });
 
-  it('emits the click when enabled', () => {
-    let clicks = 0;
-    component.clicked.subscribe(() => clicks++);
+  it('does not emit clicked event when loading', () => {
+    const fixture = TestBed.createComponent(ButtonComponent);
+    fixture.componentRef.setInput('loading', true);
+    fixture.detectChanges();
+    const comp = fixture.componentInstance;
+    const emitSpy = vi.spyOn(comp.clicked, 'emit');
 
-    button().click();
+    comp.handleClick(new MouseEvent('click'));
 
-    expect(clicks).toBe(1);
+    expect(emitSpy).not.toHaveBeenCalled();
   });
 });

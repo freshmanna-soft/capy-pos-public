@@ -8,7 +8,7 @@
  *   - Sells product even with 0 stock → throws ConditionalCheckFailedException
  */
 
-const { initTelemetry, flushTelemetry } = require('./shared/telemetry');
+const { initTelemetry, withSpan, instrument, flushTelemetry } = require('./shared/telemetry');
 const { GetCommand, UpdateCommand, PutCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('./shared/dynamodb');
 const { log, response } = require('./shared/logger');
@@ -18,7 +18,7 @@ const PRODUCTS_TABLE = process.env.PRODUCTS_TABLE;
 const TRANSACTIONS_TABLE = process.env.TRANSACTIONS_TABLE;
 const failureMode = process.env.ENABLE_FAILURE === 'true';
 
-exports.handler = async (event) => {
+const baseHandler = async (event) => {
   const productId = event.pathParameters?.id;
   const body = event.body ? JSON.parse(event.body) : {};
   const quantity = body.quantity || 1;
@@ -132,3 +132,5 @@ exports.handler = async (event) => {
     });
   }
 };
+
+exports.handler = instrument('POST /api/products/{id}/sell', baseHandler);

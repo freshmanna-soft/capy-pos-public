@@ -293,9 +293,11 @@ function authHeaders(): Record<string, string> {
 function refuseUnauthorizedPush(productIds: string[], action: string): boolean {
   if (sessionToken() !== null) return false;
 
-  console.warn(
-    `[Worker:Push] No operator session — refusing to ${action} ${productIds.length} product(s).`
-  );
+  // In kiosk/shop context the absence of an operator session is expected and
+  // harmless — stock decrements will flush on the next authorised staff login.
+  // Use info instead of warn so the browser console stays clean for operators.
+  const log = config.kioskMode ? console.info : console.warn;
+  log(`[Worker:Push] No operator session — refusing to ${action} ${productIds.length} product(s).`);
 
   postEvent({
     type: 'PUSH_COMPLETED',

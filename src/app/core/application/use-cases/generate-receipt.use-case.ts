@@ -3,6 +3,7 @@ import { CartService } from '@core/application/services/cart.service';
 import { CartItem } from '@core/application/services/cart.service.interface';
 import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { ReceiptData, ReceiptLine } from '@core/application/dtos/receipt.dto';
+import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
 
 export type { ReceiptData } from '@core/application/dtos/receipt.dto';
 
@@ -27,6 +28,7 @@ export type { ReceiptData } from '@core/application/dtos/receipt.dto';
 })
 export class GenerateReceiptUseCase {
   private readonly cartService = inject(CartService);
+  private readonly kioskSettings = inject(KioskSettingsService);
 
   /**
    * Generates receipt data from current cart state and payment result.
@@ -43,6 +45,8 @@ export class GenerateReceiptUseCase {
       tax: this.cartService.tax(),
       taxRate: this.cartService.taxRate(),
       total: this.cartService.total(),
+      storeName: this.kioskSettings.storeName() || 'Capy-POS',
+      storeAddress: this.kioskSettings.storeAddress(),
     };
   }
 
@@ -63,7 +67,9 @@ export class GenerateReceiptUseCase {
     subtotal: number,
     tax: number,
     taxRate: number,
-    total: number
+    total: number,
+    storeName = '',
+    storeAddress = ''
   ): ReceiptData {
     return {
       payment,
@@ -73,6 +79,8 @@ export class GenerateReceiptUseCase {
       tax,
       taxRate,
       total,
+      storeName,
+      storeAddress,
     };
   }
 

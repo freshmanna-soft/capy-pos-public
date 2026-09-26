@@ -24,6 +24,7 @@ import { ButtonComponent } from '@shared/ui/atoms/button/button.component';
 import { InputComponent } from '@shared/ui/atoms/input/input.component';
 import { ModalComponent } from '@shared/ui/molecules/modal/modal.component';
 import { BarcodeScanFieldComponent } from './components/barcode-scan-field.component';
+import { ImagePickerComponent } from '@shared/ui/image-picker/image-picker.component';
 import { barcodeKey } from '@core/domain/utils/barcode';
 import { ToastService } from '@shared/ui/toast/toast.service';
 import { AuthorizationError } from '@core/application/auth/angular-authorization.service';
@@ -55,6 +56,7 @@ const FIELD_ORDER: readonly (keyof ProductFormData)[] = [
   'lowStockThreshold',
   'reorderQuantity',
   'description',
+  'imageUrl',
 ];
 
 /**
@@ -72,6 +74,7 @@ interface ProductFormData {
   barcode: string;
   lowStockThreshold: number;
   reorderQuantity: number;
+  imageUrl: string;
 }
 
 /**
@@ -102,6 +105,7 @@ interface ProductFormData {
     InputComponent,
     ModalComponent,
     BarcodeScanFieldComponent,
+    ImagePickerComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './inventory-management.component.html',
@@ -402,6 +406,7 @@ export class InventoryManagementComponent implements OnInit {
       // which meant every product saved through this form had its configured
       // reorder quantity silently replaced.
       reorderQuantity: product.reorderQuantity,
+      imageUrl: product.imageUrl ?? '',
     });
   }
 
@@ -516,6 +521,7 @@ export class InventoryManagementComponent implements OnInit {
         barcode: data.barcode.trim() || undefined,
         lowStockThreshold: Number(data.lowStockThreshold),
         reorderQuantity: Number(data.reorderQuantity),
+        imageUrl: data.imageUrl.trim() || undefined,
       };
 
       const result = await this.inventoryFacade.createProduct(request);
@@ -549,6 +555,7 @@ export class InventoryManagementComponent implements OnInit {
         barcode: data.barcode.trim(),
         lowStockThreshold: Number(data.lowStockThreshold),
         reorderQuantity: Number(data.reorderQuantity),
+        imageUrl: data.imageUrl.trim() || undefined,
       };
 
       const result = await this.inventoryFacade.updateProduct(request);
@@ -763,6 +770,7 @@ export class InventoryManagementComponent implements OnInit {
       barcode: '',
       lowStockThreshold: 10,
       reorderQuantity: 20,
+      imageUrl: '',
     };
   }
 }

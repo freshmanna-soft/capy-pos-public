@@ -8,7 +8,17 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
+import { Permission } from '@core/domain/auth';
 import { LowStockSettingsService } from '@core/application/services/low-stock-settings.service';
+import {
+  KioskSettingsService,
+  StoreRecord,
+  TerminalRecord,
+  LatLng,
+} from '@core/application/services/kiosk-settings.service';
+import { TerminalMode } from '@core/domain/auth/terminal-id.value-object';
+import { FenceMapComponent } from '@shared/ui/fence-map/fence-map.component';
 import { ThemeService } from '@core/application/services/theme.service';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import {
@@ -23,6 +33,7 @@ import {
 } from '@core/application/auth/ports/quick-auth.port';
 import { PasskeySummaryDto } from '@core/application/auth/dtos/quick-auth.dto';
 import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webauthn/pin-policy';
+import { environment } from '../../../environments/environment';
 
 /**
  * Settings Component
@@ -37,7 +48,7 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, FenceMapComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page-container" data-testid="settings-page">
@@ -288,18 +299,315 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
         }
       </div>
 
-      <!-- Future Settings Placeholder -->
-      <div class="settings-section">
+      <!-- ── Org → Store → Terminal ────────────────────────────────────────── -->
+      <div class="settings-section" data-testid="store-info-settings">
         <div class="section-header">
-          <h2>🏪 Store Information</h2>
-          <p class="section-description">Store name, address, and contact details</p>
+          <h2>🏪 Organisations, Stores &amp; Terminals</h2>
+          <p class="section-description">
+            Define the hierarchy that gives every kiosk its store context. Each terminal shows its
+            store name, address and phone to the customer.
+          </p>
         </div>
-        <div class="coming-soon-card">
-          <span class="coming-icon">🚧</span>
-          <p>Coming in a future sprint</p>
+
+        <!-- Active-terminal banner + launch button -->
+        <div class="active-terminal-banner" data-testid="active-terminal-banner">
+          <span class="atb-label">This device is running as</span>
+          <strong class="atb-id">{{ kioskSettings.terminalId() }}</strong>
+          <span class="atb-store">{{ kioskSettings.storeName() || 'Unnamed store' }}</span>
+          @if (canUseKiosk()) {
+            <button class="btn-launch-kiosk" (click)="launchKiosk()" data-testid="btn-launch-kiosk">
+              🏧 Open Kiosk Terminal
+            </button>
+          }
         </div>
+
+        <!-- ── Org list ─────────────────────────────────────────────────── -->
+        @for (org of kioskSettings.orgs(); track org.orgId) {
+          <div class="entity-card" [attr.data-testid]="'org-card-' + org.orgId">
+            <!-- Org header row -->
+            <div class="entity-header">
+              <div class="entity-icon">🏢</div>
+              <div class="entity-title-area">
+                <input
+                  class="entity-name-input"
+                  type="text"
+                  placeholder="Organisation name"
+                  [value]="org.name"
+                  (change)="updateOrgName(org, $any($event.target).value)"
+                  [attr.data-testid]="'input-org-name-' + org.orgId"
+                />
+                <code class="entity-id-badge">{{ org.orgId }}</code>
+              </div>
+              <button
+                class="btn-icon btn-danger"
+                title="Delete organisation"
+                (click)="confirmDeleteOrg(org.orgId)"
+                [attr.data-testid]="'btn-delete-org-' + org.orgId"
+              >
+                ✕
+              </button>
+            </div>
+
+            <!-- ── Store list under this org ─────────────────────────── -->
+            @for (store of storesForOrg(org.orgId); track store.storeId) {
+              <div class="store-card" [attr.data-testid]="'store-card-' + store.storeId">
+                <!-- Store header row -->
+                <div class="entity-header entity-header--store">
+                  <div class="entity-icon">🏬</div>
+                  <div class="entity-title-area">
+                    <input
+                      class="entity-name-input"
+                      type="text"
+                      placeholder="Store name"
+                      [value]="store.name"
+                      (change)="updateStoreName(store, $any($event.target).value)"
+                      [attr.data-testid]="'input-store-name-' + store.storeId"
+                    />
+                    <code class="entity-id-badge">{{ store.storeId }}</code>
+                  </div>
+                  <button
+                    class="btn-icon btn-danger"
+                    title="Delete store"
+                    (click)="confirmDeleteStore(store.storeId)"
+                    [attr.data-testid]="'btn-delete-store-' + store.storeId"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <!-- Store contact fields -->
+                <div class="store-contact-grid">
+                  <input
+                    class="store-input"
+                    type="text"
+                    placeholder="Street address"
+                    [value]="store.address"
+                    (change)="updateStoreAddress(store, $any($event.target).value)"
+                    [attr.data-testid]="'input-address-' + store.storeId"
+                  />
+                  <input
+                    class="store-input"
+                    type="tel"
+                    placeholder="Support phone"
+                    [value]="store.phone"
+                    (change)="updateStorePhone(store, $any($event.target).value)"
+                    [attr.data-testid]="'input-phone-' + store.storeId"
+                  />
+                </div>
+
+                <!-- ── Geofence polygon map ────────────────────────────── -->
+                <div class="fence-section" [attr.data-testid]="'fence-section-' + store.storeId">
+                  <button
+                    type="button"
+                    class="fence-toggle"
+                    (click)="toggleFenceMap(store.storeId)"
+                    [attr.data-testid]="'btn-toggle-fence-' + store.storeId"
+                  >
+                    <span>🗺️ Geofence polygon</span>
+                    @if (store.fencePolygon.length >= 3) {
+                      <span class="fence-badge fence-badge--on">● Active</span>
+                    } @else {
+                      <span class="fence-badge">Not configured</span>
+                    }
+                    <span class="fence-toggle-caret">{{
+                      fenceMapOpen(store.storeId) ? '▲' : '▼'
+                    }}</span>
+                  </button>
+
+                  @if (fenceMapOpen(store.storeId)) {
+                    <app-fence-map
+                      [initialPolygon]="store.fencePolygon"
+                      (polygonChange)="saveFencePolygon(store, $event)"
+                      [attr.data-testid]="'fence-map-' + store.storeId"
+                    />
+                  }
+                </div>
+
+                <!-- ── Terminal list under this store ─────────────────── -->
+                @for (terminal of terminalsForStore(store.storeId); track terminal.terminalId) {
+                  <div
+                    class="terminal-row"
+                    [class.terminal-row--active]="
+                      kioskSettings.activeTerminalId() === terminal.terminalId
+                    "
+                    [attr.data-testid]="'terminal-row-' + terminal.terminalId"
+                  >
+                    <div class="terminal-left">
+                      <span
+                        class="terminal-mode-badge"
+                        [class.terminal-mode-badge--kiosk]="terminal.mode === 'kiosk'"
+                      >
+                        {{ terminal.mode === 'kiosk' ? '🏧' : '🧑‍💼' }}
+                      </span>
+                      <div>
+                        <input
+                          class="terminal-label-input"
+                          type="text"
+                          placeholder="Terminal label"
+                          [value]="terminal.label"
+                          (change)="updateTerminalLabel(terminal, $any($event.target).value)"
+                          [attr.data-testid]="'input-label-' + terminal.terminalId"
+                        />
+                        <code class="entity-id-badge entity-id-badge--sm">{{
+                          terminal.terminalId
+                        }}</code>
+                      </div>
+                    </div>
+
+                    <div class="terminal-right">
+                      <!-- Mode selector -->
+                      <div class="mode-toggle mode-toggle--sm" role="group">
+                        <button
+                          class="mode-btn mode-btn--sm"
+                          [class.mode-btn--active]="terminal.mode === 'operator'"
+                          (click)="setTerminalMode(terminal, 'operator')"
+                        >
+                          Op
+                        </button>
+                        <button
+                          class="mode-btn mode-btn--sm"
+                          [class.mode-btn--active]="terminal.mode === 'kiosk'"
+                          (click)="setTerminalMode(terminal, 'kiosk')"
+                        >
+                          Kiosk
+                        </button>
+                      </div>
+                      <!-- "Use this terminal" button -->
+                      @if (kioskSettings.activeTerminalId() !== terminal.terminalId) {
+                        <button
+                          class="btn-use"
+                          (click)="activateTerminal(terminal.terminalId)"
+                          [attr.data-testid]="'btn-activate-' + terminal.terminalId"
+                        >
+                          Use this terminal
+                        </button>
+                      } @else {
+                        <span class="terminal-active-chip">● Active</span>
+                      }
+                      <!-- Payment overrides -->
+                      <div class="payment-overrides">
+                        <label class="override-label"
+                          >MP
+                          <select
+                            class="override-select"
+                            [value]="
+                              terminal.mercadopagoEnabled === null
+                                ? 'auto'
+                                : terminal.mercadopagoEnabled
+                                  ? 'on'
+                                  : 'off'
+                            "
+                            (change)="setMpOverride(terminal, $any($event.target).value)"
+                            [attr.data-testid]="'mp-override-' + terminal.terminalId"
+                          >
+                            <option value="auto">Auto</option>
+                            <option value="on">On</option>
+                            <option value="off">Off</option>
+                          </select>
+                        </label>
+                        <label class="override-label"
+                          >PayPal
+                          <select
+                            class="override-select"
+                            [value]="
+                              terminal.paypalEnabled === null
+                                ? 'auto'
+                                : terminal.paypalEnabled
+                                  ? 'on'
+                                  : 'off'
+                            "
+                            (change)="setPaypalOverride(terminal, $any($event.target).value)"
+                            [attr.data-testid]="'paypal-override-' + terminal.terminalId"
+                          >
+                            <option value="auto">Auto</option>
+                            <option value="on">On</option>
+                            <option value="off">Off</option>
+                          </select>
+                        </label>
+                      </div>
+                      <!-- Device token section (kiosk mode only) -->
+                      @if (terminal.mode === 'kiosk') {
+                        <div class="device-token-row">
+                          @if (terminal.deviceToken) {
+                            <span
+                              class="device-token-chip"
+                              [attr.data-testid]="'device-token-chip-' + terminal.terminalId"
+                              title="{{ terminal.deviceToken }}"
+                              >🔑 Token set</span
+                            >
+                          } @else {
+                            <span class="device-token-chip device-token-chip--missing"
+                              >⚠️ No token</span
+                            >
+                          }
+                          <button
+                            class="btn-token"
+                            [disabled]="tokenBusy(terminal.terminalId)"
+                            (click)="generateDeviceToken(terminal)"
+                            [attr.data-testid]="'btn-generate-token-' + terminal.terminalId"
+                          >
+                            {{
+                              tokenBusy(terminal.terminalId)
+                                ? 'Generating…'
+                                : terminal.deviceToken
+                                  ? 'Regenerate'
+                                  : 'Generate token'
+                            }}
+                          </button>
+                          @if (tokenError(terminal.terminalId)) {
+                            <span
+                              class="device-token-error"
+                              [attr.data-testid]="'token-error-' + terminal.terminalId"
+                              >{{ tokenError(terminal.terminalId) }}</span
+                            >
+                          }
+                        </div>
+                      }
+                      <button
+                        class="btn-icon btn-danger"
+                        title="Delete terminal"
+                        (click)="confirmDeleteTerminal(terminal.terminalId)"
+                        [attr.data-testid]="'btn-delete-terminal-' + terminal.terminalId"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                }
+
+                <!-- Add terminal -->
+                <button
+                  class="btn-add btn-add--terminal"
+                  (click)="addTerminal(store.storeId)"
+                  [attr.data-testid]="'btn-add-terminal-' + store.storeId"
+                >
+                  + Add terminal
+                </button>
+              </div>
+            }
+
+            <!-- Add store under this org -->
+            <button
+              class="btn-add btn-add--store"
+              (click)="addStore(org.orgId)"
+              [attr.data-testid]="'btn-add-store-' + org.orgId"
+            >
+              + Add store
+            </button>
+          </div>
+        }
+
+        <!-- Add org -->
+        <button class="btn-add btn-add--org" (click)="addOrg()" data-testid="btn-add-org">
+          + Add organisation
+        </button>
+
+        @if (hierarchySaved()) {
+          <div class="message message-success" data-testid="hierarchy-saved">✓ Saved.</div>
+        }
       </div>
 
+      <!-- Tax Configuration (still coming soon) -->
       <div class="settings-section">
         <div class="section-header">
           <h2>💰 Tax Configuration</h2>
@@ -666,6 +974,443 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
       :host-context(html.dark) .theme-switch--on .theme-switch__track {
         background: #2563eb;
       }
+
+      /* ── Org / Store / Terminal hierarchy ─────────────────────────────── */
+
+      .active-terminal-banner {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        margin-top: 1rem;
+        padding: 0.625rem 1rem;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 8px;
+        font-size: 0.8125rem;
+      }
+      .atb-label {
+        color: #3b82f6;
+      }
+      .atb-id {
+        color: #1d4ed8;
+        font-family: monospace;
+      }
+      .atb-store {
+        color: #374151;
+        margin-left: auto;
+      }
+      .btn-launch-kiosk {
+        margin-left: 0.75rem;
+        padding: 0.25rem 0.75rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        background: #1d4ed8;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .btn-launch-kiosk:hover {
+        background: #1e40af;
+      }
+
+      .entity-card {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+      }
+      .store-card {
+        margin-top: 0.75rem;
+        padding: 0.75rem 1rem;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+      }
+
+      .entity-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+      .entity-header--store {
+        gap: 0.5rem;
+      }
+
+      .entity-icon {
+        font-size: 1.25rem;
+        flex-shrink: 0;
+      }
+
+      .entity-title-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+      }
+
+      .entity-name-input,
+      .terminal-label-input {
+        width: 100%;
+        padding: 0.375rem 0.625rem;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        outline: none;
+        background: white;
+      }
+      .entity-name-input:focus,
+      .terminal-label-input:focus {
+        border-color: #2563eb;
+      }
+      .terminal-label-input {
+        font-size: 0.875rem;
+        font-weight: 500;
+      }
+
+      .entity-id-badge {
+        font-family: monospace;
+        font-size: 0.7rem;
+        color: #6b7280;
+        background: #f3f4f6;
+        padding: 0.1rem 0.375rem;
+        border-radius: 4px;
+        width: fit-content;
+      }
+      .entity-id-badge--sm {
+        font-size: 0.65rem;
+      }
+
+      .store-contact-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+      }
+
+      .store-input {
+        padding: 0.375rem 0.625rem;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        outline: none;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .store-input:focus {
+        border-color: #2563eb;
+      }
+
+      /* Terminal row */
+      .terminal-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+        margin-top: 0.5rem;
+        padding: 0.625rem 0.75rem;
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+      }
+      .terminal-row--active {
+        border-color: #3b82f6;
+        background: #eff6ff;
+      }
+      .terminal-left {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        flex: 1;
+        min-width: 0;
+      }
+      .terminal-right {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .terminal-mode-badge {
+        font-size: 1.25rem;
+        flex-shrink: 0;
+        margin-top: 0.125rem;
+      }
+
+      .mode-toggle {
+        display: flex;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .mode-toggle--sm {
+      }
+      .mode-btn {
+        padding: 0.375rem 0.875rem;
+        background: white;
+        border: none;
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          color 0.15s;
+      }
+      .mode-btn--sm {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+      }
+      .mode-btn--active {
+        background: #2563eb;
+        color: white;
+        font-weight: 600;
+      }
+      .mode-btn:not(.mode-btn--active):hover {
+        background: #f3f4f6;
+      }
+
+      .terminal-active-chip {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #16a34a;
+        background: #dcfce7;
+        padding: 0.2rem 0.5rem;
+        border-radius: 9999px;
+        white-space: nowrap;
+      }
+
+      .btn-use {
+        padding: 0.25rem 0.625rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        background: none;
+        border: 1px solid #2563eb;
+        color: #2563eb;
+        border-radius: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-use:hover {
+        background: #eff6ff;
+      }
+
+      .payment-overrides {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .override-label {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: #374151;
+      }
+      .override-select {
+        padding: 0.15rem 0.25rem;
+        font-size: 0.75rem;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        background: white;
+        cursor: pointer;
+      }
+
+      .btn-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+        background: none;
+        font-size: 0.75rem;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .btn-danger {
+        border-color: #fca5a5;
+        color: #b91c1c;
+      }
+      .btn-danger:hover {
+        background: #fef2f2;
+      }
+
+      .device-token-row {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        flex-wrap: wrap;
+        margin-top: 0.125rem;
+      }
+      .device-token-chip {
+        font-size: 0.7rem;
+        font-weight: 500;
+        padding: 0.1rem 0.4rem;
+        border-radius: 4px;
+        background: #dcfce7;
+        color: #166534;
+        white-space: nowrap;
+      }
+      .device-token-chip--missing {
+        background: #fef9c3;
+        color: #854d0e;
+      }
+      .btn-token {
+        padding: 0.2rem 0.5rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+        background: none;
+        border: 1px solid #7c3aed;
+        color: #7c3aed;
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-token:hover:not(:disabled) {
+        background: #f5f3ff;
+      }
+      .btn-token:disabled {
+        opacity: 0.5;
+        cursor: wait;
+      }
+      .device-token-error {
+        font-size: 0.7rem;
+        color: #b91c1c;
+      }
+
+      .btn-add {
+        display: block;
+        width: 100%;
+        margin-top: 0.5rem;
+        padding: 0.5rem;
+        background: none;
+        border: 1px dashed #d1d5db;
+        border-radius: 6px;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: #6b7280;
+        cursor: pointer;
+        text-align: left;
+        transition:
+          border-color 0.15s,
+          color 0.15s;
+      }
+      .btn-add:hover {
+        border-color: #2563eb;
+        color: #2563eb;
+      }
+      .btn-add--org {
+        margin-top: 1rem;
+        border-radius: 8px;
+      }
+      .btn-add--store {
+        border-radius: 6px;
+      }
+      .btn-add--terminal {
+        font-size: 0.75rem;
+      }
+
+      /* Dark mode additions */
+      :host-context(html.dark) .entity-card {
+        background: #1f2937;
+        border-color: #374151;
+      }
+      :host-context(html.dark) .store-card {
+        background: #111827;
+        border-color: #374151;
+      }
+      :host-context(html.dark) .terminal-row {
+        background: #1f2937;
+        border-color: #374151;
+      }
+      :host-context(html.dark) .terminal-row--active {
+        background: #1e3a5f;
+        border-color: #3b82f6;
+      }
+      :host-context(html.dark) .entity-name-input,
+      :host-context(html.dark) .terminal-label-input,
+      :host-context(html.dark) .store-input,
+      :host-context(html.dark) .override-select {
+        background: #374151;
+        border-color: #4b5563;
+        color: #f9fafb;
+      }
+      :host-context(html.dark) .entity-id-badge {
+        background: #374151;
+        color: #9ca3af;
+      }
+      :host-context(html.dark) .active-terminal-banner {
+        background: #1e3a5f;
+        border-color: #1d4ed8;
+      }
+      :host-context(html.dark) .btn-add {
+        border-color: #4b5563;
+        color: #9ca3af;
+      }
+      :host-context(html.dark) .mode-btn:not(.mode-btn--active) {
+        background: #374151;
+        color: #d1d5db;
+      }
+
+      /* ── Fence section ──────────────────────────────────────────────── */
+      .fence-section {
+        margin-top: 0.625rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .fence-toggle {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        background: white;
+        border: none;
+        cursor: pointer;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: #374151;
+        text-align: left;
+        transition: background 0.15s;
+      }
+      .fence-toggle:hover {
+        background: #f9fafb;
+      }
+      .fence-toggle-caret {
+        margin-left: auto;
+        font-size: 0.65rem;
+        color: #9ca3af;
+      }
+      .fence-badge {
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 0.1rem 0.4rem;
+        border-radius: 9999px;
+        background: #f3f4f6;
+        color: #6b7280;
+      }
+      .fence-badge--on {
+        background: #dcfce7;
+        color: #166534;
+      }
+
+      :host-context(html.dark) .fence-section {
+        border-color: #374151;
+      }
+      :host-context(html.dark) .fence-toggle {
+        background: #1f2937;
+        color: #e5e7eb;
+      }
+      :host-context(html.dark) .fence-toggle:hover {
+        background: #111827;
+      }
     `,
   ],
 })
@@ -673,6 +1418,7 @@ export class SettingsComponent implements OnInit {
   private readonly quickAuthAdmin = inject(QUICK_AUTH_ADMIN_PORT);
   private readonly quickAuth = inject(QUICK_AUTH_GATEWAY);
   private readonly currentUser = inject(CurrentUserService);
+  private readonly router = inject(Router);
 
   readonly minPinLength = MIN_PIN_LENGTH;
   readonly maxPinLength = MAX_PIN_LENGTH;
@@ -690,13 +1436,50 @@ export class SettingsComponent implements OnInit {
   /** Nothing here can be set up for nobody — see QuickAuthAdminPort. */
   readonly signedIn = computed(() => this.currentUser.operatorId() !== null);
   readonly busy = computed(() => this.enrolling() || this.savingPin());
+  /** True when the current operator holds USE_KIOSK — gates the launch button. */
+  readonly canUseKiosk = computed(() => this.currentUser.hasPermission(Permission.USE_KIOSK));
 
   readonly lowStockSettings = inject(LowStockSettingsService);
+  readonly kioskSettings = inject(KioskSettingsService);
   private readonly themeService = inject(ThemeService);
 
   readonly thresholdInput = signal(10);
   readonly saveSuccess = signal(false);
   readonly saveError = signal<string | null>(null);
+  readonly hierarchySaved = signal(false);
+
+  /** Per-terminal busy state for device-token generation. Key = terminalId. */
+  private readonly _tokenBusy = signal<Record<string, boolean>>({});
+  /** Per-terminal error message for device-token generation. Key = terminalId. */
+  private readonly _tokenError = signal<Record<string, string>>({});
+
+  tokenBusy(terminalId: string): boolean {
+    return this._tokenBusy()[terminalId] ?? false;
+  }
+  tokenError(terminalId: string): string | null {
+    return this._tokenError()[terminalId] ?? null;
+  }
+
+  /** Set of store IDs whose fence map panel is currently expanded. */
+  private readonly _openFenceMaps = signal<Set<string>>(new Set());
+
+  /** Returns true when the fence map panel for `storeId` is open. */
+  fenceMapOpen(storeId: string): boolean {
+    return this._openFenceMaps().has(storeId);
+  }
+
+  /** Toggle the fence map panel for a given store. */
+  toggleFenceMap(storeId: string): void {
+    this._openFenceMaps.update((s) => {
+      const next = new Set(s);
+      if (next.has(storeId)) {
+        next.delete(storeId);
+      } else {
+        next.add(storeId);
+      }
+      return next;
+    });
+  }
 
   /** Whether dark mode is currently active */
   readonly isDark = computed(() => this.themeService.theme() === 'dark');
@@ -709,6 +1492,7 @@ export class SettingsComponent implements OnInit {
   async ngOnInit(): Promise<void> {
     const threshold = await this.lowStockSettings.loadThreshold();
     this.thresholdInput.set(threshold);
+    await this.kioskSettings.load();
     await this.loadSignInMethods();
   }
 
@@ -874,5 +1658,179 @@ export class SettingsComponent implements OnInit {
     } catch (err) {
       this.saveError.set(err instanceof Error ? err.message : 'Failed to save threshold');
     }
+  }
+
+  // ── Hierarchy helpers ─────────────────────────────────────────────────────
+
+  storesForOrg(orgId: string) {
+    return this.kioskSettings.stores().filter((s) => s.orgId === orgId);
+  }
+
+  terminalsForStore(storeId: string) {
+    return this.kioskSettings.terminals().filter((t) => t.storeId === storeId);
+  }
+
+  private _flash(): void {
+    this.hierarchySaved.set(true);
+    setTimeout(() => this.hierarchySaved.set(false), 2000);
+  }
+
+  // ── Org actions ──────────────────────────────────────────────────────────
+
+  async addOrg(): Promise<void> {
+    const orgId = `org-${Date.now()}`;
+    await this.kioskSettings.saveOrg({ orgId, name: '' });
+    this._flash();
+  }
+
+  async updateOrgName(org: { orgId: string; name: string }, name: string): Promise<void> {
+    await this.kioskSettings.saveOrg({ ...org, name: name.trim() });
+    this._flash();
+  }
+
+  async confirmDeleteOrg(orgId: string): Promise<void> {
+    if (!confirm('Delete this organisation and all its stores and terminals?')) return;
+    await this.kioskSettings.deleteOrg(orgId);
+  }
+
+  // ── Store actions ─────────────────────────────────────────────────────────
+
+  async addStore(orgId: string): Promise<void> {
+    const storeId = this.kioskSettings.nextStoreId(orgId, `store-${Date.now()}`);
+    await this.kioskSettings.saveStore({
+      orgId,
+      storeId,
+      name: '',
+      address: '',
+      phone: '',
+      fencePolygon: [],
+    });
+    this._flash();
+  }
+
+  async updateStoreName(store: StoreRecord, name: string): Promise<void> {
+    await this.kioskSettings.saveStore({ ...store, name: name.trim() });
+    this._flash();
+  }
+
+  async updateStoreAddress(store: StoreRecord, address: string): Promise<void> {
+    await this.kioskSettings.saveStore({ ...store, address: address.trim() });
+    this._flash();
+  }
+
+  async updateStorePhone(store: StoreRecord, phone: string): Promise<void> {
+    await this.kioskSettings.saveStore({ ...store, phone: phone.trim() });
+    this._flash();
+  }
+
+  /** Persist the polygon drawn in the fence map editor for a store. */
+  async saveFencePolygon(store: StoreRecord, polygon: LatLng[]): Promise<void> {
+    await this.kioskSettings.saveStore({ ...store, fencePolygon: polygon });
+    this._flash();
+  }
+
+  async confirmDeleteStore(storeId: string): Promise<void> {
+    if (!confirm('Delete this store and all its terminals?')) return;
+    await this.kioskSettings.deleteStore(storeId);
+  }
+
+  // ── Terminal actions ──────────────────────────────────────────────────────
+
+  async addTerminal(storeId: string): Promise<void> {
+    const terminalId = this.kioskSettings.nextTerminalId(storeId, `terminal-${Date.now()}`);
+    const orgId = storeId.split('/')[0];
+    await this.kioskSettings.saveTerminal({
+      orgId,
+      storeId,
+      terminalId,
+      label: 'New terminal',
+      mode: TerminalMode.OPERATOR,
+      mercadopagoEnabled: null,
+      paypalEnabled: null,
+      fenceEnabled: false,
+      fenceLat: null,
+      fenceLng: null,
+      fenceRadiusMeters: 200,
+    });
+    this._flash();
+  }
+
+  async updateTerminalLabel(terminal: TerminalRecord, label: string): Promise<void> {
+    await this.kioskSettings.saveTerminal({ ...terminal, label: label.trim() });
+    this._flash();
+  }
+
+  async setTerminalMode(terminal: TerminalRecord, mode: TerminalMode): Promise<void> {
+    await this.kioskSettings.saveTerminal({ ...terminal, mode });
+    this._flash();
+  }
+
+  async setMpOverride(terminal: TerminalRecord, value: string): Promise<void> {
+    const override = value === 'auto' ? null : value === 'on';
+    await this.kioskSettings.saveTerminal({ ...terminal, mercadopagoEnabled: override });
+    this._flash();
+  }
+
+  async setPaypalOverride(terminal: TerminalRecord, value: string): Promise<void> {
+    const override = value === 'auto' ? null : value === 'on';
+    await this.kioskSettings.saveTerminal({ ...terminal, paypalEnabled: override });
+    this._flash();
+  }
+
+  async activateTerminal(terminalId: string): Promise<void> {
+    await this.kioskSettings.setActiveTerminal(terminalId);
+    this._flash();
+  }
+
+  async confirmDeleteTerminal(terminalId: string): Promise<void> {
+    if (!confirm('Delete this terminal?')) return;
+    await this.kioskSettings.deleteTerminal(terminalId);
+  }
+
+  /**
+   * Call `POST /api/kiosk-device-token` with the staff JWT and save the returned
+   * token to the terminal record in Dexie.
+   *
+   * Requires the operator to be signed in (staff JWT on session).
+   */
+  async generateDeviceToken(terminal: TerminalRecord): Promise<void> {
+    const accessToken = this.currentUser.session()?.accessToken;
+    if (!accessToken) {
+      this._tokenError.update((e) => ({ ...e, [terminal.terminalId]: 'Not signed in' }));
+      return;
+    }
+
+    this._tokenBusy.update((b) => ({ ...b, [terminal.terminalId]: true }));
+    this._tokenError.update((e) => ({ ...e, [terminal.terminalId]: '' }));
+
+    try {
+      const response = await fetch(`${environment.apiUrl}/kiosk-device-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ terminalId: terminal.terminalId }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const { token } = (await response.json()) as { token: string };
+      await this.kioskSettings.saveTerminal({ ...terminal, deviceToken: token });
+      this._flash();
+    } catch (err) {
+      this._tokenError.update((e) => ({
+        ...e,
+        [terminal.terminalId]: err instanceof Error ? err.message : 'Failed',
+      }));
+    } finally {
+      this._tokenBusy.update((b) => ({ ...b, [terminal.terminalId]: false }));
+    }
+  }
+  /** Navigate to the kiosk splash screen for this terminal. */
+  launchKiosk(): void {
+    void this.router.navigate(['/kiosk']);
   }
 }

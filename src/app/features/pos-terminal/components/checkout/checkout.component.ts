@@ -2,9 +2,11 @@ import {
   Component,
   ChangeDetectionStrategy,
   inject,
+  input,
   signal,
   computed,
   output,
+  OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -14,7 +16,13 @@ import { ProcessCardPaymentUseCase } from '@core/application/use-cases/process-c
 import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
 import { CircuitBreakerService } from '@core/infrastructure/resilience/circuit-breaker.service';
 import { RetryService } from '@core/infrastructure/resilience/retry.service';
-import { PaymentResult, StaffPaymentMethod } from '@core/application/dtos/payment.dto';
+import {
+  PaymentMethod,
+  PaymentResult,
+  StaffPaymentMethod,
+} from '@core/application/dtos/payment.dto';
+import { MERCADOPAGO_PAYMENT_PORT } from '@core/application/ports/mercadopago.port';
+import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
 
 /**
  * Name of the circuit breaker that fronts the (simulated) card payment gateway.
@@ -129,6 +137,28 @@ const DECLINED_TEST_CARD = '4000000000000002';
                 <span class="method-icon">📱</span>
                 <span class="method-label">Mobile</span>
               </button>
+              @if (mercadopago.isEnabled()) {
+                <!-- Clicking MP launches the Wallet Brick directly — no extra Continue step. -->
+                <button
+                  class="method-card method-card--mp"
+                  (click)="selectAndProceed('mercadopago')"
+                  data-testid="method-mercadopago"
+                >
+                  <span class="method-icon">🔵</span>
+                  <span class="method-label">MercadoPago</span>
+                </button>
+              }
+              @if (paypal.isEnabled()) {
+                <!-- Same direct-launch for PayPal. -->
+                <button
+                  class="method-card method-card--paypal"
+                  (click)="selectAndProceed('paypal')"
+                  data-testid="method-paypal"
+                >
+                  <span class="method-icon">🅿️</span>
+                  <span class="method-label">PayPal</span>
+                </button>
+              }
             </div>
             <button
               class="btn-proceed"
@@ -292,6 +322,85 @@ const DECLINED_TEST_CARD = '4000000000000002';
               >
                 Pay {{ cardPayment.amountToCharge() | currency }}
               </button>
+            </div>
+          </div>
+        }
+
+        <!-- Step 2: MercadoPago Payment -->
+        <!-- MercadoPago — Wallet Brick (primary: pay from MP account) -->
+        @if (step() === 'mercadopago-wallet') {
+          <div class="mercadopago-payment" data-testid="mercadopago-wallet-payment">
+            <h3 class="section-title">MercadoPago</h3>
+            <div class="amount-display">
+              <span class="amount-label">Amount</span>
+              <span class="amount-value">{{ cartService.total() | currency }}</span>
+            </div>
+            <!-- Wallet Brick renders here. Once the buyer clicks Pay in the Brick,
+                 mpWalletPolling() becomes true and the waiting overlay replaces it. -->
+            @if (!mpWalletPolling()) {
+              <div id="mp-wallet-brick-container" data-testid="mp-wallet-brick-container"></div>
+              <div class="mp-mode-toggle">
+                <button
+                  class="btn-text-link"
+                  (click)="mpMode.set('card'); goBack(); confirmPayment()"
+                  data-testid="btn-mp-use-card"
+                >
+                  Pay with a card instead
+                </button>
+              </div>
+              <div class="action-buttons">
+                <button class="btn-back" (click)="goBack()">Back</button>
+              </div>
+            } @else {
+              <!-- Polling state: buyer is completing payment in the MP app / new tab -->
+              <div class="mp-wallet-waiting" data-testid="mp-wallet-waiting">
+                <div class="spinner"></div>
+                <p class="processing-text">Waiting for payment confirmation…</p>
+                <p class="mp-waiting-hint">
+                  Complete the payment in the MercadoPago tab that opened.
+                </p>
+              </div>
+            }
+          </div>
+        }
+
+        <!-- MercadoPago — Card Brick (fallback: enter card details) -->
+        @if (step() === 'mercadopago') {
+          <div class="mercadopago-payment" data-testid="mercadopago-payment">
+            <h3 class="section-title">MercadoPago — Card</h3>
+            <div class="amount-display">
+              <span class="amount-label">Amount</span>
+              <span class="amount-value">{{ cartService.total() | currency }}</span>
+            </div>
+            <!-- Card Payment Brick renders here -->
+            <div id="mp-card-brick-container" data-testid="mp-brick-container"></div>
+            <div class="mp-mode-toggle">
+              <button
+                class="btn-text-link"
+                (click)="mpMode.set('wallet'); goBack(); confirmPayment()"
+                data-testid="btn-mp-use-wallet"
+              >
+                Pay with MercadoPago account instead
+              </button>
+            </div>
+            <div class="action-buttons">
+              <button class="btn-back" (click)="goBack()">Back</button>
+            </div>
+          </div>
+        }
+
+        <!-- Step 2: PayPal Payment -->
+        @if (step() === 'paypal') {
+          <div class="paypal-payment" data-testid="paypal-payment">
+            <h3 class="section-title">PayPal</h3>
+            <div class="amount-display">
+              <span class="amount-label">Amount</span>
+              <span class="amount-value">{{ cartService.total() | currency }}</span>
+            </div>
+            <!-- The PayPal JS SDK renders its Buttons widget inside this element -->
+            <div id="paypal-btn-container" data-testid="paypal-btn-container"></div>
+            <div class="action-buttons">
+              <button class="btn-back" (click)="goBack()">Back</button>
             </div>
           </div>
         }
@@ -792,16 +901,106 @@ const DECLINED_TEST_CARD = '4000000000000002';
         color: #374151;
         font-family: monospace;
       }
+
+      .mercadopago-payment {
+        padding: 1.5rem;
+      }
+
+      #mp-card-brick-container,
+      #mp-wallet-brick-container {
+        min-height: 280px;
+        margin-bottom: 1rem;
+      }
+
+      .mp-mode-toggle {
+        text-align: center;
+        margin: 0.5rem 0 0.75rem;
+      }
+
+      .btn-text-link {
+        background: none;
+        border: none;
+        color: #009ee3;
+        font-size: 0.85rem;
+        cursor: pointer;
+        text-decoration: underline;
+        padding: 0;
+      }
+
+      .btn-text-link:hover {
+        color: #007ab8;
+      }
+
+      .mp-wallet-waiting {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 2rem 1rem;
+        text-align: center;
+      }
+
+      .mp-waiting-hint {
+        font-size: 0.85rem;
+        color: #57606a;
+        margin: 0;
+      }
+
+      .method-card--mp {
+        border-color: #009ee3;
+      }
+
+      .method-card--mp:hover,
+      .method-card--mp.selected {
+        border-color: #009ee3;
+        background: #e5f6fd;
+        box-shadow: 0 0 0 3px rgba(0, 158, 227, 0.15);
+      }
+
+      .paypal-payment {
+        padding: 1.5rem;
+      }
+
+      #paypal-btn-container {
+        min-height: 150px;
+        margin-bottom: 1rem;
+      }
+
+      .method-card--paypal {
+        border-color: #003087;
+      }
+
+      .method-card--paypal:hover,
+      .method-card--paypal.selected {
+        border-color: #003087;
+        background: #e8eef6;
+        box-shadow: 0 0 0 3px rgba(0, 48, 135, 0.15);
+      }
     `,
   ],
 })
-export class CheckoutComponent {
+export class CheckoutComponent implements OnDestroy {
   readonly cartService = inject(CartService);
   readonly cashPayment = inject(ProcessCashPaymentUseCase);
   readonly cardPayment = inject(ProcessCardPaymentUseCase);
+  readonly mercadopago = inject(MERCADOPAGO_PAYMENT_PORT);
+  readonly paypal = inject(PAYPAL_PAYMENT_PORT);
   private readonly persistTransaction = inject(PersistTransactionUseCase);
   private readonly circuitBreaker = inject(CircuitBreakerService);
   private readonly retry = inject(RetryService);
+
+  /**
+   * When true the checkout is running in kiosk (self-checkout) mode.
+   * In kiosk mode only digital payment methods (MercadoPago, PayPal) are shown;
+   * cash and card entry are hidden because an unattended terminal cannot handle
+   * physical tender or manual card input.
+   */
+  readonly kioskMode = input<boolean>(false);
+
+  // Derived: in kiosk mode with no digital methods available, operator must be shown instead.
+  readonly showCashCard = computed(
+    () => !this.kioskMode() || (!this.mercadopago.isEnabled() && !this.paypal.isEnabled())
+  );
 
   // Outputs
   readonly paymentComplete = output<PaymentResult>();
@@ -809,13 +1008,36 @@ export class CheckoutComponent {
 
   // State
   readonly step = signal<
-    'select' | 'cash' | 'card' | 'mobile' | 'processing' | 'retrying' | 'error'
+    | 'select'
+    | 'cash'
+    | 'card'
+    | 'mobile'
+    | 'mercadopago'
+    | 'mercadopago-wallet'
+    | 'paypal'
+    | 'processing'
+    | 'retrying'
+    | 'error'
   >('select');
-  readonly selectedMethod = signal<StaffPaymentMethod | null>(null);
+  readonly selectedMethod = signal<PaymentMethod | null>(null);
   readonly changeAmount = signal<number>(0);
+
+  /**
+   * True while the Wallet Brick's polling loop is running (buyer clicked Pay
+   * and we're waiting for MP to confirm). Drives the "waiting" overlay in the
+   * mercadopago-wallet step so the Brick container isn't destroyed mid-poll.
+   */
+  readonly mpWalletPolling = signal<boolean>(false);
 
   /** User-facing message shown in the 'error' step after a failed payment. */
   readonly errorMessage = signal<string>('');
+
+  /**
+   * MercadoPago sub-mode: 'card' = Card Payment Brick (enter card in iframe);
+   * 'wallet' = Wallet Brick (pay from existing MercadoPago account, QR / link).
+   * 'wallet' is the primary/recommended mode.
+   */
+  readonly mpMode = signal<'card' | 'wallet'>('wallet');
 
   // Form fields
   cashTendered = 0;
@@ -837,23 +1059,49 @@ export class CheckoutComponent {
     this.selectedMethod.set(method);
   }
 
+  /** Select a method and immediately proceed — used by MP and PayPal buttons
+   *  so the Brick renders on the first click, with no extra Continue step. */
+  selectAndProceed(method: PaymentMethod): void {
+    this.selectedMethod.set(method);
+    this.proceedToDetails();
+  }
+
   proceedToDetails(): void {
     const method = this.selectedMethod();
-    if (method) {
-      if (method === 'cash') {
-        this.cashPayment.reset();
-      }
-      this.step.set(method);
+    if (!method) return;
+
+    if (method === 'cash') {
+      this.cashPayment.reset();
     }
+
+    // MercadoPago / PayPal: skip the intermediate step and go straight to
+    // rendering the widget. The container div becomes visible when
+    // step === 'mercadopago' / 'paypal', which the process method sets internally.
+    if (method === 'mercadopago' || method === 'paypal') {
+      this.confirmPayment();
+      return;
+    }
+
+    this.step.set(method);
   }
 
   goBack(): void {
+    this.mercadopago.destroy();
+    this.paypal.destroy();
+    this.mpWalletPolling.set(false);
     this.step.set('select');
     this.cashPayment.reset();
     this.cashTendered = 0;
   }
 
+  ngOnDestroy(): void {
+    this.mercadopago.destroy();
+    this.paypal.destroy();
+  }
+
   cancel(): void {
+    this.mercadopago.destroy();
+    this.paypal.destroy();
     this.cashPayment.reset();
     this.checkoutCancelled.emit();
   }
@@ -931,6 +1179,23 @@ export class CheckoutComponent {
     }
 
     this.isSubmitting = true;
+
+    // MercadoPago / PayPal: the SDK drives its own UI — do NOT set step to
+    // 'processing' here because that hides the container div the widget renders into.
+    if (method === 'mercadopago') {
+      if (this.mpMode() === 'wallet') {
+        void this.processMercadopagoWalletPayment(transactionId);
+      } else {
+        void this.processMercadopagoPayment(transactionId);
+      }
+      return;
+    }
+
+    if (method === 'paypal') {
+      void this.processPaypalPayment(transactionId);
+      return;
+    }
+
     this.step.set('processing');
 
     // Card payments are routed through the payment-gateway circuit breaker +
@@ -1005,10 +1270,142 @@ export class CheckoutComponent {
     return this.cardNumber.replace(/\s+/g, '') === DECLINED_TEST_CARD;
   }
 
-  /** From the 'error' step, return to the card form so the cashier can retry. */
+  /**
+   * Mounts the MercadoPago **Wallet Brick** — the buyer pays from their
+   * existing MercadoPago account (QR / link). This is the primary mode.
+   */
+  private async processMercadopagoWalletPayment(transactionId: string): Promise<void> {
+    this.step.set('mercadopago-wallet');
+    this.mpWalletPolling.set(false);
+    this.isSubmitting = false;
+
+    try {
+      // Pass a callback so the adapter can tell us the moment the buyer clicks Pay
+      // and polling starts — we flip to the "waiting" overlay immediately.
+      const result = await this.mercadopago.createWalletBrick(
+        this.cartService.total(),
+        'mp-wallet-brick-container',
+        () => {
+          this.mpWalletPolling.set(true);
+        }
+      );
+
+      this.mpWalletPolling.set(false);
+      if (result.status === 'approved' || result.status === 'pending') {
+        this.isSubmitting = true;
+        this.step.set('processing');
+        this.finalizePayment('mercadopago', transactionId);
+      } else {
+        this.step.set('error');
+        this.errorMessage.set('MercadoPago payment was not completed. Please try again.');
+        this.isSubmitting = false;
+      }
+    } catch (err) {
+      this.mpWalletPolling.set(false);
+      this.mercadopago.destroy();
+      this.step.set('error');
+      const message = err instanceof Error ? err.message : 'MercadoPago Wallet payment failed.';
+      this.errorMessage.set(message);
+      this.isSubmitting = false;
+    }
+  }
+
+  /**
+   * Mounts the MercadoPago **Card Payment Brick** — the buyer types card
+   * details into the MP iframe. Optional fallback when the buyer does not
+   * have a MercadoPago account.
+   */
+  private async processMercadopagoPayment(transactionId: string): Promise<void> {
+    // Render the brick — the container div must be in the DOM, so we go back
+    // to the mercadopago step first (processing hides it).
+    this.step.set('mercadopago');
+    this.isSubmitting = false; // allow the brick's own submit button
+
+    try {
+      const result = await this.mercadopago.createAndRender(
+        this.cartService.total(),
+        'mp-card-brick-container'
+      );
+
+      if (result.status === 'approved') {
+        this.isSubmitting = true;
+        this.step.set('processing');
+        this.finalizePayment('mercadopago', transactionId);
+      } else if (result.status === 'pending') {
+        // Pending is acceptable — treat as complete and let the backend confirm.
+        this.isSubmitting = true;
+        this.step.set('processing');
+        this.finalizePayment('mercadopago', transactionId);
+      } else {
+        this.step.set('error');
+        this.errorMessage.set('MercadoPago payment was not approved. Please try again.');
+        this.isSubmitting = false;
+      }
+    } catch {
+      this.mercadopago.destroy();
+      this.step.set('error');
+      this.errorMessage.set('MercadoPago payment failed. Please try again.');
+      this.isSubmitting = false;
+    }
+  }
+
+  /**
+   * Renders the PayPal Buttons widget inside the dedicated container and waits
+   * for the buyer to approve or cancel.
+   *
+   * The widget drives its own UI; step stays 'paypal' so the container div
+   * remains in the DOM while the widget is active.
+   */
+  private async processPaypalPayment(transactionId: string): Promise<void> {
+    this.step.set('paypal');
+    this.isSubmitting = false; // allow the PayPal widget's own buttons
+
+    try {
+      const result = await this.paypal.createAndRender(
+        this.cartService.total(),
+        'paypal-btn-container'
+      );
+
+      if (result.status === 'completed') {
+        this.isSubmitting = true;
+        this.step.set('processing');
+        this.finalizePayment('paypal', transactionId);
+      } else if (result.status === 'pending') {
+        // Treat pending as complete; backend will confirm capture.
+        this.isSubmitting = true;
+        this.step.set('processing');
+        this.finalizePayment('paypal', transactionId);
+      } else {
+        // Buyer cancelled.
+        this.step.set('error');
+        this.errorMessage.set('PayPal payment was cancelled. Please try again.');
+        this.isSubmitting = false;
+      }
+    } catch {
+      this.paypal.destroy();
+      this.step.set('error');
+      this.errorMessage.set('PayPal payment failed. Please try again.');
+      this.isSubmitting = false;
+    }
+  }
+
+  /** From the 'error' step, return to the correct form so the cashier can retry. */
   retryPayment(): void {
     this.errorMessage.set('');
-    this.step.set('card');
+    const method = this.selectedMethod();
+    if (method === 'mercadopago') {
+      if (this.mpMode() === 'wallet') {
+        void this.processMercadopagoWalletPayment(this.generateTransactionId());
+      } else {
+        this.step.set('mercadopago');
+        void this.processMercadopagoPayment(this.generateTransactionId());
+      }
+    } else if (method === 'paypal') {
+      this.step.set('paypal');
+      void this.processPaypalPayment(this.generateTransactionId());
+    } else {
+      this.step.set('card');
+    }
   }
 
   /**
@@ -1016,7 +1413,7 @@ export class CheckoutComponent {
    * emits the result. Shared by the cash/mobile timeout path and the card
    * gateway path so completion behaviour stays identical across methods.
    */
-  private finalizePayment(method: StaffPaymentMethod, transactionId: string): void {
+  private finalizePayment(method: PaymentMethod, transactionId: string): void {
     const result: PaymentResult = {
       method,
       amount: this.cartService.total(),

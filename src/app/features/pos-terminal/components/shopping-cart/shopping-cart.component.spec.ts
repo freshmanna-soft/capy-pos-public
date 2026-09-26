@@ -109,7 +109,7 @@ describe('ShoppingCartComponent', () => {
     it('should cap quantity at stock level', () => {
       const event = { target: { value: '999' } } as unknown as Event;
       component.updateQuantity('prod-1', event);
-      expect(cartService.items()[0].quantity).toBe(50); // stock is 50
+      expect(cartService.items()[0].quantity).toBe(10); // capped at MAX_QTY_PER_PRODUCT (stock=50 > 10)
     });
   });
 

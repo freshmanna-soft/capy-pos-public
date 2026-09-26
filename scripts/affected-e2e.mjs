@@ -129,6 +129,14 @@ const FEATURE_MAP = [
     re: /^src\/app\/agents\//,
     specs: ['agent-integration.spec.ts', 'pos-terminal.spec.ts'],
   },
+  // Kiosk and shop flows — self-checkout on physical terminal and customer phone.
+  { re: /^src\/app\/features\/kiosk\//, specs: ['kiosk.spec.ts', 'shop.spec.ts'] },
+  { re: /^src\/app\/features\/shop\//, specs: ['shop.spec.ts'] },
+  // Sync worker kiosk-mode flag — changes here affect the kiosk console-log tests.
+  {
+    re: /^src\/app\/core\/infrastructure\/sync\/sync-kiosk-mode\.service\.ts$/,
+    specs: ['kiosk.spec.ts', 'shop.spec.ts'],
+  },
 ];
 
 /** Classify one file. Returns {full?, specs?, skip?, unknown?}. First match wins. */

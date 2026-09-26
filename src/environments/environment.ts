@@ -6,6 +6,22 @@ export const environment = {
   production: false,
   name: 'development',
 
+  /**
+   * Geofencing — dev/test overrides.
+   *
+   * `mockPosition`: when set, GeofencingService returns this lat/lng instead
+   *   of calling navigator.geolocation. Set to a point inside your test polygon
+   *   to test the "inside" path, or outside it for "outside".
+   *   Leave null to use the real browser Geolocation API (default for staging
+   *   and production; will be null there).
+   *
+   * Example — fake-GPS to a coordinate inside a drawn polygon:
+   *   mockPosition: { lat: 40.7128, lng: -74.0060 }
+   */
+  geofencing: {
+    mockPosition: null as { lat: number; lng: number } | null,
+  },
+
   // Gates *creating* the seeded admin@capy-pos.local bootstrap account in
   // dexie-database.service.ts. Deliberately its own flag rather than
   // `!production`: a build config can be "production" in every optimization/
@@ -53,6 +69,9 @@ export const environment = {
   // answers /clerk/agent.
   clerkAgentApiUrl: '',
 
+  // Product image upload path, appended to apiUrl: POST `${apiUrl}${imageApiPath}/${productId}/image`
+  imageApiPath: '/products',
+
   // Database
   databaseName: 'capy_pos_dev',
   enableOfflineMode: true,
@@ -86,6 +105,12 @@ export const environment = {
   // Cognito's pool/client ids are committed in plaintext; only the client
   // *secret* is sensitive, and that lives in the relay's Code Engine secret,
   // never here.
+  // IBM Cloud App ID — opt-in. Set `enabled: true` only when the relay is
+  // running locally (`npm run start:relay` in a second terminal). Leaving it
+  // false keeps `ng serve` working without the relay, which is the normal dev
+  // workflow. E2E tests (Playwright) bypass auth entirely via sessionStorage
+  // injection (see tests/e2e/helpers/auth.ts) so they don't need the relay
+  // regardless of this flag.
   appId: {
     enabled: false,
     region: 'us-south',
@@ -108,11 +133,26 @@ export const environment = {
     enabled: true,
   },
 
-  // PayPal's browser client ID is public. Never add a client secret here.
+  // MercadoPago — enabled when the till runs in kiosk or operator mode. The
+  // public key is not a secret (same as Stripe's publishable key): it identifies
+  // the merchant account but grants no write access. The *access token* (secret)
+  // must live server-side only and is never compiled into this bundle.
+  // `preferenceApiUrl` points at the operator backend that creates MP preferences
+  // using the server-side access token and returns only the preference id.
+  mercadopago: {
+    enabled: true,
+    publicKey: 'APP_USR-6304b4d3-513f-47eb-99bb-91a86ad5ddb4', // replace with real TEST key
+    preferenceApiUrl: 'http://localhost:8790/api/mercadopago/preference',
+  },
+
+  // PayPal — disabled in dev; the adapter is opt-in per build target.
+  // clientId is the PayPal app's client ID (not a secret). The access token
+  // used to capture orders lives server-side in preferenceApiUrl only.
   paypal: {
     enabled: false,
-    clientId: '',
+    clientId: '', // replace with sandbox client ID for local testing
     environment: 'sandbox' as const,
+    preferenceApiUrl: 'http://localhost:8790/api/paypal/order',
   },
 
   // Feature Flags
@@ -126,6 +166,8 @@ export const environment = {
     // flag, not aiVision: that one governs paying the model to *look*, and the two
     // switch on independently.
     clerkAgent: false,
+    // Kiosk self-checkout mode — when enabled the default route is /kiosk.
+    kiosk: false,
   },
 
   // AI clerk voice. Browser Web Speech APIs — no keys, no cost, but

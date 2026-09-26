@@ -5,14 +5,14 @@
  * Route: GET /api/transactions
  */
 
-const { initTelemetry, flushTelemetry } = require('./shared/telemetry');
+const { initTelemetry, withSpan, instrument, flushTelemetry } = require('./shared/telemetry');
 const { ScanCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('./shared/dynamodb');
 const { log, response } = require('./shared/logger');
 
 const TRANSACTIONS_TABLE = process.env.TRANSACTIONS_TABLE;
 
-exports.handler = async (event) => {
+const baseHandler = async (event) => {
   log('info', 'GetTransactions invoked', { table: TRANSACTIONS_TABLE });
 
   try {
@@ -42,3 +42,5 @@ exports.handler = async (event) => {
     });
   }
 };
+
+exports.handler = instrument('GET /api/transactions', baseHandler);

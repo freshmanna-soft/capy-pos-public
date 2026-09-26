@@ -38,6 +38,9 @@ import {
   type CustomerLoyaltyProfileReader,
 } from './customer-loyalty-http.ts';
 import { CustomerProfileStore, type CustomerProfileDocument } from './customer-profile-store.ts';
+import { CosImageStore } from './cos-image-store.ts';
+import { MemoryImageStore } from '../../shared/src/image-store.ts';
+import type { ImageStore } from '../../shared/src/image-store.ts';
 
 const PORT = Number(process.env['PORT'] ?? 8790);
 
@@ -51,6 +54,8 @@ const PORT = Number(process.env['PORT'] ?? 8790);
  */
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_CHECKOUT_BODY_BYTES = 16 * 1024;
+/** Raised limit for multipart image uploads (2 MiB). */
+const MAX_IMAGE_BODY_BYTES = 2_097_152;
 
 /**
  * Fail before listening, not on the first request.
@@ -198,6 +203,92 @@ function readInternalSecret(): string {
   return process.env['INTERNAL_API_SECRET'] ?? '';
 }
 
+/**
+ * Optional — an empty value means `POST /api/mercadopago/preference` always
+ * 503s (see `createMercadoPagoPreference` in `api.ts`). This is deliberate:
+ * a deployment that has never set MP_ACCESS_TOKEN should not crash; it simply
+ * has MercadoPago unconfigured, and the 503 tells the browser that clearly.
+ */
+function readMpAccessToken(): string {
+  return process.env['MP_ACCESS_TOKEN'] ?? '';
+}
+
+/**
+ * Base URL of the Angular app — used as the origin for MercadoPago back_urls.
+ * Defaults to http://localhost:4200 so local dev works without any extra config.
+ * In production / Code Engine set APP_BASE_URL to the public HTTPS origin.
+ */
+function readAppBaseUrl(): string {
+  const url = process.env['APP_BASE_URL'] ?? 'http://localhost:4200';
+  // Strip trailing slash so back_url paths are always /payment/success etc.
+  return url.replace(/\/+$/, '');
+}
+
+/**
+ * Resolve the ISO 4217 currency code for MercadoPago preferences.
+ *
+ * Set MP_CURRENCY_ID explicitly to override. When unset, the site is inferred
+ * from the access token's embedded site code (the third dash-segment of an
+ * APP_USR token encodes the site: MLM → MXN, MLA → ARS, etc.).
+ *
+ * Site → currency map (all current MP markets):
+ *   MLA → ARS (Argentina)   MLB → BRL (Brazil)    MLC → CLP (Chile)
+ *   MLM → MXN (Mexico)      MCO → COP (Colombia)  MPE → PEN (Peru)
+ *   MLU → UYU (Uruguay)     MRD → DOP (Dom. Rep.)
+ */
+function readMpCurrencyId(): string {
+  const explicit = process.env['MP_CURRENCY_ID'] ?? '';
+  if (explicit.length > 0) {
+    console.log(`[pos-api] MercadoPago currency: ${explicit} (MP_CURRENCY_ID)`);
+    return explicit;
+  }
+
+  // Try to infer from the access token. APP_USR tokens embed the site id
+  // inside them (not as a cryptographic claim — just a readable prefix segment).
+  const token = process.env['MP_ACCESS_TOKEN'] ?? '';
+  const SITE_CURRENCY: Record<string, string> = {
+    MLA: 'ARS', MLB: 'BRL', MLC: 'CLP', MLM: 'MXN',
+    MCO: 'COP', MPE: 'PEN', MLU: 'UYU', MRD: 'DOP',
+  };
+
+  for (const [site, currency] of Object.entries(SITE_CURRENCY)) {
+    // The site id appears as a standalone segment in the token string.
+    if (token.includes(`-${site}-`) || token.includes(`_${site}_`)) {
+      console.log(`[pos-api] MercadoPago currency: ${currency} (inferred from site ${site})`);
+      return currency;
+    }
+  }
+
+  console.warn(
+    '[pos-api] MP_CURRENCY_ID not set and could not be inferred from MP_ACCESS_TOKEN. ' +
+    'Defaulting to MXN. Set MP_CURRENCY_ID=<your currency> to override.'
+  );
+  return 'MXN';
+}
+
+/**
+ * Choose the image store from the environment.
+ *
+ * IBM COS when all four vars are set; MemoryImageStore with a warning otherwise.
+ * The explicit warning mirrors the `POS_API_STORE=memory` path in `buildStores()`:
+ * a silent fallback would give a Code Engine revision that starts, passes its
+ * health check, and discards every uploaded image on restart.
+ */
+function buildImageStore(): ImageStore {
+  const endpoint = process.env['COS_ENDPOINT'] ?? '';
+  const apiKey = process.env['COS_APIKEY'] ?? '';
+  const bucket = process.env['COS_BUCKET'] ?? '';
+  const publicUrlBase = process.env['COS_PUBLIC_URL_BASE'] ?? '';
+
+  if (endpoint.length > 0 && apiKey.length > 0 && bucket.length > 0 && publicUrlBase.length > 0) {
+    console.log(`[pos-api] image store: COS (${bucket})`);
+    return new CosImageStore({ endpoint, apiKey, bucket, publicUrlBase });
+  }
+
+  console.warn('[pos-api] image store: in-memory — images are lost on restart. Set COS_ENDPOINT, COS_APIKEY, COS_BUCKET, COS_PUBLIC_URL_BASE to use IBM COS.');
+  return new MemoryImageStore();
+}
+
 function buildRuntimeDeps(): {
   readonly api: ApiDeps;
   readonly checkout: CheckoutRuntime;
@@ -211,9 +302,13 @@ function buildRuntimeDeps(): {
       customerLoyalty: new CustomerProfileStore(stores.customerProfiles),
       api: {
         ...stores,
+        imageStore: buildImageStore(),
         secret: requireSecret(),
         appId: readAppIdConfig(),
         internalSecret: readInternalSecret(),
+        mpAccessToken: readMpAccessToken(),
+        mpCurrencyId: readMpCurrencyId(),
+        appBaseUrl: readAppBaseUrl(),
         nowSeconds: () => Math.floor(Date.now() / 1000),
         nowIso: () => new Date().toISOString(),
         newId: () => randomUUID(),
@@ -275,13 +370,18 @@ export function createPosRequestHandler(input: {
     const traceId = typeof incoming === 'string' && incoming.length > 0 ? incoming : newTraceId();
     const origin = singleHeader(req.headers.origin);
     const cors = corsHeaders(origin, input.allowedOrigins);
+
+    // Path only: a query string is not part of any route here, and leaving it on
+    // would make `/api/health?x=1` a 404.
     const path = (req.url ?? '/').split('?')[0] ?? '/';
+
     const checkoutRoute = path.startsWith('/api/self-checkout/checkouts');
     const customerLoyaltyRoute = path === CUSTOMER_LOYALTY_PATH;
     const privateCustomerRoute = checkoutRoute || customerLoyaltyRoute;
     const responsePolicy = privateCustomerRoute
       ? { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }
       : {};
+
     const send = (status: number, body: unknown, headers: Record<string, string> = {}): void => {
       res.writeHead(status, {
         ...cors,
@@ -297,6 +397,7 @@ export function createPosRequestHandler(input: {
       send(403, { error: 'Origin not allowed.' });
       return;
     }
+
     if (req.method === 'OPTIONS') {
       res
         .writeHead(204, {
@@ -312,10 +413,23 @@ export function createPosRequestHandler(input: {
       return;
     }
 
+    // Detect multipart image upload routes to apply the raised body limit and
+    // pass raw bytes rather than a JSON-parsed body.
+    const reqContentType = (req.headers['content-type'] ?? '').toLowerCase();
+    const isImageUpload =
+      (req.method ?? '').toUpperCase() === 'POST' &&
+      /^\/api\/products\/[^/]+\/image$/.test(path) &&
+      reqContentType.startsWith('multipart/');
+
+    const maxBodyBytes = isImageUpload
+      ? MAX_IMAGE_BODY_BYTES
+      : privateCustomerRoute
+        ? MAX_CHECKOUT_BODY_BYTES
+        : MAX_BODY_BYTES;
+
     const chunks: Buffer[] = [];
     let received = 0;
     let aborted = false;
-    const maxBodyBytes = privateCustomerRoute ? MAX_CHECKOUT_BODY_BYTES : MAX_BODY_BYTES;
 
     req.on('data', (chunk: Buffer) => {
       if (aborted) return;
@@ -332,16 +446,26 @@ export function createPosRequestHandler(input: {
     req.on('end', () => {
       if (aborted) return;
       void (async () => {
-        const raw = Buffer.concat(chunks).toString('utf8');
+        const rawBuffer = Buffer.concat(chunks);
         let body: unknown;
-        if (raw.trim().length > 0) {
-          try {
-            body = JSON.parse(raw);
-          } catch {
-            send(400, { error: 'Body must be JSON.' });
-            return;
+        let rawBody: Uint8Array | undefined;
+
+        if (isImageUpload) {
+          // For multipart routes pass the raw bytes — JSON.parse would corrupt
+          // binary data and the route handler does its own framing.
+          rawBody = new Uint8Array(rawBuffer);
+        } else {
+          const raw = rawBuffer.toString('utf8');
+          if (raw.trim().length > 0) {
+            try {
+              body = JSON.parse(raw);
+            } catch {
+              send(400, { error: 'Body must be JSON.' });
+              return;
+            }
           }
         }
+
         const internalSecretHeader = req.headers['x-internal-secret'];
         try {
           if (customerLoyaltyRoute) {
@@ -400,6 +524,8 @@ export function createPosRequestHandler(input: {
               internalSecret:
                 typeof internalSecretHeader === 'string' ? internalSecretHeader : undefined,
               body,
+              rawBody,
+              contentType: reqContentType,
             },
             input.api
           );

@@ -766,6 +766,33 @@ describe('ClerkFacade', () => {
         expect(recordHistogram).toHaveBeenCalledWith('clerk.undo.batch.lines', 2, undefined);
       });
     });
+
+    describe('undoLabel()', () => {
+      it('returns empty string when no pending add is set (empty lines array)', () => {
+        // _pendingAdd() is null → lines defaults to [] → describeUndoLabel([]) → ''
+        expect(clerk.pendingAdd()).toBeNull();
+        expect(clerk.undoLabel()).toBe('');
+      });
+
+      it('returns "Undo N × Label" for a single line with quantity > 1', async () => {
+        // Add 3 avocados in one voice-driven batch.
+        await seam(clerk).withUndoBatch((batch) => {
+          seam(clerk).addByName(['avocado'], 3, 'agent', batch);
+        });
+
+        // lines.length === 1, quantity > 1 → count prefix fires
+        expect(clerk.undoLabel()).toBe('Undo 3 × Avocado');
+      });
+
+      it('returns "Undo Label" for a single line with quantity 1 (no count prefix)', async () => {
+        // Add 1 avocado — no count prefix expected.
+        await seam(clerk).withUndoBatch((batch) => {
+          seam(clerk).addByName(['avocado'], 1, 'agent', batch);
+        });
+
+        expect(clerk.undoLabel()).toBe('Undo Avocado');
+      });
+    });
   });
 
   describe('voice', () => {

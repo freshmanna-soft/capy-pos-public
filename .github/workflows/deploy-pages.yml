@@ -17,7 +17,7 @@ concurrency:
 
 env:
   NODE_VERSION: '22'
-  ANGULAR_BUILD_CONFIG: 'production'
+  ANGULAR_BUILD_CONFIG: 'github-pages'
   BASE_HREF: '/capy-pos-public/'
 
 jobs:
@@ -188,6 +188,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-angular-${{ hashFiles('**/package-lock.json') }}-
             ${{ runner.os }}-angular-
+
+      - name: Inject MercadoPago test credentials
+        # GitHub Pages uses MercadoPago TEST credentials so no real money moves.
+        # Both values are injected here into environment.github-pages.ts before
+        # ng build; neither is committed to the repository.
+        #
+        # Required GitHub secrets (Settings → Secrets and variables → Actions):
+        #   MERCADOPAGO_PUBLIC_KEY_TEST  — TEST public key from MP dashboard
+        env:
+          MP_PUBLIC_KEY_TEST: ${{ secrets.MERCADOPAGO_PUBLIC_KEY_TEST }}
+        run: |
+          sed -i "s|publicKey: '', // Set via CI secret: MERCADOPAGO_PUBLIC_KEY_TEST|publicKey: '${MP_PUBLIC_KEY_TEST}', // injected by CI|" src/environments/environment.github-pages.ts
 
       - name: Build Angular app
         run: npx ng build --configuration=${{ env.ANGULAR_BUILD_CONFIG }} --base-href ${{ env.BASE_HREF }}
