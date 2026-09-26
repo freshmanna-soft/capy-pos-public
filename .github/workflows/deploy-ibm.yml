@@ -1,0 +1,290 @@
+name: Deploy to IBM Cloud
+
+# Triggered on every push to main that touches deployable source, and manually
+# via workflow_dispatch so an operator can force a redeploy without a commit.
+#
+# ── Architecture ─────────────────────────────────────────────────────────────
+#
+# 1. detect-changes   Emits a boolean output per service. On manual dispatch
+#                     with an explicit `services` input that list wins; otherwise
+#                     we diff HEAD~1..HEAD and gate on the path patterns below.
+#
+# 2. build (matrix)   One job per service, but a single shared job definition
+#                     driven by a JSON matrix. Only services whose changed=true
+#                     output was set in step 1 actually run (if: condition on the
+#                     matrix entry). Uses docker/login-action and
+#                     docker/build-push-action (official pinned-SHA actions) to
+#                     build linux/amd64 images and push them to IBM Container
+#                     Registry with a SHA-derived immutable tag.
+#
+# 3. deploy (matrix)  Calls `ibmcloud ce app update` for the same set of
+#                     services after their images land in ICR. Runs only after
+#                     build succeeds.
+#
+# 4. summary          Aggregates results into the GitHub step summary.
+#
+# ── Prerequisites — GitHub repository secrets ────────────────────────────────
+#
+#   IBM_CLOUD_API_KEY         IBM Cloud API key (Manager on Code Engine project,
+#                             Writer on the CR namespace).
+#   CR_NAMESPACE              ICR namespace, e.g. capy-pos-3223793
+#   CE_PROJECT_NAME           Code Engine project name, e.g. capy-pos
+#   CE_REGION                 IBM Cloud region, e.g. us-south
+#   MERCADOPAGO_PUBLIC_KEY    MP production public key — baked into the Angular
+#                             production bundle at build time (not a secret in the
+#                             browser security sense, but kept out of the repo).
+#
+# ── What this workflow does NOT do ───────────────────────────────────────────
+#
+# It does not run `terraform apply`. Infrastructure shape (new apps, secret
+# bindings, Cloudant databases) is still managed manually via terraform/. This
+# workflow only promotes freshly built images into already-provisioned apps.
+
+on:
+  push:
+    branches: [main]
+    # Only run when something deployable actually changed. Documentation,
+    # test configs, and CI-only files never need a new container image.
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+      - 'nginx.conf'
+      - 'angular.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'infra/**'
+  workflow_dispatch:
+    inputs:
+      services:
+        description: >
+          Comma-separated services to force-rebuild and redeploy.
+          Leave empty to auto-detect from the last commit diff.
+          Valid: frontend, pos-api, vision-proxy, clerk-agent-relay, appid-token-relay
+        required: false
+        default: ''
+
+concurrency:
+  # One IBM Cloud deploy at a time; never cancel in-flight to avoid
+  # a half-promoted image set leaving the estate inconsistent.
+  group: deploy-ibm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IBM_CLOUD_REGION: ${{ secrets.CE_REGION }}
+  CR_REGISTRY: us.icr.io
+  CR_NAMESPACE: ${{ secrets.CR_NAMESPACE }}
+  CE_PROJECT: ${{ secrets.CE_PROJECT_NAME }}
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 1 — decide which services need a new image
+  # ───────────────────────────────────────────────────────────────────────────
+  detect-changes:
+    name: 🔍 Detect changed services
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image_tag:          ${{ steps.tag.outputs.image_tag }}
+      build_matrix:       ${{ steps.matrix.outputs.build_matrix }}
+      any_changed:        ${{ steps.matrix.outputs.any_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Compute immutable image tag
+        id: tag
+        # Short SHA — unique per commit, well under ICR's 128-char tag limit,
+        # traceable in `ibmcloud ce app get` output.
+        run: echo "image_tag=sha-$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build deployment matrix
+        id: matrix
+        run: |
+          MANUAL="${{ github.event.inputs.services }}"
+
+          if [ -n "$MANUAL" ]; then
+            # workflow_dispatch with explicit list — honour it directly.
+            CHANGED="$MANUAL"
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          fi
+
+          # ── Per-service path rules ──────────────────────────────────────
+          # infra/shared affects every Node service (shared DocumentStore port).
+          check() {
+            local svc="$1"; shift
+            if [ -n "$MANUAL" ]; then
+              echo "$MANUAL" | grep -qw "$svc" && echo true || echo false
+            else
+              echo "$CHANGED" | grep -qE "$@" && echo true || echo false
+            fi
+          }
+
+          F=$(check frontend  '^(src/|Dockerfile|nginx\.conf|angular\.json|package(-lock)?\.json)')
+          P=$(check pos-api   '^infra/(shared|pos-api)/')
+          V=$(check vision-proxy      '^infra/(shared|vision-proxy)/')
+          C=$(check clerk-agent-relay '^infra/(shared|clerk-agent-relay)/')
+          A=$(check appid-token-relay '^infra/(shared|appid-token-relay)/')
+
+          # Build a JSON matrix that includes only changed services so the
+          # build job skips the others with a native matrix `if:` condition.
+          # Each entry carries everything the build and deploy steps need.
+          ENTRIES="[]"
+          add() {
+            local changed="$1" name="$2" dockerfile="$3" context="$4" app="$5"
+            if [ "$changed" = "true" ]; then
+              ENTRIES=$(echo "$ENTRIES" | jq \
+                --arg n "$name" --arg d "$dockerfile" --arg c "$context" --arg a "$app" \
+                '. += [{"name":$n,"dockerfile":$d,"context":$c,"app":$a}]')
+            fi
+          }
+
+          add "$F" "frontend"          "Dockerfile"                              "."                      "capy-pos-app"
+          add "$P" "pos-api"           "infra/pos-api/Dockerfile"                "infra"                  "capy-pos-api"
+          add "$V" "vision-proxy"      "infra/vision-proxy/Dockerfile"           "infra/vision-proxy"     "capy-vision-proxy"
+          add "$C" "clerk-agent-relay" "infra/clerk-agent-relay/Dockerfile"      "infra/clerk-agent-relay" "capy-clerk-agent-relay"
+          add "$A" "appid-token-relay" "infra/appid-token-relay/Dockerfile"      "infra/appid-token-relay" "capy-appid-token-relay"
+
+          echo "build_matrix=$(echo "$ENTRIES" | jq -c '{include:.}')" >> "$GITHUB_OUTPUT"
+          echo "any_changed=$([ "$ENTRIES" = '[]' ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 2 — build & push (matrix, one entry per changed service)
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: 🏗️ Build & push ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: detect-changes
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    strategy:
+      # Let each service build independently — a vision-proxy failure should
+      # not block the frontend or pos-api deploy.
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Inject the MercadoPago production public key only for the frontend image.
+      # It is baked into environment.prod.ts at build time the same way
+      # deploy-pages.yml does it for the MP test key.
+      - name: Inject MercadoPago production public key (frontend only)
+        if: matrix.name == 'frontend'
+        env:
+          MP_PUBLIC_KEY: ${{ secrets.MERCADOPAGO_PUBLIC_KEY }}
+        run: |
+          sed -i \
+            "s|publicKey: '', // Set via environment variable: MERCADOPAGO_PUBLIC_KEY|publicKey: '${MP_PUBLIC_KEY}', // injected by CI|" \
+            src/environments/environment.prod.ts
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # docker/login-action is the official recommended way to authenticate
+      # against any registry (docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images).
+      # IBM ICR accepts an API key as the password with username "iamapikey".
+      - name: Log in to IBM Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.CR_REGISTRY }}
+          username: iamapikey
+          password: ${{ secrets.IBM_CLOUD_API_KEY }}
+
+      # docker/build-push-action is the official recommended action for
+      # building and pushing container images from GitHub Actions workflows.
+      # --platform linux/amd64 is required: Code Engine runs on amd64 nodes,
+      # and a mac/arm build pushed without this flag silently produces an arm64
+      # image that Code Engine refuses to schedule.
+      - name: Build and push ${{ matrix.app }}
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.CR_REGISTRY }}/${{ env.CR_NAMESPACE }}/${{ matrix.app }}:${{ needs.detect-changes.outputs.image_tag }}
+          # Registry-backed layer cache: the cache image never triggers a
+          # deploy (it carries no valid app tag), and it keeps layer reuse
+          # across workflow runs without consuming the runner's local disk.
+          cache-from: type=registry,ref=${{ env.CR_REGISTRY }}/${{ env.CR_NAMESPACE }}/${{ matrix.app }}:cache
+          cache-to:   type=registry,ref=${{ env.CR_REGISTRY }}/${{ env.CR_NAMESPACE }}/${{ matrix.app }}:cache,mode=max
+
+      - name: Report pushed digest
+        run: echo "✅ ${{ matrix.app }}:${{ needs.detect-changes.outputs.image_tag }} → ${{ steps.push.outputs.digest }}"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 3 — update Code Engine apps with the new images
+  # Runs only after ALL build jobs complete (needs: build, which covers the
+  # full matrix), so a partially-failed matrix aborts the deploy step cleanly.
+  # ───────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: 🚀 Deploy ${{ matrix.app }} to Code Engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [detect-changes, build]
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+
+    steps:
+      - name: Install IBM Cloud CLI + plugins
+        run: |
+          curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+          ibmcloud plugin install container-registry -f -q
+          ibmcloud plugin install code-engine -f -q
+
+      - name: Authenticate with IBM Cloud
+        env:
+          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
+        run: |
+          ibmcloud login --apikey "$IBM_CLOUD_API_KEY" -r "$IBM_CLOUD_REGION" -q
+          ibmcloud target -g Default
+
+      - name: Update ${{ matrix.app }} revision
+        env:
+          IMAGE_TAG: ${{ needs.detect-changes.outputs.image_tag }}
+        run: |
+          ibmcloud ce project select --name "$CE_PROJECT" -k
+          ibmcloud ce app update \
+            --name "${{ matrix.app }}" \
+            --image "${CR_REGISTRY}/${CR_NAMESPACE}/${{ matrix.app }}:${IMAGE_TAG}" \
+            --wait
+          echo "✅ ${{ matrix.app }} → ${IMAGE_TAG}"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 4 — write a deployment summary visible on the workflow run page
+  # ───────────────────────────────────────────────────────────────────────────
+  summary:
+    name: 📋 Deployment summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [detect-changes, build, deploy]
+    steps:
+      - name: Write summary
+        run: |
+          TAG="${{ needs.detect-changes.outputs.image_tag }}"
+          BUILD="${{ needs.build.result }}"
+          DEPLOY="${{ needs.deploy.result }}"
+
+          echo "## 🚀 IBM Cloud Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image tag** | \`${TAG}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Triggered by** | @${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Build** | ${BUILD} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Deploy** | ${DEPLOY} |" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ needs.detect-changes.outputs.any_changed }}" = "false" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "> ℹ️ No deployable files changed — all services skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
