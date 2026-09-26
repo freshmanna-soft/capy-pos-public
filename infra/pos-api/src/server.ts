@@ -31,6 +31,13 @@ import { buildCheckoutRuntime, type CheckoutRuntime } from './checkout-runtime.t
 import { CloudantStore } from './cloudant-store.ts';
 import { MemoryStore } from '../../shared/src/document-store.ts';
 import type { DocumentStore } from '../../shared/src/document-store.ts';
+import type { CustomerVerificationConfig } from './customer-auth.ts';
+import {
+  CUSTOMER_LOYALTY_PATH,
+  handleCustomerLoyaltyHttp,
+  type CustomerLoyaltyProfileReader,
+} from './customer-loyalty-http.ts';
+import { CustomerProfileStore, type CustomerProfileDocument } from './customer-profile-store.ts';
 import { CosImageStore } from './cos-image-store.ts';
 import { MemoryImageStore } from '../../shared/src/image-store.ts';
 import type { ImageStore } from '../../shared/src/image-store.ts';
@@ -46,6 +53,7 @@ const PORT = Number(process.env['PORT'] ?? 8790);
  * cap is what makes the boundary hold against a body rather than a token.
  */
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_CHECKOUT_BODY_BYTES = 16 * 1024;
 /** Raised limit for multipart image uploads (2 MiB). */
 const MAX_IMAGE_BODY_BYTES = 2_097_152;
 
@@ -281,19 +289,42 @@ function buildImageStore(): ImageStore {
   return new MemoryImageStore();
 }
 
-const deps: ApiDeps = {
-  ...buildStores(),
-  imageStore: buildImageStore(),
-  secret: requireSecret(),
-  appId: readAppIdConfig(),
-  internalSecret: readInternalSecret(),
-  mpAccessToken: readMpAccessToken(),
-  mpCurrencyId: readMpCurrencyId(),
-  appBaseUrl: readAppBaseUrl(),
-  nowSeconds: () => Math.floor(Date.now() / 1000),
-  nowIso: () => new Date().toISOString(),
-  newId: () => randomUUID(),
-};
+function buildRuntimeDeps(): {
+  readonly api: ApiDeps;
+  readonly checkout: CheckoutRuntime;
+  readonly customerAuth?: CustomerVerificationConfig;
+  readonly customerLoyalty: CustomerLoyaltyProfileReader;
+} {
+  const stores = buildStores();
+  try {
+    return {
+      customerAuth: readCustomerAppIdConfig(),
+      customerLoyalty: new CustomerProfileStore(stores.customerProfiles),
+      api: {
+        ...stores,
+        imageStore: buildImageStore(),
+        secret: requireSecret(),
+        appId: readAppIdConfig(),
+        internalSecret: readInternalSecret(),
+        mpAccessToken: readMpAccessToken(),
+        mpCurrencyId: readMpCurrencyId(),
+        appBaseUrl: readAppBaseUrl(),
+        nowSeconds: () => Math.floor(Date.now() / 1000),
+        nowIso: () => new Date().toISOString(),
+        newId: () => randomUUID(),
+      },
+      checkout: buildCheckoutRuntime({
+        environment: process.env,
+        products: stores.products,
+        transactions: stores.transactions,
+        cloudant: stores.cloudant,
+      }),
+    };
+  } catch (error) {
+    console.error('[pos-api] checkout configuration is invalid. Refusing to start.', error);
+    process.exit(1);
+  }
+}
 
 /**
  * CORS.
@@ -325,42 +356,205 @@ export function readAllowedOrigins(
   return new Set(origins);
 }
 
-  // Path only: a query string is not part of any route here, and leaving it on
-  // would make `/api/health?x=1` a 404.
-  const path = (req.url ?? '/').split('?')[0] ?? '/';
+export function createPosRequestHandler(input: {
+  readonly api: ApiDeps;
+  readonly checkout: CheckoutRuntime;
+  readonly customerAuth?: CustomerVerificationConfig;
+  readonly customerLoyalty?: CustomerLoyaltyProfileReader;
+  readonly allowedOrigins: ReadonlySet<string>;
+  readonly newTraceId?: () => string;
+}): (req: IncomingMessage, res: ServerResponse) => void {
+  const newTraceId = input.newTraceId ?? randomUUID;
+  return (req, res) => {
+    const incoming = req.headers['x-trace-id'];
+    const traceId = typeof incoming === 'string' && incoming.length > 0 ? incoming : newTraceId();
+    const origin = singleHeader(req.headers.origin);
+    const cors = corsHeaders(origin, input.allowedOrigins);
 
-  // Detect multipart image upload routes to apply the raised body limit and
-  // pass raw bytes rather than a JSON-parsed body.
-  const reqContentType = (req.headers['content-type'] ?? '').toLowerCase();
-  const isImageUpload =
-    (req.method ?? '').toUpperCase() === 'POST' &&
-    /^\/api\/products\/[^/]+\/image$/.test(path) &&
-    reqContentType.startsWith('multipart/');
+    // Path only: a query string is not part of any route here, and leaving it on
+    // would make `/api/health?x=1` a 404.
+    const path = (req.url ?? '/').split('?')[0] ?? '/';
 
-  const bodyLimit = isImageUpload ? MAX_IMAGE_BODY_BYTES : MAX_BODY_BYTES;
+    const checkoutRoute = path.startsWith('/api/self-checkout/checkouts');
+    const customerLoyaltyRoute = path === CUSTOMER_LOYALTY_PATH;
+    const privateCustomerRoute = checkoutRoute || customerLoyaltyRoute;
+    const responsePolicy = privateCustomerRoute
+      ? { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }
+      : {};
 
-  const chunks: Buffer[] = [];
-  let received = 0;
-  let aborted = false;
+    const send = (status: number, body: unknown, headers: Record<string, string> = {}): void => {
+      res.writeHead(status, {
+        ...cors,
+        ...responsePolicy,
+        ...headers,
+        'Content-Type': 'application/json',
+        'X-Trace-Id': traceId,
+      });
+      res.end(JSON.stringify(body));
+    };
 
     if (origin !== undefined && cors['Access-Control-Allow-Origin'] === undefined) {
       send(403, { error: 'Origin not allowed.' });
       return;
     }
-    received += chunk.length;
-    if (received > bodyLimit) {
-      aborted = true;
-      send(413, { error: 'Request body too large.' });
-      req.destroy();
+
+    if (req.method === 'OPTIONS') {
+      res
+        .writeHead(204, {
+          ...cors,
+          ...responsePolicy,
+          'X-Trace-Id': traceId,
+          'Access-Control-Allow-Headers':
+            'Content-Type, Authorization, X-Trace-Id, Idempotency-Key, X-Checkout-Token',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+          'Access-Control-Max-Age': '600',
+        })
+        .end();
       return;
     }
 
-  req.on('end', () => {
-    if (aborted) {
-      return;
-    }
-    void (async () => {
-      const rawBuffer = Buffer.concat(chunks);
+    // Detect multipart image upload routes to apply the raised body limit and
+    // pass raw bytes rather than a JSON-parsed body.
+    const reqContentType = (req.headers['content-type'] ?? '').toLowerCase();
+    const isImageUpload =
+      (req.method ?? '').toUpperCase() === 'POST' &&
+      /^\/api\/products\/[^/]+\/image$/.test(path) &&
+      reqContentType.startsWith('multipart/');
+
+    const maxBodyBytes = isImageUpload
+      ? MAX_IMAGE_BODY_BYTES
+      : privateCustomerRoute
+        ? MAX_CHECKOUT_BODY_BYTES
+        : MAX_BODY_BYTES;
+
+    const chunks: Buffer[] = [];
+    let received = 0;
+    let aborted = false;
+
+    req.on('data', (chunk: Buffer) => {
+      if (aborted) return;
+      received += chunk.length;
+      if (received > maxBodyBytes) {
+        aborted = true;
+        send(413, { error: 'Request body too large.' });
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    req.on('end', () => {
+      if (aborted) return;
+      void (async () => {
+        const rawBuffer = Buffer.concat(chunks);
+        let body: unknown;
+        let rawBody: Uint8Array | undefined;
+
+        if (isImageUpload) {
+          // For multipart routes pass the raw bytes — JSON.parse would corrupt
+          // binary data and the route handler does its own framing.
+          rawBody = new Uint8Array(rawBuffer);
+        } else {
+          const raw = rawBuffer.toString('utf8');
+          if (raw.trim().length > 0) {
+            try {
+              body = JSON.parse(raw);
+            } catch {
+              send(400, { error: 'Body must be JSON.' });
+              return;
+            }
+          }
+        }
+
+        const internalSecretHeader = req.headers['x-internal-secret'];
+        try {
+          if (customerLoyaltyRoute) {
+            const loyaltyResponse =
+              input.customerLoyalty === undefined
+                ? { status: 503, body: { error: 'Customer loyalty is unavailable.' } }
+                : await handleCustomerLoyaltyHttp(
+                    {
+                      method: req.method ?? 'GET',
+                      path,
+                      authorization: req.headers.authorization,
+                    },
+                    {
+                      profiles: input.customerLoyalty,
+                      customerAuth: input.customerAuth,
+                      nowSeconds: input.api.nowSeconds,
+                      nowIso: input.api.nowIso,
+                    }
+                  );
+            if (loyaltyResponse !== null) {
+              send(loyaltyResponse.status, loyaltyResponse.body);
+              return;
+            }
+          }
+          const checkoutResponse = await handleCheckoutHttp(
+            {
+              method: req.method ?? 'GET',
+              path,
+              authorization: req.headers.authorization,
+              idempotencyKey: singleHeader(req.headers['idempotency-key']),
+              checkoutToken: singleHeader(req.headers['x-checkout-token']),
+              body,
+            },
+            {
+              checkout: input.checkout.service,
+              rateLimiter: input.checkout.rateLimiter,
+              rateLimitKey: clientRateLimitKey(req),
+              customerAuth: input.customerAuth,
+              nowSeconds: input.api.nowSeconds,
+            }
+          );
+          if (checkoutResponse !== null) {
+            const retryAfter = retryAfterHeader(checkoutResponse.body);
+            send(
+              checkoutResponse.status,
+              checkoutResponse.body,
+              retryAfter === undefined ? {} : { 'Retry-After': retryAfter }
+            );
+            return;
+          }
+          const response = await handle(
+            {
+              method: req.method ?? 'GET',
+              path,
+              authorization: req.headers.authorization,
+              internalSecret:
+                typeof internalSecretHeader === 'string' ? internalSecretHeader : undefined,
+              body,
+              rawBody,
+              contentType: reqContentType,
+            },
+            input.api
+          );
+          send(response.status, response.body);
+        } catch (error) {
+          console.error(`[pos-api] request failed`, { traceId, path, method: req.method, error });
+          send(502, { error: 'The API is unavailable.' });
+        }
+      })();
+    });
+  };
+}
+
+function corsHeaders(
+  origin: string | undefined,
+  allowed: ReadonlySet<string>
+): Record<string, string> {
+  return origin !== undefined && allowed.has(origin)
+    ? {
+        'Access-Control-Allow-Origin': origin,
+        'Access-Control-Expose-Headers': 'X-Trace-Id, Retry-After',
+        Vary: 'Origin',
+      }
+    : { Vary: 'Origin' };
+}
+
+function singleHeader(value: string | readonly string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
 
 export function clientRateLimitKey(req: IncomingMessage, trustedProxyHops = 1): string {
   const raw = req.headers['x-forwarded-for'];
@@ -375,47 +569,24 @@ export function clientRateLimitKey(req: IncomingMessage, trustedProxyHops = 1): 
   return address.slice(0, 500);
 }
 
-      let body: unknown;
-      let rawBody: Uint8Array | undefined;
+function retryAfterHeader(body: unknown): string | undefined {
+  if (body === null || typeof body !== 'object') return undefined;
+  const value = (body as { retryAfterSeconds?: unknown }).retryAfterSeconds;
+  return Number.isSafeInteger(value) && (value as number) > 0 ? String(value) : undefined;
+}
 
-      if (isImageUpload) {
-        // For multipart routes pass the raw bytes — JSON.parse would corrupt
-        // binary data and the route handler does its own framing.
-        rawBody = new Uint8Array(rawBuffer);
-      } else {
-        const raw = rawBuffer.toString('utf8');
-        if (raw.trim().length > 0) {
-          try {
-            body = JSON.parse(raw);
-          } catch {
-            send(400, { error: 'Body must be JSON.' });
-            return;
-          }
-        }
-      }
-
-      try {
-        const response = await handle(
-          {
-            method: req.method ?? 'GET',
-            path,
-            authorization: req.headers.authorization,
-            internalSecret: typeof internalSecretHeader === 'string' ? internalSecretHeader : undefined,
-            body,
-            rawBody,
-            contentType: reqContentType,
-          },
-          deps
-        );
-        send(response.status, response.body);
-      } catch (error) {
-        // The store threw — Cloudant unreachable, IAM refusing the key. The message
-        // stays in the log and out of the response: it names hosts and databases,
-        // and the caller can do nothing with it but learn the shape of the backend.
-        console.error(`[pos-api] request failed`, { traceId, path, method: req.method, error });
-        send(502, { error: 'The API is unavailable.' });
-      }
-    })();
+export function startPosServer(): ReturnType<typeof createServer> {
+  const deps = buildRuntimeDeps();
+  let allowedOrigins: ReadonlySet<string>;
+  try {
+    allowedOrigins = readAllowedOrigins(process.env);
+  } catch (error) {
+    console.error('[pos-api] CORS configuration is invalid. Refusing to start.', error);
+    process.exit(1);
+  }
+  const server = createServer(createPosRequestHandler({ ...deps, allowedOrigins }));
+  return server.listen(PORT, () => {
+    console.log(`[pos-api] listening on http://localhost:${PORT}/api/health`);
   });
 }
 
