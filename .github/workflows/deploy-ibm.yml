@@ -23,7 +23,14 @@ name: Deploy to IBM Cloud
 #
 # 4. summary          Aggregates results into the GitHub step summary.
 #
-# ── Prerequisites — GitHub repository secrets ────────────────────────────────
+# ── Prerequisites — GitHub Environment secrets (Settings → Environments → production) ──
+#
+# All secrets are scoped to the "production" GitHub Environment, the same
+# pattern deploy-pages.yml uses for its "github-pages" environment. This means:
+#   • Secrets only unlock when the job declares `environment: production`.
+#   • You can add required reviewers or deployment protection rules on the
+#     environment so a push to main still needs a human sign-off.
+#   • Settings → Environments → production → Environment secrets:
 #
 #   IBM_CLOUD_API_KEY         IBM Cloud API key (Manager on Code Engine project,
 #                             Writer on the CR namespace).
@@ -31,8 +38,7 @@ name: Deploy to IBM Cloud
 #   CE_PROJECT_NAME           Code Engine project name, e.g. capy-pos
 #   CE_REGION                 IBM Cloud region, e.g. us-south
 #   MERCADOPAGO_PUBLIC_KEY    MP production public key — baked into the Angular
-#                             production bundle at build time (not a secret in the
-#                             browser security sense, but kept out of the repo).
+#                             production bundle at build time.
 #
 # ── What this workflow does NOT do ───────────────────────────────────────────
 #
@@ -73,10 +79,9 @@ permissions:
   contents: read
 
 env:
-  IBM_CLOUD_REGION: ${{ secrets.CE_REGION }}
   CR_REGISTRY: us.icr.io
-  CR_NAMESPACE: ${{ secrets.CR_NAMESPACE }}
-  CE_PROJECT: ${{ secrets.CE_PROJECT_NAME }}
+  # Non-secret defaults — overridden per environment if needed.
+  IBM_CLOUD_REGION: us-south
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
@@ -154,6 +159,10 @@ jobs:
 
   # ───────────────────────────────────────────────────────────────────────────
   # Job 2 — build & push (matrix, one entry per changed service)
+  #
+  # Declares `environment: production` so Environment secrets are available
+  # (IBM_CLOUD_API_KEY for ICR login, MERCADOPAGO_PUBLIC_KEY for the bundle).
+  # This is the same pattern deploy-pages.yml uses for its github-pages env.
   # ───────────────────────────────────────────────────────────────────────────
   build:
     name: 🏗️ Build & push ${{ matrix.name }}
@@ -161,6 +170,10 @@ jobs:
     timeout-minutes: 20
     needs: detect-changes
     if: needs.detect-changes.outputs.any_changed == 'true'
+    # Scopes secrets to the "production" GitHub Environment.
+    # Create it at: Settings → Environments → New environment → "production"
+    # Then add secrets there instead of at the repository level.
+    environment: production
     strategy:
       # Let each service build independently — a vision-proxy failure should
       # not block the frontend or pos-api deploy.
@@ -185,8 +198,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # docker/login-action is the official recommended way to authenticate
-      # against any registry (docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images).
       # IBM ICR accepts an API key as the password with username "iamapikey".
       - name: Log in to IBM Container Registry
         uses: docker/login-action@v3
@@ -222,6 +233,11 @@ jobs:
   # Job 3 — update Code Engine apps with the new images
   # Runs only after ALL build jobs complete (needs: build, which covers the
   # full matrix), so a partially-failed matrix aborts the deploy step cleanly.
+  #
+  # Also declares `environment: production` — the CE_PROJECT_NAME / CR_NAMESPACE
+  # / CE_REGION / IBM_CLOUD_API_KEY secrets live there, not at repo level.
+  # This is also where you'd add deployment protection rules (required reviewers,
+  # wait timers) if you want a human gate before Code Engine is updated.
   # ───────────────────────────────────────────────────────────────────────────
   deploy:
     name: 🚀 Deploy ${{ matrix.app }} to Code Engine
@@ -229,6 +245,11 @@ jobs:
     timeout-minutes: 15
     needs: [detect-changes, build]
     if: needs.detect-changes.outputs.any_changed == 'true'
+    environment:
+      name: production
+      # The URL shown on the GitHub deployment page — links to the Code Engine
+      # frontend. Hardcoded because CE app URLs are stable after first deploy.
+      url: https://capy-pos-app.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
@@ -250,6 +271,9 @@ jobs:
       - name: Update ${{ matrix.app }} revision
         env:
           IMAGE_TAG: ${{ needs.detect-changes.outputs.image_tag }}
+          CR_NAMESPACE: ${{ secrets.CR_NAMESPACE }}
+          CE_PROJECT: ${{ secrets.CE_PROJECT_NAME }}
+          IBM_CLOUD_REGION: ${{ secrets.CE_REGION }}
         run: |
           ibmcloud ce project select --name "$CE_PROJECT" -k
           ibmcloud ce app update \
