@@ -277,10 +277,10 @@ resource "aws_lambda_function" "get_products" {
   }
 
   environment {
-    variables = {
+    variables = merge(local.otel_env, {
       PRODUCTS_TABLE = aws_dynamodb_table.products.name
       ENABLE_FAILURE = var.enable_failure_mode ? "true" : "false"
-    }
+    })
   }
 }
 
@@ -323,11 +323,11 @@ resource "aws_lambda_function" "sell_product" {
   }
 
   environment {
-    variables = {
+    variables = merge(local.otel_env, {
       PRODUCTS_TABLE     = aws_dynamodb_table.products.name
       TRANSACTIONS_TABLE = aws_dynamodb_table.transactions.name
       ENABLE_FAILURE     = var.enable_failure_mode ? "true" : "false"
-    }
+    })
   }
 }
 
@@ -370,9 +370,9 @@ resource "aws_lambda_function" "get_transactions" {
   }
 
   environment {
-    variables = {
+    variables = merge(local.otel_env, {
       TRANSACTIONS_TABLE = aws_dynamodb_table.transactions.name
-    }
+    })
   }
 }
 
@@ -415,9 +415,9 @@ resource "aws_lambda_function" "create_product" {
   }
 
   environment {
-    variables = {
+    variables = merge(local.otel_env, {
       PRODUCTS_TABLE = aws_dynamodb_table.products.name
-    }
+    })
   }
 }
 
@@ -460,9 +460,9 @@ resource "aws_lambda_function" "update_product" {
   }
 
   environment {
-    variables = {
+    variables = merge(local.otel_env, {
       PRODUCTS_TABLE = aws_dynamodb_table.products.name
-    }
+    })
   }
 }
 
@@ -505,9 +505,9 @@ resource "aws_lambda_function" "delete_product" {
   }
 
   environment {
-    variables = {
+    variables = merge(local.otel_env, {
       PRODUCTS_TABLE = aws_dynamodb_table.products.name
-    }
+    })
   }
 }
 
@@ -550,9 +550,9 @@ resource "aws_lambda_function" "health" {
   }
 
   environment {
-    variables = {
+    variables = merge(local.otel_env, {
       ENABLE_FAILURE = var.enable_failure_mode ? "true" : "false"
-    }
+    })
   }
 }
 

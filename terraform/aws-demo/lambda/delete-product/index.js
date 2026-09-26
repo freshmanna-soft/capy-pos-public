@@ -8,14 +8,14 @@
  * rather than silently succeeding.
  */
 
-const { initTelemetry, flushTelemetry } = require('./shared/telemetry');
+const { initTelemetry, withSpan, instrument, flushTelemetry } = require('./shared/telemetry');
 const { DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('./shared/dynamodb');
 const { log, response } = require('./shared/logger');
 
 const PRODUCTS_TABLE = process.env.PRODUCTS_TABLE;
 
-exports.handler = async (event) => {
+const baseHandler = async (event) => {
   const productId = event.pathParameters?.id;
 
   log('info', 'DeleteProduct invoked', { productId, table: PRODUCTS_TABLE });
@@ -45,3 +45,5 @@ exports.handler = async (event) => {
     return response(500, { error: 'Internal server error' });
   }
 };
+
+exports.handler = instrument('DELETE /api/products/{id}', baseHandler);

@@ -8,14 +8,14 @@
  * Returns: { product: {...} }
  */
 
-const { initTelemetry, flushTelemetry } = require('./shared/telemetry');
+const { initTelemetry, withSpan, instrument, flushTelemetry } = require('./shared/telemetry');
 const { PutCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('./shared/dynamodb');
 const { log, response } = require('./shared/logger');
 
 const PRODUCTS_TABLE = process.env.PRODUCTS_TABLE;
 
-exports.handler = async (event) => {
+const baseHandler = async (event) => {
   log('info', 'CreateProduct invoked', { table: PRODUCTS_TABLE });
 
   try {
@@ -61,3 +61,5 @@ exports.handler = async (event) => {
     return response(500, { error: 'Internal server error' });
   }
 };
+
+exports.handler = instrument('POST /api/products', baseHandler);

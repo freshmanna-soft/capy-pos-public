@@ -58,6 +58,9 @@ terraform/**/.terraform/
 tfplan
 .terraform.lock.hcl
 terraform/terraform.tfvars
+# Secret var files (e.g. Grafana service-account token) — never commit
+*.auto.tfvars
+secret*.tfvars
 
 # =============================================================================
 # IDEs and editors

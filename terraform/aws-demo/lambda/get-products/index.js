@@ -9,7 +9,7 @@
  *   - Random data corruption (null name/price on one product)
  */
 
-const { initTelemetry, flushTelemetry } = require('./shared/telemetry');
+const { initTelemetry, withSpan, instrument, flushTelemetry } = require('./shared/telemetry');
 const { ScanCommand } = require('@aws-sdk/lib-dynamodb');
 const { docClient } = require('./shared/dynamodb');
 const { log, response } = require('./shared/logger');
@@ -19,7 +19,7 @@ initTelemetry();
 const PRODUCTS_TABLE = process.env.PRODUCTS_TABLE;
 const failureMode = process.env.ENABLE_FAILURE === 'true';
 
-exports.handler = async (event) => {
+const baseHandler = async (event) => {
   log('info', 'GetProducts invoked', { table: PRODUCTS_TABLE, failureMode });
 
   try {
@@ -70,3 +70,5 @@ exports.handler = async (event) => {
     await flushTelemetry();
   }
 };
+
+exports.handler = instrument('GET /api/products', baseHandler);

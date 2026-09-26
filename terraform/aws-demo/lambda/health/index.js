@@ -5,10 +5,10 @@
  * Route: GET /api/health
  */
 
-const { initTelemetry, flushTelemetry } = require('./shared/telemetry');
+const { initTelemetry, withSpan, instrument, flushTelemetry } = require('./shared/telemetry');
 const { log, response } = require('./shared/logger');
 
-exports.handler = async (event) => {
+const baseHandler = async (event) => {
   log('info', 'Health check invoked');
 
   return response(200, {
@@ -27,3 +27,5 @@ exports.handler = async (event) => {
     },
   });
 };
+
+exports.handler = instrument('GET /api/health', baseHandler);

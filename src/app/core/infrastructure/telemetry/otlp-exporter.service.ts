@@ -42,8 +42,13 @@ export class OtlpExporterService {
 
       this.tracerProvider = new WebTracerProvider({ resource });
 
+      // OTLP/HTTP posts traces to <endpoint>/v1/traces. The Grafana Cloud
+      // gateway base is ".../otlp", so append the signal path when absent.
+      const base = environment.telemetry?.otlp?.endpoint || 'http://localhost:4317';
+      const tracesUrl = base.endsWith('/v1/traces') ? base : `${base}/v1/traces`;
+
       const exporter = new OTLPTraceExporter({
-        url: environment.telemetry?.otlp?.endpoint || 'http://localhost:4317',
+        url: tracesUrl,
         headers: this.buildHeaders(),
       });
 
@@ -60,8 +65,15 @@ export class OtlpExporterService {
       'Content-Type': 'application/protobuf',
     };
 
+    // Grafana Cloud's OTLP gateway uses HTTP Basic auth (base64 of
+    // "<instanceId>:<token>"), not Bearer. Fall back to Bearer for a plain-token
+    // endpoint (e.g. a local collector) when no instanceId is configured.
+    const instanceId = environment.telemetry?.otlp?.instanceId;
     const apiKey = environment.telemetry?.otlp?.apiKey;
-    if (apiKey) {
+    if (instanceId && apiKey) {
+      const credentials = btoa(`${instanceId}:${apiKey}`);
+      headers['Authorization'] = `Basic ${credentials}`;
+    } else if (apiKey) {
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
 
