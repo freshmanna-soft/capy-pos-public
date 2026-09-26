@@ -218,25 +218,47 @@ jobs:
         run: echo "✅ ${{ matrix.app }}:${{ needs.detect-changes.outputs.image_tag }} → ${{ steps.push.outputs.digest }}"
 
   # ───────────────────────────────────────────────────────────────────────────
-  # Job 3 — update Code Engine apps with the new images
-  # Runs only after ALL build jobs complete (needs: build, which covers the
-  # full matrix), so a partially-failed matrix aborts the deploy step cleanly.
+  # Job 3 — manual approval gate
   #
-  # Also declares `environment: production` — the CE_PROJECT_NAME / CR_NAMESPACE
-  # / CE_REGION / IBM_CLOUD_API_KEY secrets live there, not at repo level.
-  # This is also where you'd add deployment protection rules (required reviewers,
-  # wait timers) if you want a human gate before Code Engine is updated.
+  # A single no-op job that targets the "production-gate" environment.
+  # Configure that environment with Required Reviewers and this job becomes
+  # the approval button in the GitHub Actions UI — one prompt, not five.
+  #
+  # Settings → Environments → production-gate → Protection rules
+  #   ☑ Required reviewers → add yourself (or a team)
+  #
+  # The deploy matrix waits on this job, so images are only pushed to
+  # Code Engine after a human clicks Approve here.
+  # ───────────────────────────────────────────────────────────────────────────
+  approve:
+    name: 🔐 Approve deploy to production
+    runs-on: ubuntu-latest
+    timeout-minutes: 60   # how long the button stays open before auto-cancel
+    needs: [detect-changes, build]
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    environment:
+      name: production-gate
+      url: https://capy-pos-app.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud
+    steps:
+      - name: Approval granted
+        run: |
+          echo "✅ Deployment to production approved by ${{ github.actor }}"
+          echo "   Tag: ${{ needs.detect-changes.outputs.image_tag }}"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 4 — update Code Engine apps with the new images
+  # Runs only after approval (needs: approve). The matrix deploys all changed
+  # services in parallel once the gate is cleared.
   # ───────────────────────────────────────────────────────────────────────────
   deploy:
     name: 🚀 Deploy ${{ matrix.app }} to Code Engine
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [detect-changes, build]
+    needs: [detect-changes, approve]
     if: needs.detect-changes.outputs.any_changed == 'true'
     environment:
       name: production
-      # The URL shown on the GitHub deployment page — links to the Code Engine
-      # frontend. Hardcoded because CE app URLs are stable after first deploy.
+      # URL shown on the Deployments page after the job completes.
       url: https://capy-pos-app.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud
     strategy:
       fail-fast: false
@@ -280,7 +302,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [detect-changes, build, deploy]
+    needs: [detect-changes, build, approve, deploy]
     steps:
       - name: Write summary
         run: |
