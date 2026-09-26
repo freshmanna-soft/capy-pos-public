@@ -47,12 +47,12 @@ name: Deploy to IBM Cloud
 # workflow only promotes freshly built images into already-provisioned apps.
 
 on:
-  # Trigger on any tag that looks like a version: v1.0.0, v2.3.1-rc1, etc.
+  # Trigger on any version tag: v1.0.0, v2.3.1-rc1, etc.
   # Push the tag to trigger a deploy:
   #   git tag v1.2.3 && git push origin v1.2.3
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+*'
+      - 'v[0-9]+\.[0-9]+\.[0-9]+*'
   workflow_dispatch:
     inputs:
       services:
@@ -74,8 +74,6 @@ permissions:
 
 env:
   CR_REGISTRY: us.icr.io
-  # Non-secret defaults — overridden per environment if needed.
-  IBM_CLOUD_REGION: us-south
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
@@ -167,6 +165,9 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
 
+    env:
+      CR_NAMESPACE: ${{ secrets.CR_NAMESPACE }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -241,6 +242,13 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
 
+    # All environment secrets available to every step in this job.
+    env:
+      IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
+      IBM_CLOUD_REGION:  ${{ secrets.CE_REGION }}
+      CR_NAMESPACE:      ${{ secrets.CR_NAMESPACE }}
+      CE_PROJECT:        ${{ secrets.CE_PROJECT_NAME }}
+
     steps:
       - name: Install IBM Cloud CLI + plugins
         run: |
@@ -249,8 +257,6 @@ jobs:
           ibmcloud plugin install code-engine -f -q
 
       - name: Authenticate with IBM Cloud
-        env:
-          IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
         run: |
           ibmcloud login --apikey "$IBM_CLOUD_API_KEY" -r "$IBM_CLOUD_REGION" -q
           ibmcloud target -g Default
@@ -258,9 +264,6 @@ jobs:
       - name: Update ${{ matrix.app }} revision
         env:
           IMAGE_TAG: ${{ needs.detect-changes.outputs.image_tag }}
-          CR_NAMESPACE: ${{ secrets.CR_NAMESPACE }}
-          CE_PROJECT: ${{ secrets.CE_PROJECT_NAME }}
-          IBM_CLOUD_REGION: ${{ secrets.CE_REGION }}
         run: |
           ibmcloud ce project select --name "$CE_PROJECT" -k
           ibmcloud ce app update \
