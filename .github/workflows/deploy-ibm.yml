@@ -47,24 +47,18 @@ name: Deploy to IBM Cloud
 # workflow only promotes freshly built images into already-provisioned apps.
 
 on:
+  # Trigger on any tag that looks like a version: v1.0.0, v2.3.1-rc1, etc.
+  # Push the tag to trigger a deploy:
+  #   git tag v1.2.3 && git push origin v1.2.3
   push:
-    branches: [main]
-    # Only run when something deployable actually changed. Documentation,
-    # test configs, and CI-only files never need a new container image.
-    paths:
-      - 'src/**'
-      - 'Dockerfile'
-      - 'nginx.conf'
-      - 'angular.json'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'infra/**'
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
     inputs:
       services:
         description: >
           Comma-separated services to force-rebuild and redeploy.
-          Leave empty to auto-detect from the last commit diff.
+          Leave empty to rebuild all services.
           Valid: frontend, pos-api, vision-proxy, clerk-agent-relay, appid-token-relay
         required: false
         default: ''
@@ -100,59 +94,52 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Compute immutable image tag
+      - name: Compute image tag
         id: tag
-        # Short SHA — unique per commit, well under ICR's 128-char tag limit,
-        # traceable in `ibmcloud ce app get` output.
-        run: echo "image_tag=sha-$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
+        # On a version tag push the tag name IS the image tag (v1.2.3).
+        # On workflow_dispatch use the short SHA as a fallback.
+        run: |
+          if [ -n "${{ github.ref_name }}" ] && echo "${{ github.ref_name }}" | grep -qE '^v[0-9]'; then
+            echo "image_tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_tag=sha-$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build deployment matrix
         id: matrix
         run: |
           MANUAL="${{ github.event.inputs.services }}"
 
+          # On a tag release, build everything unless the operator narrowed the
+          # list via workflow_dispatch. There is no meaningful "what changed"
+          # diff on a tag — the tag itself is the release signal.
           if [ -n "$MANUAL" ]; then
-            # workflow_dispatch with explicit list — honour it directly.
-            CHANGED="$MANUAL"
+            include_all=false
           else
-            CHANGED=$(git diff --name-only HEAD~1 HEAD)
+            include_all=true
           fi
 
-          # ── Per-service path rules ──────────────────────────────────────
-          # infra/shared affects every Node service (shared DocumentStore port).
-          check() {
-            local svc="$1"; shift
-            if [ -n "$MANUAL" ]; then
-              echo "$MANUAL" | grep -qw "$svc" && echo true || echo false
-            else
-              echo "$CHANGED" | grep -qE "$@" && echo true || echo false
-            fi
-          }
-
-          F=$(check frontend  '^(src/|Dockerfile|nginx\.conf|angular\.json|package(-lock)?\.json)')
-          P=$(check pos-api   '^infra/(shared|pos-api)/')
-          V=$(check vision-proxy      '^infra/(shared|vision-proxy)/')
-          C=$(check clerk-agent-relay '^infra/(shared|clerk-agent-relay)/')
-          A=$(check appid-token-relay '^infra/(shared|appid-token-relay)/')
-
-          # Build a JSON matrix that includes only changed services so the
-          # build job skips the others with a native matrix `if:` condition.
-          # Each entry carries everything the build and deploy steps need.
-          ENTRIES="[]"
           add() {
-            local changed="$1" name="$2" dockerfile="$3" context="$4" app="$5"
-            if [ "$changed" = "true" ]; then
+            local include="$1" name="$2" dockerfile="$3" context="$4" app="$5"
+            local should_add=false
+            if [ "$include_all" = "true" ]; then
+              should_add=true
+            elif echo "$MANUAL" | grep -qw "$name"; then
+              should_add=true
+            fi
+            if [ "$should_add" = "true" ]; then
               ENTRIES=$(echo "$ENTRIES" | jq \
                 --arg n "$name" --arg d "$dockerfile" --arg c "$context" --arg a "$app" \
                 '. += [{"name":$n,"dockerfile":$d,"context":$c,"app":$a}]')
             fi
           }
 
-          add "$F" "frontend"          "Dockerfile"                              "."                      "capy-pos-app"
-          add "$P" "pos-api"           "infra/pos-api/Dockerfile"                "infra"                  "capy-pos-api"
-          add "$V" "vision-proxy"      "infra/vision-proxy/Dockerfile"           "infra/vision-proxy"     "capy-vision-proxy"
-          add "$C" "clerk-agent-relay" "infra/clerk-agent-relay/Dockerfile"      "infra/clerk-agent-relay" "capy-clerk-agent-relay"
-          add "$A" "appid-token-relay" "infra/appid-token-relay/Dockerfile"      "infra/appid-token-relay" "capy-appid-token-relay"
+          ENTRIES="[]"
+          add true "frontend"          "Dockerfile"                         "."                       "capy-pos-app"
+          add true "pos-api"           "infra/pos-api/Dockerfile"           "infra"                   "capy-pos-api"
+          add true "vision-proxy"      "infra/vision-proxy/Dockerfile"      "infra/vision-proxy"      "capy-vision-proxy"
+          add true "clerk-agent-relay" "infra/clerk-agent-relay/Dockerfile" "infra/clerk-agent-relay" "capy-clerk-agent-relay"
+          add true "appid-token-relay" "infra/appid-token-relay/Dockerfile" "infra/appid-token-relay" "capy-appid-token-relay"
 
           echo "build_matrix=$(echo "$ENTRIES" | jq -c '{include:.}')" >> "$GITHUB_OUTPUT"
           echo "any_changed=$([ "$ENTRIES" = '[]' ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
@@ -302,13 +289,9 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| | |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Release tag** | \`${{ github.ref_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Image tag** | \`${TAG}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Commit** | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Triggered by** | @${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Build** | ${BUILD} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Deploy** | ${DEPLOY} |" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ "${{ needs.detect-changes.outputs.any_changed }}" = "false" ]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "> ℹ️ No deployable files changed — all services skipped." >> "$GITHUB_STEP_SUMMARY"
-          fi
