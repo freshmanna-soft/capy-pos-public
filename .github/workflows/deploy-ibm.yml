@@ -1,0 +1,322 @@
+name: Deploy to IBM Cloud
+
+# Triggered on every push to main that touches deployable source, and manually
+# via workflow_dispatch so an operator can force a redeploy without a commit.
+#
+# ── Architecture ─────────────────────────────────────────────────────────────
+#
+# 1. detect-changes   Emits a boolean output per service. On manual dispatch
+#                     with an explicit `services` input that list wins; otherwise
+#                     we diff HEAD~1..HEAD and gate on the path patterns below.
+#
+# 2. build (matrix)   One job per service, but a single shared job definition
+#                     driven by a JSON matrix. Only services whose changed=true
+#                     output was set in step 1 actually run (if: condition on the
+#                     matrix entry). Uses docker/login-action and
+#                     docker/build-push-action (official pinned-SHA actions) to
+#                     build linux/amd64 images and push them to IBM Container
+#                     Registry with a SHA-derived immutable tag.
+#
+# 3. deploy (matrix)  Calls `ibmcloud ce app update` for the same set of
+#                     services after their images land in ICR. Runs only after
+#                     build succeeds.
+#
+# 4. summary          Aggregates results into the GitHub step summary.
+#
+# ── Prerequisites — GitHub Environment secrets (Settings → Environments → production) ──
+#
+# All secrets are scoped to the "production" GitHub Environment, the same
+# pattern deploy-pages.yml uses for its "github-pages" environment. This means:
+#   • Secrets only unlock when the job declares `environment: production`.
+#   • You can add required reviewers or deployment protection rules on the
+#     environment so a push to main still needs a human sign-off.
+#   • Settings → Environments → production → Environment secrets:
+#
+#   IBM_CLOUD_API_KEY         IBM Cloud API key (Manager on Code Engine project,
+#                             Writer on the CR namespace).
+#   CR_NAMESPACE              ICR namespace, e.g. capy-pos-3223793
+#   CE_PROJECT_NAME           Code Engine project name, e.g. capy-pos
+#   CE_REGION                 IBM Cloud region, e.g. us-south
+#   MERCADOPAGO_PUBLIC_KEY    MP production public key — baked into the Angular
+#                             production bundle at build time.
+#
+# ── What this workflow does NOT do ───────────────────────────────────────────
+#
+# It does not run `terraform apply`. Infrastructure shape (new apps, secret
+# bindings, Cloudant databases) is still managed manually via terraform/. This
+# workflow only promotes freshly built images into already-provisioned apps.
+
+on:
+  # Trigger on any version tag: v1.0.0, v2.3.1-rc1, etc.
+  # Push the tag to trigger a deploy:
+  #   git tag v1.2.3 && git push origin v1.2.3
+  push:
+    tags:
+      - 'v[0-9]+\.[0-9]+\.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      services:
+        description: >
+          Comma-separated services to force-rebuild and redeploy.
+          Leave empty to rebuild all services.
+          Valid: frontend, pos-api, vision-proxy, clerk-agent-relay, appid-token-relay
+        required: false
+        default: ''
+
+concurrency:
+  # One IBM Cloud deploy at a time; never cancel in-flight to avoid
+  # a half-promoted image set leaving the estate inconsistent.
+  group: deploy-ibm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CR_REGISTRY: us.icr.io
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 1 — decide which services need a new image
+  # ───────────────────────────────────────────────────────────────────────────
+  detect-changes:
+    name: 🔍 Detect changed services
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image_tag:          ${{ steps.tag.outputs.image_tag }}
+      build_matrix:       ${{ steps.matrix.outputs.build_matrix }}
+      any_changed:        ${{ steps.matrix.outputs.any_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Compute image tag
+        id: tag
+        # On a version tag push the tag name IS the image tag (v1.2.3).
+        # On workflow_dispatch use the short SHA as a fallback.
+        run: |
+          if [ -n "${{ github.ref_name }}" ] && echo "${{ github.ref_name }}" | grep -qE '^v[0-9]'; then
+            echo "image_tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "image_tag=sha-$(git rev-parse --short=8 HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build deployment matrix
+        id: matrix
+        run: |
+          MANUAL="${{ github.event.inputs.services }}"
+
+          # On a tag release, build everything unless the operator narrowed the
+          # list via workflow_dispatch. There is no meaningful "what changed"
+          # diff on a tag — the tag itself is the release signal.
+          if [ -n "$MANUAL" ]; then
+            include_all=false
+          else
+            include_all=true
+          fi
+
+          add() {
+            local include="$1" name="$2" dockerfile="$3" context="$4" app="$5"
+            local should_add=false
+            if [ "$include_all" = "true" ]; then
+              should_add=true
+            elif echo "$MANUAL" | grep -qw "$name"; then
+              should_add=true
+            fi
+            if [ "$should_add" = "true" ]; then
+              ENTRIES=$(echo "$ENTRIES" | jq \
+                --arg n "$name" --arg d "$dockerfile" --arg c "$context" --arg a "$app" \
+                '. += [{"name":$n,"dockerfile":$d,"context":$c,"app":$a}]')
+            fi
+          }
+
+          ENTRIES="[]"
+          add true "frontend"          "Dockerfile"                         "."                       "capy-pos-app"
+          add true "pos-api"           "infra/pos-api/Dockerfile"           "infra"                   "capy-pos-api"
+          add true "vision-proxy"      "infra/vision-proxy/Dockerfile"      "infra/vision-proxy"      "capy-vision-proxy"
+          add true "clerk-agent-relay" "infra/clerk-agent-relay/Dockerfile" "infra/clerk-agent-relay" "capy-clerk-agent-relay"
+          add true "appid-token-relay" "infra/appid-token-relay/Dockerfile" "infra/appid-token-relay" "capy-appid-token-relay"
+
+          echo "build_matrix=$(echo "$ENTRIES" | jq -c '{include:.}')" >> "$GITHUB_OUTPUT"
+          echo "any_changed=$([ "$ENTRIES" = '[]' ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 2 — build & push (matrix, one entry per changed service)
+  #
+  # Declares `environment: production` so Environment secrets are available
+  # (IBM_CLOUD_API_KEY for ICR login, MERCADOPAGO_PUBLIC_KEY for the bundle).
+  # This is the same pattern deploy-pages.yml uses for its github-pages env.
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: 🏗️ Build & push ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: detect-changes
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    # Scopes secrets to the "production" GitHub Environment.
+    # Create it at: Settings → Environments → New environment → "production"
+    # Then add secrets there instead of at the repository level.
+    environment: production
+    strategy:
+      # Let each service build independently — a vision-proxy failure should
+      # not block the frontend or pos-api deploy.
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+
+    env:
+      CR_NAMESPACE: ${{ secrets.CR_NAMESPACE }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Inject the MercadoPago production public key only for the frontend image.
+      # It is baked into environment.prod.ts at build time the same way
+      # deploy-pages.yml does it for the MP test key.
+      - name: Inject MercadoPago production public key (frontend only)
+        if: matrix.name == 'frontend'
+        env:
+          MP_PUBLIC_KEY: ${{ secrets.MERCADOPAGO_PUBLIC_KEY }}
+        run: |
+          sed -i \
+            "s|publicKey: '', // Set via environment variable: MERCADOPAGO_PUBLIC_KEY|publicKey: '${MP_PUBLIC_KEY}', // injected by CI|" \
+            src/environments/environment.prod.ts
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # IBM ICR accepts an API key as the password with username "iamapikey".
+      - name: Log in to IBM Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.CR_REGISTRY }}
+          username: iamapikey
+          password: ${{ secrets.IBM_CLOUD_API_KEY }}
+
+      # docker/build-push-action is the official recommended action for
+      # building and pushing container images from GitHub Actions workflows.
+      # --platform linux/amd64 is required: Code Engine runs on amd64 nodes,
+      # and a mac/arm build pushed without this flag silently produces an arm64
+      # image that Code Engine refuses to schedule.
+      - name: Build and push ${{ matrix.app }}
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.CR_REGISTRY }}/${{ env.CR_NAMESPACE }}/${{ matrix.app }}:${{ needs.detect-changes.outputs.image_tag }}
+          # Registry-backed layer cache: the cache image never triggers a
+          # deploy (it carries no valid app tag), and it keeps layer reuse
+          # across workflow runs without consuming the runner's local disk.
+          cache-from: type=registry,ref=${{ env.CR_REGISTRY }}/${{ env.CR_NAMESPACE }}/${{ matrix.app }}:cache
+          cache-to:   type=registry,ref=${{ env.CR_REGISTRY }}/${{ env.CR_NAMESPACE }}/${{ matrix.app }}:cache,mode=max
+
+      - name: Report pushed digest
+        run: echo "✅ ${{ matrix.app }}:${{ needs.detect-changes.outputs.image_tag }} → ${{ steps.push.outputs.digest }}"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 3 — manual approval gate
+  #
+  # A single no-op job that targets the "production-gate" environment.
+  # Configure that environment with Required Reviewers and this job becomes
+  # the approval button in the GitHub Actions UI — one prompt, not five.
+  #
+  # Settings → Environments → production-gate → Protection rules
+  #   ☑ Required reviewers → add yourself (or a team)
+  #
+  # The deploy matrix waits on this job, so images are only pushed to
+  # Code Engine after a human clicks Approve here.
+  # ───────────────────────────────────────────────────────────────────────────
+  approve:
+    name: 🔐 Approve deploy to production
+    runs-on: ubuntu-latest
+    timeout-minutes: 60   # how long the button stays open before auto-cancel
+    needs: [detect-changes, build]
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    environment:
+      name: production-gate
+      url: https://capy-pos-app.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud
+    steps:
+      - name: Approval granted
+        run: |
+          echo "✅ Deployment to production approved by ${{ github.actor }}"
+          echo "   Tag: ${{ needs.detect-changes.outputs.image_tag }}"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 4 — update Code Engine apps with the new images
+  # Runs only after approval (needs: approve). The matrix deploys all changed
+  # services in parallel once the gate is cleared.
+  # ───────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: 🚀 Deploy ${{ matrix.app }} to Code Engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [detect-changes, approve]
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    environment:
+      name: production
+      # URL shown on the Deployments page after the job completes.
+      url: https://capy-pos-app.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.detect-changes.outputs.build_matrix) }}
+
+    # All environment secrets available to every step in this job.
+    env:
+      IBM_CLOUD_API_KEY: ${{ secrets.IBM_CLOUD_API_KEY }}
+      IBM_CLOUD_REGION:  ${{ secrets.CE_REGION }}
+      CR_NAMESPACE:      ${{ secrets.CR_NAMESPACE }}
+      CE_PROJECT:        ${{ secrets.CE_PROJECT_NAME }}
+
+    steps:
+      - name: Install IBM Cloud CLI + plugins
+        run: |
+          curl -fsSL https://clis.cloud.ibm.com/install/linux | sh
+          ibmcloud plugin install container-registry -f -q
+          ibmcloud plugin install code-engine -f -q
+
+      - name: Authenticate with IBM Cloud
+        run: |
+          ibmcloud login --apikey "$IBM_CLOUD_API_KEY" -r "$IBM_CLOUD_REGION" -q
+          ibmcloud target -g Default
+
+      - name: Update ${{ matrix.app }} revision
+        env:
+          IMAGE_TAG: ${{ needs.detect-changes.outputs.image_tag }}
+        run: |
+          ibmcloud ce project select --name "$CE_PROJECT" -k
+          ibmcloud ce app update \
+            --name "${{ matrix.app }}" \
+            --image "${CR_REGISTRY}/${CR_NAMESPACE}/${{ matrix.app }}:${IMAGE_TAG}" \
+            --wait
+          echo "✅ ${{ matrix.app }} → ${IMAGE_TAG}"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 4 — write a deployment summary visible on the workflow run page
+  # ───────────────────────────────────────────────────────────────────────────
+  summary:
+    name: 📋 Deployment summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [detect-changes, build, approve, deploy]
+    steps:
+      - name: Write summary
+        run: |
+          TAG="${{ needs.detect-changes.outputs.image_tag }}"
+          BUILD="${{ needs.build.result }}"
+          DEPLOY="${{ needs.deploy.result }}"
+
+          echo "## 🚀 IBM Cloud Deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Release tag** | \`${{ github.ref_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Image tag** | \`${TAG}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Triggered by** | @${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Build** | ${BUILD} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Deploy** | ${DEPLOY} |" >> "$GITHUB_STEP_SUMMARY"
