@@ -4,7 +4,8 @@ import { stubLiveSyncEndpoints } from './auth';
 // ---------------------------------------------------------------------------
 // Dexie database name used by the app (matches DexieDatabase class definition)
 // ---------------------------------------------------------------------------
-const DB_NAME = 'capy-pos-db';
+/** The IndexedDB database name used by DexieDatabase (see super('CapyPOSDB')). */
+const DB_NAME = 'CapyPOSDB';
 
 /**
  * seedKioskDexie
@@ -95,7 +96,7 @@ export async function seedKioskDexie(page: Page): Promise<void> {
 export async function seedKioskDeviceToken(page: Page): Promise<void> {
   await page.evaluate(() => {
     return new Promise<void>((resolve, reject) => {
-      const req = indexedDB.open('capy-pos-db');
+      const req = indexedDB.open('CapyPOSDB');
       req.onerror = () => reject(req.error);
       req.onsuccess = () => {
         const db = req.result;
