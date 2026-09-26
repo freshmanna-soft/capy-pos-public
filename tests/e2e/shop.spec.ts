@@ -25,8 +25,8 @@ import { stubLiveSyncEndpoints } from './helpers/auth';
  * No running backend is required.
  */
 
-/** Update to '/shop' once ST-2 creates the dedicated route. */
-const SHOP_ROUTE = '/kiosk/shop';
+/** ST-2 is done: /shop (ShopComponent) exists and has no auth guard. */
+const SHOP_ROUTE = '/shop';
 
 test.describe('Shop — Customer phone self-checkout flow', () => {
   let kiosk: KioskPage;
