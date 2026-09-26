@@ -12,7 +12,7 @@ test.describe('Capy-POS Application', () => {
   });
 
   test('should load the application', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/pos');
 
     // Wait for the app to load
 
@@ -21,7 +21,7 @@ test.describe('Capy-POS Application', () => {
   });
 
   test('should display the main navigation', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/pos');
 
     // Check for navigation elements
     // This will need to be updated based on actual implementation
@@ -32,7 +32,7 @@ test.describe('Capy-POS Application', () => {
   test('should be responsive', async ({ page }) => {
     // Test desktop view
     await page.setViewportSize({ width: 1920, height: 1080 });
-    await page.goto('/');
+    await page.goto('/pos');
     await expect(page.locator('body')).toBeVisible();
 
     // Test tablet view
@@ -51,7 +51,7 @@ test.describe('Button Component', () => {
   });
 
   test('should render buttons correctly', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('/pos');
 
     // This test will be expanded once we have actual buttons in the UI
     const body = await page.locator('body');

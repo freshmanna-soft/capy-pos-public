@@ -195,7 +195,8 @@ test.describe('POS Terminal - Search to Cart Flow', () => {
   test.beforeEach(async ({ page }) => {
     pos = new PosTerminalPage(page);
     await loginAsAdmin(page);
-    await page.goto('/');
+    // loginAsAdmin already lands on /pos; re-navigate to ensure pos-terminal is loaded.
+    await page.goto('/pos');
     // Wait for the app to fully load and seed data to initialize
     await expect(page.getByTestId('pos-terminal')).toBeVisible();
   });
