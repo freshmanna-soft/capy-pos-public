@@ -498,3 +498,276 @@ variable "services" {
     error_message = "The customer verification audience may be bound only to capy-pos-api."
   }
 }
+
+# ── PayPal ────────────────────────────────────────────────────────────────────
+
+variable "paypal_client_id" {
+  description = <<-EOT
+    PayPal REST application client id. Non-sensitive — same reasoning as
+    appid_client_id: it identifies the application, not a credential. Committed
+    in environment.prod.ts as paypal.clientId.
+  EOT
+  type    = string
+  default = ""
+}
+
+variable "paypal_client_secret" {
+  description = <<-EOT
+    PayPal REST application client secret. Bound as a Code Engine secret on
+    capy-pos-api; never compiled into any client bundle.
+  EOT
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "paypal_expected_merchant_id" {
+  description = <<-EOT
+    PayPal merchant account id. Used by pos-api to verify that captured orders
+    belong to this merchant before confirming them. Non-sensitive.
+  EOT
+  type    = string
+  default = ""
+}
+
+variable "paypal_environment" {
+  description = "PayPal environment: 'sandbox' or 'production'."
+  type        = string
+  default     = "production"
+
+  validation {
+    condition     = contains(["sandbox", "production"], var.paypal_environment)
+    error_message = "paypal_environment must be 'sandbox' or 'production'."
+  }
+}
+
+variable "paypal_timeout_ms" {
+  description = "Timeout in milliseconds for PayPal API calls (1–120000)."
+  type        = number
+  default     = 10000
+}
+
+# ── Checkout config ───────────────────────────────────────────────────────────
+
+variable "checkout_store_id" {
+  description = <<-EOT
+    Opaque store identifier embedded in every checkout capability token. Used
+    by pos-api to scope reservations to a single storefront. Any non-empty
+    string is valid; treat it as a logical tenant id, not a secret.
+  EOT
+  type    = string
+  default = ""
+}
+
+variable "checkout_currency" {
+  description = "ISO 4217 currency code for checkout (must be 'USD' in production)."
+  type        = string
+  default     = "USD"
+}
+
+variable "checkout_tax_basis_points" {
+  description = "Sales tax in basis points (0–10000). 825 = 8.25 %."
+  type        = number
+  default     = 0
+}
+
+variable "checkout_max_item_quantity" {
+  description = "Maximum quantity of a single product in one basket (1–10000)."
+  type        = number
+  default     = 99
+}
+
+variable "checkout_max_aggregate_quantity" {
+  description = "Maximum total item count across the whole basket (≥ max_item_quantity, ≤ 50000)."
+  type        = number
+  default     = 200
+}
+
+variable "checkout_max_total_minor_units" {
+  description = "Maximum basket total in minor currency units (e.g. cents). 1–100000000."
+  type        = number
+  default     = 1000000
+}
+
+variable "checkout_v2_writes_enabled" {
+  description = <<-EOT
+    Feature flag — when true, POST /api/transactions writes V2 kiosk-sale
+    records (with schema_version and optional customerBinding). Set to false
+    to keep writing V1 records during a staged rollout.
+  EOT
+  type    = bool
+  default = true
+}
+
+# ── Checkout HMAC keyrings ────────────────────────────────────────────────────
+# Both are map(string): version → key. The active version is pointed to by
+# checkout_idempotency_key_version / checkout_capability_key_version.
+# Rotate by adding a new version and bumping the pointer; old versions stay
+# in the map so in-flight tokens signed with them remain valid through the
+# transition window.
+
+variable "checkout_idempotency_hmac_keys" {
+  description = <<-EOT
+    HMAC keyring for checkout idempotency tokens. Map of version → key.
+    Every key must be ≥ 32 characters. Generate with `openssl rand -hex 32`.
+    Stored as a Code Engine secret; never compiled into any client bundle.
+  EOT
+  type      = map(string)
+  sensitive = true
+
+  validation {
+    condition     = length(var.checkout_idempotency_hmac_keys) >= 1
+    error_message = "checkout_idempotency_hmac_keys must contain at least one version."
+  }
+
+  validation {
+    condition     = alltrue([for k in values(var.checkout_idempotency_hmac_keys) : length(k) >= 32])
+    error_message = "Every checkout_idempotency_hmac_keys key must be at least 32 characters."
+  }
+}
+
+variable "checkout_idempotency_key_version" {
+  description = "Active key version in checkout_idempotency_hmac_keys (must be a key in that map)."
+  type        = string
+  default     = "v1"
+}
+
+variable "checkout_capability_hmac_keys" {
+  description = <<-EOT
+    HMAC keyring for checkout capability tokens. Map of version → key.
+    Every key must be ≥ 32 characters. Generate with `openssl rand -hex 32`.
+    Stored as a Code Engine secret; never compiled into any client bundle.
+  EOT
+  type      = map(string)
+  sensitive = true
+
+  validation {
+    condition     = length(var.checkout_capability_hmac_keys) >= 1
+    error_message = "checkout_capability_hmac_keys must contain at least one version."
+  }
+
+  validation {
+    condition     = alltrue([for k in values(var.checkout_capability_hmac_keys) : length(k) >= 32])
+    error_message = "Every checkout_capability_hmac_keys key must be at least 32 characters."
+  }
+}
+
+variable "checkout_capability_key_version" {
+  description = "Active key version in checkout_capability_hmac_keys (must be a key in that map)."
+  type        = string
+  default     = "v1"
+}
+
+# ── Checkout rate limiting ────────────────────────────────────────────────────
+
+variable "checkout_rate_limit_requests" {
+  description = "Max requests per window per IP for unauthenticated checkout routes (1–1000)."
+  type        = number
+  default     = 20
+}
+
+variable "checkout_rate_limit_window_ms" {
+  description = "Rate-limit sliding window in milliseconds (1000–3600000)."
+  type        = number
+  default     = 60000
+}
+
+variable "checkout_rate_limit_max_keys" {
+  description = "Maximum tracked IPs in the rate-limit table (1–100000)."
+  type        = number
+  default     = 10000
+}
+
+# ── Checkout jobs ─────────────────────────────────────────────────────────────
+
+variable "checkout_job_cpu_limit" {
+  description = "vCPU limit for checkout batch jobs (migration, reconciliation)."
+  type        = string
+  default     = "0.5"
+}
+
+variable "checkout_job_memory_limit" {
+  description = "Memory limit for checkout batch jobs."
+  type        = string
+  default     = "1G"
+}
+
+variable "checkout_migration_max_execution_seconds" {
+  description = "Max wall-clock seconds for the checkout migration job (1–3600)."
+  type        = number
+  default     = 600
+}
+
+variable "checkout_migration_retry_limit" {
+  description = "Retry attempts for the checkout migration job (0–10)."
+  type        = number
+  default     = 2
+}
+
+variable "checkout_reconciliation_max_execution_seconds" {
+  description = "Max wall-clock seconds for the checkout reconciliation job (1–3600)."
+  type        = number
+  default     = 600
+}
+
+variable "checkout_reconciliation_retry_limit" {
+  description = "Retry attempts for the checkout reconciliation job (0–10)."
+  type        = number
+  default     = 2
+}
+
+# ── Checkout reconciliation worker ────────────────────────────────────────────
+
+variable "checkout_worker_max_checkouts" {
+  description = "Maximum open checkouts the reconciliation worker processes per run (1–1000)."
+  type        = number
+  default     = 100
+}
+
+variable "checkout_worker_page_size" {
+  description = "Cloudant page size for reconciliation reads (1–100)."
+  type        = number
+  default     = 25
+}
+
+variable "checkout_worker_max_duration_ms" {
+  description = <<-EOT
+    Self-imposed deadline for one reconciliation run in milliseconds. Must be
+    less than checkout_reconciliation_max_execution_seconds * 1000 so the
+    worker can flush before Code Engine kills the job (1–900000).
+  EOT
+  type    = number
+  default = 540000
+}
+
+# ── Customer loyalty ──────────────────────────────────────────────────────────
+
+variable "customer_loyalty_enabled" {
+  description = <<-EOT
+    Feature flag — enables durable customer loyalty storage and the loyalty
+    reconciliation job. Requires checkout_v2_writes_enabled = true.
+  EOT
+  type    = bool
+  default = false
+}
+
+variable "checkout_reconciliation_schedule" {
+  description = <<-EOT
+    Cron schedule for the checkout reconciliation Code Engine job (e.g.
+    "0 * * * *" to run every hour). Applied out-of-band via the IBM Cloud
+    console or CLI — Terraform outputs this value for reference but does not
+    create the subscription itself (IBM's CE Terraform provider does not expose
+    cron subscription resources yet).
+  EOT
+  type    = string
+  default = "0 * * * *"
+}
+
+variable "checkout_reconciliation_time_zone" {
+  description = <<-EOT
+    IANA time zone for the checkout reconciliation cron subscription
+    (e.g. "America/Chicago"). Applied out-of-band, same as the schedule.
+  EOT
+  type    = string
+  default = "UTC"
+}
