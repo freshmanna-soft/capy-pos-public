@@ -32,12 +32,21 @@ import {
   ROLE_PERMISSIONS,
   authorize,
   constantTimeStringsEqual,
+  isRolesShape,
   readBearer,
   verifySessionToken,
   signToken,
   type AppIdVerificationConfig,
 } from './session-auth.ts';
 import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
+import type { CheckoutInventoryMarkers } from './checkout-inventory.ts';
+import {
+  productAvailableStock,
+  productHasActiveReservations,
+  publicCheckoutSaleTransaction,
+  type CheckoutSaleTransactionDocument,
+  type PublicCheckoutSaleTransactionDocument,
+} from './checkout-fulfillment.ts';
 import type { ImageStore } from '../../shared/src/image-store.ts';
 
 /** The catalogue document. Field-for-field what `create-product/index.js` writes. */
@@ -642,6 +651,13 @@ async function listProducts(
 function publicProduct(product: ProductDocument): PublicProductDocument {
   const { checkoutMarkers: _checkoutMarkers, ...projection } = product;
   return projection;
+}
+
+/** Strips internal V2 checkout ownership fields before staff history leaves the API. */
+function publicTransaction(transaction: TransactionDocument): PublicTransactionDocument {
+  return 'kind' in transaction && transaction.kind === 'checkout-sale'
+    ? publicCheckoutSaleTransaction(transaction)
+    : transaction;
 }
 
 /**
