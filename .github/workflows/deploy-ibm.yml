@@ -246,15 +246,100 @@ jobs:
           echo "   Tag: ${{ needs.detect-changes.outputs.image_tag }}"
 
   # ───────────────────────────────────────────────────────────────────────────
-  # Job 4 — update Code Engine apps with the new images
-  # Runs only after approval (needs: approve). The matrix deploys all changed
-  # services in parallel once the gate is cleared.
+  # Job 4 — run terraform apply to sync infrastructure state
+  #
+  # Runs after approval, before the image deploy. This ensures Code Engine
+  # secrets (checkout HMAC keys, PayPal creds, etc.) are written/updated
+  # BEFORE `ce app update` creates the new revision that reads them.
+  #
+  # Map-type variables (checkout_idempotency_hmac_keys,
+  # checkout_capability_hmac_keys) use HCL map syntax as per the official
+  # Terraform docs: TF_VAR_amap='{ key = "value" }'
+  #
+  # ── Required GitHub Environment secrets (Settings → Environments → production) ──
+  #
+  #   TF_VAR_ibmcloud_api_key               same as IBM_CLOUD_API_KEY
+  #   TF_VAR_session_jwt_secret             HS256 secret shared with the browser bundle
+  #   TF_VAR_anthropic_api_key              Claude API key
+  #   TF_VAR_appid_tenant_id                App ID tenant id
+  #   TF_VAR_appid_client_id                App ID staff client id
+  #   TF_VAR_appid_client_secret            App ID staff client secret
+  #   TF_VAR_appid_management_api_key       App ID management API key
+  #   TF_VAR_internal_api_secret            Service-to-service shared secret
+  #   TF_VAR_mercadopago_access_token_prod  MP production access token
+  #   TF_VAR_mercadopago_access_token_test  MP test access token
+  #   TF_VAR_mercadopago_public_key         MP public key
+  #   TF_VAR_paypal_client_secret           PayPal client secret
+  #   TF_VAR_checkout_idempotency_hmac_keys HCL map: { v1 = "<hex>" }
+  #   TF_VAR_checkout_capability_hmac_keys  HCL map: { v1 = "<hex>" }
+  #   TF_VAR_paypal_client_id               PayPal client id
+  #   TF_VAR_paypal_expected_merchant_id    PayPal merchant id
+  #   TF_VAR_checkout_store_id              Logical store id scoping checkout tokens
+  #   TF_VAR_image_tag                      set automatically from the git tag below
+  # ───────────────────────────────────────────────────────────────────────────
+  terraform:
+    name: 🏗️ Terraform apply
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [detect-changes, approve]
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    environment: production
+    defaults:
+      run:
+        working-directory: terraform
+
+    env:
+      # Non-secret Terraform variables — safe to inline
+      TF_VAR_region:                        ${{ secrets.CE_REGION }}
+      TF_VAR_cr_namespace:                  ${{ secrets.CR_NAMESPACE }}
+      TF_VAR_image_tag:                     ${{ needs.detect-changes.outputs.image_tag }}
+      # Sensitive Terraform variables — all from environment secrets
+      TF_VAR_ibmcloud_api_key:              ${{ secrets.IBM_CLOUD_API_KEY }}
+      TF_VAR_session_jwt_secret:            ${{ secrets.TF_VAR_SESSION_JWT_SECRET }}
+      TF_VAR_anthropic_api_key:             ${{ secrets.TF_VAR_ANTHROPIC_API_KEY }}
+      TF_VAR_appid_tenant_id:               ${{ secrets.TF_VAR_APPID_TENANT_ID }}
+      TF_VAR_appid_client_id:               ${{ secrets.TF_VAR_APPID_CLIENT_ID }}
+      TF_VAR_appid_client_secret:           ${{ secrets.TF_VAR_APPID_CLIENT_SECRET }}
+      TF_VAR_appid_management_api_key:      ${{ secrets.TF_VAR_APPID_MANAGEMENT_API_KEY }}
+      TF_VAR_internal_api_secret:           ${{ secrets.TF_VAR_INTERNAL_API_SECRET }}
+      TF_VAR_mercadopago_access_token_prod: ${{ secrets.TF_VAR_MERCADOPAGO_ACCESS_TOKEN_PROD }}
+      TF_VAR_mercadopago_access_token_test: ${{ secrets.TF_VAR_MERCADOPAGO_ACCESS_TOKEN_TEST }}
+      TF_VAR_mercadopago_public_key:        ${{ secrets.MERCADOPAGO_PUBLIC_KEY }}
+      TF_VAR_paypal_client_id:              ${{ secrets.TF_VAR_PAYPAL_CLIENT_ID }}
+      TF_VAR_paypal_client_secret:          ${{ secrets.TF_VAR_PAYPAL_CLIENT_SECRET }}
+      TF_VAR_paypal_expected_merchant_id:   ${{ secrets.TF_VAR_PAYPAL_EXPECTED_MERCHANT_ID }}
+      TF_VAR_checkout_store_id:             ${{ secrets.TF_VAR_CHECKOUT_STORE_ID }}
+      # Map type — HCL syntax: { v1 = "<hex>" }  (per Terraform docs on TF_VAR_amap)
+      TF_VAR_checkout_idempotency_hmac_keys: ${{ secrets.TF_VAR_CHECKOUT_IDEMPOTENCY_HMAC_KEYS }}
+      TF_VAR_checkout_capability_hmac_keys:  ${{ secrets.TF_VAR_CHECKOUT_CAPABILITY_HMAC_KEYS }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
+            -backend-config="endpoint=${{ secrets.TF_BACKEND_ENDPOINT }}" \
+            -backend-config="access_key=${{ secrets.TF_BACKEND_ACCESS_KEY }}" \
+            -backend-config="secret_key=${{ secrets.TF_BACKEND_SECRET_KEY }}"
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve -input=false
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 5 — update Code Engine apps with the new images
+  # Runs only after terraform (needs: terraform). The matrix deploys all
+  # changed services in parallel once infrastructure is up to date.
   # ───────────────────────────────────────────────────────────────────────────
   deploy:
     name: 🚀 Deploy ${{ matrix.app }} to Code Engine
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [detect-changes, approve]
+    needs: [detect-changes, terraform]
     if: needs.detect-changes.outputs.any_changed == 'true'
     environment:
       name: production
@@ -295,19 +380,20 @@ jobs:
           echo "✅ ${{ matrix.app }} → ${IMAGE_TAG}"
 
   # ───────────────────────────────────────────────────────────────────────────
-  # Job 4 — write a deployment summary visible on the workflow run page
+  # Job 6 — write a deployment summary visible on the workflow run page
   # ───────────────────────────────────────────────────────────────────────────
   summary:
     name: 📋 Deployment summary
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
-    needs: [detect-changes, build, approve, deploy]
+    needs: [detect-changes, build, approve, terraform, deploy]
     steps:
       - name: Write summary
         run: |
           TAG="${{ needs.detect-changes.outputs.image_tag }}"
           BUILD="${{ needs.build.result }}"
+          TF="${{ needs.terraform.result }}"
           DEPLOY="${{ needs.deploy.result }}"
 
           echo "## 🚀 IBM Cloud Deployment" >> "$GITHUB_STEP_SUMMARY"
@@ -319,4 +405,5 @@ jobs:
           echo "| **Commit** | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Triggered by** | @${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Build** | ${BUILD} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Terraform** | ${TF} |" >> "$GITHUB_STEP_SUMMARY"
           echo "| **Deploy** | ${DEPLOY} |" >> "$GITHUB_STEP_SUMMARY"
