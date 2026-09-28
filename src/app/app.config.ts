@@ -54,7 +54,7 @@ export const appConfig: ApplicationConfig = {
         console.log('Dexie database opened successfully');
 
         await db.initializeWithSeedData();
-        console.log('Database initialized with seed data');
+        console.log('Database initialized');
 
         const stats = await db.getStats();
         console.log('Database statistics:', stats);

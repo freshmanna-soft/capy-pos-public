@@ -11,6 +11,7 @@ import {
   signal,
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import { environment } from '../../../../environments/environment';
 
@@ -89,7 +90,7 @@ const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
             class="flex min-h-[44px] items-center gap-1.5 rounded-lg bg-gray-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-600 active:scale-95 disabled:opacity-50"
             data-testid="btn-upload-file"
             (click)="fileInput.click()"
-            [disabled]="uploading()"
+            [disabled]="uploading() || !canUploadBinary()"
           >
             📁 Upload
           </button>
@@ -106,7 +107,7 @@ const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
               "
               data-testid="btn-capture-camera"
               (click)="captureFromCamera()"
-              [disabled]="uploading()"
+              [disabled]="uploading() || !canUploadBinary()"
             >
               {{ cameraActive() ? '⏹ Stop' : '📷 Camera' }}
             </button>
@@ -133,6 +134,13 @@ const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
         data-testid="file-input"
         (change)="onFileSelected($event)"
       />
+
+      @if (!canUploadBinary()) {
+        <p class="text-xs text-gray-500" data-testid="upload-requires-product">
+          Save the product first to upload a file or camera image. You can still add an image URL
+          now.
+        </p>
+      }
 
       <!-- URL input row -->
       @if (showUrlInput()) {
@@ -193,6 +201,7 @@ const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 export class ImagePickerComponent {
   private readonly camera = inject(CameraService);
   private readonly http = inject(HttpClient);
+  private readonly auth = inject(AUTH_GATEWAY);
 
   // ----- Inputs / Outputs -----
 
@@ -206,6 +215,9 @@ export class ImagePickerComponent {
   readonly uploadError = signal<string | null>(null);
   readonly cameraActive = signal(false);
   readonly showUrlInput = signal(false);
+
+  /** Binary uploads require a persisted product id; the request still verifies the session token. */
+  readonly canUploadBinary = computed(() => this.productId().trim().length > 0);
 
   /**
    * Whether the device can supply a getUserMedia stream at all.
@@ -240,6 +252,11 @@ export class ImagePickerComponent {
    * Validates MIME type and size client-side before POSTing.
    */
   onFileSelected(event: Event): void {
+    if (!this.canUploadBinary()) {
+      this.uploadError.set('Save the product before uploading an image.');
+      return;
+    }
+
     const file = (event.target as HTMLInputElement).files?.[0];
     if (!file) {
       return;
@@ -263,6 +280,11 @@ export class ImagePickerComponent {
    * If the camera is already active this method stops it instead.
    */
   async captureFromCamera(): Promise<void> {
+    if (!this.canUploadBinary()) {
+      this.uploadError.set('Save the product before uploading an image.');
+      return;
+    }
+
     if (this.cameraActive()) {
       this.stopCamera();
       return;
@@ -306,16 +328,27 @@ export class ImagePickerComponent {
 
     const url = `${environment.apiUrl}${environment.imageApiPath}/${this.productId()}/image`;
 
-    this.http.post<{ imageUrl: string }>(url, formData).subscribe({
-      next: (result) => {
-        this.imageUrlChange.emit(result.imageUrl);
-        this.uploading.set(false);
-      },
-      error: () => {
-        this.uploadError.set('Upload failed. Please try again.');
-        this.uploading.set(false);
-      },
-    });
+    const token = this.auth.getAccessToken();
+    if (token === null) {
+      this.uploadError.set('Sign in as an operator before uploading an image.');
+      this.uploading.set(false);
+      return;
+    }
+
+    this.http
+      .post<{ imageUrl: string }>(url, formData, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      .subscribe({
+        next: (result) => {
+          this.imageUrlChange.emit(result.imageUrl);
+          this.uploading.set(false);
+        },
+        error: () => {
+          this.uploadError.set('Upload failed. Please try again.');
+          this.uploading.set(false);
+        },
+      });
   }
 
   private stopCamera(): void {

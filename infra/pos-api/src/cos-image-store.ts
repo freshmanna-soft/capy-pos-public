@@ -24,10 +24,10 @@ export interface CosConfig {
 /**
  * Stores product images in an IBM COS bucket.
  *
- * The object key is `productId` — one image per product, no versioning.  A second
- * upload for the same product silently replaces the previous one, which is the
- * intended behaviour: the operator is updating the image, not appending to a
- * history.
+ * The object key is `products/productId` — one image per product, no versioning.
+ * A second upload for the same product silently replaces the previous one, which
+ * is the intended behaviour: the operator is updating the image, not appending to
+ * a history.
  */
 export class CosImageStore implements ImageStore {
   private token: { value: string; expiresAtMs: number } | null = null;
@@ -51,7 +51,11 @@ export class CosImageStore implements ImageStore {
 
   async upload(productId: string, mimeType: string, data: Uint8Array): Promise<string> {
     const token = await this.bearerToken();
-    const url = `${this.config.endpoint}/${encodeURIComponent(this.config.bucket)}/${encodeURIComponent(productId)}`;
+    const objectKey = `products/${productId}`;
+    const url = `${this.config.endpoint}/${encodeURIComponent(this.config.bucket)}/${objectKey
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/')}`;
     const response = await this.fetchImpl(url, {
       method: 'PUT',
       headers: {
@@ -64,7 +68,7 @@ export class CosImageStore implements ImageStore {
     if (!response.ok) {
       throw new Error(`COS upload failed with ${response.status}.`);
     }
-    return `${this.config.publicUrlBase}/${encodeURIComponent(productId)}`;
+    return `${this.config.publicUrlBase}/products/${encodeURIComponent(productId)}`;
   }
 
   /**

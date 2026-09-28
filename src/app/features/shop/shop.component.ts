@@ -281,7 +281,7 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
               <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                 @for (product of filteredProducts(); track product.id) {
                   <button
-                    class="group flex flex-col items-center gap-2 p-3 rounded-2xl bg-onsen-water
+                    class="group relative flex flex-col items-center gap-2 p-3 rounded-2xl bg-onsen-water
                            border border-onsen-surface/60 active:scale-95 transition-transform
                            focus:outline-none focus-visible:ring-2 focus-visible:ring-yuzu/60
                            disabled:opacity-40 disabled:cursor-not-allowed min-h-[140px]"
@@ -314,7 +314,7 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
                     @if (product.stock === 0) {
                       <span
                         class="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-tsuba text-white text-[10px] font-bold uppercase"
-                        >Out</span
+                        >Out of stock</span
                       >
                     }
                   </button>

@@ -496,7 +496,7 @@ export class PosFacade {
 
   // ─── Database Operations ──────────────────────────────────────────────
 
-  /** Initialize database with seed data if empty */
+  /** Initialize local bootstrap data when enabled */
   async initializeDatabase(): Promise<void> {
     await this.db.initializeWithSeedData();
   }

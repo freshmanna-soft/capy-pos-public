@@ -306,7 +306,7 @@ const POLL_MS = 150;
                   @if (product.stock === 0) {
                     <span
                       class="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-tsuba text-white text-[10px] font-bold uppercase"
-                      >Out</span
+                      >Out of stock</span
                     >
                   }
                   <span
