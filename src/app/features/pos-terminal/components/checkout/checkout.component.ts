@@ -118,7 +118,7 @@ const DECLINED_TEST_CARD = '4000000000000002';
         @if (step() === 'select') {
           <div class="co-body" data-testid="payment-methods">
             <!-- MercadoPago — primary row (when enabled) -->
-            @if (mercadopago.isEnabled()) {
+            @if (mercadopagoAvailable()) {
               <button
                 class="co-method-row co-method-row--mp"
                 (click)="selectAndProceed('mercadopago')"
@@ -164,7 +164,7 @@ const DECLINED_TEST_CARD = '4000000000000002';
             }
 
             <!-- PayPal — primary row (when enabled) -->
-            @if (paypal.isEnabled()) {
+            @if (paypalAvailable()) {
               <button
                 class="co-method-row co-method-row--paypal"
                 (click)="selectAndProceed('paypal')"
@@ -209,10 +209,10 @@ const DECLINED_TEST_CARD = '4000000000000002';
             @if (showCashCard()) {
               <div
                 class="co-staff-divider"
-                [class.has-digital]="mercadopago.isEnabled() || paypal.isEnabled()"
+                [class.has-digital]="mercadopagoAvailable() || paypalAvailable()"
               >
                 <span>{{
-                  mercadopago.isEnabled() || paypal.isEnabled()
+                  mercadopagoAvailable() || paypalAvailable()
                     ? 'Or pay another way'
                     : 'Choose payment method'
                 }}</span>
@@ -230,6 +230,19 @@ const DECLINED_TEST_CARD = '4000000000000002';
                     <path d="M6 12h.01M18 12h.01" stroke-width="2.2" stroke-linecap="round" />
                   </svg>
                   <span>Cash</span>
+                </button>
+                <button
+                  class="co-staff-card"
+                  [class.selected]="selectedMethod() === 'card'"
+                  (click)="selectMethod('card')"
+                  data-testid="method-card"
+                >
+                  <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="2" y="5" width="20" height="14" rx="2" stroke-width="1.8" />
+                    <path d="M2 10h20" stroke-width="1.8" />
+                    <path d="M6 15h4" stroke-width="1.8" stroke-linecap="round" />
+                  </svg>
+                  <span>Card</span>
                 </button>
                 <button
                   class="co-staff-card"
@@ -1210,9 +1223,22 @@ export class CheckoutComponent implements OnDestroy {
    */
   readonly kioskMode = input<boolean>(false);
 
+  /**
+   * Terminal overrides are resolved by KioskSettingsService before the kiosk
+   * shell opens checkout. The payment adapters remain build-time providers, so
+   * the shell passes the resolved availability for kiosk terminals explicitly.
+   */
+  readonly mercadopagoEnabled = input<boolean | undefined>(undefined);
+  readonly paypalEnabled = input<boolean | undefined>(undefined);
+
+  readonly mercadopagoAvailable = computed(
+    () => this.mercadopagoEnabled() ?? this.mercadopago.isEnabled()
+  );
+  readonly paypalAvailable = computed(() => this.paypalEnabled() ?? this.paypal.isEnabled());
+
   // Derived: in kiosk mode with no digital methods available, operator must be shown instead.
   readonly showCashCard = computed(
-    () => !this.kioskMode() || (!this.mercadopago.isEnabled() && !this.paypal.isEnabled())
+    () => !this.kioskMode() || (!this.mercadopagoAvailable() && !this.paypalAvailable())
   );
 
   // Outputs

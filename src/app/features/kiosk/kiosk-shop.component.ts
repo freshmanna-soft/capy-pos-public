@@ -625,6 +625,8 @@ const POLL_MS = 150;
     @if (showCheckout()) {
       <app-checkout
         [kioskMode]="kioskSettings.isKiosk()"
+        [mercadopagoEnabled]="kioskSettings.mercadopagoActive()"
+        [paypalEnabled]="kioskSettings.paypalActive()"
         (paymentComplete)="handlePaymentComplete($event)"
         (checkoutCancelled)="closeCheckout()"
         data-testid="kiosk-checkout"

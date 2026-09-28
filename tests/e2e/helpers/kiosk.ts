@@ -117,8 +117,10 @@ export async function seedKioskDeviceToken(page: Page): Promise<void> {
             terminalId: 'default-org/default-store/default-terminal',
             label: 'E2E terminal',
             mode: 'kiosk',
-            mercadopagoEnabled: null,
-            paypalEnabled: null,
+            // Keep kiosk E2E coverage on the explicit cash-payment path. Null
+            // inherits the dev MercadoPago flag and hides cash/card methods.
+            mercadopagoEnabled: false,
+            paypalEnabled: false,
             fenceEnabled: false,
             fenceLat: null,
             fenceLng: null,
