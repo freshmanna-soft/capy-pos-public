@@ -418,7 +418,7 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
         <!-- Checkout overlay -->
         @if (showCheckout()) {
           <app-checkout
-            [kioskMode]="true"
+            [kioskMode]="false"
             (paymentComplete)="handlePaymentComplete($event)"
             (checkoutCancelled)="closeCheckout()"
             data-testid="shop-checkout"
