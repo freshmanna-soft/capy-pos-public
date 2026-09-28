@@ -22,6 +22,24 @@ export interface CheckoutRuntime {
   readonly rateLimiter: FixedWindowCheckoutRateLimiter;
 }
 
+/**
+ * Returns a disabled stub runtime when CHECKOUT_ENABLED is absent or false.
+ * All routes handled by the stub immediately return 503 so the rest of the
+ * API keeps working — operators can sell via MercadoPago/cash without PayPal
+ * being configured.
+ */
+function buildDisabledCheckoutRuntime(): CheckoutRuntime {
+  const disabled = () => Promise.reject(new Error('Checkout is disabled on this instance.'));
+  return Object.freeze({
+    checkouts: {
+      get: disabled, create: disabled, update: disabled, delete: disabled,
+      list: disabled, findByIdempotencyKey: disabled,
+    } as unknown as CheckoutRepository,
+    rateLimiter: { check: () => ({ allowed: false, retryAfterMs: 0 }) } as unknown as FixedWindowCheckoutRateLimiter,
+    service: { createCheckout: disabled, captureCheckout: disabled, cancelCheckout: disabled, getCheckout: disabled } as unknown as CheckoutService,
+  });
+}
+
 export function buildCheckoutRuntime(input: {
   readonly environment: Readonly<Record<string, string | undefined>>;
   readonly products: DocumentStore<ProductDocument>;
@@ -30,6 +48,14 @@ export function buildCheckoutRuntime(input: {
   readonly nowIso?: () => string;
   readonly newId?: () => string;
 }): CheckoutRuntime {
+  // CHECKOUT_ENABLED must be explicitly set to "true" to activate PayPal
+  // checkout. When absent (the default — Terraform only sets it when
+  // needs_checkout = true) the server starts normally and all checkout
+  // endpoints return 503 rather than crashing at startup.
+  if (input.environment['CHECKOUT_ENABLED'] !== 'true') {
+    return buildDisabledCheckoutRuntime();
+  }
+
   const mode = input.environment['NODE_ENV'] === 'production' ? 'production' : 'development';
   const config = loadCheckoutConfig(input.environment, mode);
   const secrets = loadCheckoutSecrets(input.environment);
