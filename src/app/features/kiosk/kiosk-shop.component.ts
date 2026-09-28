@@ -684,35 +684,11 @@ const POLL_MS = 150;
       <div class="fixed inset-0 z-[1100]" data-testid="kiosk-receipt-wrapper">
         <app-receipt
           [data]="receiptData()!"
+          [closeCountdown]="receiptCountdown()"
           (newTransaction)="handleNewTransaction()"
           (printReceipt)="handlePrintReceipt()"
           data-testid="kiosk-receipt"
         />
-        @if (receiptCountdown() > 0) {
-          <div
-            class="fixed bottom-0 inset-x-0 flex items-center justify-center gap-2 py-3 px-5
-                   bg-black/70 text-white/80 text-sm font-medium z-[1200]"
-            data-testid="kiosk-receipt-countdown"
-          >
-            <button
-              type="button"
-              class="inline-flex items-center gap-2"
-              (click)="handleNewTransaction()"
-              aria-label="Close receipt"
-              data-testid="kiosk-receipt-close"
-            >
-              <span
-                >🕐 Closing in <strong class="text-yuzu">{{ receiptCountdown() }}s</strong></span
-              >
-              <span
-                aria-hidden="true"
-                class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/50 text-2xl font-bold leading-none text-white hover:border-yuzu hover:text-yuzu"
-              >
-                ×
-              </span>
-            </button>
-          </div>
-        }
       </div>
     }
   `,
