@@ -302,7 +302,7 @@ describe('CheckoutComponent', () => {
     it('should display payment method options', () => {
       const el = fixture.nativeElement;
       expect(el.querySelector('[data-testid="method-cash"]')).toBeTruthy();
-      expect(el.querySelector('[data-testid="method-card"]')).toBeFalsy();
+      expect(el.querySelector('[data-testid="method-card"]')).toBeTruthy();
       expect(el.querySelector('[data-testid="method-mobile"]')).toBeTruthy();
     });
 
