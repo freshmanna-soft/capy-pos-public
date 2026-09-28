@@ -50,6 +50,9 @@ locals {
   appid_secret_services    = { for name, service in var.services : name => service if service.needs_appid_secret }
   internal_secret_services = { for name, service in var.services : name => service if service.needs_internal_secret }
   mercadopago_services     = { for name, service in var.services : name => service if service.needs_mercadopago }
+  checkout_services           = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
+  checkout_job_services       = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
+  customer_loyalty_services   = { for name, service in var.services : name => service if try(service.needs_customer_loyalty, false) }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
   # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses. Empty until
@@ -583,10 +586,10 @@ resource "ibm_code_engine_job" "loyalty_migration" {
   lifecycle {
     precondition {
       condition = (
-        length(var.appid_customer_client_id) > 0 &&
-        (!var.customer_loyalty_enabled || var.checkout_v2_writes_enabled)
+        !var.customer_loyalty_enabled ||
+        (length(var.appid_customer_client_id) > 0 && var.checkout_v2_writes_enabled)
       )
-      error_message = "Customer verification needs appid_customer_client_id, and customer_loyalty_enabled requires checkout_v2_writes_enabled."
+      error_message = "customer_loyalty_enabled requires appid_customer_client_id and checkout_v2_writes_enabled=true."
     }
   }
 
