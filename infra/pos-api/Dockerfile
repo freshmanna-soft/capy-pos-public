@@ -64,11 +64,15 @@ ENV NODE_ENV=production
 
 WORKDIR /app
 
-# Production dependencies only. pos-api has none today (Cloudant is called over
-# plain HTTPS, not an SDK) — this still validates the lockfile and stays correct
-# the day a real runtime dependency is added.
-COPY pos-api/package.json pos-api/package-lock.json ./pos-api/
-RUN cd pos-api && npm ci --omit=dev --ignore-scripts && npm cache clean --force
+# Production dependencies — installed at /app so that Node's module resolver
+# finds them when loading files under /app/dist/pos-api/src/*.js.
+# tsc mirrors the source tree so compiled output lands at dist/pos-api/src/
+# (not a flat dist/). Node walks up from the file's directory looking for
+# node_modules; if deps were at /app/pos-api/node_modules the resolver would
+# never find them from /app/dist/pos-api/src. Installing at /app puts
+# node_modules at the common ancestor of dist/, which the resolver reaches.
+COPY pos-api/package.json pos-api/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # The mirrored-tree emit means this is `./dist/pos-api/src/server.js` and
 # `./dist/shared/src/document-store.js` here, not a flat `./dist/server.js`.
