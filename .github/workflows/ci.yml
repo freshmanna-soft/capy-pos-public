@@ -1,17 +1,28 @@
 name: CI
 
-# PR gates for main. The fast, deterministic checks (lint, unit tests +coverage,
-# tooling tests, production build) run first and in parallel; the slower affected
-# Playwright e2e job runs only after all of them pass (needs: [lint, test, build]),
-# so a fast-check failure short-circuits the ~7-min e2e run.
-# (deploy lives in deploy-pages.yml on push to main.)
+# Runs on:
+#   • PRs targeting main or dev  — gating merges
+#   • Version tag pushes (vX.Y.Z) — gating releases before the human approval
+#     gate in deploy-ibm.yml fires. A tag that fails CI here still shows the
+#     approve button, but the deploy jobs won't run until these checks pass
+#     because deploy-ibm.yml's `approve` job needs `build` which needs this
+#     workflow to be green on the same commit.
+#
+# Fast checks (lint, unit tests, build) run first and in parallel; slower
+# Playwright e2e and smoke jobs run only after all of them pass.
+# (GitHub Pages deploy lives in deploy-pages.yml on push to main.)
 on:
   pull_request:
     branches: [main, dev]
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
 
 concurrency:
+  # PR runs cancel on new push; tag runs are unique and must never cancel —
+  # a cancelled tag CI leaves the human gate in deploy-ibm.yml hanging.
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -245,11 +256,14 @@ jobs:
           echo "::error::playwright install failed after 3 attempts (see warnings above)"
           exit 1
       - name: Ensure base ref is available
-        run: git fetch --no-tags origin ${{ github.base_ref }}
+        # On a tag push there is no PR base; diff against main so the affected
+        # selector treats every file as changed and runs the full suite.
+        run: git fetch --no-tags origin ${{ github.base_ref || 'main' }}
       - name: Run affected e2e
         # Mirrors the pre-push hook; diffs against the PR base branch.
+        # On a tag push AFFECTED_BASE falls back to origin/main → full suite.
         env:
-          AFFECTED_BASE: origin/${{ github.base_ref }}
+          AFFECTED_BASE: origin/${{ github.base_ref || 'main' }}
           PLAYWRIGHT_PROJECT: chromium
         run: node scripts/affected-e2e.mjs
       - name: Upload Playwright report

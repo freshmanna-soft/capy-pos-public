@@ -85,7 +85,7 @@ export const environment = {
     region: 'us-south',
     tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
     staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
-    customerClientId: '',
+    customerClientId: '7a2cdfd6-a289-4b86-b415-58b9faf17cb5',
     relayUrl:
       'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/token',
     // Registered on the deployed relay; answers 502 until epic #261 item 25 puts
