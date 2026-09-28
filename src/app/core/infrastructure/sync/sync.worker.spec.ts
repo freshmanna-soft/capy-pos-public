@@ -128,13 +128,40 @@ describe('sync worker request authorization (#206, #224)', () => {
       expect(worker.authFor('/api/products')).toBe(`Bearer ${TOKEN}`);
     });
 
-    it('sends the token on the transactions pull', async () => {
+    it('sends the token on the transactions pull for staff sessions', async () => {
       const worker = await loadWorker();
       worker.send({ type: 'START_SYNC', config: config(TOKEN) });
       await worker.settle();
       worker.send({ type: 'STOP_SYNC' });
 
       expect(worker.authFor('/api/transactions')).toBe(`Bearer ${TOKEN}`);
+    });
+
+    it('skips the transactions pull in kiosk mode', async () => {
+      const worker = await loadWorker();
+      worker.send({ type: 'START_SYNC', config: { ...config(TOKEN), kioskMode: true } });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(worker.calls.some(([url]) => url.includes('/api/products'))).toBe(true);
+      expect(worker.calls.some(([url]) => url.includes('/api/transactions'))).toBe(false);
+    });
+
+    it('skips the transactions pull for a shop-session token even before route state arrives', async () => {
+      const worker = await loadWorker();
+      const payload = btoa(JSON.stringify({ type: 'shop-session' }))
+        .replace(/=/g, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+      worker.send({
+        type: 'START_SYNC',
+        config: { ...config(`header.${payload}.signature`), kioskMode: false },
+      });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(worker.calls.some(([url]) => url.includes('/api/products'))).toBe(true);
+      expect(worker.calls.some(([url]) => url.includes('/api/transactions'))).toBe(false);
     });
 
     it('does NOT send the token on the health probe', async () => {

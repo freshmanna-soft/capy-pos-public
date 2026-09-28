@@ -550,7 +550,21 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
                           rounded-full bg-black/80 text-white/90 text-sm font-semibold z-[1200]
                           shadow-lg border border-white/10"
               >
-                🕐 Closing in <strong class="text-yuzu">{{ receiptCountdown() }}s</strong>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2"
+                  (click)="handleNewTransaction()"
+                  aria-label="Close receipt"
+                  data-testid="shop-receipt-close"
+                >
+                  🕐 Closing in <strong class="text-yuzu">{{ receiptCountdown() }}s</strong>
+                  <span
+                    aria-hidden="true"
+                    class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/40 text-xl font-bold leading-none text-white hover:border-yuzu hover:text-yuzu"
+                  >
+                    ×
+                  </span>
+                </button>
               </div>
             }
           </div>
