@@ -323,7 +323,6 @@ jobs:
         run: |
           terraform init \
             -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
-            -backend-config="endpoint=${{ secrets.TF_BACKEND_ENDPOINT }}" \
             -backend-config="access_key=${{ secrets.TF_BACKEND_ACCESS_KEY }}" \
             -backend-config="secret_key=${{ secrets.TF_BACKEND_SECRET_KEY }}"
 

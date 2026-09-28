@@ -340,6 +340,10 @@ variable "services" {
     # pos-api sets this, since it is the one service that calls MercadoPago's
     # Payments API server-side. The token never enters any client bundle.
     needs_mercadopago = optional(bool, false)
+    # Enables the full checkout stack: PayPal, HMAC keyrings, rate limiter,
+    # Cloudant checkouts DB, and the checkout Code Engine secret. Requires
+    # needs_cloudant and pins_cors_origins (validated below).
+    needs_checkout = optional(bool, false)
     scale_min_instances     = optional(number, 0)
     scale_max_instances     = optional(number, 2)
     scale_initial_instances = optional(number, 1)
@@ -405,19 +409,16 @@ variable "services" {
       image_port                  = 8790
       needs_session_secret        = true
       needs_appid_verification    = true
-      needs_customer_verification = true
-      needs_customer_loyalty      = true
+      # needs_customer_verification and needs_customer_loyalty require
+      # appid_customer_client_id — enable once App ID customer app is set up.
+      needs_customer_verification = false
+      needs_customer_loyalty      = false
       needs_cloudant              = true
-      needs_checkout              = true
+      # needs_checkout requires PayPal credentials — enable once configured.
+      needs_checkout              = false
       pins_cors_origins           = true
-      # Serves GET /internal/roles for the two proxies (Phase 5 RBAC
-      # centralization) — gated by this shared secret, since that route has
-      # no end-user token to check.
-      needs_internal_secret = true
-      # Calls MercadoPago's Payments API server-side; holds the access token
-      # so it never enters any client bundle. Both the GitHub Pages frontend
-      # and the Code Engine frontend call this same backend.
-      needs_mercadopago = true
+      needs_internal_secret       = true
+      needs_mercadopago           = true
     }
     # infra/appid-token-relay — holds the App ID client secret so the browser
     # bundle never has to. Not a "session-guarded" service in the

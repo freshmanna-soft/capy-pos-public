@@ -586,10 +586,10 @@ resource "ibm_code_engine_job" "loyalty_migration" {
   lifecycle {
     precondition {
       condition = (
-        length(var.appid_customer_client_id) > 0 &&
-        (!var.customer_loyalty_enabled || var.checkout_v2_writes_enabled)
+        !var.customer_loyalty_enabled ||
+        (length(var.appid_customer_client_id) > 0 && var.checkout_v2_writes_enabled)
       )
-      error_message = "Customer verification needs appid_customer_client_id, and customer_loyalty_enabled requires checkout_v2_writes_enabled."
+      error_message = "customer_loyalty_enabled requires appid_customer_client_id and checkout_v2_writes_enabled=true."
     }
   }
 
