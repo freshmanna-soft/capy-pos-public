@@ -145,9 +145,12 @@ jobs:
   # ───────────────────────────────────────────────────────────────────────────
   # Job 2 — build & push (matrix, one entry per changed service)
   #
-  # Declares `environment: production` so Environment secrets are available
-  # (IBM_CLOUD_API_KEY for ICR login, MERCADOPAGO_PUBLIC_KEY for the bundle).
-  # This is the same pattern deploy-pages.yml uses for its github-pages env.
+  # Uses repository-level secrets (IBM_CLOUD_API_KEY, CR_NAMESPACE,
+  # MERCADOPAGO_PUBLIC_KEY) so this job does NOT need `environment: production`.
+  # Declaring an environment on a matrix job creates one GitHub Deployment
+  # record per matrix entry — that floods the /deployments page with phantom
+  # build entries. Keep environment declarations only on the deploy job, where
+  # they represent real Code Engine production deployments.
   # ───────────────────────────────────────────────────────────────────────────
   build:
     name: 🏗️ Build & push ${{ matrix.name }}
@@ -155,10 +158,6 @@ jobs:
     timeout-minutes: 20
     needs: detect-changes
     if: needs.detect-changes.outputs.any_changed == 'true'
-    # Scopes secrets to the "production" GitHub Environment.
-    # Create it at: Settings → Environments → New environment → "production"
-    # Then add secrets there instead of at the repository level.
-    environment: production
     strategy:
       # Let each service build independently — a vision-proxy failure should
       # not block the frontend or pos-api deploy.
