@@ -208,11 +208,11 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.CR_REGISTRY }}/${{ env.CR_NAMESPACE }}/${{ matrix.app }}:${{ needs.detect-changes.outputs.image_tag }}
-          # Registry-backed layer cache: the cache image never triggers a
-          # deploy (it carries no valid app tag), and it keeps layer reuse
-          # across workflow runs without consuming the runner's local disk.
-          cache-from: type=registry,ref=${{ env.CR_REGISTRY }}/${{ env.CR_NAMESPACE }}/${{ matrix.app }}:cache
-          cache-to:   type=registry,ref=${{ env.CR_REGISTRY }}/${{ env.CR_NAMESPACE }}/${{ matrix.app }}:cache,mode=max
+          # GitHub Actions cache (type=gha) is free and does not consume any
+          # IBM Container Registry storage quota — avoids the monthly 512 MB
+          # push-quota limit that registry-backed cache (type=registry) hits.
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to:   type=gha,scope=${{ matrix.app }},mode=max
 
       - name: Report pushed digest
         run: echo "✅ ${{ matrix.app }}:${{ needs.detect-changes.outputs.image_tag }} → ${{ steps.push.outputs.digest }}"
