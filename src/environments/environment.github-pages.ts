@@ -53,9 +53,13 @@ export const environment = {
     region: 'us-south',
     tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
     staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
-    customerClientId: '',
+    customerClientId: '', // Set once App ID customer app is provisioned — epic #261 item 25
     relayUrl:
       'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/token',
+    // Route is already registered on the deployed relay; answers 502 until
+    // APPID_CUSTOMER_CLIENT_ID/SECRET are added to the Code Engine secret.
+    customerRelayUrl:
+      'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/customer/token',
   },
 
   stripe: {
