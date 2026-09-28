@@ -32,7 +32,7 @@ export type { ReceiptData } from '@core/application/dtos/receipt.dto';
     <div class="receipt-overlay" data-testid="receipt-overlay">
       <div class="receipt-panel" data-testid="receipt-panel">
         <!-- ── Success header ──────────────────────────────────────────── -->
-        <div class="rc-header" data-testid="payment-success">
+        <div class="rc-header receipt-header" data-testid="payment-success">
           <div class="rc-check">
             <svg width="36" height="36" fill="none" viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="12" fill="#4e8c7a" fill-opacity=".18" />
@@ -46,7 +46,7 @@ export type { ReceiptData } from '@core/application/dtos/receipt.dto';
             </svg>
           </div>
           <div>
-            <h2 class="rc-title">Payment successful</h2>
+            <h2 class="rc-title">Payment Successful!</h2>
             <p class="rc-subtitle">{{ data().storeName }}</p>
           </div>
           <span class="rc-total-badge" data-testid="receipt-total">
@@ -433,9 +433,9 @@ export class ReceiptComponent {
 
   getMethodLabel(method: string): string {
     const labels: Record<string, string> = {
-      cash: 'Cash',
-      card: 'Card',
-      mobile: 'Mobile',
+      cash: '💵 Cash',
+      card: '💳 Card',
+      mobile: '📱 Mobile',
       paypal: 'PayPal',
       mercadopago: 'MercadoPago',
     };

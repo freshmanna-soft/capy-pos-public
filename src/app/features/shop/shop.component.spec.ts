@@ -467,6 +467,7 @@ describe('ShopComponent — cart and category actions', () => {
   it('openCheckout opens checkout when cart has items', () => {
     const { component, cart } = setup();
     cart.isEmpty.set(false);
+    cart.total.set(10);
 
     // kioskCustomer.customer() is null, so attachCustomerDirectly should NOT be called
     component.openCheckout();
@@ -727,6 +728,7 @@ describe('ShopComponent — openCheckout and closeCheckout', () => {
     const facade = fixture.debugElement.injector.get(PosFacade);
 
     cart.isEmpty.set(false);
+    cart.total.set(10);
     component.openCheckout();
 
     expect(facade.attachCustomerDirectly).toHaveBeenCalledWith(fakeCustomer);
