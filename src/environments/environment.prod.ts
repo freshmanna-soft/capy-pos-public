@@ -102,11 +102,13 @@ export const environment = {
 
   // MercadoPago — enabled for production. Public key is not a secret; the
   // access token lives in the pos-api backend only.
+  // `currency` must match MP_CURRENCY_ID set on the pos-api Code Engine app.
   mercadopago: {
     enabled: true,
     publicKey: '', // Set via environment variable: MERCADOPAGO_PUBLIC_KEY
     preferenceApiUrl:
       'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api/mercadopago/preference',
+    currency: 'MXN', // ISO 4217 — must match MP_CURRENCY_ID on the backend
   },
 
   // PayPal — disabled until keys are provisioned. clientId is not a secret.

@@ -143,6 +143,7 @@ export const environment = {
     enabled: true,
     publicKey: 'APP_USR-6304b4d3-513f-47eb-99bb-91a86ad5ddb4', // replace with real TEST key
     preferenceApiUrl: 'http://localhost:8790/api/mercadopago/preference',
+    currency: 'MXN', // ISO 4217 — must match MP_CURRENCY_ID on the backend
   },
 
   // PayPal — disabled in dev; the adapter is opt-in per build target.

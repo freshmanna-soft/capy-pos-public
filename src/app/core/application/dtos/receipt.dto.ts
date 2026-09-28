@@ -13,7 +13,8 @@ export interface ReceiptLine {
 export interface ReceiptData {
   readonly payment: PaymentResult;
   readonly items: readonly ReceiptLine[];
-  readonly currency: 'USD';
+  /** ISO 4217 currency code for the transaction (e.g. 'MXN', 'USD'). */
+  readonly currency: string;
   readonly subtotal: number;
   readonly tax: number;
   readonly taxRate: number;
