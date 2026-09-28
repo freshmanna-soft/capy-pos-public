@@ -160,6 +160,30 @@ describe('ImagePickerComponent', () => {
     expect(picker.canUploadBinary()).toBe(false);
   });
 
+  it('does not upload when the operator session token is unavailable', () => {
+    authGateway.getAccessToken.mockReturnValue(null);
+    const file = makeFile('photo.jpg', 'image/jpeg', 512 * 1024);
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+
+    picker.onFileSelected(makeChangeEvent(file));
+
+    httpMock.expectNone((r) => r.url.includes('/image'));
+    expect(picker.uploadError()).toContain('Sign in as an operator');
+    expect(picker.uploading()).toBe(false);
+  });
+
+  it('does not start the camera while the product id is empty', async () => {
+    host.productId.set('');
+    fixture.detectChanges();
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+
+    await picker.captureFromCamera();
+
+    expect(cameraStart).not.toHaveBeenCalled();
+    expect(picker.uploadError()).toContain('Save the product');
+    httpMock.expectNone((r) => r.url.includes('/image'));
+  });
+
   it('rejects a file larger than 2 MB and sets uploadError without making an HTTP call', () => {
     const tooBig = makeFile('huge.jpg', 'image/jpeg', 3 * 1024 * 1024); // 3 MB
     const pickerInst = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
