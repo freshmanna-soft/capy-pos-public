@@ -272,9 +272,8 @@ resource "ibm_code_engine_secret" "internal_secret" {
 }
 
 # MercadoPago tokens — both test and prod in one secret on capy-pos-api.
-# pos-api's /preference route reads MERCADOPAGO_ACCESS_TOKEN_PROD (real kiosk);
-# /preference/test reads MERCADOPAGO_ACCESS_TOKEN_TEST (GitHub Pages, sandboxes).
-# Keeping them together means one secret rotation, not two separate ones.
+# server.ts reads MP_ACCESS_TOKEN (the production token) for /preference.
+# MERCADOPAGO_ACCESS_TOKEN_PROD/_TEST kept for the Angular build step.
 resource "ibm_code_engine_secret" "mercadopago_secret" {
   for_each = local.mercadopago_services
 
@@ -283,6 +282,7 @@ resource "ibm_code_engine_secret" "mercadopago_secret" {
   format     = "generic"
 
   data = {
+    MP_ACCESS_TOKEN               = var.mercadopago_access_token_prod
     MERCADOPAGO_ACCESS_TOKEN_TEST = var.mercadopago_access_token_test
     MERCADOPAGO_ACCESS_TOKEN_PROD = var.mercadopago_access_token_prod
   }
@@ -941,6 +941,17 @@ resource "ibm_code_engine_app" "apps" {
       name      = "INTERNAL_API_SECRET"
       key       = "INTERNAL_API_SECRET"
       reference = ibm_code_engine_secret.internal_secret[0].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_mercadopago ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "MP_ACCESS_TOKEN"
+      key       = "MP_ACCESS_TOKEN"
+      reference = ibm_code_engine_secret.mercadopago_secret[each.key].name
     }
   }
 
