@@ -233,19 +233,6 @@ const DECLINED_TEST_CARD = '4000000000000002';
                 </button>
                 <button
                   class="co-staff-card"
-                  [class.selected]="selectedMethod() === 'card'"
-                  (click)="selectMethod('card')"
-                  data-testid="method-card"
-                >
-                  <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <rect x="2" y="5" width="20" height="14" rx="2" stroke-width="1.8" />
-                    <path d="M2 10h20" stroke-width="1.8" />
-                    <path d="M6 15h4" stroke-width="1.8" stroke-linecap="round" />
-                  </svg>
-                  <span>Card</span>
-                </button>
-                <button
-                  class="co-staff-card"
                   [class.selected]="selectedMethod() === 'mobile'"
                   (click)="selectMethod('mobile')"
                   data-testid="method-mobile"

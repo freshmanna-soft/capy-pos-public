@@ -21,6 +21,7 @@ import { ProductService } from '@core/application/services/product.service';
 import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
 import { GeofencingService } from '@core/application/services/geofencing.service';
 import { KioskCustomerService } from '@features/kiosk/kiosk-customer.service';
+import { SyncService } from '@core/infrastructure/sync/sync.service';
 import { PosFacade } from '@core/application/facades';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
@@ -545,8 +546,9 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
             />
             @if (receiptCountdown() > 0) {
               <div
-                class="fixed bottom-0 inset-x-0 flex items-center justify-center gap-2 py-3 px-5
-                          bg-black/70 text-white/80 text-sm font-medium z-[1200]"
+                class="fixed top-4 right-4 flex items-center justify-center gap-2 py-2.5 px-4
+                          rounded-full bg-black/80 text-white/90 text-sm font-semibold z-[1200]
+                          shadow-lg border border-white/10"
               >
                 🕐 Closing in <strong class="text-yuzu">{{ receiptCountdown() }}s</strong>
               </div>
@@ -652,6 +654,7 @@ export class ShopComponent implements OnInit, OnDestroy {
   private readonly injector = inject(Injector);
   private readonly customerRepo = inject(CUSTOMER_REPOSITORY);
   private readonly authGateway = inject(AUTH_GATEWAY);
+  private readonly syncService = inject(SyncService);
 
   // ── View state ───────────────────────────────────────────────────────────────
   readonly view = signal<ShopView>('resolving');
@@ -893,6 +896,7 @@ export class ShopComponent implements OnInit, OnDestroy {
     // Reuse an existing valid session token from sessionStorage
     const existing = sessionStorage.getItem(SESSION_TOKEN_KEY);
     if (existing) {
+      this.syncService.updateConfig({ sessionToken: existing });
       this.startShopping();
       return;
     }
@@ -909,6 +913,7 @@ export class ShopComponent implements OnInit, OnDestroy {
       }
       const data = (await response.json()) as { token: string; expiresAt: string };
       sessionStorage.setItem(SESSION_TOKEN_KEY, data.token);
+      this.syncService.updateConfig({ sessionToken: data.token });
       this.startShopping();
     } catch (err) {
       this.sessionError.set(

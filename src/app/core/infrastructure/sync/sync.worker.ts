@@ -413,15 +413,8 @@ async function performSync(): Promise<void> {
     return;
   }
 
-  // No session, no pull (#224). The worker starts at app boot, before anyone has
-  // signed in, and every products/transactions route on `pos-api` answers 401
-  // without a token. Attempting it anyway would spend three retries per tick and
-  // trip the circuit breaker, so the first sync *after* sign-in would wait out an
-  // open circuit. Skipping is a deferral: `UPDATE_CONFIG` lands the token and the
-  // next tick — or the `FORCE_SYNC` that follows it — syncs normally. Health is
-  // probed separately and stays unauthenticated, so connectivity is still reported.
   if (sessionToken() === null) {
-    console.log('[Worker:Sync] No operator session — deferring sync until sign-in.');
+    console.log('[Worker:Sync] No operator or device session — deferring sync.');
     return;
   }
 
