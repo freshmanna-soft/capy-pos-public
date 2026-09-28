@@ -126,3 +126,4 @@ secret.auto.tfvars
 # repo nothing here reads. Keep them in the deck tool / shared drive instead.
 *.pptx
 *.key
+terraform/backend.hcl
