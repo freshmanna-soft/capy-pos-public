@@ -111,15 +111,19 @@ function readAppIdConfig():
  */
 function readRolesSourceConfig(): RolesSourceConfig | undefined {
   const url = process.env['POS_API_INTERNAL_ROLES_URL'] ?? '';
-  const secret = process.env['INTERNAL_API_SECRET'] ?? '';
 
-  if (url.length === 0 && secret.length === 0) {
+  // INTERNAL_API_SECRET is a general-purpose shared secret also used for
+  // other service-to-service auth. Its presence alone does not mean the
+  // roles-URL feature is half-configured — only the URL controls that.
+  if (url.length === 0) {
     return undefined;
   }
-  if (url.length === 0 || secret.length === 0) {
+
+  const secret = process.env['INTERNAL_API_SECRET'] ?? '';
+  if (secret.length === 0) {
     console.error(
-      '[clerk-agent] POS_API_INTERNAL_ROLES_URL and INTERNAL_API_SECRET must be set together, or ' +
-        'not at all. Refusing to start rather than fetch the shared roles document half-configured.'
+      '[clerk-agent] POS_API_INTERNAL_ROLES_URL is set but INTERNAL_API_SECRET is missing. ' +
+        'Refusing to start rather than fetch the shared roles document unauthenticated.'
     );
     process.exit(1);
   }

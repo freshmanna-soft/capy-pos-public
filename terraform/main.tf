@@ -126,6 +126,7 @@ locals {
         POS_API_INTERNAL_ROLES_URL = var.pos_api_internal_url
       } : {},
       service.needs_checkout ? {
+        CHECKOUT_ENABLED                 = "true"
         ALLOWED_ORIGINS                  = local.allowed_origins
         CLOUDANT_CHECKOUTS_DB            = "checkouts"
         CHECKOUT_STORE_ID                = var.checkout_store_id
