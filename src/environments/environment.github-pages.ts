@@ -53,9 +53,13 @@ export const environment = {
     region: 'us-south',
     tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
     staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
-    customerClientId: '',
+    customerClientId: '7a2cdfd6-a289-4b86-b415-58b9faf17cb5', // Set once App ID customer app is provisioned — epic #261 item 25
     relayUrl:
       'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/token',
+    // Route is already registered on the deployed relay; answers 502 until
+    // APPID_CUSTOMER_CLIENT_ID/SECRET are added to the Code Engine secret.
+    customerRelayUrl:
+      'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/customer/token',
   },
 
   stripe: {
@@ -73,6 +77,7 @@ export const environment = {
     publicKey: '', // Set via CI secret: MERCADOPAGO_PUBLIC_KEY_TEST
     preferenceApiUrl:
       'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api/mercadopago/preference/test',
+    currency: 'MXN', // ISO 4217 — must match MP_CURRENCY_ID on the backend
   },
 
   paypal: {

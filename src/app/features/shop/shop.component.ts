@@ -15,11 +15,13 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { CurrencyPipe } from '@angular/common';
 import { CartService, MAX_QTY_PER_PRODUCT } from '@core/application/services/cart.service';
 import { ProductService } from '@core/application/services/product.service';
 import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
 import { GeofencingService } from '@core/application/services/geofencing.service';
 import { KioskCustomerService } from '@features/kiosk/kiosk-customer.service';
+import { SyncService } from '@core/infrastructure/sync/sync.service';
 import { PosFacade } from '@core/application/facades';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
@@ -34,6 +36,8 @@ import { CustomerStatus, CustomerTier } from '@core/domain/entities/customer.ent
 import { CUSTOMER_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import { environment } from '../../../environments/environment';
+
+const STORE_CURRENCY = environment.mercadopago.currency;
 
 const MAX_QTY = MAX_QTY_PER_PRODUCT;
 
@@ -73,7 +77,7 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
 @Component({
   selector: 'app-shop',
   standalone: true,
-  imports: [CheckoutComponent, ReceiptComponent, FormsModule],
+  imports: [CheckoutComponent, ReceiptComponent, FormsModule, CurrencyPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [CameraService],
   template: `
@@ -304,7 +308,9 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
                     <p class="w-full text-steam text-xs font-semibold text-center line-clamp-2">
                       {{ product.name }}
                     </p>
-                    <p class="text-yuzu text-sm font-bold">\${{ product.price.toFixed(2) }}</p>
+                    <p class="text-yuzu text-sm font-bold">
+                      {{ product.price | currency: currency }}
+                    </p>
                     @if (product.stock === 0) {
                       <span
                         class="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-tsuba text-white text-[10px] font-bold uppercase"
@@ -341,7 +347,9 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
                       <p class="text-steam text-sm font-semibold truncate">
                         {{ item.product.name }}
                       </p>
-                      <p class="text-kelp/70 text-xs">\${{ item.product.price.toFixed(2) }} each</p>
+                      <p class="text-kelp/70 text-xs">
+                        {{ item.product.price | currency: currency }} each
+                      </p>
                     </div>
                     <div class="flex items-center gap-1">
                       <button
@@ -362,7 +370,7 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
                       </button>
                     </div>
                     <p class="text-yuzu text-sm font-bold w-14 text-right">
-                      \${{ (item.product.price * item.quantity).toFixed(2) }}
+                      {{ item.product.price * item.quantity | currency: currency }}
                     </p>
                   </div>
                 }
@@ -371,24 +379,24 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
           </div>
           <div class="px-6 py-5 border-t border-onsen-surface/60 flex-shrink-0 flex flex-col gap-3">
             <div class="flex justify-between text-steam/70 text-sm">
-              <span>Subtotal</span><span>\${{ cartService.subtotal().toFixed(2) }}</span>
+              <span>Subtotal</span><span>{{ cartService.subtotal() | currency: currency }}</span>
             </div>
             <div class="flex justify-between text-steam/70 text-sm">
-              <span>Tax</span><span>\${{ cartService.tax().toFixed(2) }}</span>
+              <span>Tax</span><span>{{ cartService.tax() | currency: currency }}</span>
             </div>
             <div class="flex justify-between text-steam font-display text-lg font-bold">
               <span>Total</span
-              ><span data-testid="shop-total">\${{ cartService.total().toFixed(2) }}</span>
+              ><span data-testid="shop-total">{{ cartService.total() | currency: currency }}</span>
             </div>
             <button
               class="w-full min-h-[56px] rounded-2xl bg-yuzu text-onsen-deep font-display font-bold text-lg
                      active:scale-95 transition-transform focus:outline-none focus-visible:ring-4 focus-visible:ring-yuzu/60
                      disabled:opacity-40 disabled:cursor-not-allowed"
-              [disabled]="cartService.isEmpty()"
+              [disabled]="cartService.isEmpty() || cartService.total() <= 0"
               (click)="openCheckout()"
               data-testid="shop-pay-now"
             >
-              🛒 Pay Now · \${{ cartService.total().toFixed(2) }}
+              🛒 Pay Now · {{ cartService.total() | currency: currency }}
             </button>
           </div>
         </aside>
@@ -400,7 +408,10 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
               class="w-full min-h-[60px] rounded-2xl bg-yuzu text-onsen-deep font-display font-bold text-lg shadow-lg shadow-yuzu/30 active:scale-95 transition-transform"
               (click)="openCheckout()"
             >
-              🛒 Pay · \${{ cartService.total().toFixed(2) }} ({{ cartService.totalItems() }} items)
+              🛒 Pay · {{ cartService.total() | currency: currency }} ({{
+                cartService.totalItems()
+              }}
+              items)
             </button>
           </div>
         }
@@ -408,7 +419,7 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
         <!-- Checkout overlay -->
         @if (showCheckout()) {
           <app-checkout
-            [kioskMode]="true"
+            [kioskMode]="false"
             (paymentComplete)="handlePaymentComplete($event)"
             (checkoutCancelled)="closeCheckout()"
             data-testid="shop-checkout"
@@ -535,8 +546,9 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
             />
             @if (receiptCountdown() > 0) {
               <div
-                class="fixed bottom-0 inset-x-0 flex items-center justify-center gap-2 py-3 px-5
-                          bg-black/70 text-white/80 text-sm font-medium z-[1200]"
+                class="fixed top-4 right-4 flex items-center justify-center gap-2 py-2.5 px-4
+                          rounded-full bg-black/80 text-white/90 text-sm font-semibold z-[1200]
+                          shadow-lg border border-white/10"
               >
                 🕐 Closing in <strong class="text-yuzu">{{ receiptCountdown() }}s</strong>
               </div>
@@ -642,6 +654,7 @@ export class ShopComponent implements OnInit, OnDestroy {
   private readonly injector = inject(Injector);
   private readonly customerRepo = inject(CUSTOMER_REPOSITORY);
   private readonly authGateway = inject(AUTH_GATEWAY);
+  private readonly syncService = inject(SyncService);
 
   // ── View state ───────────────────────────────────────────────────────────────
   readonly view = signal<ShopView>('resolving');
@@ -650,6 +663,7 @@ export class ShopComponent implements OnInit, OnDestroy {
 
   // ── Shopping state ───────────────────────────────────────────────────────────
   readonly maxQty = MAX_QTY;
+  readonly currency = STORE_CURRENCY;
   readonly isLoading = signal(false);
   readonly selectedCategory = signal<string | null>(null);
   readonly showCheckout = signal(false);
@@ -691,7 +705,8 @@ export class ShopComponent implements OnInit, OnDestroy {
   private readonly shopIdleTimeoutMs = 120_000;
   private readonly receiptAutoDismissMs = 30_000;
   private shopIdleTimer: ReturnType<typeof setTimeout> | null = null;
-  private shopIdleStarted = false;
+  private shopIdleCountdownStartTimer: ReturnType<typeof setTimeout> | null = null;
+  private shopIdleCountdownTimer: ReturnType<typeof setInterval> | null = null;
   private receiptDismissTimer: ReturnType<typeof setTimeout> | null = null;
   private receiptCountdownTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -881,6 +896,7 @@ export class ShopComponent implements OnInit, OnDestroy {
     // Reuse an existing valid session token from sessionStorage
     const existing = sessionStorage.getItem(SESSION_TOKEN_KEY);
     if (existing) {
+      this.syncService.updateConfig({ sessionToken: existing });
       this.startShopping();
       return;
     }
@@ -897,6 +913,7 @@ export class ShopComponent implements OnInit, OnDestroy {
       }
       const data = (await response.json()) as { token: string; expiresAt: string };
       sessionStorage.setItem(SESSION_TOKEN_KEY, data.token);
+      this.syncService.updateConfig({ sessionToken: data.token });
       this.startShopping();
     } catch (err) {
       this.sessionError.set(
@@ -976,6 +993,7 @@ export class ShopComponent implements OnInit, OnDestroy {
 
   openCheckout(): void {
     if (this.cartService.isEmpty()) return;
+    if (this.cartService.total() <= 0) return;
     const customer = this.kioskCustomer.customer();
     if (customer) {
       this.posFacade.attachCustomerDirectly(customer);
@@ -1112,16 +1130,19 @@ export class ShopComponent implements OnInit, OnDestroy {
 
   private startShopIdleTimer(): void {
     this.clearIdleTimers();
-    this.shopIdleStarted = false;
     const countdownMs = this.shopIdleTimeoutMs - 15_000;
-    setTimeout(() => {
-      if (this.shopIdleStarted) return;
-      this.shopIdleStarted = true;
+    this.shopIdleCountdownStartTimer = setTimeout(() => {
+      this.shopIdleCountdownStartTimer = null;
       let remaining = 15;
       this.idleCountdown.set(remaining);
-      setInterval(() => {
+      this.shopIdleCountdownTimer = setInterval(() => {
         remaining -= 1;
         this.idleCountdown.set(remaining);
+        // The main dismiss timer fires at the same time; stop ticking.
+        if (remaining <= 0 && this.shopIdleCountdownTimer !== null) {
+          clearInterval(this.shopIdleCountdownTimer);
+          this.shopIdleCountdownTimer = null;
+        }
       }, 1_000);
     }, countdownMs);
     this.shopIdleTimer = setTimeout(() => {
@@ -1132,9 +1153,17 @@ export class ShopComponent implements OnInit, OnDestroy {
   }
 
   private clearIdleTimers(): void {
-    if (this.shopIdleTimer) {
+    if (this.shopIdleTimer !== null) {
       clearTimeout(this.shopIdleTimer);
       this.shopIdleTimer = null;
+    }
+    if (this.shopIdleCountdownStartTimer !== null) {
+      clearTimeout(this.shopIdleCountdownStartTimer);
+      this.shopIdleCountdownStartTimer = null;
+    }
+    if (this.shopIdleCountdownTimer !== null) {
+      clearInterval(this.shopIdleCountdownTimer);
+      this.shopIdleCountdownTimer = null;
     }
     this.idleCountdown.set(0);
   }

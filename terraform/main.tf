@@ -125,6 +125,14 @@ locals {
       name != "capy-pos-api" && service.needs_internal_secret && var.pos_api_internal_url != "" ? {
         POS_API_INTERNAL_ROLES_URL = var.pos_api_internal_url
       } : {},
+      service.needs_mercadopago ? {
+        # APP_BASE_URL drives the back_urls in the MercadoPago preference so
+        # auto_return works after payment. Without it the server defaults to
+        # http://localhost:4200 and MP rejects auto_return over plain HTTP.
+        # MP_CURRENCY_ID overrides the token-inferred currency (MXN for Mexico).
+        APP_BASE_URL    = "https://capy-pos-app.${var.ce_subdomain}.${var.ce_region}.codeengine.appdomain.cloud"
+        MP_CURRENCY_ID  = var.mp_currency_id
+      } : {},
       service.needs_checkout ? {
         CHECKOUT_ENABLED                 = "true"
         ALLOWED_ORIGINS                  = local.allowed_origins

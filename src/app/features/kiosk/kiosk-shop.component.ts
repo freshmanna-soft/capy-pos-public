@@ -404,7 +404,9 @@ const POLL_MS = 150;
                    shadow-lg shadow-yuzu/30 active:scale-95 transition-transform
                    focus:outline-none focus-visible:ring-4 focus-visible:ring-yuzu/60
                    disabled:opacity-40 disabled:cursor-not-allowed mt-2"
-            [disabled]="cartService.isEmpty() || fenceCheckingAtCheckout()"
+            [disabled]="
+              cartService.isEmpty() || cartService.total() <= 0 || fenceCheckingAtCheckout()
+            "
             (click)="openCheckout()"
             aria-label="Proceed to payment"
             data-testid="kiosk-pay-now"
@@ -518,7 +520,7 @@ const POLL_MS = 150;
                        shadow-lg shadow-yuzu/40 active:scale-95 transition-transform
                        focus:outline-none focus-visible:ring-4 focus-visible:ring-yuzu/60 mt-1
                        disabled:opacity-40 disabled:cursor-not-allowed"
-                [disabled]="fenceCheckingAtCheckout()"
+                [disabled]="cartService.total() <= 0 || fenceCheckingAtCheckout()"
                 (click)="mobileCartOpen.set(false); openCheckout()"
                 data-testid="kiosk-pay-now-mobile"
               >
@@ -623,6 +625,8 @@ const POLL_MS = 150;
     @if (showCheckout()) {
       <app-checkout
         [kioskMode]="kioskSettings.isKiosk()"
+        [mercadopagoEnabled]="kioskSettings.mercadopagoActive()"
+        [paypalEnabled]="kioskSettings.paypalActive()"
         (paymentComplete)="handlePaymentComplete($event)"
         (checkoutCancelled)="closeCheckout()"
         data-testid="kiosk-checkout"
@@ -1013,6 +1017,7 @@ export class KioskShopComponent implements OnInit, OnDestroy {
    */
   async openCheckout(): Promise<void> {
     if (this.cartService.isEmpty()) return;
+    if (this.cartService.total() <= 0) return;
 
     // Block checkout if no device token has been provisioned for this terminal.
     if (!this.kioskSettings.deviceToken()) {

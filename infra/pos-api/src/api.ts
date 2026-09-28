@@ -715,7 +715,13 @@ function createShopSession(request: ApiRequest, deps: ApiDeps): ApiResponse {
 
   const exp = deps.nowSeconds() + 3600; // 1 hour
   const token = signToken(
-    { sub: storeId, type: 'shop-session', tenantId: storeId, exp },
+    {
+      sub: storeId,
+      type: 'shop-session',
+      tenantId: storeId,
+      permissions: [Permission.VIEW_INVENTORY],
+      exp,
+    },
     deps.secret
   );
   return { status: 201, body: { token, expiresAt: new Date(exp * 1000).toISOString() } };

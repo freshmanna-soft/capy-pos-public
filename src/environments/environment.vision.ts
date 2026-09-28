@@ -113,6 +113,7 @@ export const environment = {
     enabled: false,
     publicKey: '',
     preferenceApiUrl: 'http://localhost:8790/api/mercadopago/preference',
+    currency: 'MXN',
   },
 
   paypal: {

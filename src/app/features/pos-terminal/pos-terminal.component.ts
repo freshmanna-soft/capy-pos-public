@@ -221,16 +221,19 @@ export class PosTerminalComponent implements OnInit {
    * the sale.
    */
   openCheckout(): void {
-    if (!this.posFacade.isCartEmpty()) {
-      this.showCheckout.set(true);
-      void this.geofencing.checkFence().then((status) => {
-        if (status === 'outside') {
-          this.toast.warning(
-            `You appear to be outside the store fence for "${this.kioskSettings.storeName() || 'this store'}". Checkout may be restricted.`
-          );
-        }
-      });
+    if (this.posFacade.isCartEmpty()) return;
+    if (this.posFacade.total() <= 0) {
+      this.toast.warning('Order total is $0.00 — check product prices before checking out.');
+      return;
     }
+    this.showCheckout.set(true);
+    void this.geofencing.checkFence().then((status) => {
+      if (status === 'outside') {
+        this.toast.warning(
+          `You appear to be outside the store fence for "${this.kioskSettings.storeName() || 'this store'}". Checkout may be restricted.`
+        );
+      }
+    });
   }
 
   /**
