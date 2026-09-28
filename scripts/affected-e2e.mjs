@@ -49,7 +49,9 @@ function resolveDiffBase() {
 
 function changedFiles(baseRef) {
   if (!baseRef) return null; // signal: cannot determine -> caller escalates to full
-  const out = git(['diff', '--name-only', baseRef, 'HEAD']);
+  // Deleted specs no longer exist for Playwright to run. Exclude deleted paths
+  // so removing a redundant suite does not make CI invoke a missing file.
+  const out = git(['diff', '--diff-filter=ACMRTUXB', '--name-only', baseRef, 'HEAD']);
   return out ? out.split('\n').filter(Boolean) : [];
 }
 
@@ -100,15 +102,11 @@ const FEATURE_MAP = [
   { re: /^src\/app\/features\/pos-terminal\//, specs: ['pos-terminal.spec.ts'] },
   {
     re: /^src\/app\/features\/inventory-management\//,
-    specs: [
-      'inventory-management.spec.ts',
-      's4-5-inventory-customer-workflows.spec.ts',
-      'low-stock-alerts.spec.ts',
-    ],
+    specs: ['inventory-management.spec.ts', 'low-stock-alerts.spec.ts'],
   },
   {
     re: /^src\/app\/features\/customers\//,
-    specs: ['customer-management.spec.ts', 's4-5-inventory-customer-workflows.spec.ts'],
+    specs: ['customer-management.spec.ts'],
   },
   {
     re: /^src\/app\/features\/dashboard\//,
@@ -117,7 +115,7 @@ const FEATURE_MAP = [
   { re: /^src\/app\/features\/settings\//, specs: ['low-stock-alerts.spec.ts'] },
   {
     re: /^src\/app\/features\/login\//,
-    specs: ['app.spec.ts', 'persona-workflows.spec.ts'],
+    specs: ['persona-workflows.spec.ts'],
   },
   { re: /^src\/app\/features\/reports\//, specs: [] }, // covered by the floor
   // The clerk and the camera plumbing under it are one feature in two places, and
@@ -129,13 +127,14 @@ const FEATURE_MAP = [
     re: /^src\/app\/agents\//,
     specs: ['agent-integration.spec.ts', 'pos-terminal.spec.ts'],
   },
-  // Kiosk and shop flows — self-checkout on physical terminal and customer phone.
-  { re: /^src\/app\/features\/kiosk\//, specs: ['kiosk.spec.ts', 'shop.spec.ts'] },
-  { re: /^src\/app\/features\/shop\//, specs: ['shop.spec.ts'] },
+  // Kiosk flow — physical terminal and anonymous checkout on the shared shop component.
+  // The former standalone shop suite duplicated the first three kiosk scenarios.
+  { re: /^src\/app\/features\/kiosk\//, specs: ['kiosk.spec.ts'] },
+  { re: /^src\/app\/features\/shop\//, specs: ['kiosk.spec.ts'] },
   // Sync worker kiosk-mode flag — changes here affect the kiosk console-log tests.
   {
     re: /^src\/app\/core\/infrastructure\/sync\/sync-kiosk-mode\.service\.ts$/,
-    specs: ['kiosk.spec.ts', 'shop.spec.ts'],
+    specs: ['kiosk.spec.ts'],
   },
 ];
 

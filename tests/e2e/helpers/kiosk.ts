@@ -200,27 +200,6 @@ export async function stubTransactionEndpoint(page: Page): Promise<void> {
 }
 
 /**
- * stubShopSessionEndpoint
- *
- * Intercepts POST /api/shop/session and replies 201 with a dummy token.
- * Used in shop.spec.ts where the /shop route requests a session on load.
- */
-export async function stubShopSessionEndpoint(page: Page): Promise<void> {
-  await page.route(
-    (url) => url.pathname.endsWith('/api/shop/session'),
-    (route) =>
-      route.fulfill({
-        status: 201,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          token: 'e2e-shop-session-token',
-          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-        }),
-      }),
-  );
-}
-
-/**
  * KioskPage
  *
  * Page Object Model for the kiosk shop flow. Encapsulates selectors and
