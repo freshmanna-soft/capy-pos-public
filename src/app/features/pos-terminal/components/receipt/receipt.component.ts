@@ -149,7 +149,11 @@ export type { ReceiptData } from '@core/application/dtos/receipt.dto';
             (click)="newTransaction.emit()"
             data-testid="btn-new-transaction"
           >
-            New transaction
+            <span aria-hidden="true" class="rc-close-icon">×</span>
+            Close
+            @if (closeCountdown() > 0) {
+              <span class="rc-close-countdown">({{ closeCountdown() }}s)</span>
+            }
           </button>
         </div>
       </div>
@@ -401,6 +405,10 @@ export type { ReceiptData } from '@core/application/dtos/receipt.dto';
       }
 
       .rc-btn-primary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
         flex: 2;
         padding: 0.875rem;
         border-radius: 12px;
@@ -413,6 +421,18 @@ export type { ReceiptData } from '@core/application/dtos/receipt.dto';
         transition: all 0.15s;
         letter-spacing: -0.01em;
       }
+      .rc-close-icon {
+        font-size: 1.35rem;
+        line-height: 1;
+        font-weight: 400;
+      }
+
+      .rc-close-countdown {
+        font-size: 0.8rem;
+        font-weight: 600;
+        opacity: 0.8;
+      }
+
       .rc-btn-primary:hover {
         background: #f5c24a;
         transform: translateY(-1px);
@@ -427,6 +447,7 @@ export type { ReceiptData } from '@core/application/dtos/receipt.dto';
 })
 export class ReceiptComponent {
   readonly data = input.required<ReceiptData>();
+  readonly closeCountdown = input(0);
 
   readonly printReceipt = output<void>();
   readonly newTransaction = output<void>();

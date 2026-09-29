@@ -616,16 +616,25 @@ async function resolveAppIdScopes(
  * Sign a minimal HS256 JWT.
  *
  * Only the fields the kiosk/shop token contract needs are accepted: `sub`,
- * `type`, `tenantId`, and `exp`. Everything else is left out on purpose —
- * keeping the payload small and explicit prevents accidental leakage of
- * internal claims into externally-visible tokens.
+ * `type`, `tenantId`, `permissions`, and `exp`. `permissions` is optional for
+ * kiosk-device tokens, which only authenticate checkout writes; shop-session
+ * tokens include `inventory:view` so the anonymous catalogue can be read.
+ * Everything else is left out on purpose — keeping the payload small and
+ * explicit prevents accidental leakage of internal claims into externally-visible
+ * tokens.
  *
  * Exported so `api.ts` can issue shop-session and kiosk-device tokens
  * with the same key and algorithm that `verifySessionToken` already trusts,
  * without duplicating the base64url machinery.
  */
 export function signToken(
-  payload: { sub: string; type: string; tenantId: string; exp: number },
+  payload: {
+    sub: string;
+    type: string;
+    tenantId: string;
+    permissions?: readonly string[];
+    exp: number;
+  },
   secret: string
 ): string {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))

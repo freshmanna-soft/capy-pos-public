@@ -21,7 +21,7 @@ describe('SyncKioskModeService', () => {
       providers: [
         SyncKioskModeService,
         { provide: SyncService, useValue: { updateConfig } },
-        { provide: Router, useValue: { events: events$.asObservable() } },
+        { provide: Router, useValue: { events: events$.asObservable(), url: '/pos' } },
       ],
     });
 
