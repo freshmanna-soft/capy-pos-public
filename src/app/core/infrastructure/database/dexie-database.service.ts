@@ -37,6 +37,16 @@ export { DEFAULT_ADMIN_PASSWORD_HASH };
  */
 export const DEFAULT_TENANT_ID = 'default-tenant';
 
+/** SKUs belonging to the historical local-only demo catalog. */
+const DEMO_PRODUCT_SKUS = [
+  'BEV-COF-001',
+  'BEV-CAP-001',
+  'FOOD-CRO-001',
+  'BEV-LAT-001',
+  'FOOD-MUF-001',
+  'BEV-SEA-001',
+] as const;
+
 /**
  * Current export envelope schema version. Used to detect and refuse/upgrade
  * mismatched importFromJSON snapshots (R7).
@@ -755,22 +765,35 @@ export class DexieDatabase extends Dexie {
   }
 
   /**
-   * Initialize database with seed data.
+   * Initialize local bootstrap data when enabled.
+   *
+   * Product seeding is explicitly controlled by `seedProducts` or the build
+   * environment. Production builds therefore never create a local catalog.
    *
    * Guard: takes a pre-migration snapshot BEFORE allowing initializeWithSeedData
    * to proceed so the rollback-from-snapshot path (R19) is always available.
    * The snapshot is stored in settings under key '__v4_pre_migration_snapshot'.
    * It is a one-shot guard — once written it is not overwritten.
    */
-  async initializeWithSeedData(): Promise<void> {
+  async initializeWithSeedData(options: { seedProducts?: boolean } = {}): Promise<void> {
     // R19 guard: capture a pre-v4 snapshot the very first time this runs
     // after the v4 migration. By this point the DB is already open at v4,
     // but we record the current state so operators can roll back if needed.
     await this._ensurePreMigrationSnapshot();
 
     const productCount = await this.products.count();
+    const seedProducts = options.seedProducts ?? environment.allowSeededProducts;
 
-    if (productCount === 0) {
+    if (!seedProducts && productCount > 0) {
+      const demoRows = await this.products
+        .filter((product) => (DEMO_PRODUCT_SKUS as readonly string[]).includes(product.sku))
+        .toArray();
+      if (demoRows.length > 0) {
+        await this.products.bulkDelete(demoRows.map((product) => product.id));
+      }
+    }
+
+    if (seedProducts && productCount === 0) {
       // Seed products
       await this.products.bulkAdd([
         {

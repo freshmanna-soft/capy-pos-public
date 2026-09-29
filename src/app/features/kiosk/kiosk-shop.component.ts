@@ -306,7 +306,7 @@ const POLL_MS = 150;
                   @if (product.stock === 0) {
                     <span
                       class="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-tsuba text-white text-[10px] font-bold uppercase"
-                      >Out</span
+                      >Out of stock</span
                     >
                   }
                   <span
@@ -686,21 +686,11 @@ const POLL_MS = 150;
       <div class="fixed inset-0 z-[1100]" data-testid="kiosk-receipt-wrapper">
         <app-receipt
           [data]="receiptData()!"
+          [closeCountdown]="receiptCountdown()"
           (newTransaction)="handleNewTransaction()"
           (printReceipt)="handlePrintReceipt()"
           data-testid="kiosk-receipt"
         />
-        @if (receiptCountdown() > 0) {
-          <div
-            class="fixed bottom-0 inset-x-0 flex items-center justify-center gap-2 py-3 px-5
-                   bg-black/70 text-white/80 text-sm font-medium z-[1200]"
-            data-testid="kiosk-receipt-countdown"
-          >
-            <span
-              >🕐 Closing in <strong class="text-yuzu">{{ receiptCountdown() }}s</strong></span
-            >
-          </div>
-        }
       </div>
     }
   `,

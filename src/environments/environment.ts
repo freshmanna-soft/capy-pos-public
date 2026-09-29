@@ -29,6 +29,10 @@ export const environment = {
   // pilot, and only the real deployed pilot may never gain this account.
   allowSeededAdmin: true,
 
+  // Local-only demo catalog. Real deployments must keep this disabled so the
+  // browser never invents products that do not exist in the backend catalog.
+  allowSeededProducts: true,
+
   // API Configuration
   //
   // The open follow-up #224 left behind: local dev now points at a *locally

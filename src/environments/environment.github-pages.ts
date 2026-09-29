@@ -18,6 +18,8 @@ export const environment = {
   name: 'github-pages',
 
   allowSeededAdmin: false,
+  // GitHub Pages uses the deployed backend catalog, never browser demo data.
+  allowSeededProducts: false,
   geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   apiUrl: 'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api',

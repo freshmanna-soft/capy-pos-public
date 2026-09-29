@@ -12,6 +12,9 @@ export const environment = {
   // flipped, so CI can exercise a logged-in state without this file granting
   // the same thing to the real deployed pilot.
   allowSeededAdmin: false,
+  // Production reads its catalog from the deployed API; never create browser
+  // demo products that can later be submitted as nonexistent product IDs.
+  allowSeededProducts: false,
   geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration
