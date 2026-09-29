@@ -306,7 +306,7 @@ const POLL_MS = 150;
                   @if (product.stock === 0) {
                     <span
                       class="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-tsuba text-white text-[10px] font-bold uppercase"
-                      >Out</span
+                      >Out of stock</span
                     >
                   }
                   <span
@@ -404,7 +404,9 @@ const POLL_MS = 150;
                    shadow-lg shadow-yuzu/30 active:scale-95 transition-transform
                    focus:outline-none focus-visible:ring-4 focus-visible:ring-yuzu/60
                    disabled:opacity-40 disabled:cursor-not-allowed mt-2"
-            [disabled]="cartService.isEmpty() || fenceCheckingAtCheckout()"
+            [disabled]="
+              cartService.isEmpty() || cartService.total() <= 0 || fenceCheckingAtCheckout()
+            "
             (click)="openCheckout()"
             aria-label="Proceed to payment"
             data-testid="kiosk-pay-now"
@@ -518,7 +520,7 @@ const POLL_MS = 150;
                        shadow-lg shadow-yuzu/40 active:scale-95 transition-transform
                        focus:outline-none focus-visible:ring-4 focus-visible:ring-yuzu/60 mt-1
                        disabled:opacity-40 disabled:cursor-not-allowed"
-                [disabled]="fenceCheckingAtCheckout()"
+                [disabled]="cartService.total() <= 0 || fenceCheckingAtCheckout()"
                 (click)="mobileCartOpen.set(false); openCheckout()"
                 data-testid="kiosk-pay-now-mobile"
               >
@@ -623,6 +625,8 @@ const POLL_MS = 150;
     @if (showCheckout()) {
       <app-checkout
         [kioskMode]="kioskSettings.isKiosk()"
+        [mercadopagoEnabled]="kioskSettings.mercadopagoActive()"
+        [paypalEnabled]="kioskSettings.paypalActive()"
         (paymentComplete)="handlePaymentComplete($event)"
         (checkoutCancelled)="closeCheckout()"
         data-testid="kiosk-checkout"
@@ -682,21 +686,11 @@ const POLL_MS = 150;
       <div class="fixed inset-0 z-[1100]" data-testid="kiosk-receipt-wrapper">
         <app-receipt
           [data]="receiptData()!"
+          [closeCountdown]="receiptCountdown()"
           (newTransaction)="handleNewTransaction()"
           (printReceipt)="handlePrintReceipt()"
           data-testid="kiosk-receipt"
         />
-        @if (receiptCountdown() > 0) {
-          <div
-            class="fixed bottom-0 inset-x-0 flex items-center justify-center gap-2 py-3 px-5
-                   bg-black/70 text-white/80 text-sm font-medium z-[1200]"
-            data-testid="kiosk-receipt-countdown"
-          >
-            <span
-              >🕐 Closing in <strong class="text-yuzu">{{ receiptCountdown() }}s</strong></span
-            >
-          </div>
-        }
       </div>
     }
   `,
@@ -1013,6 +1007,7 @@ export class KioskShopComponent implements OnInit, OnDestroy {
    */
   async openCheckout(): Promise<void> {
     if (this.cartService.isEmpty()) return;
+    if (this.cartService.total() <= 0) return;
 
     // Block checkout if no device token has been provisioned for this terminal.
     if (!this.kioskSettings.deviceToken()) {

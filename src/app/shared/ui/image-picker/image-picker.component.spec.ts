@@ -2,6 +2,7 @@ import { TestBed, ComponentFixture } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { Component, signal } from '@angular/core';
 import { ImagePickerComponent } from './image-picker.component';
+import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import { environment } from '../../../../environments/environment';
 
@@ -64,6 +65,9 @@ describe('ImagePickerComponent', () => {
   let cameraStop: ReturnType<typeof vi.fn>;
   let cameraAttach: ReturnType<typeof vi.fn>;
   let captureFrame: ReturnType<typeof vi.fn>;
+  const authGateway = {
+    getAccessToken: vi.fn(() => 'operator-token'),
+  };
 
   beforeEach(() => {
     cameraStart = vi.fn().mockResolvedValue(true);
@@ -76,6 +80,7 @@ describe('ImagePickerComponent', () => {
 
     TestBed.configureTestingModule({
       imports: [HostComponent, HttpClientTestingModule],
+      providers: [{ provide: AUTH_GATEWAY, useValue: authGateway }],
     });
 
     // The component provides its own CameraService instance (providers: [CameraService]).
@@ -108,6 +113,8 @@ describe('ImagePickerComponent', () => {
 
   afterEach(() => {
     httpMock.verify();
+    authGateway.getAccessToken.mockReset();
+    authGateway.getAccessToken.mockReturnValue('operator-token');
     vi.restoreAllMocks();
   });
 
@@ -126,6 +133,7 @@ describe('ImagePickerComponent', () => {
     const req = httpMock.expectOne(expectedUrl);
 
     expect(req.request.method).toBe('POST');
+    expect(req.request.headers.get('Authorization')).toBe('Bearer operator-token');
     expect(req.request.body).toBeInstanceOf(FormData);
 
     const returnedUrl = 'https://cdn.example.com/products/prod-001.jpg';
@@ -138,6 +146,43 @@ describe('ImagePickerComponent', () => {
   // -------------------------------------------------------------------------
   // Test 2 — file > 2 MB → sets uploadError, makes NO HTTP call
   // -------------------------------------------------------------------------
+
+  it('does not upload a file while the product id is empty', () => {
+    host.productId.set('');
+    fixture.detectChanges();
+
+    const file = makeFile('photo.jpg', 'image/jpeg', 512 * 1024);
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+    picker.onFileSelected(makeChangeEvent(file));
+
+    httpMock.expectNone((r) => r.url.includes('/image'));
+    expect(picker.uploadError()).toContain('Save the product');
+    expect(picker.canUploadBinary()).toBe(false);
+  });
+
+  it('does not upload when the operator session token is unavailable', () => {
+    authGateway.getAccessToken.mockReturnValue(null);
+    const file = makeFile('photo.jpg', 'image/jpeg', 512 * 1024);
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+
+    picker.onFileSelected(makeChangeEvent(file));
+
+    httpMock.expectNone((r) => r.url.includes('/image'));
+    expect(picker.uploadError()).toContain('Sign in as an operator');
+    expect(picker.uploading()).toBe(false);
+  });
+
+  it('does not start the camera while the product id is empty', async () => {
+    host.productId.set('');
+    fixture.detectChanges();
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+
+    await picker.captureFromCamera();
+
+    expect(cameraStart).not.toHaveBeenCalled();
+    expect(picker.uploadError()).toContain('Save the product');
+    httpMock.expectNone((r) => r.url.includes('/image'));
+  });
 
   it('rejects a file larger than 2 MB and sets uploadError without making an HTTP call', () => {
     const tooBig = makeFile('huge.jpg', 'image/jpeg', 3 * 1024 * 1024); // 3 MB

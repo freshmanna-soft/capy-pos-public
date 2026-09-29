@@ -264,6 +264,8 @@ jobs:
   #   TF_VAR_appid_client_id                App ID staff client id
   #   TF_VAR_appid_client_secret            App ID staff client secret
   #   TF_VAR_appid_management_api_key       App ID management API key
+  #   TF_VAR_appid_customer_client_id       App ID CUSTOMER app client id (not sensitive — already in environment.*.ts)
+  #   TF_VAR_appid_customer_client_secret   App ID CUSTOMER app client secret (MUST be set together with the id above)
   #   TF_VAR_internal_api_secret            Service-to-service shared secret
   #   TF_VAR_mercadopago_access_token_prod  MP production access token
   #   TF_VAR_mercadopago_access_token_test  MP test access token
@@ -300,6 +302,10 @@ jobs:
       TF_VAR_appid_client_id:               ${{ secrets.TF_VAR_APPID_CLIENT_ID }}
       TF_VAR_appid_client_secret:           ${{ secrets.TF_VAR_APPID_CLIENT_SECRET }}
       TF_VAR_appid_management_api_key:      ${{ secrets.TF_VAR_APPID_MANAGEMENT_API_KEY }}
+      # Customer App ID application — both or neither (Terraform precondition enforces pairing).
+      # Leave unset (empty string) until the customer App ID application is provisioned.
+      TF_VAR_appid_customer_client_id:      ${{ secrets.TF_VAR_APPID_CUSTOMER_CLIENT_ID }}
+      TF_VAR_appid_customer_client_secret:  ${{ secrets.TF_VAR_APPID_CUSTOMER_CLIENT_SECRET }}
       TF_VAR_internal_api_secret:           ${{ secrets.TF_VAR_INTERNAL_API_SECRET }}
       TF_VAR_mercadopago_access_token_prod: ${{ secrets.TF_VAR_MERCADOPAGO_ACCESS_TOKEN_PROD }}
       TF_VAR_mercadopago_access_token_test: ${{ secrets.TF_VAR_MERCADOPAGO_ACCESS_TOKEN_TEST }}

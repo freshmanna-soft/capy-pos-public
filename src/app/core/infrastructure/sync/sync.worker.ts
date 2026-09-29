@@ -261,6 +261,39 @@ function sessionToken(): string | null {
 }
 
 /**
+ * Read the token kind without treating the browser-side decode as authorization.
+ * The API still verifies the signature and permissions; this hint only prevents
+ * staff-only background pulls for capability tokens when route state is catching up.
+ */
+function sessionTokenType(): string | null {
+  const token = sessionToken();
+  if (!token) return null;
+
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
+    const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+    const claims = JSON.parse(new TextDecoder().decode(bytes)) as { type?: unknown };
+    return typeof claims.type === 'string' ? claims.type : null;
+  } catch {
+    // Invalid/opaque tokens are left to the API; this helper must never block a
+    // normal staff session because its token format is not browser-decodable.
+    return null;
+  }
+}
+
+function shouldSkipTransactionPull(): boolean {
+  return (
+    config.kioskMode === true ||
+    sessionTokenType() === 'shop-session' ||
+    sessionTokenType() === 'kiosk-device'
+  );
+}
+
+/**
  * The `Authorization` header every guarded route requires (issues #206, #224), or
  * nothing when nobody is signed in.
  *
@@ -413,15 +446,8 @@ async function performSync(): Promise<void> {
     return;
   }
 
-  // No session, no pull (#224). The worker starts at app boot, before anyone has
-  // signed in, and every products/transactions route on `pos-api` answers 401
-  // without a token. Attempting it anyway would spend three retries per tick and
-  // trip the circuit breaker, so the first sync *after* sign-in would wait out an
-  // open circuit. Skipping is a deferral: `UPDATE_CONFIG` lands the token and the
-  // next tick — or the `FORCE_SYNC` that follows it — syncs normally. Health is
-  // probed separately and stays unauthenticated, so connectivity is still reported.
   if (sessionToken() === null) {
-    console.log('[Worker:Sync] No operator session — deferring sync until sign-in.');
+    console.log('[Worker:Sync] No operator or device session — deferring sync.');
     return;
   }
 
@@ -439,16 +465,22 @@ async function performSync(): Promise<void> {
     // Notify main thread with synced products (main thread writes to Dexie)
     postEvent({ type: 'PRODUCTS_SYNCED', products });
 
-    // Sync transactions
+    // Anonymous shop and kiosk sessions may read products, but they must not read
+    // transaction history. Their capability token intentionally lacks
+    // `sale:view_transactions`, so skip this request instead of turning an expected
+    // 403 into repeated console noise and circuit-breaker failures. Staff sessions
+    // retain the transaction pull.
     let transactionCount = 0;
-    try {
-      transactionCount = await circuitBreaker.execute(() =>
-        retry.execute('sync-transactions', () => syncTransactions())
-      );
-      postEvent({ type: 'TRANSACTIONS_SYNCED', count: transactionCount });
-    } catch (txError) {
-      // Transactions sync failure is non-fatal
-      console.warn('[Worker:Sync] Transaction sync failed:', txError);
+    if (!shouldSkipTransactionPull()) {
+      try {
+        transactionCount = await circuitBreaker.execute(() =>
+          retry.execute('sync-transactions', () => syncTransactions())
+        );
+        postEvent({ type: 'TRANSACTIONS_SYNCED', count: transactionCount });
+      } catch (txError) {
+        // Transactions sync failure is non-fatal
+        console.warn('[Worker:Sync] Transaction sync failed:', txError);
+      }
     }
 
     const duration = Date.now() - startTime;

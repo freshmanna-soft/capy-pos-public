@@ -400,7 +400,7 @@ describe('CheckoutComponent', () => {
 
     it('should display amount due from use case', () => {
       const el = fixture.nativeElement;
-      const amountEl = el.querySelector('.amount-value');
+      const amountEl = el.querySelector('.co-amount-hero-value');
       expect(amountEl.textContent).toContain('108.50');
     });
 
@@ -464,7 +464,7 @@ describe('CheckoutComponent', () => {
     it('should display quick amount buttons from use case', () => {
       fixture.detectChanges();
       const el = fixture.nativeElement;
-      const quickBtns = el.querySelectorAll('.quick-btn');
+      const quickBtns = el.querySelectorAll('.co-quick-btn');
       expect(quickBtns.length).toBe(4);
     });
 
@@ -544,7 +544,7 @@ describe('CheckoutComponent', () => {
 
     it('should display amount to charge from use case', () => {
       const el = fixture.nativeElement;
-      const amountEl = el.querySelector('.amount-value');
+      const amountEl = el.querySelector('.co-amount-hero-value');
       expect(amountEl.textContent).toContain('108.50');
     });
 

@@ -138,12 +138,41 @@ describe('POST /api/shop/session', () => {
     assert.equal(res.status, 400);
   });
 
-  test('token is verifiable and has type=shop-session', async () => {
+  test('token is verifiable and grants inventory viewing', async () => {
     const res = await handle(req({ storeId: 'org/store-1' }), makeDeps());
     const claims = verifySessionToken(res.body.token, SECRET, NOW);
     assert.ok(claims !== null);
     assert.equal(claims.type, 'shop-session');
     assert.equal(claims.operatorId, 'org/store-1');
+    assert.deepEqual(claims.permissions, ['inventory:view']);
+  });
+
+  test('shop-session token can list products', async () => {
+    const deps = makeDeps();
+    await deps.products.create({
+      id: 'p1',
+      name: 'Coffee',
+      price: 2.5,
+      category: 'Drinks',
+      stock: 3,
+      description: 'Fresh coffee',
+      createdAt: new Date(NOW * 1000).toISOString(),
+      updatedAt: new Date(NOW * 1000).toISOString(),
+    });
+    const session = await handle(req({ storeId: 'org/store-1' }), deps);
+    const res = await handle(
+      {
+        method: 'GET',
+        path: '/api/products',
+        authorization: `Bearer ${session.body.token}`,
+        internalSecret: undefined,
+        body: undefined,
+      },
+      deps
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.count, 1);
+    assert.equal(res.body.products[0].id, 'p1');
   });
 });
 

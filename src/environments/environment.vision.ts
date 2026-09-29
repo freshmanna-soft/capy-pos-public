@@ -34,6 +34,7 @@ export const environment = {
 
   // See environment.ts — decoupled from `production` on purpose.
   allowSeededAdmin: true,
+  allowSeededProducts: true,
   geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration
@@ -113,6 +114,7 @@ export const environment = {
     enabled: false,
     publicKey: '',
     preferenceApiUrl: 'http://localhost:8790/api/mercadopago/preference',
+    currency: 'MXN',
   },
 
   paypal: {

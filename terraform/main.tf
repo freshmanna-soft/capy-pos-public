@@ -44,15 +44,16 @@ locals {
   # The apps that hold the model key, the apps that verify a session token, and the
   # apps that talk to Cloudant. Derived once so the secret resources and the env
   # bindings below cannot drift apart from each other.
-  model_key_services       = { for name, service in var.services : name => service if service.needs_model_key }
-  session_guarded_services = { for name, service in var.services : name => service if service.needs_session_secret }
-  cloudant_services        = { for name, service in var.services : name => service if service.needs_cloudant }
-  appid_secret_services    = { for name, service in var.services : name => service if service.needs_appid_secret }
-  internal_secret_services = { for name, service in var.services : name => service if service.needs_internal_secret }
-  mercadopago_services     = { for name, service in var.services : name => service if service.needs_mercadopago }
-  checkout_services           = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
-  checkout_job_services       = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
-  customer_loyalty_services   = { for name, service in var.services : name => service if try(service.needs_customer_loyalty, false) }
+  model_key_services        = { for name, service in var.services : name => service if service.needs_model_key }
+  session_guarded_services  = { for name, service in var.services : name => service if service.needs_session_secret }
+  cloudant_services         = { for name, service in var.services : name => service if service.needs_cloudant }
+  appid_secret_services     = { for name, service in var.services : name => service if service.needs_appid_secret }
+  internal_secret_services  = { for name, service in var.services : name => service if service.needs_internal_secret }
+  mercadopago_services      = { for name, service in var.services : name => service if service.needs_mercadopago }
+  image_store_services      = { for name, service in var.services : name => service if try(service.needs_image_store, false) }
+  checkout_services         = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
+  checkout_job_services     = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
+  customer_loyalty_services = { for name, service in var.services : name => service if try(service.needs_customer_loyalty, false) }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
   # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses. Empty until
@@ -124,6 +125,14 @@ locals {
       # each service's own server.ts).
       name != "capy-pos-api" && service.needs_internal_secret && var.pos_api_internal_url != "" ? {
         POS_API_INTERNAL_ROLES_URL = var.pos_api_internal_url
+      } : {},
+      service.needs_mercadopago ? {
+        # APP_BASE_URL drives the back_urls in the MercadoPago preference so
+        # auto_return works after payment. Without it the server defaults to
+        # http://localhost:4200 and MP rejects auto_return over plain HTTP.
+        # MP_CURRENCY_ID overrides the token-inferred currency (MXN for Mexico).
+        APP_BASE_URL   = "https://capy-pos-app.${var.ce_subdomain}.${var.ce_region}.codeengine.appdomain.cloud"
+        MP_CURRENCY_ID = var.mp_currency_id
       } : {},
       service.needs_checkout ? {
         CHECKOUT_ENABLED                 = "true"
@@ -412,6 +421,30 @@ resource "ibm_code_engine_secret" "cloudant_migration_creds" {
   data = {
     CLOUDANT_URL    = local.cloudant_manager_credentials.url
     CLOUDANT_APIKEY = local.cloudant_manager_credentials.apikey
+  }
+}
+
+resource "ibm_code_engine_secret" "cos_api" {
+  for_each = local.image_store_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-cos"
+  format     = "generic"
+
+  data = {
+    COS_APIKEY = var.cos_api_key
+  }
+
+  lifecycle {
+    precondition {
+      condition = alltrue([
+        length(var.cos_endpoint) > 0,
+        length(var.cos_api_key) > 0,
+        length(var.cos_bucket) > 0,
+        length(var.cos_public_url_base) > 0,
+      ])
+      error_message = "Image storage requires COS_ENDPOINT, COS_API_KEY, COS_BUCKET, and COS_PUBLIC_URL_BASE."
+    }
   }
 }
 
@@ -974,6 +1007,47 @@ resource "ibm_code_engine_app" "apps" {
       name      = "MERCADOPAGO_ACCESS_TOKEN_PROD"
       key       = "MERCADOPAGO_ACCESS_TOKEN_PROD"
       reference = ibm_code_engine_secret.mercadopago_secret[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type  = "literal"
+      name  = "COS_ENDPOINT"
+      value = var.cos_endpoint
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type  = "literal"
+      name  = "COS_BUCKET"
+      value = var.cos_bucket
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type  = "literal"
+      name  = "COS_PUBLIC_URL_BASE"
+      value = var.cos_public_url_base
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "COS_APIKEY"
+      key       = "COS_APIKEY"
+      reference = ibm_code_engine_secret.cos_api[each.key].name
     }
   }
 

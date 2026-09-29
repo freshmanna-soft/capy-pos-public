@@ -12,6 +12,9 @@ export const environment = {
   // flipped, so CI can exercise a logged-in state without this file granting
   // the same thing to the real deployed pilot.
   allowSeededAdmin: false,
+  // Production reads its catalog from the deployed API; never create browser
+  // demo products that can later be submitted as nonexistent product IDs.
+  allowSeededProducts: false,
   geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration
@@ -85,7 +88,7 @@ export const environment = {
     region: 'us-south',
     tenantId: 'ee0c0740-5252-48a4-9b7c-e2b60712256e',
     staffClientId: '6a92b580-1e10-4b09-ba3d-854f9fa774a5',
-    customerClientId: '',
+    customerClientId: '7a2cdfd6-a289-4b86-b415-58b9faf17cb5',
     relayUrl:
       'https://capy-appid-token-relay.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/appid/token',
     // Registered on the deployed relay; answers 502 until epic #261 item 25 puts
@@ -102,11 +105,13 @@ export const environment = {
 
   // MercadoPago — enabled for production. Public key is not a secret; the
   // access token lives in the pos-api backend only.
+  // `currency` must match MP_CURRENCY_ID set on the pos-api Code Engine app.
   mercadopago: {
     enabled: true,
     publicKey: '', // Set via environment variable: MERCADOPAGO_PUBLIC_KEY
     preferenceApiUrl:
       'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api/mercadopago/preference',
+    currency: 'MXN', // ISO 4217 — must match MP_CURRENCY_ID on the backend
   },
 
   // PayPal — disabled until keys are provisioned. clientId is not a secret.

@@ -58,6 +58,11 @@ const DECLINED_TEST_CARD = '4000000000000002';
   imports: [CommonModule, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <!--
+      Fullscreen payment panel — no modal scrim, slides in from the right on
+      desktop, fills screen on mobile. The onsen palette keeps it on-brand.
+      The overlay wrapper still traps keyboard focus (Escape / click-outside).
+    -->
     <div
       class="checkout-overlay"
       data-testid="checkout-overlay"
@@ -74,118 +79,210 @@ const DECLINED_TEST_CARD = '4000000000000002';
         role="document"
         data-testid="checkout-panel"
       >
-        <!-- Header -->
-        <div class="checkout-header">
-          <h2 class="checkout-title">Complete Payment</h2>
-          <button class="close-btn" (click)="cancel()" aria-label="Close checkout">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <!-- ── Header ──────────────────────────────────────────────────── -->
+        <div class="co-header">
+          <button class="co-back-btn" (click)="cancel()" aria-label="Close checkout">
+            <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 stroke-linecap="round"
                 stroke-linejoin="round"
                 stroke-width="2"
-                d="M6 18L18 6M6 6l12 12"
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
               />
             </svg>
           </button>
+          <span class="co-title">Checkout</span>
         </div>
 
-        <!-- Order Summary -->
-        <div class="order-summary">
-          <div class="summary-row">
-            <span>Subtotal</span>
-            <span>{{ cartService.subtotal() | currency }}</span>
+        <!-- ── Order total strip ───────────────────────────────────────── -->
+        <div class="co-total-strip" data-testid="checkout-total-strip">
+          <div class="co-total-row">
+            <span class="co-total-label">Subtotal</span>
+            <span class="co-total-value-sm">{{ cartService.subtotal() | currency }}</span>
           </div>
-          <div class="summary-row">
-            <span>Tax ({{ (cartService.taxRate() * 100).toFixed(1) }}%)</span>
-            <span>{{ cartService.tax() | currency }}</span>
-          </div>
-          <div class="summary-row total">
-            <span>Total</span>
-            <span data-testid="checkout-total">{{ cartService.total() | currency }}</span>
-          </div>
-        </div>
-
-        <!-- Step 1: Payment Method Selection -->
-        @if (step() === 'select') {
-          <div class="payment-methods" data-testid="payment-methods">
-            <h3 class="section-title">Select Payment Method</h3>
-            <div class="method-grid">
-              <button
-                class="method-card"
-                [class.selected]="selectedMethod() === 'cash'"
-                (click)="selectMethod('cash')"
-                data-testid="method-cash"
-              >
-                <span class="method-icon">💵</span>
-                <span class="method-label">Cash</span>
-              </button>
-              <button
-                class="method-card"
-                [class.selected]="selectedMethod() === 'card'"
-                (click)="selectMethod('card')"
-                data-testid="method-card"
-              >
-                <span class="method-icon">💳</span>
-                <span class="method-label">Card</span>
-              </button>
-              <button
-                class="method-card"
-                [class.selected]="selectedMethod() === 'mobile'"
-                (click)="selectMethod('mobile')"
-                data-testid="method-mobile"
-              >
-                <span class="method-icon">📱</span>
-                <span class="method-label">Mobile</span>
-              </button>
-              @if (mercadopago.isEnabled()) {
-                <!-- Clicking MP launches the Wallet Brick directly — no extra Continue step. -->
-                <button
-                  class="method-card method-card--mp"
-                  (click)="selectAndProceed('mercadopago')"
-                  data-testid="method-mercadopago"
-                >
-                  <span class="method-icon">🔵</span>
-                  <span class="method-label">MercadoPago</span>
-                </button>
-              }
-              @if (paypal.isEnabled()) {
-                <!-- Same direct-launch for PayPal. -->
-                <button
-                  class="method-card method-card--paypal"
-                  (click)="selectAndProceed('paypal')"
-                  data-testid="method-paypal"
-                >
-                  <span class="method-icon">🅿️</span>
-                  <span class="method-label">PayPal</span>
-                </button>
-              }
-            </div>
-            <button
-              class="btn-proceed"
-              [disabled]="!selectedMethod()"
-              (click)="proceedToDetails()"
-              data-testid="btn-proceed"
+          <div class="co-total-row">
+            <span class="co-total-label"
+              >Tax ({{ (cartService.taxRate() * 100).toFixed(1) }}%)</span
             >
-              Continue
-            </button>
+            <span class="co-total-value-sm">{{ cartService.tax() | currency }}</span>
+          </div>
+          <div class="co-total-row co-total-row--grand">
+            <span class="co-grand-label">Total</span>
+            <span class="co-grand-value" data-testid="checkout-total">{{
+              cartService.total() | currency
+            }}</span>
+          </div>
+        </div>
+
+        <!-- ── Step 1 — method selection ─────────────────────────────── -->
+        @if (step() === 'select') {
+          <div class="co-body" data-testid="payment-methods">
+            <!-- MercadoPago — primary row (when enabled) -->
+            @if (mercadopagoAvailable()) {
+              <button
+                class="co-method-row co-method-row--mp"
+                (click)="selectAndProceed('mercadopago')"
+                data-testid="method-mercadopago"
+              >
+                <span class="co-method-logo">
+                  <svg width="28" height="28" viewBox="0 0 48 48" fill="none">
+                    <circle cx="24" cy="24" r="24" fill="#009EE3" />
+                    <path
+                      d="M10 24c0-7.732 6.268-14 14-14s14 6.268 14 14-6.268 14-14 14S10 31.732 10 24z"
+                      fill="#fff"
+                      fill-opacity=".18"
+                    />
+                    <path
+                      d="M18.5 27.5l3.5-7 3.5 5 2.5-3.5 2.5 5.5"
+                      stroke="#fff"
+                      stroke-width="2.2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </span>
+                <span class="co-method-info">
+                  <span class="co-method-name">MercadoPago</span>
+                  <span class="co-method-hint">Pay with your MP account or QR</span>
+                </span>
+                <svg
+                  class="co-chevron"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            }
+
+            <!-- PayPal — primary row (when enabled) -->
+            @if (paypalAvailable()) {
+              <button
+                class="co-method-row co-method-row--paypal"
+                (click)="selectAndProceed('paypal')"
+                data-testid="method-paypal"
+              >
+                <span class="co-method-logo">
+                  <svg width="28" height="28" viewBox="0 0 48 48" fill="none">
+                    <rect width="48" height="48" rx="24" fill="#003087" />
+                    <path
+                      d="M19 30h-3l3-14h5.5c2.5 0 4.5 1 4 3.5-.5 2.5-2.5 3.5-5 3.5H21l-2 7z"
+                      fill="#009cde"
+                    />
+                    <path
+                      d="M23 30h-3l2-9h5c2 0 3.5.8 3 3-.5 2.2-2 3-4 3h-1.5L23 30z"
+                      fill="#fff"
+                    />
+                  </svg>
+                </span>
+                <span class="co-method-info">
+                  <span class="co-method-name">PayPal</span>
+                  <span class="co-method-hint">Pay with your PayPal account</span>
+                </span>
+                <svg
+                  class="co-chevron"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            }
+
+            <!-- Cash / Card / Mobile — staff methods (hidden in kiosk mode) -->
+            @if (showCashCard()) {
+              <div
+                class="co-staff-divider"
+                [class.has-digital]="mercadopagoAvailable() || paypalAvailable()"
+              >
+                <span>{{
+                  mercadopagoAvailable() || paypalAvailable()
+                    ? 'Or pay another way'
+                    : 'Choose payment method'
+                }}</span>
+              </div>
+              <div class="co-staff-grid">
+                <button
+                  class="co-staff-card"
+                  [class.selected]="selectedMethod() === 'cash'"
+                  (click)="selectMethod('cash')"
+                  data-testid="method-cash"
+                >
+                  <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="2" y="6" width="20" height="12" rx="2" stroke-width="1.8" />
+                    <circle cx="12" cy="12" r="3" stroke-width="1.8" />
+                    <path d="M6 12h.01M18 12h.01" stroke-width="2.2" stroke-linecap="round" />
+                  </svg>
+                  <span>Cash</span>
+                </button>
+                <button
+                  class="co-staff-card"
+                  [class.selected]="selectedMethod() === 'card'"
+                  (click)="selectMethod('card')"
+                  data-testid="method-card"
+                >
+                  <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="2" y="5" width="20" height="14" rx="2" stroke-width="1.8" />
+                    <path d="M2 10h20" stroke-width="1.8" />
+                    <path d="M6 15h4" stroke-width="1.8" stroke-linecap="round" />
+                  </svg>
+                  <span>Card</span>
+                </button>
+                <button
+                  class="co-staff-card"
+                  [class.selected]="selectedMethod() === 'mobile'"
+                  (click)="selectMethod('mobile')"
+                  data-testid="method-mobile"
+                >
+                  <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="7" y="2" width="10" height="20" rx="2" stroke-width="1.8" />
+                    <circle cx="12" cy="18" r=".8" fill="currentColor" />
+                  </svg>
+                  <span>Mobile</span>
+                </button>
+              </div>
+              <button
+                class="co-btn-proceed"
+                [disabled]="!selectedMethod()"
+                (click)="proceedToDetails()"
+                data-testid="btn-proceed"
+              >
+                Continue
+              </button>
+            }
           </div>
         }
 
-        <!-- Step 2: Cash Payment -->
+        <!-- ── Step 2 — Cash ──────────────────────────────────────────── -->
         @if (step() === 'cash') {
-          <div class="cash-payment" data-testid="cash-payment">
-            <h3 class="section-title">Cash Payment</h3>
-            <div class="amount-display">
-              <span class="amount-label">Amount Due</span>
-              <span class="amount-value">{{ cashPayment.amountDue() | currency }}</span>
+          <div class="co-body" data-testid="cash-payment">
+            <div class="co-amount-hero">
+              <span class="co-amount-hero-label">Amount Due</span>
+              <span class="co-amount-hero-value">{{ cashPayment.amountDue() | currency }}</span>
             </div>
-            <div class="input-group">
-              <label for="cash-tendered" class="input-label">Amount Tendered</label>
+            <div class="co-input-group">
+              <label for="cash-tendered" class="co-label">Amount Tendered</label>
               <input
                 id="cash-tendered"
                 type="number"
-                class="amount-input"
-                [class.input-error]="cashPayment.validation().error"
+                class="co-input"
+                [class.co-input--error]="cashPayment.validation().error"
                 [min]="cashPayment.amountDue()"
                 step="0.01"
                 [(ngModel)]="cashTendered"
@@ -195,36 +292,31 @@ const DECLINED_TEST_CARD = '4000000000000002';
               />
             </div>
             @if (cashPayment.validation().error) {
-              <div class="error-display" data-testid="cash-error">
-                <span class="error-icon">⚠️</span>
-                <span class="error-text">{{ cashPayment.validation().error }}</span>
+              <div class="co-error-row" data-testid="cash-error">
+                <span>{{ cashPayment.validation().error }}</span>
               </div>
             }
             @if (cashPayment.validation().isValid && cashTendered > 0) {
-              <div class="change-display" data-testid="change-amount">
-                <span class="change-label">Change Due</span>
-                <span class="change-value">{{ cashPayment.changeAmount() | currency }}</span>
+              <div class="co-change-row" data-testid="change-amount">
+                <span class="co-change-label">Change Due</span>
+                <span class="co-change-value">{{ cashPayment.changeAmount() | currency }}</span>
               </div>
             }
-            <div class="quick-amounts">
+            <div class="co-quick-grid">
               @for (amount of cashPayment.quickAmounts(); track amount) {
                 <button
-                  class="quick-btn"
+                  class="co-quick-btn"
                   (click)="setCashAmount(amount)"
                   [attr.data-testid]="'quick-' + amount"
                 >
-                  @if (amount === cashPayment.amountDue()) {
-                    Exact
-                  } @else {
-                    {{ amount | currency }}
-                  }
+                  {{ amount === cashPayment.amountDue() ? 'Exact' : (amount | currency) }}
                 </button>
               }
             </div>
-            <div class="action-buttons">
-              <button class="btn-back" (click)="goBack()">Back</button>
+            <div class="co-actions">
+              <button class="co-btn-back" (click)="goBack()">Back</button>
               <button
-                class="btn-confirm"
+                class="co-btn-confirm"
                 [disabled]="!cashPayment.validation().isValid"
                 (click)="confirmPayment()"
                 data-testid="btn-confirm-cash"
@@ -235,30 +327,31 @@ const DECLINED_TEST_CARD = '4000000000000002';
           </div>
         }
 
-        <!-- Step 2: Card Payment -->
+        <!-- ── Step 2 — Card ──────────────────────────────────────────── -->
         @if (step() === 'card') {
-          <div class="card-payment" data-testid="card-payment">
-            <h3 class="section-title">Card Payment</h3>
-            <div class="amount-display">
-              <span class="amount-label">Charging</span>
-              <span class="amount-value">{{ cardPayment.amountToCharge() | currency }}</span>
+          <div class="co-body" data-testid="card-payment">
+            <div class="co-amount-hero">
+              <span class="co-amount-hero-label">Charging</span>
+              <span class="co-amount-hero-value">{{
+                cardPayment.amountToCharge() | currency
+              }}</span>
             </div>
             @if (cardPayment.cardBrand() !== 'unknown') {
-              <div class="card-brand-display" data-testid="card-brand">
-                <span class="brand-badge">{{ cardPayment.cardBrand() | uppercase }}</span>
+              <div class="co-card-brand" data-testid="card-brand">
+                <span class="co-brand-badge">{{ cardPayment.cardBrand() | uppercase }}</span>
                 @if (cardPayment.last4()) {
-                  <span class="last4-display">•••• {{ cardPayment.last4() }}</span>
+                  <span class="co-last4">•••• {{ cardPayment.last4() }}</span>
                 }
               </div>
             }
-            <div class="card-form">
-              <div class="input-group">
-                <label for="card-number" class="input-label">Card Number</label>
+            <div class="co-card-form">
+              <div class="co-input-group">
+                <label for="card-number" class="co-label">Card Number</label>
                 <input
                   id="card-number"
                   type="text"
-                  class="card-input"
-                  [class.input-error]="cardPayment.fieldValidation().cardNumber.error"
+                  class="co-input"
+                  [class.co-input--error]="cardPayment.fieldValidation().cardNumber.error"
                   [(ngModel)]="cardNumber"
                   (ngModelChange)="onCardNumberChange($event)"
                   placeholder="•••• •••• •••• ••••"
@@ -266,19 +359,19 @@ const DECLINED_TEST_CARD = '4000000000000002';
                   data-testid="card-number"
                 />
                 @if (cardPayment.fieldValidation().cardNumber.error) {
-                  <span class="field-error" data-testid="card-number-error">
+                  <span class="co-field-error" data-testid="card-number-error">
                     {{ cardPayment.fieldValidation().cardNumber.error }}
                   </span>
                 }
               </div>
-              <div class="card-row">
-                <div class="input-group">
-                  <label for="card-expiry" class="input-label">Expiry</label>
+              <div class="co-card-row">
+                <div class="co-input-group">
+                  <label for="card-expiry" class="co-label">Expiry</label>
                   <input
                     id="card-expiry"
                     type="text"
-                    class="card-input"
-                    [class.input-error]="cardPayment.fieldValidation().expiry.error"
+                    class="co-input"
+                    [class.co-input--error]="cardPayment.fieldValidation().expiry.error"
                     [(ngModel)]="cardExpiry"
                     (ngModelChange)="onCardExpiryChange($event)"
                     placeholder="MM/YY"
@@ -286,18 +379,18 @@ const DECLINED_TEST_CARD = '4000000000000002';
                     data-testid="card-expiry"
                   />
                   @if (cardPayment.fieldValidation().expiry.error) {
-                    <span class="field-error" data-testid="card-expiry-error">
+                    <span class="co-field-error" data-testid="card-expiry-error">
                       {{ cardPayment.fieldValidation().expiry.error }}
                     </span>
                   }
                 </div>
-                <div class="input-group">
-                  <label for="card-cvv" class="input-label">CVV</label>
+                <div class="co-input-group">
+                  <label for="card-cvv" class="co-label">CVV</label>
                   <input
                     id="card-cvv"
                     type="password"
-                    class="card-input"
-                    [class.input-error]="cardPayment.fieldValidation().cvv.error"
+                    class="co-input"
+                    [class.co-input--error]="cardPayment.fieldValidation().cvv.error"
                     [(ngModel)]="cardCvv"
                     (ngModelChange)="onCardCvvChange($event)"
                     placeholder="•••"
@@ -305,17 +398,17 @@ const DECLINED_TEST_CARD = '4000000000000002';
                     data-testid="card-cvv"
                   />
                   @if (cardPayment.fieldValidation().cvv.error) {
-                    <span class="field-error" data-testid="card-cvv-error">
+                    <span class="co-field-error" data-testid="card-cvv-error">
                       {{ cardPayment.fieldValidation().cvv.error }}
                     </span>
                   }
                 </div>
               </div>
             </div>
-            <div class="action-buttons">
-              <button class="btn-back" (click)="goBack()">Back</button>
+            <div class="co-actions">
+              <button class="co-btn-back" (click)="goBack()">Back</button>
               <button
-                class="btn-confirm"
+                class="co-btn-confirm"
                 [disabled]="!canConfirmCard()"
                 (click)="confirmPayment()"
                 data-testid="btn-confirm-card"
@@ -326,103 +419,116 @@ const DECLINED_TEST_CARD = '4000000000000002';
           </div>
         }
 
-        <!-- Step 2: MercadoPago Payment -->
-        <!-- MercadoPago — Wallet Brick (primary: pay from MP account) -->
+        <!-- ── Step 2 — MP Wallet Brick ───────────────────────────────── -->
         @if (step() === 'mercadopago-wallet') {
-          <div class="mercadopago-payment" data-testid="mercadopago-wallet-payment">
-            <h3 class="section-title">MercadoPago</h3>
-            <div class="amount-display">
-              <span class="amount-label">Amount</span>
-              <span class="amount-value">{{ cartService.total() | currency }}</span>
+          <div class="co-body" data-testid="mercadopago-wallet-payment">
+            <div class="co-mp-header">
+              <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+                <circle cx="24" cy="24" r="24" fill="#009EE3" />
+                <path
+                  d="M18.5 27.5l3.5-7 3.5 5 2.5-3.5 2.5 5.5"
+                  stroke="#fff"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span class="co-mp-brand">MercadoPago</span>
+              <span class="co-mp-amount">{{ cartService.total() | currency }}</span>
             </div>
-            <!-- Wallet Brick renders here. Once the buyer clicks Pay in the Brick,
-                 mpWalletPolling() becomes true and the waiting overlay replaces it. -->
             @if (!mpWalletPolling()) {
               <div id="mp-wallet-brick-container" data-testid="mp-wallet-brick-container"></div>
-              <div class="mp-mode-toggle">
-                <button
-                  class="btn-text-link"
-                  (click)="mpMode.set('card'); goBack(); confirmPayment()"
-                  data-testid="btn-mp-use-card"
-                >
-                  Pay with a card instead
-                </button>
-              </div>
-              <div class="action-buttons">
-                <button class="btn-back" (click)="goBack()">Back</button>
+              <button
+                class="co-text-link"
+                (click)="mpMode.set('card'); goBack(); confirmPayment()"
+                data-testid="btn-mp-use-card"
+              >
+                Pay with a card instead
+              </button>
+              <div class="co-actions co-actions--single">
+                <button class="co-btn-back" (click)="goBack()">Back</button>
               </div>
             } @else {
-              <!-- Polling state: buyer is completing payment in the MP app / new tab -->
-              <div class="mp-wallet-waiting" data-testid="mp-wallet-waiting">
-                <div class="spinner"></div>
-                <p class="processing-text">Waiting for payment confirmation…</p>
-                <p class="mp-waiting-hint">
-                  Complete the payment in the MercadoPago tab that opened.
-                </p>
+              <div class="co-waiting" data-testid="mp-wallet-waiting">
+                <div class="co-spinner"></div>
+                <p class="co-waiting-title">Waiting for confirmation…</p>
+                <p class="co-waiting-hint">Complete payment in the MercadoPago tab that opened.</p>
               </div>
             }
           </div>
         }
 
-        <!-- MercadoPago — Card Brick (fallback: enter card details) -->
+        <!-- ── Step 2 — MP Card Brick ─────────────────────────────────── -->
         @if (step() === 'mercadopago') {
-          <div class="mercadopago-payment" data-testid="mercadopago-payment">
-            <h3 class="section-title">MercadoPago — Card</h3>
-            <div class="amount-display">
-              <span class="amount-label">Amount</span>
-              <span class="amount-value">{{ cartService.total() | currency }}</span>
+          <div class="co-body" data-testid="mercadopago-payment">
+            <div class="co-mp-header">
+              <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+                <circle cx="24" cy="24" r="24" fill="#009EE3" />
+                <path
+                  d="M18.5 27.5l3.5-7 3.5 5 2.5-3.5 2.5 5.5"
+                  stroke="#fff"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span class="co-mp-brand">MercadoPago — Card</span>
+              <span class="co-mp-amount">{{ cartService.total() | currency }}</span>
             </div>
-            <!-- Card Payment Brick renders here -->
             <div id="mp-card-brick-container" data-testid="mp-brick-container"></div>
-            <div class="mp-mode-toggle">
-              <button
-                class="btn-text-link"
-                (click)="mpMode.set('wallet'); goBack(); confirmPayment()"
-                data-testid="btn-mp-use-wallet"
-              >
-                Pay with MercadoPago account instead
-              </button>
-            </div>
-            <div class="action-buttons">
-              <button class="btn-back" (click)="goBack()">Back</button>
+            <button
+              class="co-text-link"
+              (click)="mpMode.set('wallet'); goBack(); confirmPayment()"
+              data-testid="btn-mp-use-wallet"
+            >
+              Pay with MercadoPago account instead
+            </button>
+            <div class="co-actions co-actions--single">
+              <button class="co-btn-back" (click)="goBack()">Back</button>
             </div>
           </div>
         }
 
-        <!-- Step 2: PayPal Payment -->
+        <!-- ── Step 2 — PayPal ────────────────────────────────────────── -->
         @if (step() === 'paypal') {
-          <div class="paypal-payment" data-testid="paypal-payment">
-            <h3 class="section-title">PayPal</h3>
-            <div class="amount-display">
-              <span class="amount-label">Amount</span>
-              <span class="amount-value">{{ cartService.total() | currency }}</span>
+          <div class="co-body" data-testid="paypal-payment">
+            <div class="co-amount-hero">
+              <span class="co-amount-hero-label">Amount</span>
+              <span class="co-amount-hero-value">{{ cartService.total() | currency }}</span>
             </div>
-            <!-- The PayPal JS SDK renders its Buttons widget inside this element -->
             <div id="paypal-btn-container" data-testid="paypal-btn-container"></div>
-            <div class="action-buttons">
-              <button class="btn-back" (click)="goBack()">Back</button>
+            <div class="co-actions co-actions--single">
+              <button class="co-btn-back" (click)="goBack()">Back</button>
             </div>
           </div>
         }
 
-        <!-- Step 2: Mobile Payment -->
+        <!-- ── Step 2 — Mobile ────────────────────────────────────────── -->
         @if (step() === 'mobile') {
-          <div class="mobile-payment" data-testid="mobile-payment">
-            <h3 class="section-title">Mobile Payment</h3>
-            <div class="amount-display">
-              <span class="amount-label">Amount</span>
-              <span class="amount-value">{{ cartService.total() | currency }}</span>
+          <div class="co-body" data-testid="mobile-payment">
+            <div class="co-amount-hero">
+              <span class="co-amount-hero-label">Amount</span>
+              <span class="co-amount-hero-value">{{ cartService.total() | currency }}</span>
             </div>
-            <div class="qr-placeholder">
-              <div class="qr-code" data-testid="qr-code">
-                <span class="qr-icon">📲</span>
-                <p class="qr-text">Scan QR code or tap to pay</p>
+            <div class="co-qr-area">
+              <div class="co-qr-box" data-testid="qr-code">
+                <svg width="40" height="40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="7" height="7" rx="1" stroke-width="1.8" />
+                  <rect x="14" y="3" width="7" height="7" rx="1" stroke-width="1.8" />
+                  <rect x="3" y="14" width="7" height="7" rx="1" stroke-width="1.8" />
+                  <path
+                    d="M14 14h.01M14 17h3M17 14v3M20 17v3M20 14h.01"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <p class="co-qr-text">Scan QR code or tap to pay</p>
               </div>
             </div>
-            <div class="action-buttons">
-              <button class="btn-back" (click)="goBack()">Back</button>
+            <div class="co-actions">
+              <button class="co-btn-back" (click)="goBack()">Back</button>
               <button
-                class="btn-confirm"
+                class="co-btn-confirm"
                 (click)="confirmPayment()"
                 data-testid="btn-confirm-mobile"
               >
@@ -432,32 +538,41 @@ const DECLINED_TEST_CARD = '4000000000000002';
           </div>
         }
 
-        <!-- Processing State -->
+        <!-- ── Processing ─────────────────────────────────────────────── -->
         @if (step() === 'processing') {
-          <div class="processing" data-testid="processing">
-            <div class="spinner"></div>
-            <p class="processing-text">Processing payment...</p>
+          <div class="co-body co-body--centered" data-testid="processing">
+            <div class="co-spinner co-spinner--lg"></div>
+            <p class="co-state-text">Processing payment…</p>
           </div>
         }
 
-        <!-- Retrying State (transient gateway failure) -->
+        <!-- ── Retrying ───────────────────────────────────────────────── -->
         @if (step() === 'retrying') {
-          <div class="processing" data-testid="payment-retrying">
-            <div class="spinner"></div>
-            <p class="processing-text">Payment failed — retrying…</p>
+          <div class="co-body co-body--centered" data-testid="payment-retrying">
+            <div class="co-spinner co-spinner--lg"></div>
+            <p class="co-state-text">Payment failed — retrying…</p>
           </div>
         }
 
-        <!-- Error State (gateway declined / circuit open) -->
+        <!-- ── Error ──────────────────────────────────────────────────── -->
         @if (step() === 'error') {
-          <div class="payment-error" data-testid="payment-error">
-            <div class="error-icon">⚠️</div>
-            <p class="error-text">{{ errorMessage() }}</p>
-            <div class="action-buttons">
-              <button class="btn-back" (click)="cancel()" data-testid="btn-cancel-payment">
+          <div class="co-body co-body--centered" data-testid="payment-error">
+            <div class="co-error-icon">
+              <svg width="40" height="40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" stroke-width="1.8" />
+                <path d="M12 8v4M12 16h.01" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </div>
+            <p class="co-error-msg">{{ errorMessage() }}</p>
+            <div class="co-actions">
+              <button class="co-btn-back" (click)="cancel()" data-testid="btn-cancel-payment">
                 Cancel
               </button>
-              <button class="btn-confirm" (click)="retryPayment()" data-testid="btn-retry-payment">
+              <button
+                class="co-btn-confirm"
+                (click)="retryPayment()"
+                data-testid="btn-retry-payment"
+              >
                 Try Again
               </button>
             </div>
@@ -468,335 +583,510 @@ const DECLINED_TEST_CARD = '4000000000000002';
   `,
   styles: [
     `
+      /* ── Layout shell ─────────────────────────────────────────────── */
       .checkout-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.5);
+        /* Subtle dark veil — much lighter than the old 50% black */
+        background: rgba(20, 16, 14, 0.6);
         display: flex;
-        align-items: center;
-        justify-content: center;
+        align-items: stretch;
+        justify-content: flex-end;
         z-index: 1000;
-        padding: 1rem;
       }
 
       .checkout-panel {
-        background: white;
-        border-radius: 16px;
+        background: #1f3a38; /* onsen-water */
+        color: #e8dccb; /* steam */
         width: 100%;
-        max-width: 480px;
-        max-height: 90vh;
-        overflow-y: auto;
-        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
+        max-width: 440px;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        /* Slide-in from right */
+        animation: slideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
       }
 
-      .checkout-header {
+      @keyframes slideIn {
+        from {
+          transform: translateX(100%);
+        }
+        to {
+          transform: translateX(0);
+        }
+      }
+
+      /* Full-screen on mobile */
+      @media (max-width: 639px) {
+        .checkout-overlay {
+          align-items: flex-end;
+          justify-content: center;
+        }
+        .checkout-panel {
+          max-width: 100%;
+          height: 96dvh;
+          border-radius: 20px 20px 0 0;
+          animation: slideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes slideUp {
+          from {
+            transform: translateY(100%);
+          }
+          to {
+            transform: translateY(0);
+          }
+        }
+      }
+
+      /* ── Header ───────────────────────────────────────────────────── */
+      .co-header {
         display: flex;
-        justify-content: space-between;
         align-items: center;
-        padding: 1.5rem;
-        border-bottom: 1px solid #e5e7eb;
+        gap: 0.75rem;
+        padding: 1.25rem 1.25rem 1rem;
+        border-bottom: 1px solid rgba(232, 220, 203, 0.1);
+        flex-shrink: 0;
       }
 
-      .checkout-title {
-        font-size: 1.25rem;
-        font-weight: 700;
-        margin: 0;
-        color: #111827;
-      }
-
-      .close-btn {
-        background: none;
+      .co-back-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
         border: none;
-        color: #6b7280;
+        background: rgba(232, 220, 203, 0.08);
+        color: #e8dccb;
         cursor: pointer;
-        padding: 0.5rem;
-        border-radius: 8px;
+        transition: background 0.15s;
+        flex-shrink: 0;
+      }
+      .co-back-btn:hover {
+        background: rgba(232, 220, 203, 0.15);
       }
 
-      .close-btn:hover {
-        background: #f3f4f6;
-        color: #111827;
+      .co-title {
+        font-size: 1.0625rem;
+        font-weight: 700;
+        color: #e8dccb;
+        letter-spacing: -0.01em;
       }
 
-      .close-btn svg {
-        width: 1.25rem;
-        height: 1.25rem;
+      /* ── Total strip ──────────────────────────────────────────────── */
+      .co-total-strip {
+        padding: 1rem 1.25rem;
+        background: rgba(20, 16, 14, 0.35);
+        border-bottom: 1px solid rgba(232, 220, 203, 0.08);
+        flex-shrink: 0;
       }
 
-      .order-summary {
-        padding: 1.25rem 1.5rem;
-        background: #f9fafb;
-        border-bottom: 1px solid #e5e7eb;
-      }
-
-      .summary-row {
+      .co-total-row {
         display: flex;
         justify-content: space-between;
-        padding: 0.375rem 0;
-        font-size: 0.875rem;
-        color: #6b7280;
+        align-items: baseline;
+        padding: 0.2rem 0;
       }
 
-      .summary-row.total {
-        font-size: 1.125rem;
-        font-weight: 700;
-        color: #111827;
-        padding-top: 0.75rem;
-        border-top: 1px solid #e5e7eb;
+      .co-total-label {
+        font-size: 0.8rem;
+        color: rgba(232, 220, 203, 0.55);
+      }
+      .co-total-value-sm {
+        font-size: 0.8rem;
+        color: rgba(232, 220, 203, 0.7);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .co-total-row--grand {
         margin-top: 0.5rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid rgba(232, 220, 203, 0.12);
+      }
+      .co-grand-label {
+        font-size: 0.9375rem;
+        font-weight: 700;
+        color: #e8dccb;
+      }
+      .co-grand-value {
+        font-size: 1.375rem;
+        font-weight: 800;
+        color: #f0b429;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.02em;
       }
 
-      .section-title {
-        font-size: 1rem;
-        font-weight: 600;
-        margin: 0 0 1rem;
-        color: #374151;
+      /* ── Scrollable body ──────────────────────────────────────────── */
+      .co-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
       }
 
-      .payment-methods,
-      .cash-payment,
-      .card-payment,
-      .mobile-payment {
-        padding: 1.5rem;
+      .co-body--centered {
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+        text-align: center;
       }
 
-      .method-grid {
+      /* ── Digital payment rows (MP / PayPal) ───────────────────────── */
+      .co-method-row {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        width: 100%;
+        padding: 1rem 1.125rem;
+        border-radius: 14px;
+        border: 1.5px solid rgba(232, 220, 203, 0.12);
+        background: rgba(232, 220, 203, 0.05);
+        color: #e8dccb;
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          border-color 0.15s;
+        text-align: left;
+      }
+      .co-method-row:hover {
+        background: rgba(232, 220, 203, 0.1);
+        border-color: rgba(232, 220, 203, 0.22);
+      }
+      .co-method-row--mp:hover {
+        border-color: #009ee3;
+      }
+      .co-method-row--paypal:hover {
+        border-color: #009cde;
+      }
+
+      .co-method-logo {
+        flex-shrink: 0;
+        line-height: 0;
+      }
+      .co-method-info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 0.125rem;
+      }
+      .co-method-name {
+        font-size: 0.9375rem;
+        font-weight: 700;
+      }
+      .co-method-hint {
+        font-size: 0.75rem;
+        color: rgba(232, 220, 203, 0.5);
+      }
+      .co-chevron {
+        color: rgba(232, 220, 203, 0.35);
+        flex-shrink: 0;
+      }
+
+      /* ── Staff method divider ─────────────────────────────────────── */
+      .co-staff-divider {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        color: rgba(232, 220, 203, 0.4);
+        font-size: 0.75rem;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .co-staff-divider::before,
+      .co-staff-divider::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: rgba(232, 220, 203, 0.12);
+      }
+      .co-staff-divider:not(.has-digital) {
+        margin-top: 0;
+      }
+
+      /* ── Staff method 3-up grid ───────────────────────────────────── */
+      .co-staff-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 0.75rem;
-        margin-bottom: 1.5rem;
+        gap: 0.625rem;
       }
 
-      .method-card {
+      .co-staff-card {
         display: flex;
         flex-direction: column;
         align-items: center;
         gap: 0.5rem;
-        padding: 1.25rem 0.75rem;
-        border: 2px solid #e5e7eb;
+        padding: 1rem 0.5rem;
         border-radius: 12px;
-        background: white;
+        border: 1.5px solid rgba(232, 220, 203, 0.12);
+        background: rgba(232, 220, 203, 0.04);
+        color: rgba(232, 220, 203, 0.65);
+        font-size: 0.8125rem;
+        font-weight: 600;
         cursor: pointer;
         transition: all 0.15s;
       }
-
-      .method-card:hover {
-        border-color: #2563eb;
-        background: #eff6ff;
+      .co-staff-card:hover {
+        border-color: rgba(240, 180, 41, 0.5);
+        color: #e8dccb;
+        background: rgba(240, 180, 41, 0.07);
+      }
+      .co-staff-card.selected {
+        border-color: #f0b429;
+        color: #e8dccb;
+        background: rgba(240, 180, 41, 0.12);
       }
 
-      .method-card.selected {
-        border-color: #2563eb;
-        background: #eff6ff;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-      }
-
-      .method-icon {
-        font-size: 2rem;
-      }
-
-      .method-label {
-        font-size: 0.875rem;
-        font-weight: 600;
-        color: #374151;
-      }
-
-      .amount-display {
+      /* ── Amount hero (non-digital steps) ─────────────────────────── */
+      .co-amount-hero {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 1rem;
-        background: #f0fdf4;
-        border-radius: 8px;
-        margin-bottom: 1.25rem;
+        padding: 0.875rem 1rem;
+        background: rgba(20, 16, 14, 0.35);
+        border-radius: 12px;
+        border: 1px solid rgba(240, 180, 41, 0.2);
       }
-
-      .amount-label {
-        font-size: 0.875rem;
-        color: #6b7280;
-      }
-
-      .amount-value {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #16a34a;
-      }
-
-      .input-group {
-        margin-bottom: 1rem;
-      }
-
-      .input-label {
-        display: block;
+      .co-amount-hero-label {
         font-size: 0.8125rem;
-        font-weight: 500;
-        color: #374151;
-        margin-bottom: 0.375rem;
+        color: rgba(232, 220, 203, 0.55);
+      }
+      .co-amount-hero-value {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: #f0b429;
+        font-variant-numeric: tabular-nums;
       }
 
-      .amount-input,
-      .card-input {
+      /* ── Inputs ───────────────────────────────────────────────────── */
+      .co-input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.375rem;
+      }
+
+      .co-label {
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: rgba(232, 220, 203, 0.6);
+      }
+
+      .co-input {
         width: 100%;
         padding: 0.75rem 1rem;
-        border: 2px solid #e5e7eb;
-        border-radius: 8px;
-        font-size: 1.125rem;
+        background: rgba(20, 16, 14, 0.4);
+        border: 1.5px solid rgba(232, 220, 203, 0.14);
+        border-radius: 10px;
+        color: #e8dccb;
+        font-size: 1.0625rem;
         outline: none;
         transition: border-color 0.15s;
         box-sizing: border-box;
       }
-
-      .amount-input:focus,
-      .card-input:focus {
-        border-color: #2563eb;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      .co-input::placeholder {
+        color: rgba(232, 220, 203, 0.3);
+      }
+      .co-input:focus {
+        border-color: #f0b429;
+        box-shadow: 0 0 0 3px rgba(240, 180, 41, 0.12);
+      }
+      .co-input--error {
+        border-color: #c4553c;
+      }
+      .co-input--error:focus {
+        border-color: #c4553c;
+        box-shadow: 0 0 0 3px rgba(196, 85, 60, 0.15);
       }
 
-      .change-display {
+      .co-field-error {
+        font-size: 0.75rem;
+        color: #c4553c;
+        font-weight: 500;
+      }
+
+      /* ── Error / change rows ──────────────────────────────────────── */
+      .co-error-row {
+        display: flex;
+        align-items: center;
+        padding: 0.625rem 0.875rem;
+        background: rgba(196, 85, 60, 0.12);
+        border: 1px solid rgba(196, 85, 60, 0.3);
+        border-radius: 10px;
+        font-size: 0.8125rem;
+        color: #e87a65;
+        font-weight: 500;
+      }
+
+      .co-change-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
         padding: 0.75rem 1rem;
-        background: #ecfdf5;
-        border: 1px solid #a7f3d0;
-        border-radius: 8px;
-        margin-bottom: 1rem;
+        background: rgba(78, 140, 122, 0.15);
+        border: 1px solid rgba(78, 140, 122, 0.3);
+        border-radius: 10px;
       }
-
-      .change-label {
+      .co-change-label {
         font-size: 0.875rem;
-        color: #065f46;
+        color: rgba(232, 220, 203, 0.6);
       }
-
-      .change-value {
+      .co-change-value {
         font-size: 1.25rem;
         font-weight: 700;
-        color: #059669;
+        color: #4e8c7a;
       }
 
-      .quick-amounts {
+      /* ── Quick-amount chips ───────────────────────────────────────── */
+      .co-quick-grid {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 0.5rem;
-        margin-bottom: 1.5rem;
       }
 
-      .quick-btn {
-        padding: 0.625rem;
-        border: 1px solid #d1d5db;
-        border-radius: 6px;
-        background: white;
+      .co-quick-btn {
+        padding: 0.625rem 0.375rem;
+        border: 1.5px solid rgba(232, 220, 203, 0.12);
+        border-radius: 8px;
+        background: rgba(232, 220, 203, 0.04);
+        color: rgba(232, 220, 203, 0.75);
         font-size: 0.8125rem;
-        font-weight: 500;
+        font-weight: 600;
         cursor: pointer;
-        transition: all 0.15s;
+        transition: all 0.12s;
+        text-align: center;
+      }
+      .co-quick-btn:hover {
+        border-color: #f0b429;
+        color: #e8dccb;
+        background: rgba(240, 180, 41, 0.08);
       }
 
-      .quick-btn:hover {
-        background: #eff6ff;
-        border-color: #2563eb;
+      /* ── Card form ────────────────────────────────────────────────── */
+      .co-card-form {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
       }
-
-      .card-row {
+      .co-card-row {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 1rem;
+        gap: 0.75rem;
       }
 
-      .qr-placeholder {
+      .co-card-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.5rem 0.875rem;
+        background: rgba(78, 140, 122, 0.1);
+        border: 1px solid rgba(78, 140, 122, 0.25);
+        border-radius: 8px;
+      }
+      .co-brand-badge {
+        font-size: 0.7rem;
+        font-weight: 700;
+        color: #4e8c7a;
+        background: rgba(78, 140, 122, 0.2);
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+        letter-spacing: 0.06em;
+      }
+      .co-last4 {
+        font-size: 0.875rem;
+        color: rgba(232, 220, 203, 0.6);
+        font-family: ui-monospace, monospace;
+      }
+
+      /* ── MP inline header ─────────────────────────────────────────── */
+      .co-mp-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.875rem 1rem;
+        background: rgba(0, 158, 227, 0.08);
+        border: 1px solid rgba(0, 158, 227, 0.2);
+        border-radius: 12px;
+      }
+      .co-mp-brand {
+        flex: 1;
+        font-size: 0.9375rem;
+        font-weight: 700;
+        color: #e8dccb;
+      }
+      .co-mp-amount {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #f0b429;
+        font-variant-numeric: tabular-nums;
+      }
+
+      #mp-card-brick-container,
+      #mp-wallet-brick-container {
+        min-height: 280px;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      /* ── QR placeholder ───────────────────────────────────────────── */
+      .co-qr-area {
         display: flex;
         justify-content: center;
-        margin-bottom: 1.5rem;
       }
-
-      .qr-code {
+      .co-qr-box {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 0.75rem;
-        padding: 2rem;
-        border: 2px dashed #d1d5db;
-        border-radius: 12px;
+        gap: 0.875rem;
+        padding: 2rem 1.5rem;
+        border: 2px dashed rgba(232, 220, 203, 0.18);
+        border-radius: 16px;
         width: 200px;
+        color: rgba(232, 220, 203, 0.4);
       }
-
-      .qr-icon {
-        font-size: 3rem;
-      }
-
-      .qr-text {
+      .co-qr-text {
         font-size: 0.8125rem;
-        color: #6b7280;
         text-align: center;
         margin: 0;
       }
 
-      .action-buttons {
-        display: flex;
-        gap: 0.75rem;
-        margin-top: 1rem;
-      }
-
-      .btn-back {
-        flex: 1;
-        padding: 0.875rem;
-        border: 2px solid #e5e7eb;
-        border-radius: 8px;
-        background: white;
-        font-size: 0.875rem;
-        font-weight: 600;
-        cursor: pointer;
-        color: #374151;
-      }
-
-      .btn-back:hover {
-        background: #f9fafb;
-      }
-
-      .btn-proceed,
-      .btn-confirm {
-        flex: 2;
-        padding: 0.875rem;
-        border: none;
-        border-radius: 8px;
-        background: #2563eb;
-        color: white;
-        font-size: 0.875rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.15s;
-      }
-
-      .btn-proceed {
-        width: 100%;
-      }
-
-      .btn-proceed:hover:not(:disabled),
-      .btn-confirm:hover:not(:disabled) {
-        background: #1d4ed8;
-      }
-
-      .btn-proceed:disabled,
-      .btn-confirm:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-
-      .processing {
+      /* ── Waiting / polling state ──────────────────────────────────── */
+      .co-waiting {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 1rem;
-        padding: 3rem 1.5rem;
+        gap: 0.875rem;
+        padding: 2.5rem 1rem;
+        text-align: center;
+      }
+      .co-waiting-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #e8dccb;
+        margin: 0;
+      }
+      .co-waiting-hint {
+        font-size: 0.825rem;
+        color: rgba(232, 220, 203, 0.5);
+        margin: 0;
       }
 
-      .spinner {
+      /* ── Spinner ──────────────────────────────────────────────────── */
+      .co-spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid rgba(232, 220, 203, 0.12);
+        border-top-color: #f0b429;
+        border-radius: 50%;
+        animation: spin 0.75s linear infinite;
+        flex-shrink: 0;
+      }
+      .co-spinner--lg {
         width: 48px;
         height: 48px;
-        border: 4px solid #e5e7eb;
-        border-top-color: #2563eb;
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
+        border-width: 4px;
       }
 
       @keyframes spin {
@@ -805,176 +1095,112 @@ const DECLINED_TEST_CARD = '4000000000000002';
         }
       }
 
-      .processing-text {
-        font-size: 1rem;
-        color: #6b7280;
+      .co-state-text {
+        font-size: 0.9375rem;
+        color: rgba(232, 220, 203, 0.6);
         margin: 0;
       }
 
-      .payment-error {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 1rem;
-        padding: 2.5rem 1.5rem 1.5rem;
-        text-align: center;
+      /* ── Error state ──────────────────────────────────────────────── */
+      .co-error-icon {
+        color: #c4553c;
       }
-
-      .payment-error .error-icon {
-        font-size: 2.5rem;
-        line-height: 1;
-      }
-
-      .payment-error .error-text {
-        font-size: 1rem;
-        color: #b91c1c;
+      .co-error-msg {
+        font-size: 0.9375rem;
         font-weight: 600;
+        color: #e87a65;
         margin: 0;
+        max-width: 28ch;
+        line-height: 1.5;
       }
 
-      .payment-error .action-buttons {
-        width: 100%;
-      }
-
-      .input-error {
-        border-color: #ef4444;
-      }
-
-      .input-error:focus {
-        border-color: #ef4444;
-        box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
-      }
-
-      .error-display {
+      /* ── Action buttons ───────────────────────────────────────────── */
+      .co-actions {
         display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.625rem 0.875rem;
-        background: #fef2f2;
-        border: 1px solid #fecaca;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-      }
-
-      .error-icon {
-        font-size: 1rem;
-        flex-shrink: 0;
-      }
-
-      .error-text {
-        font-size: 0.8125rem;
-        color: #dc2626;
-        font-weight: 500;
-      }
-
-      .field-error {
-        display: block;
-        font-size: 0.75rem;
-        color: #dc2626;
-        margin-top: 0.25rem;
-        font-weight: 500;
-      }
-
-      .card-brand-display {
-        display: flex;
-        align-items: center;
         gap: 0.75rem;
-        padding: 0.625rem 1rem;
-        background: #eff6ff;
-        border: 1px solid #bfdbfe;
-        border-radius: 8px;
-        margin-bottom: 1.25rem;
+        margin-top: auto;
+        padding-top: 0.5rem;
       }
 
-      .brand-badge {
-        font-size: 0.75rem;
-        font-weight: 700;
-        color: #1d4ed8;
-        background: #dbeafe;
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        letter-spacing: 0.05em;
+      .co-actions--single {
+        justify-content: flex-start;
       }
 
-      .last4-display {
+      .co-btn-back {
+        flex: 1;
+        padding: 0.875rem;
+        border-radius: 12px;
+        border: 1.5px solid rgba(232, 220, 203, 0.18);
+        background: transparent;
+        color: rgba(232, 220, 203, 0.7);
         font-size: 0.875rem;
-        color: #374151;
-        font-family: monospace;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .co-btn-back:hover {
+        background: rgba(232, 220, 203, 0.07);
+        color: #e8dccb;
       }
 
-      .mercadopago-payment {
-        padding: 1.5rem;
+      .co-btn-proceed,
+      .co-btn-confirm {
+        flex: 2;
+        padding: 0.875rem;
+        border-radius: 12px;
+        border: none;
+        background: #f0b429;
+        color: #14100e;
+        font-size: 0.9375rem;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.15s;
+        letter-spacing: -0.01em;
+      }
+      .co-btn-proceed {
+        flex: 1;
       }
 
-      #mp-card-brick-container,
-      #mp-wallet-brick-container {
-        min-height: 280px;
-        margin-bottom: 1rem;
+      .co-btn-proceed:hover:not(:disabled),
+      .co-btn-confirm:hover:not(:disabled) {
+        background: #f5c24a;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(240, 180, 41, 0.3);
+      }
+      .co-btn-proceed:active:not(:disabled),
+      .co-btn-confirm:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: none;
+      }
+      .co-btn-proceed:disabled,
+      .co-btn-confirm:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
       }
 
-      .mp-mode-toggle {
-        text-align: center;
-        margin: 0.5rem 0 0.75rem;
-      }
-
-      .btn-text-link {
+      /* ── Text link (MP mode toggle) ───────────────────────────────── */
+      .co-text-link {
         background: none;
         border: none;
         color: #009ee3;
-        font-size: 0.85rem;
+        font-size: 0.8125rem;
         cursor: pointer;
         text-decoration: underline;
+        text-underline-offset: 2px;
         padding: 0;
+        align-self: center;
+      }
+      .co-text-link:hover {
+        color: #33b5e8;
       }
 
-      .btn-text-link:hover {
-        color: #007ab8;
-      }
-
-      .mp-wallet-waiting {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 2rem 1rem;
-        text-align: center;
-      }
-
-      .mp-waiting-hint {
-        font-size: 0.85rem;
-        color: #57606a;
-        margin: 0;
-      }
-
-      .method-card--mp {
-        border-color: #009ee3;
-      }
-
-      .method-card--mp:hover,
-      .method-card--mp.selected {
-        border-color: #009ee3;
-        background: #e5f6fd;
-        box-shadow: 0 0 0 3px rgba(0, 158, 227, 0.15);
-      }
-
-      .paypal-payment {
-        padding: 1.5rem;
-      }
-
-      #paypal-btn-container {
-        min-height: 150px;
-        margin-bottom: 1rem;
-      }
-
-      .method-card--paypal {
-        border-color: #003087;
-      }
-
-      .method-card--paypal:hover,
-      .method-card--paypal.selected {
-        border-color: #003087;
-        background: #e8eef6;
-        box-shadow: 0 0 0 3px rgba(0, 48, 135, 0.15);
+      /* ── Proceed button (full-width at bottom of select step) ─────── */
+      .co-btn-proceed {
+        width: 100%;
+        flex: unset;
+        margin-top: 0.25rem;
       }
     `,
   ],
@@ -997,9 +1223,22 @@ export class CheckoutComponent implements OnDestroy {
    */
   readonly kioskMode = input<boolean>(false);
 
+  /**
+   * Terminal overrides are resolved by KioskSettingsService before the kiosk
+   * shell opens checkout. The payment adapters remain build-time providers, so
+   * the shell passes the resolved availability for kiosk terminals explicitly.
+   */
+  readonly mercadopagoEnabled = input<boolean | undefined>(undefined);
+  readonly paypalEnabled = input<boolean | undefined>(undefined);
+
+  readonly mercadopagoAvailable = computed(
+    () => this.mercadopagoEnabled() ?? this.mercadopago.isEnabled()
+  );
+  readonly paypalAvailable = computed(() => this.paypalEnabled() ?? this.paypal.isEnabled());
+
   // Derived: in kiosk mode with no digital methods available, operator must be shown instead.
   readonly showCashCard = computed(
-    () => !this.kioskMode() || (!this.mercadopago.isEnabled() && !this.paypal.isEnabled())
+    () => !this.kioskMode() || (!this.mercadopagoAvailable() && !this.paypalAvailable())
   );
 
   // Outputs
@@ -1158,24 +1397,26 @@ export class CheckoutComponent implements OnDestroy {
       return;
     }
 
+    // Zero-amount guard: MercadoPago (and PayPal) reject preferences with a
+    // non-positive amount. Catch it here before the SDK call so the error
+    // message is actionable ("add items or check product prices") rather than
+    // a raw upstream "A positive amount is required."
+    const total = this.cartService.total();
+    if (total <= 0) {
+      this.step.set('error');
+      this.errorMessage.set(
+        'The order total is $0.00. Add items or check that product prices are set correctly.'
+      );
+      this.isSubmitting = false;
+      return;
+    }
+
     // Run the payment use-case exactly ONCE and reuse its result. Previously
     // execute() was called a second time inside the timeout, which minted a new
     // transactionId and ran the payment twice per confirmation.
-    let transactionId: string;
-    if (method === 'cash') {
-      const cashResult = this.cashPayment.execute();
-      if (!cashResult.success) {
-        return;
-      }
-      transactionId = cashResult.transactionId;
-    } else if (method === 'card') {
-      const cardResult = this.cardPayment.execute();
-      if (!cardResult.success) {
-        return;
-      }
-      transactionId = cardResult.transactionId;
-    } else {
-      transactionId = this.generateTransactionId();
+    const transactionId = this.resolveTransactionId(method);
+    if (transactionId === null) {
+      return; // use-case validation failed (e.g. cash amount too low)
     }
 
     this.isSubmitting = true;
@@ -1209,6 +1450,29 @@ export class CheckoutComponent implements OnDestroy {
 
     // Simulate payment processing (cash / mobile)
     setTimeout(() => this.finalizePayment(method, transactionId), 1500);
+  }
+
+  /**
+   * Resolve a transaction ID for the given payment method.
+   *
+   * For cash and card the use-case's `execute()` is responsible for validation
+   * (e.g. sufficient cash tendered, valid card fields) and minting the ID, so
+   * this method runs it and returns `null` on failure — `confirmPayment()` bails
+   * out without setting `isSubmitting`, letting the UI stay interactive.
+   * All other methods (mercadopago, paypal, mobile) generate a fresh ID here
+   * because their validation and submission are handled by the respective SDK /
+   * async process methods that follow.
+   */
+  private resolveTransactionId(method: PaymentMethod): string | null {
+    if (method === 'cash') {
+      const result = this.cashPayment.execute();
+      return result.success ? result.transactionId : null;
+    }
+    if (method === 'card') {
+      const result = this.cardPayment.execute();
+      return result.success ? result.transactionId : null;
+    }
+    return this.generateTransactionId();
   }
 
   /**

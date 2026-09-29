@@ -29,6 +29,8 @@ export const environment = {
 
   // The one flag this file exists to flip. See environment.ts.
   allowSeededAdmin: true,
+  // Smoke runs against production services; never create local demo products.
+  allowSeededProducts: false,
   geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration — identical to environment.prod.ts. The smoke suite
@@ -90,6 +92,7 @@ export const environment = {
     publicKey: '',
     preferenceApiUrl:
       'https://capy-pos-api.2e2tmn0h4vl7.us-south.codeengine.appdomain.cloud/api/mercadopago/preference',
+    currency: 'MXN', // ISO 4217 — must match MP_CURRENCY_ID on the backend
   },
 
   paypal: {

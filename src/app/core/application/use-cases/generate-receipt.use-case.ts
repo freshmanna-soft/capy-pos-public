@@ -4,6 +4,7 @@ import { CartItem } from '@core/application/services/cart.service.interface';
 import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { ReceiptData, ReceiptLine } from '@core/application/dtos/receipt.dto';
 import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
+import { environment } from '../../../../environments/environment';
 
 export type { ReceiptData } from '@core/application/dtos/receipt.dto';
 
@@ -40,7 +41,7 @@ export class GenerateReceiptUseCase {
     return {
       payment,
       items: this.linesFromCart(this.cartService.items()),
-      currency: 'USD',
+      currency: environment.mercadopago.currency,
       subtotal: this.cartService.subtotal(),
       tax: this.cartService.tax(),
       taxRate: this.cartService.taxRate(),
@@ -74,7 +75,7 @@ export class GenerateReceiptUseCase {
     return {
       payment,
       items: this.linesFromCart(items),
-      currency: 'USD',
+      currency: environment.mercadopago.currency,
       subtotal,
       tax,
       taxRate,

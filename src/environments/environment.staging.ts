@@ -8,6 +8,8 @@ export const environment = {
 
   // See environment.ts — decoupled from `production` on purpose.
   allowSeededAdmin: true,
+  // Staging uses a real remote catalog; do not mint local demo product IDs.
+  allowSeededProducts: false,
   geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration
@@ -81,6 +83,7 @@ export const environment = {
     enabled: false,
     publicKey: '', // Set via environment variable: MERCADOPAGO_PUBLIC_KEY
     preferenceApiUrl: 'https://api-staging.capy-pos.com/api/mercadopago/preference',
+    currency: 'MXN', // ISO 4217 — must match MP_CURRENCY_ID on the backend
   },
 
   // PayPal — disabled for staging until keys are provisioned.

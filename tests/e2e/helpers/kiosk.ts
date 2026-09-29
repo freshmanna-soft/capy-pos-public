@@ -117,8 +117,10 @@ export async function seedKioskDeviceToken(page: Page): Promise<void> {
             terminalId: 'default-org/default-store/default-terminal',
             label: 'E2E terminal',
             mode: 'kiosk',
-            mercadopagoEnabled: null,
-            paypalEnabled: null,
+            // Keep kiosk E2E coverage on the explicit cash-payment path. Null
+            // inherits the dev MercadoPago flag and hides cash/card methods.
+            mercadopagoEnabled: false,
+            paypalEnabled: false,
             fenceEnabled: false,
             fenceLat: null,
             fenceLng: null,
@@ -196,27 +198,6 @@ export async function stubTransactionEndpoint(page: Page): Promise<void> {
             body: JSON.stringify({ id: 'e2e-tx-001', status: 'ok' }),
           })
         : route.continue(),
-  );
-}
-
-/**
- * stubShopSessionEndpoint
- *
- * Intercepts POST /api/shop/session and replies 201 with a dummy token.
- * Used in shop.spec.ts where the /shop route requests a session on load.
- */
-export async function stubShopSessionEndpoint(page: Page): Promise<void> {
-  await page.route(
-    (url) => url.pathname.endsWith('/api/shop/session'),
-    (route) =>
-      route.fulfill({
-        status: 201,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          token: 'e2e-shop-session-token',
-          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-        }),
-      }),
   );
 }
 

@@ -29,6 +29,10 @@ export const environment = {
   // pilot, and only the real deployed pilot may never gain this account.
   allowSeededAdmin: true,
 
+  // Local-only demo catalog. Real deployments must keep this disabled so the
+  // browser never invents products that do not exist in the backend catalog.
+  allowSeededProducts: true,
+
   // API Configuration
   //
   // The open follow-up #224 left behind: local dev now points at a *locally
@@ -143,6 +147,7 @@ export const environment = {
     enabled: true,
     publicKey: 'APP_USR-6304b4d3-513f-47eb-99bb-91a86ad5ddb4', // replace with real TEST key
     preferenceApiUrl: 'http://localhost:8790/api/mercadopago/preference',
+    currency: 'MXN', // ISO 4217 — must match MP_CURRENCY_ID on the backend
   },
 
   // PayPal — disabled in dev; the adapter is opt-in per build target.
