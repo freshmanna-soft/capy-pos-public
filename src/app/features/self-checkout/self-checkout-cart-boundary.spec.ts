@@ -85,6 +85,7 @@ describe('self-checkout cart boundary', () => {
       ],
     });
 
+    sessionStorage.clear();
     appRoot = TestBed.inject(EnvironmentInjector);
     routeInjector = createEnvironmentInjector(selfCheckout.providers ?? [], appRoot);
     rootCart = TestBed.inject(CartService);
