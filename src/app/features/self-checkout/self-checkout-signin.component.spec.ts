@@ -9,7 +9,7 @@ import {
 } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { Permission } from '@core/domain/auth';
 import { InvalidCredentialsError } from '@core/infrastructure/auth/local-credential-auth.adapter';
-import { LANE_ROUTE } from './self-checkout-routes';
+import { LANE_ROUTE, SIGN_UP_ROUTE } from './self-checkout-routes';
 import { SelfCheckoutSignInComponent } from './self-checkout-signin.component';
 
 describe('SelfCheckoutSignInComponent', () => {
@@ -59,6 +59,17 @@ describe('SelfCheckoutSignInComponent', () => {
     await (fixture.componentInstance as unknown as { submit(): Promise<void> }).submit();
     fixture.detectChanges();
   }
+
+  it('offers new customers a link to account creation', () => {
+    const fixture = render();
+    const link = fixture.nativeElement.querySelector(
+      '[data-testid="signin-create-account"]'
+    ) as HTMLAnchorElement;
+
+    expect(link).toBeTruthy();
+    expect(link.textContent).toContain('Create an account');
+    expect(link.getAttribute('href')).toBe(SIGN_UP_ROUTE);
+  });
 
   it('publishes the authenticated session and returns to the existing basket', async () => {
     vi.useFakeTimers();

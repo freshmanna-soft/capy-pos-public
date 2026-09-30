@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import {
@@ -24,6 +24,7 @@ import {
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { InvalidCredentialsError } from '@core/infrastructure/auth/local-credential-auth.adapter';
 import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webauthn/pin-policy';
+import { SIGN_IN_ROUTE as CUSTOMER_SIGN_IN_ROUTE } from '@features/self-checkout/self-checkout-routes';
 
 /**
  * LoginComponent
@@ -44,7 +45,7 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="login-page" role="main">
@@ -242,6 +243,14 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
                 Forgot password?
               </button>
             }
+
+            <a
+              [routerLink]="customerSignInRoute"
+              class="btn-quiet customer-login-link"
+              data-testid="link-customer-login"
+            >
+              Customer? Sign in to checkout
+            </a>
           </form>
         } @else {
           <form
@@ -463,6 +472,13 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
         margin-top: 0.25rem;
       }
 
+      .customer-login-link {
+        align-self: center;
+        margin-top: 0.25rem;
+        text-decoration: underline;
+        text-underline-offset: 0.2em;
+      }
+
       .divider {
         display: flex;
         align-items: center;
@@ -570,6 +586,7 @@ export class LoginComponent implements OnInit {
 
   readonly loading = signal(false);
   readonly authError = signal<string | null>(null);
+  readonly customerSignInRoute = CUSTOMER_SIGN_IN_ROUTE;
 
   readonly forgotPasswordMode = signal(false);
   readonly forgotPasswordBusy = signal(false);

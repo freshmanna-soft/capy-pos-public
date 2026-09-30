@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, vi } from 'vitest';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
+import { SIGN_IN_ROUTE as CUSTOMER_SIGN_IN_ROUTE } from '@features/self-checkout/self-checkout-routes';
 import { RouterTestingModule } from '@angular/router/testing';
 import { LoginComponent } from './login.component';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
@@ -134,6 +135,16 @@ describe('LoginComponent', () => {
       expect(getEl(fixture, '[data-testid="auth-error"]')).toBeNull();
       expect(getEl(fixture, '[data-testid="email-error"]')).toBeNull();
       expect(getEl(fixture, '[data-testid="password-error"]')).toBeNull();
+    });
+
+    it('offers customers a link to their checkout sign-in', async () => {
+      const gateway = makeGateway({ succeeds: true });
+      const fixture = await createComponent(gateway);
+
+      const link = getEl<HTMLAnchorElement>(fixture, '[data-testid="link-customer-login"]');
+      expect(link).toBeTruthy();
+      expect(link.textContent).toContain('Customer? Sign in to checkout');
+      expect(link.getAttribute('href')).toBe(CUSTOMER_SIGN_IN_ROUTE);
     });
   });
 
@@ -637,6 +648,20 @@ describe('LoginComponent — forgot password', () => {
     expect(getEl(fixture, '[data-testid="forgot-password-message"]').textContent).toContain(
       "we've sent a link"
     );
+  });
+
+  it('does not request a reset when the form yields no email value', async () => {
+    const gateway = makeGateway({ succeeds: true, supportsPasswordReset: true });
+    const fixture = await createComponent(gateway);
+    fixture.componentInstance.openForgotPassword();
+    fixture.componentInstance.forgotPasswordForm.setValue({ email: 'ada@capy.test' });
+    vi.spyOn(fixture.componentInstance.forgotPasswordForm, 'getRawValue').mockReturnValue({
+      email: null,
+    });
+
+    await fixture.componentInstance.submitForgotPassword();
+
+    expect(gateway.requestPasswordReset).not.toHaveBeenCalled();
   });
 
   it('shows the identical neutral confirmation even when the gateway rejects — never reveals whether the account exists', async () => {
