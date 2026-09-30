@@ -9,6 +9,8 @@ describe('CartService', () => {
   let product2: Product;
 
   beforeEach(() => {
+    // Clear persisted cart so hydrate() always starts empty in each test
+    sessionStorage.clear();
     cartService = new CartService();
     product1 = new ProductBuilder()
       .withId('prod-1')
