@@ -68,9 +68,6 @@ describe('SelfCheckoutScanComponent', () => {
     // bus, audit log) which this panel never touches, while the cart itself is the
     // thing under test — "one line, quantity two" is `CartService`'s own dedupe,
     // and stubbing it would make the width-collapse assertions vacuous.
-    //
-    // CartService.hydrate() reads sessionStorage on construction, so the cart from
-    // a prior test would otherwise bleed into this one. Clear it first.
     sessionStorage.clear();
     cart = new CartService();
     TestBed.configureTestingModule({
@@ -352,3 +349,491 @@ describe('SelfCheckoutScanComponent', () => {
     expect(
       fixture.nativeElement.querySelector('[data-testid="self-checkout-start-camera"]')
     ).not.toBeNull();
+  });
+
+  /**
+   * Scans that beat the catalogue.
+   *
+   * The load is a promise started in the constructor and a hardware gun fires the
+   * instant a customer reaches the lane, so this window is not hypothetical. Every
+   * case here is about one thing: a stocked item must never be reported as
+   * unrecognized because of a race the customer cannot see.
+   */
+  describe('before the catalogue has loaded', () => {
+    it('says the items are still coming', () => {
+      const { fixture } = renderPending();
+
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-catalogue-loading"]')
+      ).not.toBeNull();
+    });
+
+    it('drops the hint once they arrive', async () => {
+      const { fixture, catalogue } = renderPending();
+
+      catalogue.arrive([product()]);
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-catalogue-loading"]')
+      ).toBeNull();
+    });
+
+    it('holds a scan and rings it up when the items arrive', async () => {
+      const { fixture, catalogue } = renderPending();
+
+      scan(fixture, EAN13);
+
+      expect(cart.items().length).toBe(0);
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-waiting"]')?.textContent
+      ).toContain(EAN13);
+      // The bug this guards: a stocked article called unknown because the index was
+      // still empty.
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-not-found"]')
+      ).toBeNull();
+
+      catalogue.arrive([product()]);
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(cart.items().length).toBe(1);
+      expect(cart.items()[0]?.quantity).toBe(1);
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-added"]')?.textContent
+      ).toContain('Yuzu Soda');
+    });
+
+    it('holds only the last code — a customer who scanned twice is owed one', async () => {
+      const { fixture, catalogue } = renderPending();
+
+      scan(fixture, UPCA);
+      scan(fixture, EAN13);
+
+      catalogue.arrive([product()]);
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(cart.items().length).toBe(1);
+      expect(cart.items()[0]?.quantity).toBe(1);
+    });
+
+    it('still answers a held code that turns out to be unknown', async () => {
+      const { fixture, catalogue } = renderPending();
+
+      scan(fixture, '5901234123457');
+      catalogue.arrive([product()]);
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(cart.items().length).toBe(0);
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-not-found"]')?.textContent
+      ).toContain('5901234123457');
+    });
+
+    it('sends the customer to a staffed till when the catalogue cannot be read', async () => {
+      const { fixture, catalogue } = renderPending();
+
+      scan(fixture, UPCA);
+      catalogue.fail(new Error('offline'));
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-catalogue-error"]')
+      ).not.toBeNull();
+      // Neither a lie about the code nor a phantom add: the banner is the answer.
+      expect(cart.items().length).toBe(0);
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-not-found"]')
+      ).toBeNull();
+    });
+
+    it('reports a scan made after a failed load without inventing a verdict', async () => {
+      const { fixture, catalogue } = renderPending();
+
+      catalogue.fail(new Error('offline'));
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      scan(fixture, UPCA);
+
+      expect(cart.items().length).toBe(0);
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-not-found"]')
+      ).toBeNull();
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-waiting"]')
+      ).toBeNull();
+    });
+  });
+  /**
+   * The camera path.
+   *
+   * An accelerator, not the way in: `BarcodeDetector` is Chromium-only, so a lane on
+   * Safari types instead. What it must never do is ring an item up more than the
+   * customer presented it — a jar held up for two seconds decodes sixteen times.
+   */
+  describe('the camera path', () => {
+    /** A code the decoder claims to see, big enough in frame to count. */
+    function seen(value: string): ScannedCode {
+      return { value, format: 'ean_13', box: { x: 0.35, y: 0.4, width: 0.3, height: 0.2 } };
+    }
+
+    /**
+     * A lane with the camera on offer.
+     *
+     * The frame and the camera's answer are arguments rather than mocks set by the
+     * caller beforehand, because `configure()` re-arms every double — an override
+     * made before this call would be quietly undone inside it.
+     */
+    async function openLane(
+      options: {
+        products?: Product[];
+        /** What the decoder reports each look, or `null` for "frame not examined". */
+        frame?: ScannedCode[] | null;
+        /** Whether the camera opens at all, and whether it yields a picture. */
+        opens?: boolean;
+        picture?: boolean;
+      } = {}
+    ) {
+      vi.useFakeTimers();
+      // jsdom has no media pipeline: `play()` is unimplemented and returns undefined,
+      // which `bindPreview` would then call `.catch` on.
+      vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+      configure(options.products ?? [product()]);
+      prepare.mockResolvedValue(true);
+      supported.mockReturnValue(true);
+      detect.mockResolvedValue(options.frame ?? null);
+      cameraStart.mockResolvedValue(options.opens ?? true);
+      detectionSource.mockReturnValue((options.picture ?? true) ? ({} as HTMLVideoElement) : null);
+
+      const fixture = TestBed.createComponent(SelfCheckoutScanComponent);
+      fixture.detectChanges();
+      // The catalogue load and the detector probe are both promises started in the
+      // constructor; the camera button does not exist until the probe has answered.
+      await vi.advanceTimersByTimeAsync(0);
+      fixture.detectChanges();
+      return fixture;
+    }
+
+    function startCamera(fixture: Awaited<ReturnType<typeof openLane>>) {
+      fixture.nativeElement.querySelector('[data-testid="self-checkout-start-camera"]').click();
+      fixture.detectChanges();
+    }
+
+    it('opens the camera and shows the customer what it sees', async () => {
+      const fixture = await openLane();
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(0);
+      fixture.detectChanges();
+
+      expect(cameraStart).toHaveBeenCalled();
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-preview"]')
+      ).not.toBeNull();
+      // Attached from both sides, because the element and the stream arrive in either
+      // order and a video attached too late never gets any pixels.
+      expect(attach).toHaveBeenCalled();
+    });
+
+    it('opens the camera once when the control is double-tapped', async () => {
+      const fixture = await openLane();
+      const start = fixture.nativeElement.querySelector(
+        '[data-testid="self-checkout-start-camera"]'
+      );
+
+      // Two taps landing before Angular has swapped the button for "Stop camera" —
+      // ordinary on a touch screen. A second `start()` would strand the first stream.
+      start.click();
+      start.click();
+      await vi.advanceTimersByTimeAsync(0);
+      fixture.detectChanges();
+
+      expect(cameraStart).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to typing when the camera will not open', async () => {
+      const fixture = await openLane({ opens: false });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(500);
+      fixture.detectChanges();
+
+      // A refused permission must leave the lane usable, not stuck on a dead preview.
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-preview"]')
+      ).toBeNull();
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-start-camera"]')
+      ).not.toBeNull();
+      expect(detect).not.toHaveBeenCalled();
+    });
+
+    it('adds the article it decodes from a frame', async () => {
+      const fixture = await openLane({ frame: [seen(EAN13)] });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(300);
+      fixture.detectChanges();
+
+      // Decoded as an EAN-13, stored as a UPC-A: the same width collapse as the
+      // typed path, reached through the camera.
+      expect(cart.items().length).toBe(1);
+      expect(cart.items()[0]?.product.id).toBe('p1');
+    });
+
+    it('rings one jar up once however many frames it appears in', async () => {
+      const fixture = await openLane({ frame: [seen(UPCA)] });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(1200);
+      fixture.detectChanges();
+
+      // Ten looks at the same jar is one jar. Without the gate it is ten.
+      expect(detect.mock.calls.length).toBeGreaterThan(1);
+      expect(cart.items().length).toBe(1);
+      expect(cart.items()[0]?.quantity).toBe(1);
+    });
+
+    it('keeps looking through frames that were never examined', async () => {
+      // Null is "not examined", not "nothing there" — a decode already in flight or a
+      // video with no pixels yet. Ending the scan on it would hang the lane.
+      const fixture = await openLane({ frame: null });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(1000);
+      fixture.detectChanges();
+
+      expect(detect.mock.calls.length).toBeGreaterThan(1);
+      expect(cart.items().length).toBe(0);
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-preview"]')
+      ).not.toBeNull();
+    });
+
+    it('keeps looking through frames it examined and found empty', async () => {
+      // The sibling of the null case above, and a different answer to the gate: an
+      // examined frame holding nothing is a real absence, so the gate is told `null`
+      // rather than skipped. Skipping would leave it believing whatever it last saw
+      // was still in front of the lens.
+      const fixture = await openLane({ frame: [] });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(1000);
+      fixture.detectChanges();
+
+      expect(detect.mock.calls.length).toBeGreaterThan(1);
+      expect(cart.items().length).toBe(0);
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-preview"]')
+      ).not.toBeNull();
+    });
+
+    it('ignores a code too small in frame to have been presented', async () => {
+      // A barcode caught on a shelf behind the customer decodes perfectly well. Width
+      // is what separates "in the picture" from "being handed to the till", so a box
+      // under the gate's minimum reaches it as an absence, not as that code.
+      const fixture = await openLane({
+        frame: [
+          { value: EAN13, format: 'ean_13', box: { x: 0.1, y: 0.1, width: 0.02, height: 0.01 } },
+        ],
+      });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(1000);
+      fixture.detectChanges();
+
+      expect(detect.mock.calls.length).toBeGreaterThan(1);
+      expect(cart.items().length).toBe(0);
+    });
+
+    it('rings the same jar up again once it has been taken away and brought back', async () => {
+      // Why the empty frame must reach the gate at all: absence is what retires the
+      // code in hand. Without it the gate would still hold the first sighting and a
+      // customer buying two identical sodas could only ever scan one.
+      const fixture = await openLane({ frame: [seen(UPCA)] });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(300);
+      fixture.detectChanges();
+      expect(cart.items().length).toBe(1);
+
+      // Taken out of frame for longer than a flicker, then presented again.
+      detect.mockResolvedValue([]);
+      await vi.advanceTimersByTimeAsync(2000);
+      detect.mockResolvedValue([seen(UPCA)]);
+      await vi.advanceTimersByTimeAsync(300);
+      fixture.detectChanges();
+
+      expect(cart.items().length).toBe(1);
+      expect(cart.items()[0]?.quantity).toBe(2);
+    });
+
+    it('asks the decoder nothing until there is a picture', async () => {
+      const fixture = await openLane({ picture: false });
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(detect).not.toHaveBeenCalled();
+    });
+
+    it('closes the camera when the customer puts it away', async () => {
+      const fixture = await openLane();
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(0);
+      fixture.detectChanges();
+      fixture.nativeElement.querySelector('[data-testid="self-checkout-stop-camera"]').click();
+      fixture.detectChanges();
+
+      expect(cameraStop).toHaveBeenCalled();
+      expect(
+        fixture.nativeElement.querySelector('[data-testid="self-checkout-preview"]')
+      ).toBeNull();
+    });
+
+    it('closes the camera when the lane is left mid-scan', async () => {
+      const fixture = await openLane();
+
+      startCamera(fixture);
+      await vi.advanceTimersByTimeAsync(0);
+      fixture.destroy();
+
+      // The shell navigating back to the till must not leave a customer-facing
+      // camera running on the terminal.
+      expect(cameraStop).toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * What the lane says out loud.
+   *
+   * A self-checkout is used unaided by definition, so every reply the panel renders
+   * is inserted asynchronously into a page that has already settled — which means an
+   * assistive technology only ever hears it if the element carries a live-region
+   * role. Silence is the failure mode that matters here: a customer who scans and is
+   * told nothing reads that as "it worked" and walks out with an unpaid item.
+   *
+   * `role` is asserted rather than assumed, because a missing one is invisible in
+   * every other test in this file — the text renders, the DOM query passes, and the
+   * only thing lost is the announcement.
+   */
+  describe('what the lane announces', () => {
+    type Fixture = Awaited<ReturnType<typeof render>>;
+
+    function reply(fixture: Fixture, testId: string): HTMLElement | null {
+      return fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
+    }
+
+    it('announces a successful add politely', async () => {
+      const fixture = await render();
+
+      scan(fixture, UPCA);
+
+      expect(reply(fixture, 'self-checkout-added')?.getAttribute('role')).toBe('status');
+    });
+
+    it('announces an unrecognized code politely', async () => {
+      const fixture = await render();
+
+      scan(fixture, '5901234123457');
+
+      expect(reply(fixture, 'self-checkout-not-found')?.getAttribute('role')).toBe('status');
+    });
+
+    it('announces a refused add politely', async () => {
+      const fixture = await render([product({ stock: 0 } as Partial<Product>)]);
+
+      scan(fixture, UPCA);
+
+      expect(reply(fixture, 'self-checkout-unavailable')?.getAttribute('role')).toBe('status');
+    });
+
+    it('announces the wait, and the code being held through it', () => {
+      const { fixture } = renderPending();
+
+      expect(reply(fixture, 'self-checkout-catalogue-loading')?.getAttribute('role')).toBe(
+        'status'
+      );
+
+      scan(fixture, EAN13);
+
+      expect(reply(fixture, 'self-checkout-waiting')?.getAttribute('role')).toBe('status');
+    });
+
+    it('interrupts with the catalogue failure rather than waiting to be noticed', async () => {
+      const { fixture, catalogue } = renderPending();
+
+      catalogue.fail(new Error('offline'));
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      // `alert` and not `status`: this one arrives long after the page settled and it
+      // ends the customer's visit at this lane, so it is worth interrupting for.
+      expect(reply(fixture, 'self-checkout-catalogue-error')?.getAttribute('role')).toBe('alert');
+      // And it is the banner alone until something is actually scanned.
+      expect(reply(fixture, 'self-checkout-unreachable')).toBeNull();
+    });
+
+    it('answers a scan made after a failed load instead of going silent', async () => {
+      const { fixture, catalogue } = renderPending();
+      catalogue.fail(new Error('offline'));
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      scan(fixture, UPCA);
+
+      // The banner is rendered once; this is the reply to *this* scan. Without it a
+      // customer who cannot see the banner scans their whole shop into nothing.
+      const answer = reply(fixture, 'self-checkout-unreachable');
+      expect(answer?.getAttribute('role')).toBe('status');
+      expect(answer?.textContent).toContain(UPCA);
+      expect(cart.items().length).toBe(0);
+    });
+
+    it('takes back the promise it made to a code it can no longer look up', async () => {
+      const { fixture, catalogue } = renderPending();
+      scan(fixture, EAN13);
+      expect(reply(fixture, 'self-checkout-waiting')).not.toBeNull();
+
+      catalogue.fail(new Error('offline'));
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      // "We'll add it as soon as they're here" is now false, and leaving it under the
+      // failure banner tells the customer to keep waiting for an item that is coming.
+      expect(reply(fixture, 'self-checkout-waiting')).toBeNull();
+      expect(reply(fixture, 'self-checkout-unreachable')?.textContent).toContain(EAN13);
+    });
+
+    it('says the basket already holds all the stock, rather than "unavailable"', async () => {
+      const fixture = await render([product({ stock: 1 } as Partial<Product>)]);
+
+      scan(fixture, UPCA);
+      scan(fixture, EAN13);
+
+      // The two rejections are different situations: this customer should look in
+      // their own basket, not walk to a staffed till for an item nobody is holding.
+      expect(cart.items()[0]?.quantity).toBe(1);
+      expect(reply(fixture, 'self-checkout-unavailable')?.textContent).toContain(
+        'already in your basket'
+      );
+    });
+
+    it('says nothing about the basket when there is simply none left', async () => {
+      const fixture = await render([product({ stock: 0 } as Partial<Product>)]);
+
+      scan(fixture, UPCA);
+
+      const answer = reply(fixture, 'self-checkout-unavailable');
+      expect(answer?.textContent).toContain("isn't available right now");
+      expect(answer?.textContent).not.toContain('already in your basket');
+    });
+  });
+});
