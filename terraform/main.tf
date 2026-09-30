@@ -44,16 +44,16 @@ locals {
   # The apps that hold the model key, the apps that verify a session token, and the
   # apps that talk to Cloudant. Derived once so the secret resources and the env
   # bindings below cannot drift apart from each other.
-  model_key_services       = { for name, service in var.services : name => service if service.needs_model_key }
-  session_guarded_services = { for name, service in var.services : name => service if service.needs_session_secret }
-  cloudant_services        = { for name, service in var.services : name => service if service.needs_cloudant }
-  appid_secret_services    = { for name, service in var.services : name => service if service.needs_appid_secret }
-  internal_secret_services = { for name, service in var.services : name => service if service.needs_internal_secret }
-  mercadopago_services     = { for name, service in var.services : name => service if service.needs_mercadopago }
+  model_key_services        = { for name, service in var.services : name => service if service.needs_model_key }
+  session_guarded_services  = { for name, service in var.services : name => service if service.needs_session_secret }
+  cloudant_services         = { for name, service in var.services : name => service if service.needs_cloudant }
+  appid_secret_services     = { for name, service in var.services : name => service if service.needs_appid_secret }
+  internal_secret_services  = { for name, service in var.services : name => service if service.needs_internal_secret }
+  mercadopago_services      = { for name, service in var.services : name => service if service.needs_mercadopago }
   image_store_services      = { for name, service in var.services : name => service if try(service.needs_image_store, false) }
-  checkout_services           = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
-  checkout_job_services       = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
-  customer_loyalty_services   = { for name, service in var.services : name => service if try(service.needs_customer_loyalty, false) }
+  checkout_services         = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
+  checkout_job_services     = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
+  customer_loyalty_services = { for name, service in var.services : name => service if try(service.needs_customer_loyalty, false) }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
   # what `readAllowedOrigins` in each proxy's `session-guard.ts` parses. Empty until
@@ -131,8 +131,8 @@ locals {
         # auto_return works after payment. Without it the server defaults to
         # http://localhost:4200 and MP rejects auto_return over plain HTTP.
         # MP_CURRENCY_ID overrides the token-inferred currency (MXN for Mexico).
-        APP_BASE_URL    = "https://capy-pos-app.${var.ce_subdomain}.${var.ce_region}.codeengine.appdomain.cloud"
-        MP_CURRENCY_ID  = var.mp_currency_id
+        APP_BASE_URL   = "https://capy-pos-app.${var.ce_subdomain}.${var.ce_region}.codeengine.appdomain.cloud"
+        MP_CURRENCY_ID = var.mp_currency_id
       } : {},
       service.needs_checkout ? {
         CHECKOUT_ENABLED                 = "true"
@@ -895,47 +895,6 @@ resource "ibm_code_engine_app" "apps" {
   }
 
   dynamic "run_env_variables" {
-    for_each = each.value.needs_image_store ? [1] : []
-
-    content {
-      type  = "literal"
-      name  = "COS_ENDPOINT"
-      value = var.cos_endpoint
-    }
-  }
-
-  dynamic "run_env_variables" {
-    for_each = each.value.needs_image_store ? [1] : []
-
-    content {
-      type  = "literal"
-      name  = "COS_BUCKET"
-      value = var.cos_bucket
-    }
-  }
-
-  dynamic "run_env_variables" {
-    for_each = each.value.needs_image_store ? [1] : []
-
-    content {
-      type  = "literal"
-      name  = "COS_PUBLIC_URL_BASE"
-      value = var.cos_public_url_base
-    }
-  }
-
-  dynamic "run_env_variables" {
-    for_each = each.value.needs_image_store ? [1] : []
-
-    content {
-      type      = "secret_key_reference"
-      name      = "COS_APIKEY"
-      key       = "COS_APIKEY"
-      reference = ibm_code_engine_secret.cos_api[each.key].name
-    }
-  }
-
-  dynamic "run_env_variables" {
     for_each = each.value.needs_checkout ? [1] : []
 
     content {
@@ -1048,6 +1007,47 @@ resource "ibm_code_engine_app" "apps" {
       name      = "MERCADOPAGO_ACCESS_TOKEN_PROD"
       key       = "MERCADOPAGO_ACCESS_TOKEN_PROD"
       reference = ibm_code_engine_secret.mercadopago_secret[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type  = "literal"
+      name  = "COS_ENDPOINT"
+      value = var.cos_endpoint
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type  = "literal"
+      name  = "COS_BUCKET"
+      value = var.cos_bucket
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type  = "literal"
+      name  = "COS_PUBLIC_URL_BASE"
+      value = var.cos_public_url_base
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "COS_APIKEY"
+      key       = "COS_APIKEY"
+      reference = ibm_code_engine_secret.cos_api[each.key].name
     }
   }
 

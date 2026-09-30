@@ -116,8 +116,10 @@ export interface SyncWorkerConfig {
    *
    * `refuseUnauthorizedPush` drops its log from `console.warn` to `console.info`
    * in kiosk mode so the browser console does not alarm operators with noise that
-   * is expected and harmless.  The worker behaviour is otherwise unchanged: stock
-   * decrements are queued and will flush on the next authorised staff session.
+   * is expected and harmless. The worker also skips the transaction-history pull in
+   * kiosk mode because shop/device capability tokens do not grant
+   * `sale:view_transactions`; stock decrements are queued and will flush on the
+   * next authorised staff session.
    *
    * Set by `SyncKioskModeService` via `UPDATE_CONFIG` when the router is on a
    * `/kiosk` or `/shop` route.

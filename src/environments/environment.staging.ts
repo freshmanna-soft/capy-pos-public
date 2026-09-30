@@ -8,6 +8,8 @@ export const environment = {
 
   // See environment.ts — decoupled from `production` on purpose.
   allowSeededAdmin: true,
+  // Staging uses a real remote catalog; do not mint local demo product IDs.
+  allowSeededProducts: false,
   geofencing: { mockPosition: null as { lat: number; lng: number } | null },
 
   // API Configuration

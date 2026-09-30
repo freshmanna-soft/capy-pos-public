@@ -36,18 +36,28 @@ export class SyncKioskModeService {
 
   private lastPushed: boolean | undefined = undefined;
 
+  /** Initial mode for SyncService.start(), before a worker exists to receive updates. */
+  get initialKioskMode(): boolean {
+    return this.lastPushed ?? false;
+  }
+
   constructor() {
+    // A direct load of /shop or /kiosk can happen after the router has already
+    // emitted its initial NavigationEnd. Seed from the current URL so the
+    // worker cannot start with kioskMode=false and make one staff-only pull.
+    this.pushModeForUrl(this.router.url);
+
     this.router.events
       .pipe(filter((e): e is NavigationEnd => e instanceof NavigationEnd))
-      .subscribe((e) => {
-        const kioskMode = SyncKioskModeService.KIOSK_PREFIXES.some((prefix) =>
-          e.urlAfterRedirects.startsWith(prefix)
-        );
+      .subscribe((e) => this.pushModeForUrl(e.urlAfterRedirects));
+  }
 
-        if (kioskMode === this.lastPushed) return;
+  private pushModeForUrl(url: string): void {
+    const kioskMode = SyncKioskModeService.KIOSK_PREFIXES.some((prefix) => url.startsWith(prefix));
 
-        this.lastPushed = kioskMode;
-        this.sync.updateConfig({ kioskMode });
-      });
+    if (kioskMode === this.lastPushed) return;
+
+    this.lastPushed = kioskMode;
+    this.sync.updateConfig({ kioskMode });
   }
 }
