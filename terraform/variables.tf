@@ -219,6 +219,31 @@ variable "mercadopago_access_token_prod" {
   default   = ""
 }
 
+variable "cos_endpoint" {
+  description = "IBM Cloud Object Storage S3 endpoint used for product images, without a trailing slash."
+  type        = string
+  default     = ""
+}
+
+variable "cos_bucket" {
+  description = "Externally managed IBM COS bucket name for product images."
+  type        = string
+  default     = ""
+}
+
+variable "cos_public_url_base" {
+  description = "Public read URL base for product images, without a trailing slash."
+  type        = string
+  default     = ""
+}
+
+variable "cos_api_key" {
+  description = "IBM Cloud API key used by pos-api to upload product images to COS."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "internal_api_secret" {
   description = <<-EOT
     Shared secret for service-to-service calls that have no end-user token to
@@ -310,6 +335,8 @@ variable "services" {
     # Binds CLOUDANT_URL and CLOUDANT_APIKEY from the shared Cloudant instance's
     # per-app secret.
     needs_cloudant = optional(bool, false)
+    # Binds IBM COS upload configuration for product images.
+    needs_image_store = optional(bool, false)
     # Binds APPID_REGION/APPID_TENANT_ID/APPID_CLIENT_ID as literal env and
     # APPID_CLIENT_SECRET from a per-app secret. Only infra/appid-token-relay sets
     # this — it is the one service that ever holds the App ID client secret.
@@ -414,6 +441,7 @@ variable "services" {
       needs_customer_verification = true
       needs_customer_loyalty      = false
       needs_cloudant              = true
+      needs_image_store            = true
       # needs_checkout requires PayPal credentials — enable once configured.
       needs_checkout              = false
       pins_cors_origins           = true

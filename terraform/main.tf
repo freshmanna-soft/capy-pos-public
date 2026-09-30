@@ -50,6 +50,7 @@ locals {
   appid_secret_services    = { for name, service in var.services : name => service if service.needs_appid_secret }
   internal_secret_services = { for name, service in var.services : name => service if service.needs_internal_secret }
   mercadopago_services     = { for name, service in var.services : name => service if service.needs_mercadopago }
+  image_store_services      = { for name, service in var.services : name => service if try(service.needs_image_store, false) }
   checkout_services           = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
   checkout_job_services       = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
   customer_loyalty_services   = { for name, service in var.services : name => service if try(service.needs_customer_loyalty, false) }
@@ -420,6 +421,30 @@ resource "ibm_code_engine_secret" "cloudant_migration_creds" {
   data = {
     CLOUDANT_URL    = local.cloudant_manager_credentials.url
     CLOUDANT_APIKEY = local.cloudant_manager_credentials.apikey
+  }
+}
+
+resource "ibm_code_engine_secret" "cos_api" {
+  for_each = local.image_store_services
+
+  project_id = ibm_code_engine_project.project.project_id
+  name       = "${each.key}-cos"
+  format     = "generic"
+
+  data = {
+    COS_APIKEY = var.cos_api_key
+  }
+
+  lifecycle {
+    precondition {
+      condition = alltrue([
+        length(var.cos_endpoint) > 0,
+        length(var.cos_api_key) > 0,
+        length(var.cos_bucket) > 0,
+        length(var.cos_public_url_base) > 0,
+      ])
+      error_message = "Image storage requires COS_ENDPOINT, COS_API_KEY, COS_BUCKET, and COS_PUBLIC_URL_BASE."
+    }
   }
 }
 
@@ -866,6 +891,47 @@ resource "ibm_code_engine_app" "apps" {
       name      = "CLOUDANT_APIKEY"
       key       = "CLOUDANT_APIKEY"
       reference = ibm_code_engine_secret.cloudant_creds[each.key].name
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type  = "literal"
+      name  = "COS_ENDPOINT"
+      value = var.cos_endpoint
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type  = "literal"
+      name  = "COS_BUCKET"
+      value = var.cos_bucket
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type  = "literal"
+      name  = "COS_PUBLIC_URL_BASE"
+      value = var.cos_public_url_base
+    }
+  }
+
+  dynamic "run_env_variables" {
+    for_each = each.value.needs_image_store ? [1] : []
+
+    content {
+      type      = "secret_key_reference"
+      name      = "COS_APIKEY"
+      key       = "COS_APIKEY"
+      reference = ibm_code_engine_secret.cos_api[each.key].name
     }
   }
 
