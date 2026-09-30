@@ -789,7 +789,6 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
               (printReceipt)="handlePrintReceipt()"
               data-testid="shop-receipt"
             />
-
           </div>
         }
 
