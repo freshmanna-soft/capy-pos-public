@@ -68,6 +68,7 @@ describe('SelfCheckoutScanComponent', () => {
     // bus, audit log) which this panel never touches, while the cart itself is the
     // thing under test — "one line, quantity two" is `CartService`'s own dedupe,
     // and stubbing it would make the width-collapse assertions vacuous.
+    sessionStorage.clear();
     cart = new CartService();
     TestBed.configureTestingModule({
       imports: [SelfCheckoutScanComponent],
