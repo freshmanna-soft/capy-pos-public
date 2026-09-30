@@ -17,6 +17,7 @@ template kept for reference and is not applied by this root module — see
 | `ibm_code_engine_secret.cr_secret`                | Registry pull secret (`icr-secret`).                                                                                          |
 | `ibm_code_engine_secret.model_key`                | `ANTHROPIC_API_KEY`, one per app that sets `needs_model_key`.                                                                 |
 | `ibm_code_engine_secret.session_jwt`              | `SESSION_JWT_SECRET`, one for the project, when any app sets `needs_session_secret`.                                          |
+| `ibm_code_engine_secret.cos_api`                  | `COS_APIKEY`, one per app that sets `needs_image_store`; endpoint, bucket, and public URL are literal bindings.              |
 | `ibm_cloudant.store`                              | One shared Cloudant (Lite plan) instance, for pos-api's own data.                                                             |
 | `ibm_resource_key.cloudant_key`                   | Generated Manager credential used only by checkout index migration.                                                           |
 | `ibm_resource_key.cloudant_writer_key`            | Generated Writer credential used by runtime apps and reconciliation.                                                          |
@@ -69,6 +70,8 @@ Set these as `TF_VAR_*` environment variables (never in a committed `.tfvars`):
 | `anthropic_api_key`                               | if any service `needs_model_key`                       | `""`                | Sensitive. Bound as a secret, never as a literal env var.                                                                                                                                             |
 | `anthropic_base_url`                              | no                                                     | `""`                | Route model calls through a gateway (e.g. an IBM litellm proxy) instead of the real API. Not sensitive — a literal env var. `anthropic_api_key` must be shaped for whichever endpoint this points at. |
 | `session_jwt_secret`                              | if any service `needs_session_secret`                  | `""`                | Sensitive. Must match `getJwtSecret()` — see the auth note below.                                                                                                                                     |
+| `cos_endpoint` / `cos_bucket` / `cos_public_url_base` | if any service `needs_image_store`                  | `""`                | IBM COS S3 endpoint, bucket, and public image URL base.                                                                                                                                               |
+| `cos_api_key`                                     | if any service `needs_image_store`                    | `""`                | Sensitive. IBM API key bound only as `COS_APIKEY` in the app secret.                                                                                                                                  |
 | `frontend_origins`                                | if any service `pins_cors_origins`                     | production defaults | List of `scheme://host[:port]`, no trailing slash.                                                                                                                                                    |
 | `paypal_client_id`                                | if any service `needs_checkout`                        | `""`                | PayPal REST client id; not secret.                                                                                                                                                                    |
 | `paypal_client_secret`                            | if any service `needs_checkout`                        | `""`                | Sensitive; bound through Code Engine secrets only.                                                                                                                                                    |
@@ -122,6 +125,8 @@ services = {
   routes still require exact-origin CORS.
 - `needs_cloudant` — binds Writer-scoped `CLOUDANT_URL`/`CLOUDANT_APIKEY` from the
   shared Cloudant instance's per-app secret.
+- `needs_image_store` — binds IBM COS endpoint, bucket, public URL base, and the
+  server-only `COS_APIKEY` secret for product image uploads.
 - `needs_checkout` — binds server-only PayPal/HMAC configuration and, together with
   `needs_cloudant`, declares the checkout migration and reconciliation jobs.
 - `needs_appid_secret` — binds `APPID_REGION`/`APPID_TENANT_ID`/`APPID_CLIENT_ID` as
