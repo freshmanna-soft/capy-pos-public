@@ -85,11 +85,14 @@ describe('self-checkout cart boundary', () => {
       ],
     });
 
-    sessionStorage.clear();
     appRoot = TestBed.inject(EnvironmentInjector);
     routeInjector = createEnvironmentInjector(selfCheckout.providers ?? [], appRoot);
     rootCart = TestBed.inject(CartService);
     rootCart.addProduct(CASHIER_ITEM);
+    // rootCart.addProduct persists to sessionStorage; clear it so that
+    // the route-scoped CartService constructed lazily during the test
+    // starts empty instead of hydrating the staff cart.
+    sessionStorage.clear();
     laneRef = null;
   });
 
