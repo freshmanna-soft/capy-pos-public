@@ -348,11 +348,22 @@ const POLL_MS = 150;
                 class="flex items-center gap-3 p-3 rounded-xl bg-onsen-surface/30"
                 [attr.data-testid]="'kiosk-cart-item-' + item.product.id"
               >
-                <div
-                  class="w-10 h-10 rounded-lg flex-shrink-0"
-                  [style.background]="productGradient(item.product.id)"
-                  aria-hidden="true"
-                ></div>
+                <div class="w-10 h-10 rounded-lg flex-shrink-0 overflow-hidden">
+                  @if (item.product.imageUrl) {
+                    <img
+                      [src]="item.product.imageUrl"
+                      [alt]="item.product.name"
+                      class="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  } @else {
+                    <div
+                      class="w-full h-full"
+                      [style.background]="productGradient(item.product.id)"
+                      aria-hidden="true"
+                    ></div>
+                  }
+                </div>
                 <div class="flex-1 min-w-0">
                   <p class="text-steam text-sm font-medium truncate">{{ item.product.name }}</p>
                   <p class="text-yuzu text-xs font-semibold">
@@ -468,11 +479,22 @@ const POLL_MS = 150;
             <div #kioskMobileCartItems class="flex-1 overflow-y-auto px-4 py-3 space-y-2">
               @for (item of cartService.items(); track item.product.id) {
                 <div class="flex items-center gap-3 p-3 rounded-xl bg-onsen-surface/30">
-                  <div
-                    class="w-10 h-10 rounded-lg flex-shrink-0"
-                    [style.background]="productGradient(item.product.id)"
-                    aria-hidden="true"
-                  ></div>
+                  <div class="w-10 h-10 rounded-lg flex-shrink-0 overflow-hidden">
+                    @if (item.product.imageUrl) {
+                      <img
+                        [src]="item.product.imageUrl"
+                        [alt]="item.product.name"
+                        class="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    } @else {
+                      <div
+                        class="w-full h-full"
+                        [style.background]="productGradient(item.product.id)"
+                        aria-hidden="true"
+                      ></div>
+                    }
+                  </div>
                   <div class="flex-1 min-w-0">
                     <p class="text-steam text-sm font-medium truncate">{{ item.product.name }}</p>
                     <p class="text-yuzu text-xs font-semibold">

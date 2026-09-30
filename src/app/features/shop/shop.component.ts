@@ -281,7 +281,7 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
               <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                 @for (product of filteredProducts(); track product.id) {
                   <button
-                    class="group flex flex-col items-center gap-2 p-3 rounded-2xl bg-onsen-water
+                    class="relative group flex flex-col items-center gap-2 p-3 rounded-2xl bg-onsen-water
                            border border-onsen-surface/60 active:scale-95 transition-transform
                            focus:outline-none focus-visible:ring-2 focus-visible:ring-yuzu/60
                            disabled:opacity-40 disabled:cursor-not-allowed min-h-[140px]"
@@ -317,6 +317,13 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
                         >Out</span
                       >
                     }
+                    @if (cartService.getItem(product.id); as cartItem) {
+                      <span
+                        class="absolute top-2 left-2 min-w-[22px] h-[22px] px-1.5 flex items-center justify-center rounded-full bg-yuzu text-onsen-deep text-[11px] font-bold leading-none shadow-md"
+                        [attr.aria-label]="cartItem.quantity + ' in cart'"
+                        >{{ cartItem.quantity }}</span
+                      >
+                    }
                   </button>
                 }
               </div>
@@ -329,8 +336,49 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
           class="hidden lg:flex flex-col w-[340px] xl:w-[380px] bg-onsen-water border-l border-onsen-surface/60 flex-shrink-0 overflow-hidden"
           data-testid="shop-order-summary"
         >
-          <div class="px-6 py-5 border-b border-onsen-surface/60 flex-shrink-0">
+          <div
+            class="px-6 py-5 border-b border-onsen-surface/60 flex-shrink-0 flex items-center justify-between"
+          >
             <h2 class="font-display text-lg font-bold text-steam">Your Order</h2>
+            @if (!cartService.isEmpty()) {
+              @if (!confirmClear()) {
+                <button
+                  class="flex items-center gap-1.5 text-tsuba/60 hover:text-tsuba transition-colors py-1 px-2"
+                  (click)="confirmClear.set(true)"
+                  aria-label="Clear order"
+                >
+                  <svg
+                    class="w-3.5 h-3.5 flex-shrink-0"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
+                  </svg>
+                  <span class="text-xs font-medium">Clear</span>
+                </button>
+              } @else {
+                <div class="flex items-center gap-2">
+                  <button
+                    class="px-3 py-1.5 rounded-lg text-xs font-semibold text-steam/60 bg-onsen-surface/40 active:bg-onsen-surface transition-colors"
+                    (click)="confirmClear.set(false)"
+                  >
+                    Keep
+                  </button>
+                  <button
+                    class="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-tsuba active:opacity-80 transition-colors"
+                    (click)="clearOrder()"
+                  >
+                    Yes, clear
+                  </button>
+                </div>
+              }
+            }
           </div>
           <div class="flex-1 overflow-y-auto px-6 py-4" #shopCartItems>
             @if (cartService.isEmpty()) {
@@ -343,6 +391,35 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
               <div class="flex flex-col gap-3">
                 @for (item of cartService.items(); track item.product.id) {
                   <div class="flex items-center gap-3">
+                    <!-- Product thumbnail -->
+                    <div
+                      class="flex-shrink-0 w-10 h-10 rounded-lg overflow-hidden bg-onsen-surface/40"
+                    >
+                      @if (item.product.imageUrl) {
+                        <img
+                          [src]="item.product.imageUrl"
+                          [alt]="item.product.name"
+                          class="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      } @else {
+                        <div class="w-full h-full flex items-center justify-center text-steam/30">
+                          <svg
+                            class="w-5 h-5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="1.5"
+                              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                            />
+                          </svg>
+                        </div>
+                      }
+                    </div>
                     <div class="flex-1 min-w-0">
                       <p class="text-steam text-sm font-semibold truncate">
                         {{ item.product.name }}
@@ -401,18 +478,195 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
           </div>
         </aside>
 
-        <!-- Mobile pay FAB -->
+        <!-- Mobile cart bar + expandable sheet -->
         @if (!cartService.isEmpty()) {
-          <div class="lg:hidden fixed bottom-6 inset-x-4 z-50" data-testid="shop-cart-fab">
-            <button
-              class="w-full min-h-[60px] rounded-2xl bg-yuzu text-onsen-deep font-display font-bold text-lg shadow-lg shadow-yuzu/30 active:scale-95 transition-transform"
-              (click)="openCheckout()"
-            >
-              🛒 Pay · {{ cartService.total() | currency: currency }} ({{
-                cartService.totalItems()
-              }}
-              items)
-            </button>
+          <div class="lg:hidden fixed bottom-0 inset-x-0 z-50" data-testid="shop-cart-fab">
+            <!-- Expanded item sheet -->
+            @if (mobileCartExpanded()) {
+              <!-- Backdrop -->
+              <div
+                class="fixed inset-0 bg-black/40"
+                (click)="mobileCartExpanded.set(false)"
+                aria-hidden="true"
+              ></div>
+
+              <!-- Sheet -->
+              <div
+                class="relative bg-onsen-water border-t border-onsen-surface/40 rounded-t-2xl shadow-2xl max-h-[60vh] flex flex-col"
+              >
+                <!-- Sheet header: drag handle + clear action -->
+                <div class="flex items-center px-4 pt-3 pb-2 flex-shrink-0">
+                  <!-- Left: clear order -->
+                  <div class="w-24 flex justify-start">
+                    @if (!confirmClear()) {
+                      <button
+                        class="flex items-center gap-1 text-tsuba/70 hover:text-tsuba transition-colors min-h-[36px] px-1"
+                        (click)="confirmClear.set(true)"
+                        aria-label="Clear order"
+                      >
+                        <svg
+                          class="w-4 h-4 flex-shrink-0"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                        <span class="text-xs font-medium">Clear</span>
+                      </button>
+                    } @else {
+                      <div class="flex items-center gap-1.5">
+                        <button
+                          class="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-steam/60 bg-onsen-surface/40 active:bg-onsen-surface transition-colors min-h-[36px]"
+                          (click)="confirmClear.set(false)"
+                        >
+                          Keep
+                        </button>
+                        <button
+                          class="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-tsuba active:opacity-80 transition-colors min-h-[36px]"
+                          (click)="clearOrder()"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    }
+                  </div>
+                  <!-- Centre: drag handle -->
+                  <button
+                    class="flex-1 flex justify-center cursor-pointer bg-transparent border-none py-1"
+                    (click)="mobileCartExpanded.set(false)"
+                    aria-label="Collapse cart"
+                  >
+                    <div class="w-9 h-1 rounded-full bg-steam/25"></div>
+                  </button>
+                  <!-- Right: spacer to balance layout -->
+                  <div class="w-24"></div>
+                </div>
+
+                <!-- Item list -->
+                <div class="flex-1 overflow-y-auto px-4 pb-2 space-y-2">
+                  @for (item of cartService.items(); track item.product.id) {
+                    <div
+                      class="flex items-center gap-3 py-2 border-b border-onsen-surface/30 last:border-0"
+                    >
+                      <!-- Thumbnail -->
+                      <div class="w-9 h-9 rounded-lg flex-shrink-0 overflow-hidden">
+                        @if (item.product.imageUrl) {
+                          <img
+                            [src]="item.product.imageUrl"
+                            [alt]="item.product.name"
+                            class="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        } @else {
+                          <div
+                            class="w-full h-full"
+                            [style.background]="productGradient(item.product.id)"
+                          ></div>
+                        }
+                      </div>
+                      <!-- Name + price -->
+                      <div class="flex-1 min-w-0">
+                        <p class="text-steam text-sm font-semibold truncate">
+                          {{ item.product.name }}
+                        </p>
+                        <p class="text-steam/50 text-xs">
+                          {{ item.product.price | currency: currency }} each
+                        </p>
+                      </div>
+                      <!-- Qty controls -->
+                      <div class="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          class="w-8 h-8 rounded-lg bg-onsen-surface/60 text-steam font-bold text-base flex items-center justify-center active:bg-onsen-surface transition-colors"
+                          (click)="decrementItem(item.product.id)"
+                          [attr.aria-label]="'Remove one ' + item.product.name"
+                        >
+                          −
+                        </button>
+                        <span class="text-steam text-sm font-bold w-5 text-center">{{
+                          item.quantity
+                        }}</span>
+                        <button
+                          class="w-8 h-8 rounded-lg bg-onsen-surface/60 text-steam font-bold text-base flex items-center justify-center active:bg-onsen-surface transition-colors disabled:opacity-30"
+                          (click)="incrementItem(item.product.id)"
+                          [disabled]="item.quantity >= maxQty"
+                          [attr.aria-label]="'Add one ' + item.product.name"
+                        >
+                          +
+                        </button>
+                      </div>
+                      <!-- Line total -->
+                      <p class="text-yuzu text-sm font-bold w-14 text-right flex-shrink-0">
+                        {{ item.product.price * item.quantity | currency: currency }}
+                      </p>
+                    </div>
+                  }
+                </div>
+
+                <!-- Totals + actions row -->
+                <div class="px-4 pt-3 pb-4 border-t border-onsen-surface/40 flex-shrink-0">
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="flex flex-col">
+                      <span class="text-steam/50 text-xs"
+                        >{{ cartService.totalItems() }} item{{
+                          cartService.totalItems() === 1 ? '' : 's'
+                        }}
+                        · tax incl.</span
+                      >
+                      <span class="text-steam font-display font-bold text-lg">{{
+                        cartService.total() | currency: currency
+                      }}</span>
+                    </div>
+                    <button
+                      class="flex-1 max-w-[180px] min-h-[52px] rounded-xl bg-yuzu text-onsen-deep font-display font-bold text-base shadow-md active:scale-95 transition-transform"
+                      (click)="openCheckout()"
+                    >
+                      Pay now
+                    </button>
+                  </div>
+                </div>
+              </div>
+            }
+
+            <!-- Collapsed bar (always visible when cart has items) -->
+            @if (!mobileCartExpanded()) {
+              <button
+                class="w-full min-h-[64px] bg-yuzu text-onsen-deep font-display font-bold text-base shadow-lg shadow-yuzu/30 active:scale-[0.98] transition-transform flex items-center px-5 gap-3"
+                (click)="mobileCartExpanded.set(true)"
+                data-testid="shop-cart-bar"
+              >
+                <span class="text-xl">🛒</span>
+                <span class="flex-1 text-left leading-tight">
+                  <span class="block text-sm font-semibold opacity-70"
+                    >{{ cartService.totalItems() }} item{{
+                      cartService.totalItems() === 1 ? '' : 's'
+                    }}
+                    in cart</span
+                  >
+                  <span class="block text-lg font-bold">{{
+                    cartService.total() | currency: currency
+                  }}</span>
+                </span>
+                <svg
+                  class="w-5 h-5 opacity-60"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2.5"
+                    d="M5 15l7-7 7 7"
+                  />
+                </svg>
+              </button>
+            }
           </div>
         }
 
@@ -675,6 +929,14 @@ export class ShopComponent implements OnInit, OnDestroy {
 
   // ── Auth modal ───────────────────────────────────────────────────────────────
   readonly showAuthModal = signal(false);
+  readonly mobileCartExpanded = signal(false);
+  readonly confirmClear = signal(false);
+
+  clearOrder(): void {
+    this.cartService.clearCart();
+    this.mobileCartExpanded.set(false);
+    this.confirmClear.set(false);
+  }
   readonly authError = signal<string | null>(null);
   readonly authBusy = signal(false);
   authEmail = '';
