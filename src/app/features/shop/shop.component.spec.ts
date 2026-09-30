@@ -68,6 +68,7 @@ function makeCartStub() {
     total: signal(0),
     totalItems: signal(0),
     clearCart: vi.fn(),
+    getItem: vi.fn().mockReturnValue(undefined),
   };
 }
 

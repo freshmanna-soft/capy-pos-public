@@ -50,6 +50,10 @@ describe('self-checkout cart boundary', () => {
   let laneRef: ComponentRef<SelfCheckoutComponent> | null;
 
   beforeEach(() => {
+    // Both CartService instances share the same sessionStorage key. Clear first
+    // so every instance constructed during this test hydrates from an empty store.
+    sessionStorage.clear();
+
     TestBed.configureTestingModule({
       providers: [
         { provide: Router, useValue: { navigate: vi.fn() } },
@@ -87,14 +91,24 @@ describe('self-checkout cart boundary', () => {
 
     appRoot = TestBed.inject(EnvironmentInjector);
     routeInjector = createEnvironmentInjector(selfCheckout.providers ?? [], appRoot);
+
+    // Inject rootCart while storage is empty so it hydrates clean, then add the
+    // staff item. Clear storage again immediately after so that the route-scoped
+    // CartService — which is constructed lazily on first use — also starts empty
+    // instead of hydrating the staff item that rootCart.addProduct just persisted.
     rootCart = TestBed.inject(CartService);
     rootCart.addProduct(CASHIER_ITEM);
+    sessionStorage.clear();
+
     laneRef = null;
   });
 
   afterEach(() => {
     laneRef?.destroy();
     routeInjector.destroy();
+    // Wipe any writes that happened during the test so the next beforeEach sees
+    // an empty store at the point it calls sessionStorage.clear() above.
+    sessionStorage.clear();
   });
 
   async function openLane(): Promise<ComponentRef<SelfCheckoutComponent>> {

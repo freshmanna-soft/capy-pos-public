@@ -2,6 +2,36 @@ import { Injectable, computed, signal } from '@angular/core';
 import { Product } from '@core/domain/entities/product.entity';
 import { CartItem } from '@core/application/services/cart.service.interface';
 
+const STORAGE_KEY = 'capy-pos:cart';
+
+/** Persist cart items to sessionStorage. Failures are silently ignored — a lost
+ *  write is annoying but never data-corrupting; the signal remains authoritative. */
+function persist(items: CartItem[]): void {
+  try {
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(items.map((i) => ({ product: i.product.toJSON(), quantity: i.quantity })))
+    );
+  } catch {
+    // sessionStorage unavailable or quota exceeded — no-op
+  }
+}
+
+/** Restore cart items from sessionStorage. Returns [] on any parse/schema error. */
+function hydrate(): CartItem[] {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { product: unknown; quantity: number }[];
+    return parsed.map((entry) => ({
+      product: Product.fromJSON(entry.product),
+      quantity: entry.quantity,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Service responsible for managing shopping cart state and operations.
  * Uses Angular signals for reactive state management.
@@ -23,7 +53,7 @@ export const MAX_QTY_PER_PRODUCT = 10;
 })
 export class CartService {
   // State signals
-  private readonly _items = signal<CartItem[]>([]);
+  private readonly _items = signal<CartItem[]>(hydrate());
   private readonly _taxRate = signal<number>(0.085); // 8.5% default tax rate
   private readonly _revision = signal(0);
 
@@ -207,6 +237,11 @@ export class CartService {
    * Removes all items from the cart.
    */
   clearCart(): void {
+    try {
+      sessionStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* no-op */
+    }
     this.commit([]);
   }
 
@@ -224,6 +259,7 @@ export class CartService {
   private commit(items: CartItem[]): void {
     this._items.set(items);
     this._revision.update((n) => n + 1);
+    persist(items);
   }
 
   /**
