@@ -82,12 +82,12 @@ export class PosTerminalComponent implements OnInit {
   readonly receiptData = signal<ReceiptData | null>(null);
 
   ngOnInit(): void {
-    // Initialize database with seed data if empty. The product search loads the
+    // Initialize local bootstrap data when enabled. The product search loads the
     // active catalog itself, so this only needs to ensure the data exists.
     this.posFacade
       .initializeDatabase()
       .then(() => {
-        console.log('Database initialized with seed data');
+        console.log('Database initialized');
       })
       .catch((error: unknown) => {
         console.error('Failed to initialize database:', error);

@@ -203,9 +203,9 @@ variable "mercadopago_access_token_test" {
     route. GitHub Pages (and any sandbox testing) calls that route so no real money moves.
     Never compiled into any client bundle. Bound as a Code Engine secret on capy-pos-api.
   EOT
-  type      = string
-  sensitive = true
-  default   = ""
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "mercadopago_access_token_prod" {
@@ -214,9 +214,59 @@ variable "mercadopago_access_token_prod" {
     route. Only the real kiosk (capy-pos-app on Code Engine) calls this route.
     Never compiled into any client bundle. Bound as a Code Engine secret on capy-pos-api.
   EOT
-  type      = string
-  sensitive = true
-  default   = ""
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "cos_endpoint" {
+  description = "IBM Cloud Object Storage S3 endpoint used for product images, without a trailing slash."
+  type        = string
+  default     = ""
+}
+
+variable "cos_bucket" {
+  description = "Externally managed IBM COS bucket name for product images."
+  type        = string
+  default     = ""
+}
+
+variable "cos_public_url_base" {
+  description = "Public read URL base for product images, without a trailing slash."
+  type        = string
+  default     = ""
+}
+
+variable "cos_api_key" {
+  description = "IBM Cloud API key used by pos-api to upload product images to COS."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "cos_endpoint" {
+  description = "IBM Cloud Object Storage S3 endpoint used for product images, without a trailing slash."
+  type        = string
+  default     = ""
+}
+
+variable "cos_bucket" {
+  description = "Externally managed IBM COS bucket name for product images."
+  type        = string
+  default     = ""
+}
+
+variable "cos_public_url_base" {
+  description = "Public read URL base for product images, without a trailing slash."
+  type        = string
+  default     = ""
+}
+
+variable "cos_api_key" {
+  description = "IBM Cloud API key used by pos-api to upload product images to COS."
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "internal_api_secret" {
@@ -310,6 +360,8 @@ variable "services" {
     # Binds CLOUDANT_URL and CLOUDANT_APIKEY from the shared Cloudant instance's
     # per-app secret.
     needs_cloudant = optional(bool, false)
+    # Binds IBM COS upload configuration for product images.
+    needs_image_store = optional(bool, false)
     # Binds APPID_REGION/APPID_TENANT_ID/APPID_CLIENT_ID as literal env and
     # APPID_CLIENT_SECRET from a per-app secret. Only infra/appid-token-relay sets
     # this — it is the one service that ever holds the App ID client secret.
@@ -335,15 +387,17 @@ variable "services" {
     # two proxies calling it). Same shared-secret shape as
     # needs_session_secret, deliberately separate: this gates machine-to-
     # machine calls between Code Engine apps, not a browser-issued session.
-    needs_internal_secret   = optional(bool, false)
+    needs_internal_secret = optional(bool, false)
     # Binds MERCADOPAGO_ACCESS_TOKEN from a per-app generic secret — only
     # pos-api sets this, since it is the one service that calls MercadoPago's
     # Payments API server-side. The token never enters any client bundle.
     needs_mercadopago = optional(bool, false)
+    # Binds IBM COS product-image storage settings; only pos-api should set this.
+    needs_image_store = optional(bool, false)
     # Enables the full checkout stack: PayPal, HMAC keyrings, rate limiter,
     # Cloudant checkouts DB, and the checkout Code Engine secret. Requires
     # needs_cloudant and pins_cors_origins (validated below).
-    needs_checkout = optional(bool, false)
+    needs_checkout          = optional(bool, false)
     scale_min_instances     = optional(number, 0)
     scale_max_instances     = optional(number, 2)
     scale_initial_instances = optional(number, 1)
@@ -406,19 +460,21 @@ variable "services" {
     # deliberately uses var.image_tag so its API and checkout job entry points always
     # come from the same explicitly selected image build.
     capy-pos-api = {
-      image_port                  = 8790
-      needs_session_secret        = true
-      needs_appid_verification    = true
+      image_port               = 8790
+      needs_session_secret     = true
+      needs_appid_verification = true
       # needs_customer_verification and needs_customer_loyalty require
       # appid_customer_client_id — enable once App ID customer app is set up.
       needs_customer_verification = true
       needs_customer_loyalty      = false
       needs_cloudant              = true
+      needs_image_store            = true
       # needs_checkout requires PayPal credentials — enable once configured.
-      needs_checkout              = false
-      pins_cors_origins           = true
-      needs_internal_secret       = true
-      needs_mercadopago           = true
+      needs_checkout        = false
+      pins_cors_origins     = true
+      needs_internal_secret = true
+      needs_mercadopago     = true
+      needs_image_store     = true
     }
     # infra/appid-token-relay — holds the App ID client secret so the browser
     # bundle never has to. Not a "session-guarded" service in the
@@ -508,8 +564,8 @@ variable "paypal_client_id" {
     appid_client_id: it identifies the application, not a credential. Committed
     in environment.prod.ts as paypal.clientId.
   EOT
-  type    = string
-  default = ""
+  type        = string
+  default     = ""
 }
 
 variable "paypal_client_secret" {
@@ -517,9 +573,9 @@ variable "paypal_client_secret" {
     PayPal REST application client secret. Bound as a Code Engine secret on
     capy-pos-api; never compiled into any client bundle.
   EOT
-  type      = string
-  sensitive = true
-  default   = ""
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "paypal_expected_merchant_id" {
@@ -527,8 +583,8 @@ variable "paypal_expected_merchant_id" {
     PayPal merchant account id. Used by pos-api to verify that captured orders
     belong to this merchant before confirming them. Non-sensitive.
   EOT
-  type    = string
-  default = ""
+  type        = string
+  default     = ""
 }
 
 variable "paypal_environment" {
@@ -556,8 +612,8 @@ variable "checkout_store_id" {
     by pos-api to scope reservations to a single storefront. Any non-empty
     string is valid; treat it as a logical tenant id, not a secret.
   EOT
-  type    = string
-  default = ""
+  type        = string
+  default     = ""
 }
 
 variable "checkout_currency" {
@@ -596,8 +652,8 @@ variable "checkout_v2_writes_enabled" {
     records (with schema_version and optional customerBinding). Set to false
     to keep writing V1 records during a staged rollout.
   EOT
-  type    = bool
-  default = true
+  type        = bool
+  default     = true
 }
 
 # ── Checkout HMAC keyrings ────────────────────────────────────────────────────
@@ -613,8 +669,8 @@ variable "checkout_idempotency_hmac_keys" {
     Every key must be ≥ 32 characters. Generate with `openssl rand -hex 32`.
     Stored as a Code Engine secret; never compiled into any client bundle.
   EOT
-  type      = map(string)
-  sensitive = true
+  type        = map(string)
+  sensitive   = true
 
   validation {
     condition     = length(var.checkout_idempotency_hmac_keys) >= 1
@@ -639,8 +695,8 @@ variable "checkout_capability_hmac_keys" {
     Every key must be ≥ 32 characters. Generate with `openssl rand -hex 32`.
     Stored as a Code Engine secret; never compiled into any client bundle.
   EOT
-  type      = map(string)
-  sensitive = true
+  type        = map(string)
+  sensitive   = true
 
   validation {
     condition     = length(var.checkout_capability_hmac_keys) >= 1
@@ -737,8 +793,8 @@ variable "checkout_worker_max_duration_ms" {
     less than checkout_reconciliation_max_execution_seconds * 1000 so the
     worker can flush before Code Engine kills the job (1–900000).
   EOT
-  type    = number
-  default = 540000
+  type        = number
+  default     = 540000
 }
 
 # ── Customer loyalty ──────────────────────────────────────────────────────────
@@ -748,8 +804,8 @@ variable "customer_loyalty_enabled" {
     Feature flag — enables durable customer loyalty storage and the loyalty
     reconciliation job. Requires checkout_v2_writes_enabled = true.
   EOT
-  type    = bool
-  default = false
+  type        = bool
+  default     = false
 }
 
 variable "checkout_reconciliation_schedule" {
@@ -760,8 +816,8 @@ variable "checkout_reconciliation_schedule" {
     create the subscription itself (IBM's CE Terraform provider does not expose
     cron subscription resources yet).
   EOT
-  type    = string
-  default = "0 * * * *"
+  type        = string
+  default     = "0 * * * *"
 }
 
 variable "checkout_reconciliation_time_zone" {
@@ -769,6 +825,6 @@ variable "checkout_reconciliation_time_zone" {
     IANA time zone for the checkout reconciliation cron subscription
     (e.g. "America/Chicago"). Applied out-of-band, same as the schedule.
   EOT
-  type    = string
-  default = "UTC"
+  type        = string
+  default     = "UTC"
 }

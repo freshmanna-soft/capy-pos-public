@@ -150,6 +150,45 @@ describe('DexieDatabase v4 — fresh-DB seeding', () => {
     expect(membership!.tenantId).toBe(DEFAULT_TENANT_ID);
     expect(membership!.roleId).toBe('role-admin');
   });
+
+  it('does not create demo products when product seeding is disabled', async () => {
+    await db.initializeWithSeedData({ seedProducts: false });
+
+    expect(await db.products.count()).toBe(0);
+    expect(await db.products.get('6')).toBeUndefined();
+  });
+
+  it('can explicitly seed the local demo catalog', async () => {
+    await db.initializeWithSeedData({ seedProducts: true });
+
+    expect(await db.products.count()).toBe(6);
+    expect((await db.products.get('6'))?.sku).toBe('BEV-SEA-001');
+  });
+
+  it('removes old demo products when seeding is disabled but preserves real rows', async () => {
+    await db.initializeWithSeedData({ seedProducts: true });
+    await db.products.add({
+      id: 'real-product',
+      tenantId: DEFAULT_TENANT_ID,
+      name: 'Real Product',
+      sku: 'API-REAL-1',
+      category: 'Food',
+      price: 4,
+      cost: 2,
+      quantity: 5,
+      minStockLevel: 1,
+      unit: 'piece',
+      taxRate: 0.08,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await db.initializeWithSeedData({ seedProducts: false });
+
+    expect(await db.products.get('6')).toBeUndefined();
+    expect((await db.products.get('real-product'))?.name).toBe('Real Product');
+  });
 });
 
 // ---------------------------------------------------------------------------

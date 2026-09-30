@@ -550,6 +550,17 @@ describe('ShopComponent — receipt and navigation', () => {
     vi.unstubAllGlobals();
   });
 
+  it('close receipt control clears receipt state', () => {
+    const { component } = setup();
+    component.showReceipt.set(true);
+    component.receiptData.set({} as never);
+
+    component.handleNewTransaction();
+
+    expect(component.showReceipt()).toBe(false);
+    expect(component.receiptData()).toBeNull();
+  });
+
   it('handleNewTransaction clears receipt state and navigates to /shop', async () => {
     const { component, fixture } = setup();
     const router = fixture.debugElement.injector.get(Router);

@@ -54,7 +54,7 @@ export const appConfig: ApplicationConfig = {
         console.log('Dexie database opened successfully');
 
         await db.initializeWithSeedData();
-        console.log('Database initialized with seed data');
+        console.log('Database initialized');
 
         const stats = await db.getStats();
         console.log('Database statistics:', stats);
@@ -147,14 +147,17 @@ export const appConfig: ApplicationConfig = {
       const credential = inject(SyncSessionCredentialService);
       // Injecting this registers the router listener that sets kioskMode on the
       // worker when the user navigates to /kiosk or /shop routes, downgrading the
-      // "No operator session" log from warn → info in those contexts.
-      inject(SyncKioskModeService);
+      // "No operator session" log from warn → info in those contexts. Read the
+      // initial value too: start() may perform its first pull before navigation
+      // emits an event.
+      const kioskMode = inject(SyncKioskModeService);
       syncService.start({
         apiBaseUrl: environment.apiUrl.replace('/api', ''),
         // Every backend route except the health probe requires the operator's session
         // JWT (#224) — `infra/pos-api/src/session-auth.ts` verifies it. Blank until
         // someone signs in, and the worker defers its pulls while it is.
         sessionToken: credential.token(),
+        kioskMode: kioskMode.initialKioskMode,
         syncIntervalMs: 30000,
         circuitBreaker: environment.circuitBreaker,
         retry: environment.retry,
