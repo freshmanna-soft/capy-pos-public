@@ -385,10 +385,11 @@ variable "services" {
     # pos-api sets this, since it is the one service that calls MercadoPago's
     # Payments API server-side. The token never enters any client bundle.
     needs_mercadopago = optional(bool, false)
-    # Enables the full checkout stack: PayPal, HMAC keyrings, rate limiter,
+    # Enables the PayPal checkout stack: PayPal, HMAC keyrings, rate limiter,
     # Cloudant checkouts DB, and the checkout Code Engine secret. Requires
-    # needs_cloudant and pins_cors_origins (validated below).
-    needs_checkout          = optional(bool, false)
+    # needs_cloudant and pins_cors_origins (validated below). Unrelated to
+    # MercadoPago, which needs_mercadopago enables on its own.
+    needs_paypal_checkout   = optional(bool, false)
     scale_min_instances     = optional(number, 0)
     scale_max_instances     = optional(number, 2)
     scale_initial_instances = optional(number, 1)
@@ -456,12 +457,15 @@ variable "services" {
       needs_appid_verification = true
       # needs_customer_verification and needs_customer_loyalty require
       # appid_customer_client_id — enable once App ID customer app is set up.
-      needs_customer_verification = true
+      # Customer verification only serves PayPal checkout (validated below),
+      # so it stays off until needs_paypal_checkout is enabled.
+      needs_customer_verification = false
       needs_customer_loyalty      = false
       needs_cloudant              = true
       needs_image_store           = true
-      # needs_checkout requires PayPal credentials — enable once configured.
-      needs_checkout        = false
+      # PayPal is not ready yet; payments go through MercadoPago
+      # (needs_mercadopago below).
+      needs_paypal_checkout = false
       pins_cors_origins     = true
       needs_internal_secret = true
       needs_mercadopago     = true
@@ -508,9 +512,9 @@ variable "services" {
   validation {
     condition = alltrue([
       for service in var.services :
-      !service.needs_checkout || (service.needs_cloudant && service.pins_cors_origins)
+      !service.needs_paypal_checkout || (service.needs_cloudant && service.pins_cors_origins)
     ])
-    error_message = "Every checkout service must enable Cloudant and pin CORS to frontend_origins."
+    error_message = "Every PayPal checkout service must enable Cloudant and pin CORS to frontend_origins."
   }
 
   validation {
@@ -518,11 +522,11 @@ variable "services" {
       for service in var.services :
       !service.needs_customer_verification || (
         service.needs_appid_verification &&
-        service.needs_checkout &&
+        service.needs_paypal_checkout &&
         !service.needs_appid_secret
       )
     ])
-    error_message = "Customer verification is checkout-specific, requires the existing staff App ID verifier configuration plus checkout, and must never receive App ID client secrets."
+    error_message = "Customer verification is PayPal-checkout-specific, requires the existing staff App ID verifier configuration plus needs_paypal_checkout, and must never receive App ID client secrets."
   }
 
   validation {
@@ -530,11 +534,11 @@ variable "services" {
       for service in var.services :
       !service.needs_customer_loyalty || (
         service.needs_customer_verification &&
-        service.needs_checkout &&
+        service.needs_paypal_checkout &&
         service.needs_cloudant
       )
     ])
-    error_message = "Every customer-loyalty service must enable dedicated customer verification, checkout, and Cloudant."
+    error_message = "Every customer-loyalty service must enable dedicated customer verification, needs_paypal_checkout, and Cloudant."
   }
 
   validation {

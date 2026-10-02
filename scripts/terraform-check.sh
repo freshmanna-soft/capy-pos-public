@@ -9,7 +9,8 @@
 # (no unstaged edits). Needs no cloud credentials.
 #
 # Catches duplicate declarations/keys, undeclared variables and type errors
-# (the v0.2.5 deploy failure). It cannot catch preconditions that depend on
+# (the v0.2.5 deploy failure), plus variable defaults that break their own
+# validation rules (the v0.2.6 deploy failure). It cannot catch preconditions that depend on
 # real secret values, provider API errors or missing GitHub secrets — those
 # only surface at plan/apply time in deploy-ibm.yml.
 #
@@ -61,4 +62,21 @@ if ! terraform validate -no-color; then
   exit 1
 fi
 
-echo "✅ Terraform fmt/init/validate passed."
+# validate never evaluates `validation` blocks against variable defaults —
+# only plan does — so a bad default (e.g. var.services enabling customer
+# verification without checkout, the v0.2.6 deploy failure) slipped through.
+# Evaluating any expression in `terraform console` runs those rules. Do it in
+# a variables-only copy: no providers, no backend, no credentials. console
+# exits 0 even when a rule fails, so match the error text instead.
+DEFAULTS_DIR="$WORK_DIR/defaults"
+mkdir -p "$DEFAULTS_DIR"
+cp variables*.tf "$DEFAULTS_DIR/"
+if ! echo true | terraform -chdir="$DEFAULTS_DIR" console -input=false -no-color >defaults.log 2>&1 ||
+  grep -q '^Error:' defaults.log; then
+  cat defaults.log
+  echo ""
+  echo "❌ A variable default fails its own validation rule (would fail at plan)."
+  exit 1
+fi
+
+echo "✅ Terraform fmt/init/validate and variable-default validation passed."
