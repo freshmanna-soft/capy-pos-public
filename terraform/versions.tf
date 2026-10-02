@@ -36,13 +36,13 @@ terraform {
   #   TF_BACKEND_ACCESS_KEY  HMAC access key id from a COS service credential
   #   TF_BACKEND_SECRET_KEY  HMAC secret access key from the same credential
   backend "s3" {
-    key                          = "capy-pos/terraform.tfstate"
-    region                       = "us-south"
-    skip_region_validation       = true
-    skip_credentials_validation  = true
-    skip_metadata_api_check      = true
-    skip_requesting_account_id   = true
-    use_path_style               = true
+    key                         = "capy-pos/terraform.tfstate"
+    region                      = "us-south"
+    skip_region_validation      = true
+    skip_credentials_validation = true
+    skip_metadata_api_check     = true
+    skip_requesting_account_id  = true
+    use_path_style              = true
     # IBM COS S3-compatible endpoint — bucket/access_key/secret_key come from
     # -backend-config=backend.hcl locally or -backend-config flags in CI.
     endpoints = {
