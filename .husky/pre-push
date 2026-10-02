@@ -3,6 +3,10 @@
 # 🛡️ Protected branch guard — block direct pushes to main
 # main requires PRs; direct push (including force push) is rejected locally.
 PROTECTED_BRANCH="main"
+ZERO_SHA="0000000000000000000000000000000000000000"
+
+# git feeds the pushed refs on stdin once; keep them for every gate below.
+PUSH_REFS=$(cat)
 
 while read local_ref local_sha remote_ref remote_sha; do
   remote_branch=$(echo "$remote_ref" | sed 's|refs/heads/||')
@@ -19,7 +23,31 @@ while read local_ref local_sha remote_ref remote_sha; do
     echo ""
     exit 1
   fi
-done
+done <<EOF
+$PUSH_REFS
+EOF
+
+# 🏗️ Terraform gate — only for pushes that touch terraform/. Validates an
+# exported copy of each pushed commit (see scripts/terraform-check.sh); fails
+# loudly if terraform is missing rather than skipping.
+while read local_ref local_sha remote_ref remote_sha; do
+  [ -z "$local_sha" ] && continue
+  [ "$local_sha" = "$ZERO_SHA" ] && continue # branch deletion
+  if [ "$remote_sha" != "$ZERO_SHA" ] && git cat-file -e "$remote_sha" 2>/dev/null; then
+    base="$remote_sha"
+  else
+    # New branch (or remote tip not fetched): diff against where it forked.
+    base=$(git merge-base "$local_sha" origin/dev 2>/dev/null || git merge-base "$local_sha" origin/main 2>/dev/null || true)
+  fi
+  if [ -z "$base" ] || ! git diff --quiet "$base" "$local_sha" -- terraform/; then
+    sh scripts/terraform-check.sh "$local_sha" || {
+      echo "   Push aborted."
+      exit 1
+    }
+  fi
+done <<EOF
+$PUSH_REFS
+EOF
 
 echo "🧪 Running E2E Playwright tests before push..."
 echo "   This gate ensures no disconnected features or UX regressions are pushed."

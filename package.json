@@ -29,6 +29,7 @@
     "build-storybook": "ng run capy-pos:build-storybook",
     "prepare": "husky",
     "test:graphrag": "vitest run --config scripts/graphrag/vitest.config.mjs",
+    "terraform:check": "sh scripts/terraform-check.sh",
     "release": "node scripts/release.mjs",
     "release:minor": "node scripts/release.mjs minor",
     "release:major": "node scripts/release.mjs major",
@@ -126,6 +127,9 @@
     ],
     "src/**/*.scss": [
       "prettier --write"
+    ],
+    "terraform/*.tf": [
+      "terraform fmt"
     ]
   },
   "allowScripts": {
