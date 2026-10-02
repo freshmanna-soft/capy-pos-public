@@ -168,6 +168,19 @@ services = {
 | `project_id`                        | Code Engine project id, for `ibmcloud ce project select`.  |
 | `cr_namespace`                      | Registry namespace, for `docker push`.                     |
 
+## Static checks
+
+`npm run terraform:check` runs `terraform fmt -check`, `terraform init -backend=false`
+and `terraform validate` against an exported copy of `HEAD`'s `terraform/` in a temp
+dir, so it never touches this directory's COS-backed state and needs no credentials.
+The same script runs in the husky pre-push hook (only when the push touches
+`terraform/`, and it fails if `terraform` isn't installed) and in CI's
+**Terraform Validate** job. lint-staged runs `terraform fmt` on staged `.tf` files.
+
+It catches duplicate declarations or keys, undeclared variables, and type errors.
+It cannot catch preconditions that depend on real secret values, provider API errors,
+or missing GitHub secrets. Those only show up at `plan`/`apply` time.
+
 ## Quick start
 
 ### 1. Build and push the images
