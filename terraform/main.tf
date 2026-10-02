@@ -51,8 +51,8 @@ locals {
   internal_secret_services  = { for name, service in var.services : name => service if service.needs_internal_secret }
   mercadopago_services      = { for name, service in var.services : name => service if service.needs_mercadopago }
   image_store_services      = { for name, service in var.services : name => service if try(service.needs_image_store, false) }
-  checkout_services         = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
-  checkout_job_services     = { for name, service in var.services : name => service if try(service.needs_checkout, false) }
+  checkout_services         = { for name, service in var.services : name => service if try(service.needs_paypal_checkout, false) }
+  checkout_job_services     = { for name, service in var.services : name => service if try(service.needs_paypal_checkout, false) }
   customer_loyalty_services = { for name, service in var.services : name => service if try(service.needs_customer_loyalty, false) }
 
   # The browser origins a guarded app will answer. Comma-joined because that is
@@ -134,7 +134,7 @@ locals {
         APP_BASE_URL   = "https://capy-pos-app.${var.ce_subdomain}.${var.ce_region}.codeengine.appdomain.cloud"
         MP_CURRENCY_ID = var.mp_currency_id
       } : {},
-      service.needs_checkout ? {
+      service.needs_paypal_checkout ? {
         CHECKOUT_ENABLED                 = "true"
         ALLOWED_ORIGINS                  = local.allowed_origins
         CLOUDANT_CHECKOUTS_DB            = "checkouts"
@@ -895,7 +895,7 @@ resource "ibm_code_engine_app" "apps" {
   }
 
   dynamic "run_env_variables" {
-    for_each = each.value.needs_checkout ? [1] : []
+    for_each = each.value.needs_paypal_checkout ? [1] : []
 
     content {
       type      = "secret_key_reference"
@@ -906,7 +906,7 @@ resource "ibm_code_engine_app" "apps" {
   }
 
   dynamic "run_env_variables" {
-    for_each = each.value.needs_checkout ? [1] : []
+    for_each = each.value.needs_paypal_checkout ? [1] : []
 
     content {
       type      = "secret_key_reference"
@@ -917,7 +917,7 @@ resource "ibm_code_engine_app" "apps" {
   }
 
   dynamic "run_env_variables" {
-    for_each = each.value.needs_checkout ? [1] : []
+    for_each = each.value.needs_paypal_checkout ? [1] : []
 
     content {
       type      = "secret_key_reference"

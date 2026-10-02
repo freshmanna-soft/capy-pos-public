@@ -50,7 +50,7 @@ export function buildCheckoutRuntime(input: {
 }): CheckoutRuntime {
   // CHECKOUT_ENABLED must be explicitly set to "true" to activate PayPal
   // checkout. When absent (the default — Terraform only sets it when
-  // needs_checkout = true) the server starts normally and all checkout
+  // needs_paypal_checkout = true) the server starts normally and all checkout
   // endpoints return 503 rather than crashing at startup.
   if (input.environment['CHECKOUT_ENABLED'] !== 'true') {
     return buildDisabledCheckoutRuntime();
