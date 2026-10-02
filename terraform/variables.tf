@@ -456,7 +456,9 @@ variable "services" {
       needs_appid_verification = true
       # needs_customer_verification and needs_customer_loyalty require
       # appid_customer_client_id — enable once App ID customer app is set up.
-      needs_customer_verification = true
+      # Customer verification is checkout-specific (validated below), so it
+      # also stays off until needs_checkout is enabled.
+      needs_customer_verification = false
       needs_customer_loyalty      = false
       needs_cloudant              = true
       needs_image_store           = true
