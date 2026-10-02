@@ -10,6 +10,24 @@ variable "region" {
   default     = "us-south"
 }
 
+variable "ce_region" {
+  description = "Code Engine region used to construct the public frontend URL."
+  type        = string
+  default     = "us-south"
+}
+
+variable "ce_subdomain" {
+  description = "Code Engine account subdomain used to construct the public frontend URL."
+  type        = string
+  default     = "2e2tmn0h4vl7"
+}
+
+variable "mp_currency_id" {
+  description = "MercadoPago currency identifier used for production preferences."
+  type        = string
+  default     = "MXN"
+}
+
 variable "resource_group_name" {
   description = "IBM Cloud resource group name"
   type        = string
@@ -244,31 +262,6 @@ variable "cos_api_key" {
   default     = ""
 }
 
-variable "cos_endpoint" {
-  description = "IBM Cloud Object Storage S3 endpoint used for product images, without a trailing slash."
-  type        = string
-  default     = ""
-}
-
-variable "cos_bucket" {
-  description = "Externally managed IBM COS bucket name for product images."
-  type        = string
-  default     = ""
-}
-
-variable "cos_public_url_base" {
-  description = "Public read URL base for product images, without a trailing slash."
-  type        = string
-  default     = ""
-}
-
-variable "cos_api_key" {
-  description = "IBM Cloud API key used by pos-api to upload product images to COS."
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 variable "internal_api_secret" {
   description = <<-EOT
     Shared secret for service-to-service calls that have no end-user token to
@@ -392,8 +385,6 @@ variable "services" {
     # pos-api sets this, since it is the one service that calls MercadoPago's
     # Payments API server-side. The token never enters any client bundle.
     needs_mercadopago = optional(bool, false)
-    # Binds IBM COS product-image storage settings; only pos-api should set this.
-    needs_image_store = optional(bool, false)
     # Enables the full checkout stack: PayPal, HMAC keyrings, rate limiter,
     # Cloudant checkouts DB, and the checkout Code Engine secret. Requires
     # needs_cloudant and pins_cors_origins (validated below).
@@ -468,13 +459,12 @@ variable "services" {
       needs_customer_verification = true
       needs_customer_loyalty      = false
       needs_cloudant              = true
-      needs_image_store            = true
+      needs_image_store           = true
       # needs_checkout requires PayPal credentials — enable once configured.
       needs_checkout        = false
       pins_cors_origins     = true
       needs_internal_secret = true
       needs_mercadopago     = true
-      needs_image_store     = true
     }
     # infra/appid-token-relay — holds the App ID client secret so the browser
     # bundle never has to. Not a "session-guarded" service in the
