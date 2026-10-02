@@ -35,6 +35,7 @@ import { CustomerBuilder } from '@core/domain/entities/customer.builder';
 import { CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
 import { CUSTOMER_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
+import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 import { environment } from '../../../environments/environment';
 
 const STORE_CURRENCY = environment.mercadopago.currency;
@@ -891,6 +892,7 @@ export class ShopComponent implements OnInit, OnDestroy {
   private readonly customerRepo = inject(CUSTOMER_REPOSITORY);
   private readonly authGateway = inject(AUTH_GATEWAY);
   private readonly syncService = inject(SyncService);
+  private readonly telemetry = inject(TelemetryService);
 
   // ── View state ───────────────────────────────────────────────────────────────
   readonly view = signal<ShopView>('resolving');
@@ -915,6 +917,10 @@ export class ShopComponent implements OnInit, OnDestroy {
   readonly confirmClear = signal(false);
 
   clearOrder(): void {
+    this.telemetry.trackEvent('shop.cart.cleared', {
+      itemCount: this.cartService.items().length,
+      cartTotal: this.cartService.total(),
+    });
     this.cartService.clearCart();
     this.mobileCartExpanded.set(false);
     this.confirmClear.set(false);
@@ -1013,6 +1019,7 @@ export class ShopComponent implements OnInit, OnDestroy {
     if (this.showScanSheet()) {
       this.teardownScan();
     } else {
+      this.telemetry.trackEvent('shop.scan.attempted');
       void this.startScan();
     }
   }
@@ -1063,10 +1070,16 @@ export class ShopComponent implements OnInit, OnDestroy {
     const product = products.find((p) => p.barcode === presented.value);
     if (product) {
       if (navigator.vibrate) navigator.vibrate(50);
+      this.telemetry.trackEvent('shop.scan.success', {
+        productId: product.id,
+        productName: product.name,
+        barcode: presented.value,
+      });
       this._scanToast.set({ kind: 'success', text: `✓ Added — ${product.name}` });
       this.addToCart(product);
       this.toastTimer = setTimeout(() => this.teardownScan(), TOAST_DURATION_MS);
     } else {
+      this.telemetry.trackEvent('shop.scan.miss', { barcode: presented.value });
       this._scanToast.set({ kind: 'error', text: 'Product not found — try again or browse above' });
       this.scheduleScanTick();
     }
@@ -1180,6 +1193,9 @@ export class ShopComponent implements OnInit, OnDestroy {
 
   private startShopping(): void {
     this.view.set('shopping');
+    this.telemetry.trackEvent('shop.session.started', {
+      storeId: this.resolvedStoreId(),
+    });
     this.loadProducts();
     this.startShopIdleTimer();
   }
@@ -1203,6 +1219,12 @@ export class ShopComponent implements OnInit, OnDestroy {
 
   addToCart(product: Product): void {
     this.cartService.addProduct(product);
+    this.telemetry.trackEvent('shop.product.added', {
+      productId: product.id,
+      productName: product.name,
+      category: product.category,
+      price: product.price,
+    });
     this.resetIdleTimer();
   }
 
@@ -1242,6 +1264,11 @@ export class ShopComponent implements OnInit, OnDestroy {
     if (customer) {
       this.posFacade.attachCustomerDirectly(customer);
     }
+    this.telemetry.trackEvent('shop.checkout.opened', {
+      itemCount: this.cartService.items().length,
+      cartTotal: this.cartService.total(),
+      hasCustomer: customer !== null,
+    });
     this.showCheckout.set(true);
   }
 
@@ -1259,6 +1286,10 @@ export class ShopComponent implements OnInit, OnDestroy {
       .checkout(result, sessionToken)
       .then((receipt) => {
         this.checkoutError.set(null);
+        this.telemetry.trackEvent('shop.checkout.completed', {
+          total: receipt.total,
+          itemCount: receipt.items.length,
+        });
         this.receiptData.set(receipt);
         this.showCheckout.set(false);
         this.clearIdleTimers();
@@ -1270,6 +1301,9 @@ export class ShopComponent implements OnInit, OnDestroy {
       .catch((err: unknown) => {
         // Persistence failed — cart preserved, no receipt.
         console.error('[ShopComponent] checkout failed:', err);
+        this.telemetry.trackEvent('shop.checkout.failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
         this.showCheckout.set(false);
         const detail = err instanceof Error ? ` (${err.message})` : '';
         this.checkoutError.set(
@@ -1391,6 +1425,10 @@ export class ShopComponent implements OnInit, OnDestroy {
     }, countdownMs);
     this.shopIdleTimer = setTimeout(() => {
       this.clearIdleTimers();
+      this.telemetry.trackEvent('shop.idle.timeout', {
+        itemCount: this.cartService.items().length,
+        cartTotal: this.cartService.total(),
+      });
       this.cartService.clearCart();
       void this.router.navigate(['/shop']);
     }, this.shopIdleTimeoutMs);
