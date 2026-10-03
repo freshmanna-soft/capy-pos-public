@@ -675,6 +675,255 @@ describe('POST /api/mercadopago/preference', () => {
     assert.equal(capturedBody.back_urls.failure, 'https://my-pos.example.com/payment/failure');
     assert.equal(capturedBody.back_urls.pending, 'https://my-pos.example.com/payment/pending');
   });
+
+  test('wallet mode: preference expires 30 minutes after creation', async () => {
+    let capturedBody = null;
+    const capturingFetch = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return { ok: true, json: async () => ({ id: 'p5', init_point: 'https://mp.com/p5' }), text: async () => '' };
+    };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: capturingFetch });
+    await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      deps
+    );
+    assert.equal(capturedBody.expires, true);
+    assert.equal(capturedBody.expiration_date_from, new Date(NOW * 1000).toISOString());
+    assert.equal(capturedBody.expiration_date_to, new Date((NOW + 30 * 60) * 1000).toISOString());
+  });
+
+  test('wallet mode: auto_return only over HTTPS', async () => {
+    const bodies = [];
+    const capturingFetch = async (url, opts) => {
+      bodies.push(JSON.parse(opts.body));
+      return { ok: true, json: async () => ({ id: 'p6', init_point: 'https://mp.com/p6' }), text: async () => '' };
+    };
+    for (const appBaseUrl of ['http://localhost:4200', 'https://pos.example.com']) {
+      const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', appBaseUrl, fetch: capturingFetch });
+      await handle(
+        { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+          internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+        deps
+      );
+    }
+    assert.equal(bodies[0].auto_return, undefined);
+    assert.equal(bodies[1].auto_return, 'approved');
+  });
+
+  test('wallet mode: response carries both the preference id and the external reference', async () => {
+    const prefResult = { id: 'pref-9', init_point: 'https://mp.com/pref-9', external_reference: 'ext-9' };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, prefResult) });
+    const res = await handle(
+      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
+        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      deps
+    );
+    assert.equal(res.body.id, 'pref-9');
+    assert.equal(res.body.externalReference, 'ext-9');
+  });
+});
+
+// ── POST /api/mercadopago/preference/:externalReference/cancel ───────────────
+
+describe('POST /api/mercadopago/preference/:externalReference/cancel', () => {
+  /**
+   * A fake MP that answers by URL + method, records every call, and lets each
+   * test pick the preference owner, the payments found, and which calls fail.
+   * Every test uses its own external reference: the route's per-reference rate
+   * limiter is module state and would otherwise leak between tests.
+   */
+  function fakeMp({ owner, payments = [], failOn = () => false, reread = {} }) {
+    const calls = [];
+    const fetch = async (url, init = {}) => {
+      const method = init.method ?? 'GET';
+      calls.push({ url, method, body: init.body ? JSON.parse(init.body) : undefined });
+      const reply = (status, body) => ({
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      });
+      if (failOn(url, method)) return reply(500, { message: 'upstream exploded' });
+      if (url.includes('/checkout/preferences/')) {
+        return method === 'GET'
+          ? reply(200, { id: 'pref-1', init_point: 'x', external_reference: owner })
+          : reply(200, { id: 'pref-1' });
+      }
+      if (url.includes('/v1/payments/search')) return reply(200, { results: payments });
+      const paymentId = url.split('/').pop();
+      if (method === 'PUT') return reply(200, { id: Number(paymentId), status: 'cancelled' });
+      return reply(200, reread[paymentId] ?? { id: Number(paymentId), status: 'cancelled' });
+    };
+    return { fetch, calls };
+  }
+
+  const cancelReq = (ref, body = { preferenceId: 'pref-1' }) => ({
+    method: 'POST',
+    path: `/api/mercadopago/preference/${encodeURIComponent(ref)}/cancel`,
+    authorization: undefined,
+    internalSecret: undefined,
+    body,
+  });
+
+  const writes = (calls) => calls.filter((c) => c.method === 'PUT');
+
+  test('503 when mpAccessToken is empty', async () => {
+    const res = await handle(cancelReq('ext-503'), makeDeps({ mpAccessToken: '' }));
+    assert.equal(res.status, 503);
+  });
+
+  test('approved payment short-circuits: answers approved and writes nothing', async () => {
+    const mp = fakeMp({
+      owner: 'ext-approved',
+      payments: [
+        { id: 11, status: 'pending' },
+        { id: 12, status: 'approved' },
+      ],
+    });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    const res = await handle(cancelReq('ext-approved'), deps);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { status: 'approved', paymentId: '12' });
+    assert.equal(writes(mp.calls).length, 0, 'no payment cancelled, preference not expired');
+  });
+
+  test('pending and in_process payments are cancelled; final ones are left alone', async () => {
+    const mp = fakeMp({
+      owner: 'ext-pending',
+      payments: [
+        { id: 21, status: 'pending' },
+        { id: 22, status: 'in_process' },
+        { id: 23, status: 'rejected' },
+      ],
+    });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    const res = await handle(cancelReq('ext-pending'), deps);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { status: 'cancelled' });
+    const paymentPuts = writes(mp.calls).filter((c) => c.url.includes('/v1/payments/'));
+    assert.deepEqual(
+      paymentPuts.map((c) => c.url),
+      ['https://api.mercadopago.com/v1/payments/21', 'https://api.mercadopago.com/v1/payments/22']
+    );
+    assert.ok(paymentPuts.every((c) => c.body.status === 'cancelled'));
+  });
+
+  test('the preference is expired as of now, after ownership is checked', async () => {
+    const mp = fakeMp({ owner: 'ext-expire' });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    const res = await handle(cancelReq('ext-expire'), deps);
+    assert.equal(res.status, 200);
+    assert.equal(mp.calls[0].method, 'GET');
+    assert.equal(mp.calls[0].url, 'https://api.mercadopago.com/checkout/preferences/pref-1');
+    const expire = writes(mp.calls).find((c) => c.url.includes('/checkout/preferences/pref-1'));
+    assert.ok(expire, 'preference PUT was sent');
+    assert.deepEqual(expire.body, { expires: true, expiration_date_to: new Date(NOW * 1000).toISOString() });
+  });
+
+  test('idempotent: a repeat call answers cancelled again', async () => {
+    const mp = fakeMp({ owner: 'ext-repeat', payments: [{ id: 31, status: 'cancelled' }] });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    const first = await handle(cancelReq('ext-repeat'), deps);
+    const second = await handle(cancelReq('ext-repeat'), deps);
+    assert.deepEqual(first.body, { status: 'cancelled' });
+    assert.deepEqual(second.body, { status: 'cancelled' });
+    assert.equal(
+      writes(mp.calls).filter((c) => c.url.includes('/v1/payments/')).length,
+      0,
+      'an already-cancelled payment is not PUT again'
+    );
+  });
+
+  test('400 and no writes when the preference belongs to another reference', async () => {
+    const mp = fakeMp({ owner: 'someone-else', payments: [{ id: 41, status: 'pending' }] });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    const res = await handle(cancelReq('ext-mismatch'), deps);
+    assert.equal(res.status, 400);
+    assert.equal(writes(mp.calls).length, 0);
+    assert.equal(mp.calls.length, 1, 'stops after the ownership read');
+  });
+
+  test('400 on a missing or malformed preferenceId / reference, before any MP call', async () => {
+    const mp = fakeMp({ owner: 'ext-bad' });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    for (const request of [
+      cancelReq('ext-bad', {}),
+      cancelReq('ext-bad', { preferenceId: 42 }),
+      cancelReq('ext-bad', { preferenceId: '../../v1/payments' }),
+      cancelReq('ext bad'),
+    ]) {
+      const res = await handle(request, deps);
+      assert.equal(res.status, 400);
+    }
+    assert.equal(mp.calls.length, 0);
+  });
+
+  test('502 when MP fails at any step', async () => {
+    const steps = [
+      (url, method) => url.includes('/checkout/preferences/') && method === 'GET',
+      (url) => url.includes('/v1/payments/search'),
+      (url, method) => url.includes('/checkout/preferences/') && method === 'PUT',
+    ];
+    for (const [i, failOn] of steps.entries()) {
+      const ref = `ext-502-${i}`;
+      const mp = fakeMp({ owner: ref, failOn });
+      const res = await handle(cancelReq(ref), makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch }));
+      assert.equal(res.status, 502, `step ${i}`);
+    }
+  });
+
+  test('502 when fetch throws', async () => {
+    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const res = await handle(
+      cancelReq('ext-throw'),
+      makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch })
+    );
+    assert.equal(res.status, 502);
+  });
+
+  test('a payment approved between search and cancel is reported approved', async () => {
+    const mp = fakeMp({
+      owner: 'ext-race',
+      payments: [{ id: 51, status: 'pending' }],
+      failOn: (url, method) => url.endsWith('/v1/payments/51') && method === 'PUT',
+      reread: { 51: { id: 51, status: 'approved' } },
+    });
+    const res = await handle(cancelReq('ext-race'), makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch }));
+    assert.deepEqual(res.body, { status: 'approved', paymentId: '51' });
+    assert.equal(
+      writes(mp.calls).filter((c) => c.url.includes('/checkout/preferences/')).length,
+      0,
+      'a paid preference is not expired'
+    );
+  });
+
+  test('502 when a payment cannot be cancelled and is still pending', async () => {
+    const mp = fakeMp({
+      owner: 'ext-stuck',
+      payments: [{ id: 61, status: 'pending' }],
+      failOn: (url, method) => url.endsWith('/v1/payments/61') && method === 'PUT',
+      reread: { 61: { id: 61, status: 'pending' } },
+    });
+    const res = await handle(cancelReq('ext-stuck'), makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch }));
+    assert.equal(res.status, 502);
+  });
+
+  test('429 after too many cancels for one reference', async () => {
+    const mp = fakeMp({ owner: 'ext-flood' });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    let last;
+    for (let i = 0; i < 11; i++) last = await handle(cancelReq('ext-flood'), deps);
+    assert.equal(last.status, 429);
+  });
+
+  test('only POST is routed', async () => {
+    const res = await handle(
+      { ...cancelReq('ext-get'), method: 'GET' },
+      makeDeps({ mpAccessToken: 'TEST_TOKEN' })
+    );
+    assert.equal(res.status, 404);
+  });
 });
 
 // ── GET /api/mercadopago/preference/:id ──────────────────────────────────────
