@@ -12,6 +12,7 @@ import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.servi
 import { CustomerService } from '@core/application/services/customer.service';
 import { AwardLoyaltyPointsUseCase } from '@core/application/use-cases/award-loyalty-points.use-case';
 import { TransactionRemoteService } from '@core/application/services/transaction-remote.service';
+import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
 import { Product } from '@core/domain/entities/product.entity';
 import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
 
@@ -42,8 +43,12 @@ describe('PosFacade', () => {
   let mockEventBus: { publish: ReturnType<typeof vi.fn> };
   let mockCustomers: { getCustomerByLoyaltyCode: ReturnType<typeof vi.fn> };
   let mockAwardLoyalty: { execute: ReturnType<typeof vi.fn> };
+  let mockPersistTransaction: { execute: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
+    mockPersistTransaction = {
+      execute: vi.fn().mockResolvedValue({ success: true, outcome: 'recorded' }),
+    };
     mockCartService = {
       items: signal([]),
       revision: signal(0),
@@ -99,6 +104,7 @@ describe('PosFacade', () => {
         { provide: CustomerService, useValue: mockCustomers },
         { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
         { provide: EventBusService, useValue: mockEventBus },
+        { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
         {
           provide: TransactionRemoteService,
           useValue: { persistTransaction: vi.fn().mockResolvedValue(undefined) },
@@ -262,6 +268,7 @@ describe('PosFacade', () => {
           { provide: CustomerService, useValue: mockCustomers },
           { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
           { provide: EventBusService, useValue: mockEventBus },
+          { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
         ],
       });
       facade = TestBed.inject(PosFacade);
@@ -343,6 +350,7 @@ describe('PosFacade', () => {
           { provide: CustomerService, useValue: mockCustomers },
           { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
           { provide: EventBusService, useValue: mockEventBus },
+          { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
           { provide: AuditLogService, useValue: mockAudit },
           { provide: TelemetryService, useValue: mockTelemetry },
         ],
@@ -712,6 +720,126 @@ describe('PosFacade', () => {
     });
   });
 
+  describe('recording the sale with its SaleCompleted event (#352)', () => {
+    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    const payment = { method: 'card', amount: 12.5, transactionId: 'TXN-352' };
+
+    function regular(): Customer {
+      return new Customer({
+        id: 'customer-352',
+        name: 'Dr. Lena',
+        email: 'lena@example.com',
+        phone: '+1234567890',
+        status: CustomerStatus.ACTIVE,
+        loyaltyPoints: 0,
+        tier: CustomerTier.BRONZE,
+        loyaltyCode: 'CAPY-B3KMNPQR',
+      });
+    }
+
+    it('records the sale with a fresh correlation id before the cart is cleared', async () => {
+      const order: string[] = [];
+      mockPersistTransaction.execute.mockImplementation(async () => {
+        order.push('record');
+        return { success: true, outcome: 'recorded' };
+      });
+      mockCartService.clearCart.mockImplementation(() => order.push('clear'));
+
+      await facade.checkout(payment as never);
+
+      expect(order).toEqual(['record', 'clear']);
+      expect(mockPersistTransaction.execute).toHaveBeenCalledWith({
+        paymentMethod: 'card',
+        transactionId: 'TXN-352',
+        sale: { correlationId: expect.stringMatching(UUID_V4), amount: 12.5, appliedInline: [] },
+      });
+    });
+
+    it('stamps the same correlation id on the transaction.completed bus event', async () => {
+      await facade.checkout(payment as never);
+
+      const { correlationId } = mockPersistTransaction.execute.mock.calls[0][0].sale;
+      const completed = mockEventBus.publish.mock.calls
+        .map(([message]) => message)
+        .find((message) => message.type === EventType.TRANSACTION_COMPLETED);
+      expect(completed.correlationId).toBe(correlationId);
+    });
+
+    it('gives each sale its own correlation id', async () => {
+      await facade.checkout(payment as never);
+      await facade.checkout({ ...payment, transactionId: 'TXN-353' } as never);
+
+      const [first, second] = mockPersistTransaction.execute.mock.calls.map(
+        ([request]) => request.sale.correlationId
+      );
+      expect(first).not.toBe(second);
+    });
+
+    it('records the attached customer on the sale', async () => {
+      mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(regular());
+      await facade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+
+      await facade.checkout(payment as never);
+
+      expect(mockPersistTransaction.execute.mock.calls[0][0].customerId).toBe('customer-352');
+    });
+
+    it('records locally only after the remote write succeeds (kiosk and shop)', async () => {
+      const remote = TestBed.inject(TransactionRemoteService);
+      const order: string[] = [];
+      vi.mocked(remote.persistTransaction).mockImplementation(async () => {
+        order.push('remote');
+      });
+      mockPersistTransaction.execute.mockImplementation(async () => {
+        order.push('local');
+        return { success: true, outcome: 'recorded' };
+      });
+
+      await facade.checkout(payment as never, 'device-token');
+
+      expect(order).toEqual(['remote', 'local']);
+      expect(mockPersistTransaction.execute.mock.calls[0][0].transactionId).toBe('TXN-352');
+    });
+
+    it('records nothing locally when the remote write is refused', async () => {
+      const remote = TestBed.inject(TransactionRemoteService);
+      vi.mocked(remote.persistTransaction).mockRejectedValueOnce(new Error('403'));
+
+      await expect(facade.checkout(payment as never, 'device-token')).rejects.toThrow('403');
+
+      expect(mockPersistTransaction.execute).not.toHaveBeenCalled();
+      expect(mockCartService.clearCart).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        'a deferred record',
+        () =>
+          mockPersistTransaction.execute.mockResolvedValue({ success: false, outcome: 'deferred' }),
+      ],
+      [
+        'a throwing record',
+        () => mockPersistTransaction.execute.mockRejectedValue(new Error('IndexedDB unavailable')),
+      ],
+    ])('keeps what the cashier sees unchanged after %s', async (_label, fail) => {
+      fail();
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      mockGenerateReceipt.execute.mockReturnValue({ items: [], total: 12.5 });
+      mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(regular());
+      await facade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+
+      const receipt = await facade.checkout(payment as never);
+
+      expect(receipt).toEqual({ items: [], total: 12.5 });
+      expect(mockCartService.clearCart).toHaveBeenCalled();
+      expect(facade.attachedCustomer()).toBeNull();
+      // Side effects still run inline, so nothing is lost while the record retries.
+      expect(mockAdjustStock.execute).toHaveBeenCalled();
+      expect(mockAwardLoyalty.execute).toHaveBeenCalled();
+    });
+  });
+
   describe('database initialization', () => {
     it('should delegate initializeDatabase to DexieDatabase', async () => {
       await facade.initializeDatabase();
@@ -751,6 +879,7 @@ describe('PosFacade cartRevision over the real CartService', () => {
         { provide: AuditLogService, useValue: { log: vi.fn() } },
         { provide: TelemetryService, useValue: { recordCounter: vi.fn() } },
         { provide: TransactionRemoteService, useValue: { persistTransaction: vi.fn() } },
+        { provide: PersistTransactionUseCase, useValue: { execute: vi.fn() } },
       ],
     });
     facade = TestBed.inject(PosFacade);

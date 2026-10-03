@@ -26,6 +26,8 @@ import { Product } from '@core/domain/entities/product.entity';
 import { Customer, CustomerTier } from '@core/domain/entities/customer.entity';
 import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { TransactionRemoteService } from '@core/application/services/transaction-remote.service';
+import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 /**
  * The customer attached to the sale in progress.
@@ -74,6 +76,7 @@ export class PosFacade {
   private readonly customers = inject(CustomerService);
   private readonly awardLoyaltyPoints = inject(AwardLoyaltyPointsUseCase);
   private readonly transactionRemote = inject(TransactionRemoteService);
+  private readonly persistTransaction = inject(PersistTransactionUseCase);
 
   /** The customer attached to the sale in progress, if any. */
   private readonly _attachedCustomer = signal<AttachedCustomer | null>(null);
@@ -316,6 +319,14 @@ export class PosFacade {
     // Generate receipt from current cart state BEFORE clearing
     const receipt = this.generateReceipt.execute(paymentResult);
 
+    // One id for everything this sale causes: its outbox event and its bus events.
+    const correlationId = generateUUID();
+
+    // The local record and its SaleCompleted event, written together (#352). After
+    // the remote write, so a sale the server refused is never recorded here, and
+    // before the cart is cleared, because the record is built from it.
+    await this.recordSale(paymentResult, attachedCustomer, correlationId);
+
     // Adjust stock levels (fire-and-forget, best-effort)
     try {
       const result: StockAdjustmentResult = await this.adjustStock.execute(stockAdjustmentItems);
@@ -338,7 +349,7 @@ export class PosFacade {
           amount: paymentResult.amount,
           method: paymentResult.method,
         },
-        { priority: 'high' }
+        { priority: 'high', correlationId }
       )
     );
 
@@ -376,6 +387,36 @@ export class PosFacade {
     this.detachCustomer();
 
     return receipt;
+  }
+
+  /**
+   * Records the sale locally with its `SaleCompleted` event. Never throws: the sale
+   * has been paid for, so a failed local write is logged, retried in the background
+   * by the sale outbox, and kept out of what the cashier sees.
+   */
+  private async recordSale(
+    paymentResult: PaymentResult,
+    customer: AttachedCustomer | null,
+    correlationId: string
+  ): Promise<void> {
+    try {
+      const result = await this.persistTransaction.execute({
+        paymentMethod: paymentResult.method,
+        transactionId: paymentResult.transactionId,
+        ...(customer ? { customerId: customer.id } : {}),
+        // Every side effect still runs inline below and no SaleCompleted handler
+        // exists yet; #354 and #355 move them into handlers and list them here.
+        sale: { correlationId, amount: paymentResult.amount, appliedInline: [] },
+      });
+      if (!result.success) {
+        console.warn(
+          `[PosFacade] Sale ${paymentResult.transactionId} not recorded locally yet:`,
+          result.error ?? result.outcome
+        );
+      }
+    } catch (error) {
+      console.error('[PosFacade] Recording the sale locally failed:', error);
+    }
   }
 
   /**

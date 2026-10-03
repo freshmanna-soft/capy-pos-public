@@ -88,6 +88,32 @@ export interface OutboxStatistics {
   dead: number;
 }
 
+/**
+ * A fresh, due-now outbox row. Shared by `record` and by writers that must add the
+ * row inside their own Dexie transaction (the sale outbox, #352), so both produce
+ * the same shape.
+ */
+export function newOutboxRow<K extends DomainEventType>(
+  type: K,
+  aggregateId: string,
+  payload: DomainEventPayloadMap[K],
+  at: Date,
+  correlationId?: string
+): IOutboxEventDB {
+  return {
+    id: generateUUID(),
+    type,
+    aggregateId,
+    payload: JSON.stringify(payload),
+    ...(correlationId === undefined ? {} : { correlationId }),
+    status: OutboxStatus.PENDING,
+    attempts: 0,
+    nextAttemptAt: at.getTime(),
+    createdAt: at,
+    updatedAt: at,
+  };
+}
+
 /** Statuses a drain or flush still has work for. */
 const UNFINISHED: readonly OutboxStatus[] = [OutboxStatus.PENDING, OutboxStatus.FAILED];
 
@@ -141,18 +167,7 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
     aggregateId: string,
     payload: DomainEventPayloadMap[K]
   ): Promise<string> {
-    const at = new Date(this.now());
-    const row: IOutboxEventDB = {
-      id: generateUUID(),
-      type,
-      aggregateId,
-      payload: JSON.stringify(payload),
-      status: OutboxStatus.PENDING,
-      attempts: 0,
-      nextAttemptAt: at.getTime(),
-      createdAt: at,
-      updatedAt: at,
-    };
+    const row = newOutboxRow(type, aggregateId, payload, new Date(this.now()));
     await this.db.outbox.add(row);
 
     const dispatched = this.serialize(() => this.process(row.id));
@@ -244,6 +259,7 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
       type: row.type as DomainEventType,
       aggregateId: row.aggregateId,
       payload: JSON.parse(row.payload),
+      ...(row.correlationId === undefined ? {} : { correlationId: row.correlationId }),
       attempts: row.attempts,
       createdAt: row.createdAt,
     };

@@ -651,6 +651,17 @@ describe('CheckoutComponent', () => {
       expect(result.timestamp).toBeInstanceOf(Date);
     });
 
+    // The sale is recorded by PosFacade.checkout(), after any remote write (#352).
+    // A second, earlier write here would record a sale the server refused.
+    it('does not record the sale itself', () => {
+      component.paymentComplete.subscribe(vi.fn());
+
+      component.confirmPayment();
+      vi.advanceTimersByTime(1500);
+
+      expect(mockPersistTransaction.execute).not.toHaveBeenCalled();
+    });
+
     it('should call completeProcessing after payment completes', () => {
       component.confirmPayment();
       vi.advanceTimersByTime(1500);
