@@ -1,5 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Subject, Observable, filter } from 'rxjs';
+import { generateUUID } from '@core/domain/utils/uuid';
+import type { EventType, PublishableEvent, TypedBusMessage } from './event-bus.events';
 
 /**
  * Event Bus Message
@@ -13,6 +15,10 @@ export interface EventBusMessage<T = unknown> {
   payload: T;
   timestamp: Date;
   priority: 'low' | 'normal' | 'high' | 'critical';
+  /** Shared by every event one business action caused. Never generated here. */
+  correlationId?: string;
+  /** The id of the event that directly caused this one. */
+  causationId?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -39,20 +45,17 @@ export class EventBusService {
   /**
    * Publish a message to the event bus
    */
-  publish<T = unknown>(message: Omit<EventBusMessage<T>, 'id' | 'timestamp'>): void {
-    const fullMessage: EventBusMessage<T> = {
+  publish<K extends EventType>(message: PublishableEvent<K>): void {
+    const fullMessage: TypedBusMessage<K> = {
       ...message,
-      id: this.generateMessageId(),
+      id: generateUUID(),
       timestamp: new Date(),
     };
 
-    // Store in history
     this.addToHistory(fullMessage);
-
-    // Emit to subscribers
+    // No console logging: checkout and the clerk publish on every scan, and the
+    // agent-monitor panel already shows what went through.
     this.messageSubject.next(fullMessage);
-
-    console.log(`[EventBus] Published: ${message.type} from ${message.source}`);
   }
 
   /**
@@ -65,8 +68,10 @@ export class EventBusService {
   /**
    * Subscribe to messages of a specific type
    */
-  subscribeToType(type: string): Observable<EventBusMessage> {
-    return this.messageSubject.asObservable().pipe(filter((msg) => msg.type === type));
+  subscribeToType<K extends EventType>(type: K): Observable<TypedBusMessage<K>> {
+    return this.messageSubject
+      .asObservable()
+      .pipe(filter((msg): msg is TypedBusMessage<K> => msg.type === type));
   }
 
   /**
@@ -165,10 +170,6 @@ export class EventBusService {
     if (this.messageHistory.length > this.maxHistorySize) {
       this.messageHistory = this.messageHistory.slice(-this.maxHistorySize);
     }
-  }
-
-  private generateMessageId(): string {
-    return `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 }
 

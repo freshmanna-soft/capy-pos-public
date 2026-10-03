@@ -46,7 +46,13 @@ import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanne
 import { FrameGate, GateVerdict } from '@core/infrastructure/media/frame-gate';
 import { LookScheduler } from '@core/infrastructure/media/look-scheduler';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
-import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
+import {
+  ClerkRecognitionMeta,
+  EventPayloadMap,
+  EventSource,
+  EventType,
+  busEvent,
+} from '@core/infrastructure/messaging/event-bus.events';
 import {
   readAgentPreference,
   writeAgentPreference,
@@ -1429,7 +1435,7 @@ export class ClerkFacade {
   private addProduct(
     product: Product,
     utterance: string,
-    meta: Record<string, unknown>,
+    meta: ClerkRecognitionMeta,
     provenance?: { tier: RecognitionTier; confidence: number; candidateCount: number },
     quantity = 1,
     batch?: UndoBatch
@@ -2579,8 +2585,8 @@ export class ClerkFacade {
     return this._catalog().find((product) => product.id === productId);
   }
 
-  private publish(type: EventType, payload: Record<string, unknown>): void {
-    this.eventBus.publish(busEvent(type, EventSource.CLERK_FACADE, payload, 'normal'));
+  private publish<K extends EventType>(type: K, payload: EventPayloadMap[K]): void {
+    this.eventBus.publish(busEvent(type, EventSource.CLERK_FACADE, payload));
   }
 
   /**
