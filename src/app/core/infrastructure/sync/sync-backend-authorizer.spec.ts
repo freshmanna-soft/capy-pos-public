@@ -49,19 +49,19 @@ describe('sync backend authorizer handler (#206)', () => {
     vi.spyOn(console, 'log').mockImplementation((line: string) => {
       logs.push(String(line));
     });
-    process.env.API_SERVICE_TOKEN = TOKEN;
+    process.env['API_SERVICE_TOKEN'] = TOKEN;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    delete process.env.API_SERVICE_TOKEN;
+    delete process.env['API_SERVICE_TOKEN'];
   });
 
   describe('fails closed', () => {
     it('denies when API_SERVICE_TOKEN is not configured', async () => {
       // A half-configured deploy must be unusable, not open. This is the branch
       // that would otherwise turn a Terraform mistake into a public API.
-      delete process.env.API_SERVICE_TOKEN;
+      delete process.env['API_SERVICE_TOKEN'];
 
       await expect(handler(event({ authorization: `Bearer ${TOKEN}` }))).resolves.toEqual({
         isAuthorized: false,
@@ -69,7 +69,7 @@ describe('sync backend authorizer handler (#206)', () => {
     });
 
     it('denies when API_SERVICE_TOKEN is blank', async () => {
-      process.env.API_SERVICE_TOKEN = '';
+      process.env['API_SERVICE_TOKEN'] = '';
 
       await expect(handler(event({ authorization: 'Bearer ' }))).resolves.toEqual({
         isAuthorized: false,
@@ -77,7 +77,7 @@ describe('sync backend authorizer handler (#206)', () => {
     });
 
     it('logs the misconfiguration at error level so it is findable', async () => {
-      delete process.env.API_SERVICE_TOKEN;
+      delete process.env['API_SERVICE_TOKEN'];
 
       await handler(event({ authorization: `Bearer ${TOKEN}` }));
 

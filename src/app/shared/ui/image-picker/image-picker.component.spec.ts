@@ -66,7 +66,7 @@ describe('ImagePickerComponent', () => {
   let cameraAttach: ReturnType<typeof vi.fn>;
   let captureFrame: ReturnType<typeof vi.fn>;
   const authGateway = {
-    getAccessToken: vi.fn(() => 'operator-token'),
+    getAccessToken: vi.fn((): string | null => 'operator-token'),
   };
 
   beforeEach(() => {

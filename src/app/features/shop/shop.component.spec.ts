@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { signal } from '@angular/core';
+import { signal, type WritableSignal } from '@angular/core';
 import { Router } from '@angular/router';
 import { ShopComponent } from './shop.component';
 import { CartService } from '@core/application/services/cart.service';
@@ -268,7 +268,7 @@ describe('ShopComponent — barcode scan', () => {
     });
 
     // No products → every barcode is unknown.
-    (component as unknown as Record<string, unknown>)['_products'].set([]);
+    (component as unknown as { _products: WritableSignal<Product[]> })._products.set([]);
 
     await flushMicrotasks();
     component.toggleScan();

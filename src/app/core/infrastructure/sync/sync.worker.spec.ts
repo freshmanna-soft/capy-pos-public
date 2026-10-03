@@ -305,7 +305,7 @@ describe('sync worker request authorization (#206, #224)', () => {
     // pull is before sign-in, and each 401 would count against the same breaker
     // (threshold 5) — so a couple of unauthenticated pushes would leave the circuit
     // open and stall the till's first real sync after sign-in.
-    it.each([
+    it.each<[string, SyncWorkerCommand, string]>([
       [
         'create',
         {
@@ -323,11 +323,11 @@ describe('sync worker request authorization (#206, #224)', () => {
         'PATCH',
       ],
       ['delete', { type: 'PUSH_DELETE_PRODUCTS', productIds: ['p1'] }, 'DELETE'],
-    ] as const)('sends no %s request without a session', async (_verb, command, method) => {
+    ])('sends no %s request without a session', async (_verb, command, method) => {
       const worker = await loadWorker();
       worker.send({ type: 'START_SYNC', config: config('') });
       await worker.settle();
-      worker.send(command as SyncWorkerCommand);
+      worker.send(command);
       await worker.settle();
       worker.send({ type: 'STOP_SYNC' });
 

@@ -20,6 +20,7 @@
     "test:cucumber:ci": "start-server-and-test start http://localhost:4200 test:cucumber",
     "test:all": "npm run test:unit && npm run test:e2e",
     "lint": "ng lint",
+    "typecheck": "tsc -p tsconfig.spec.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "lint:fix": "ng lint --fix",
     "lint:sonar": "eslint --no-error-on-unmatched-pattern --config eslint.sonar.config.js --max-warnings 0",
     "sonar:local": "source .env && sonar-scanner",

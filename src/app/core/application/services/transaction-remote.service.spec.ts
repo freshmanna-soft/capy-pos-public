@@ -4,7 +4,7 @@ import {
   TransactionRemoteService,
 } from './transaction-remote.service';
 import { CartService } from '@core/application/services/cart.service';
-import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -88,9 +88,9 @@ describe('TransactionRemoteService', () => {
     expect(init.headers).toMatchObject({ Authorization: 'Bearer bearer-token' });
 
     const parsed = JSON.parse(init.body as string) as Record<string, unknown>;
-    expect(parsed.paymentMethod).toBe('cash');
-    expect(parsed.total).toBe(27.5);
-    expect(Array.isArray(parsed.items)).toBe(true);
+    expect(parsed['paymentMethod']).toBe('cash');
+    expect(parsed['total']).toBe(27.5);
+    expect(Array.isArray(parsed['items'])).toBe(true);
   });
 
   it('includes customerId and customerEmail when provided', async () => {
@@ -103,8 +103,8 @@ describe('TransactionRemoteService', () => {
       RequestInit,
     ];
     const parsed = JSON.parse(init.body as string) as Record<string, unknown>;
-    expect(parsed.customerId).toBe('cust-1');
-    expect(parsed.customerEmail).toBe('alice@example.com');
+    expect(parsed['customerId']).toBe('cust-1');
+    expect(parsed['customerEmail']).toBe('alice@example.com');
   });
 
   it('omits customerId and customerEmail when not provided', async () => {

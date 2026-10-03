@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AppIdOperatorAdminAdapter } from './appid-operator-admin.adapter';
 import { APPID_CONFIG, type AppIdConfig } from './appid-auth.adapter';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
+import type { OperatorAdminPort } from '@core/application/auth/ports/operator-admin.port';
 import { DEFAULT_TENANT_ID } from '@core/infrastructure/database/dexie-database.service';
 
 const RELAY_URL = 'https://relay.test/appid/token';
@@ -21,7 +22,11 @@ function jsonResponse(body: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
 }
 
-function makeAdapter(token: string | null = 'access-token-1'): AppIdOperatorAdminAdapter {
+/**
+ * Typed as the port, which is how the app calls it: the adapter ignores the
+ * tenant id (the relay scopes by the caller's token) but still receives one.
+ */
+function makeAdapter(token: string | null = 'access-token-1'): OperatorAdminPort {
   TestBed.configureTestingModule({
     providers: [
       AppIdOperatorAdminAdapter,
