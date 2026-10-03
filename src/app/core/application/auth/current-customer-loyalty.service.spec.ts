@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { CurrentCustomerService } from './current-customer.service';
 import { CurrentCustomerLoyaltyService } from './current-customer-loyalty.service';
 import { CUSTOMER_AUTH_GATEWAY } from './ports/customer-auth-gateway.port';
-import { CUSTOMER_LOYALTY_GATEWAY } from '@core/application/ports/customer-loyalty-gateway.port';
+import {
+  CUSTOMER_LOYALTY_GATEWAY,
+  type CustomerLoyaltyProjection,
+} from '@core/application/ports/customer-loyalty-gateway.port';
 import { CustomerSessionDto } from './dtos/customer-session.dto';
 
 const expiresAt = new Date(Date.now() + 3_600_000).toISOString();
@@ -79,8 +82,8 @@ describe('CurrentCustomerLoyaltyService', () => {
   });
 
   it('discards customer A response after switching to customer B', async () => {
-    const customerA = deferred<typeof projection>();
-    const customerB = deferred<typeof projection>();
+    const customerA = deferred<CustomerLoyaltyProjection>();
+    const customerB = deferred<CustomerLoyaltyProjection>();
     const read = vi
       .fn()
       .mockReturnValueOnce(customerA.promise)
@@ -102,7 +105,7 @@ describe('CurrentCustomerLoyaltyService', () => {
   });
 
   it('clears immediately on logout and ignores the in-flight response', async () => {
-    const pending = deferred<typeof projection>();
+    const pending = deferred<CustomerLoyaltyProjection>();
     const { customer, loyalty } = setup(vi.fn().mockReturnValue(pending.promise));
 
     customer.setSession(session('customer-a'));
@@ -163,7 +166,7 @@ describe('CurrentCustomerLoyaltyService', () => {
     // Simulates: load starts for customer-a, then customer changes, then the
     // in-flight request rejects. The catch branch that checks isCurrent() before
     // setting unavailable must be exercised via a session switch mid-flight.
-    const customerA = deferred<typeof projection>();
+    const customerA = deferred<CustomerLoyaltyProjection>();
     const read = vi.fn().mockReturnValueOnce(customerA.promise);
     const { customer, loyalty } = setup(read);
 

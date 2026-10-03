@@ -58,6 +58,12 @@ jobs:
         run: npm run lint
       - name: Prettier
         run: npm run format:check
+      # Vitest strips types without checking them, so a spec can call an API that
+      # no longer exists, and an `@ts-expect-error` type test can go vacuous, while
+      # every test stays green. tsconfig.spec.json covers all of src/, app code
+      # included; the worker has its own lib set and gets its own pass.
+      - name: Type check (app + specs + worker)
+        run: npm run typecheck
 
   test:
     name: 🧪 Unit & Tooling Tests

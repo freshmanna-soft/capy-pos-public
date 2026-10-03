@@ -355,6 +355,22 @@ describe('CapybaraRenderer', () => {
       expect(renderer.debugPose().fish).toBe(true);
     });
 
+    // The direction is a coin flip, so without pinning it the leftward crossing
+    // was covered only when the dice happened to land that way, and the branch
+    // coverage gate passed or failed with them.
+    it.each([
+      { roll: 0.1, direction: 1 },
+      { roll: 0.9, direction: -1 },
+    ] as const)('swims the shoal across in direction $direction', ({ roll, direction }) => {
+      const random = vi.spyOn(Math, 'random').mockReturnValue(roll);
+      try {
+        settle(renderer, 12);
+        expect(renderer.debugPose().shoalDirection).toBe(direction);
+      } finally {
+        random.mockRestore();
+      }
+    });
+
     it('lets the shoal leave rather than looping it', () => {
       settle(renderer, 12);
       expect(renderer.debugPose().fish).toBe(true);

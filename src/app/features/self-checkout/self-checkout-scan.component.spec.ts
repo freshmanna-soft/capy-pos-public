@@ -46,14 +46,14 @@ describe('SelfCheckoutScanComponent', () => {
   }
 
   let cart: CartService;
-  const getActiveProducts = vi.fn<[], Promise<Product[]>>();
-  const prepare = vi.fn<[], Promise<boolean>>();
+  const getActiveProducts = vi.fn<() => Promise<Product[]>>();
+  const prepare = vi.fn<() => Promise<boolean>>();
   const detect = vi.fn();
   const supported = vi.fn(() => false);
-  const cameraStart = vi.fn<[], Promise<boolean>>();
+  const cameraStart = vi.fn<() => Promise<boolean>>();
   const cameraStop = vi.fn();
   const attach = vi.fn();
-  const detectionSource = vi.fn<[], HTMLVideoElement | null>();
+  const detectionSource = vi.fn<() => HTMLVideoElement | null>();
 
   function configure(products: Product[]) {
     getActiveProducts.mockResolvedValue(products);

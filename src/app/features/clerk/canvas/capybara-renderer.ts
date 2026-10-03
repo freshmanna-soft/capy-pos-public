@@ -432,6 +432,8 @@ export class CapybaraRenderer {
     breathT: number;
     ripples: number;
     fish: boolean;
+    /** 1 swims left-to-right, -1 right-to-left; null with no shoal on stage. */
+    shoalDirection: 1 | -1 | null;
     frog: boolean;
     ambientNext: AmbientKind;
     mood: ClerkMood;
@@ -449,6 +451,7 @@ export class CapybaraRenderer {
       breathT: this.breathT,
       ripples: this.ripples.length,
       fish: this.shoal !== null,
+      shoalDirection: this.shoal?.direction ?? null,
       frog: this.frog !== null,
       ambientNext: this.ambientNext,
       mood: this.mood,
