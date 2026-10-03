@@ -264,6 +264,14 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
     return getMercadoPagoPreferenceStatus(route.preferenceId, deps);
   }
 
+  // Open for the same reason as the two routes above: the shop/kiosk checkout
+  // that created the preference holds no staff JWT. What gates it instead is
+  // knowing both the server-minted external_reference (a UUID) and the
+  // preference id that belongs to it — see `cancelMercadoPagoPreference`.
+  if (route.kind === 'cancelMercadoPagoPreference') {
+    return cancelMercadoPagoPreference(route.externalReference, request, deps);
+  }
+
   // Kiosk transaction — has its own token verification (kiosk-device or shop-session),
   // not a staff JWT, so it bypasses the staff `authorize()` boundary entirely.
   if (route.kind === 'createKioskTransaction') {
@@ -325,6 +333,7 @@ type Route =
   | { readonly kind: 'createShopSession' }
   | { readonly kind: 'createMercadoPagoPreference' }
   | { readonly kind: 'getMercadoPagoPreferenceStatus'; readonly preferenceId: string }
+  | { readonly kind: 'cancelMercadoPagoPreference'; readonly externalReference: string }
   | { readonly kind: 'listProducts'; readonly permission: Permission }
   | { readonly kind: 'createProduct'; readonly permission: Permission }
   | { readonly kind: 'listTransactions'; readonly permission: Permission }
@@ -382,6 +391,19 @@ export function matchRoute(method: string, path: string): Route | null {
     const preferenceId = safeDecode(rawId);
     if (preferenceId === null || preferenceId.length === 0) return null;
     return upper === 'GET' ? { kind: 'getMercadoPagoPreferenceStatus', preferenceId } : null;
+  }
+
+  if (
+    segments.length === 5 &&
+    segments[1] === 'mercadopago' &&
+    segments[2] === 'preference' &&
+    segments[4] === 'cancel'
+  ) {
+    const rawId = segments[3];
+    if (rawId === undefined || rawId.length === 0) return null;
+    const externalReference = safeDecode(rawId);
+    if (externalReference === null || externalReference.length === 0) return null;
+    return upper === 'POST' ? { kind: 'cancelMercadoPagoPreference', externalReference } : null;
   }
 
   if (segments.length === 2 && segments[1] === 'kiosk-device-token') {
@@ -1141,6 +1163,65 @@ interface MpPreferenceResponse {
 }
 
 /**
+ * How long a wallet preference stays payable. Thirty minutes covers a buyer
+ * who has to log in to MP, top up, or retry a card inside MP's checkout; past
+ * that the till has long since moved on and a late payment would be a charge
+ * with no sale behind it.
+ */
+const MP_PREFERENCE_TTL_SECONDS = 30 * 60;
+
+/**
+ * Payment statuses MercadoPago lets a merchant move to `cancelled`. Anything
+ * else is either final (approved, rejected, refunded, cancelled) or not ours
+ * to touch (`authorized` is a card hold that only capture/void resolves).
+ */
+const MP_CANCELLABLE_STATUSES = new Set(['pending', 'in_process']);
+
+/**
+ * Upper bound on how many payments one cancel will look at. A single
+ * preference realistically has one or two attempts (a rejected card, then a
+ * retry); the cap keeps an adversarial external_reference from turning one
+ * request into an unbounded fan-out of PUTs.
+ */
+const MP_CANCEL_SEARCH_LIMIT = 20;
+
+/**
+ * Ids we mint (`randomUUID`) and ids MP mints (`<collector>-<uuid>`) are both
+ * short and alphanumeric-with-dashes. Rejecting anything else before it is
+ * interpolated into an upstream URL keeps the open cancel route from being a
+ * way to send arbitrary paths to api.mercadopago.com with our access token.
+ */
+const MP_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;
+
+/**
+ * Per-external_reference cap on cancel calls, in memory, same shape as the
+ * shop-session limiter. The route is idempotent, so an honest client calls it
+ * once or twice (button + MP's return redirect); anything beyond this is a
+ * loop or abuse burning our MP API quota.
+ */
+const MP_CANCEL_MAX_PER_REFERENCE = 10;
+const MP_CANCEL_WINDOW_MS = 60 * 60 * 1000;
+const mpCancelBuckets = new Map<string, RateBucket>();
+
+function mpCancelAllowed(externalReference: string, nowMs: number): boolean {
+  // Drop expired windows opportunistically so the map cannot grow without bound
+  // on a long-lived pod — every reference is single-use, unlike an IP.
+  if (mpCancelBuckets.size > 1000) {
+    for (const [key, bucket] of mpCancelBuckets) {
+      if (nowMs - bucket.windowStart >= MP_CANCEL_WINDOW_MS) mpCancelBuckets.delete(key);
+    }
+  }
+  const bucket = mpCancelBuckets.get(externalReference);
+  if (bucket === undefined || nowMs - bucket.windowStart >= MP_CANCEL_WINDOW_MS) {
+    mpCancelBuckets.set(externalReference, { count: 1, windowStart: nowMs });
+    return true;
+  }
+  if (bucket.count >= MP_CANCEL_MAX_PER_REFERENCE) return false;
+  bucket.count += 1;
+  return true;
+}
+
+/**
  * POST /api/mercadopago/preference — open endpoint (no staff JWT).
  *
  * Handles two modes selected by the optional `mode` field in the request body:
@@ -1196,6 +1277,20 @@ async function createMercadoPagoPreference(
           // (preference_id is not a valid search param in the MP API).
           // We use a fresh UUID so it is stable and unique per checkout.
           external_reference: deps.newId(),
+          // A preference without an expiry stays payable forever: a customer who
+          // walked away from the till could still complete it from their MP
+          // history hours later, charging them for a sale nobody rang up. The
+          // window is generous for a real checkout and is also what the cancel
+          // route shortens to "now" when the buyer gives up early.
+          expires: true,
+          expiration_date_from: new Date(deps.nowSeconds() * 1000).toISOString(),
+          expiration_date_to: new Date(
+            (deps.nowSeconds() + MP_PREFERENCE_TTL_SECONDS) * 1000
+          ).toISOString(),
+          // All three land on PaymentCallbackComponent, which tells the waiting
+          // checkout tab what happened. MP's "Return to site" link uses these
+          // too, so a buyer who abandons inside MP's own checkout still reaches
+          // a page that can trigger the gateway cancel.
           back_urls: {
             success: `${deps.appBaseUrl}/payment/success`,
             failure: `${deps.appBaseUrl}/payment/failure`,
@@ -1329,6 +1424,148 @@ async function getMercadoPagoPreferenceStatus(
   const payment = data.results?.[0];
   const status = payment?.status ?? 'not_found';
   return { status: 200, body: { status } };
+}
+
+/**
+ * POST /api/mercadopago/preference/:externalReference/cancel — open endpoint.
+ *
+ * Body: `{ preferenceId }` — the `id` the create call returned.
+ *
+ * Makes "the customer cancelled" true at the gateway rather than only in the
+ * till's UI: afterwards the checkout link cannot be paid and no half-finished
+ * payment can settle later. Nothing is persisted — the preference itself
+ * carries the external_reference, so ownership is checked against MP.
+ *
+ * Order matters:
+ *  1. Validate ids, then confirm the preference really belongs to this
+ *     external_reference *before* any write, so a mismatched pair can never
+ *     cancel somebody else's payments.
+ *  2. Search the payments. If one is already approved the buyer has paid:
+ *     answer `approved` and change nothing — the till must finalize the sale,
+ *     not strand a charge.
+ *  3. Cancel every pending / in_process payment.
+ *  4. Expire the preference (expiration_date_to = now).
+ *
+ * Idempotent: a repeat call finds nothing cancellable and re-expires an
+ * already-expired preference, answering `cancelled` again.
+ *
+ * Returns:
+ *   200 { status: 'cancelled' } | { status: 'approved', paymentId }
+ *   400 malformed ids, or the preference does not belong to the reference
+ *   429 too many cancel calls for one reference
+ *   503 mpAccessToken not configured
+ *   502 MP unreachable or returned non-2xx
+ */
+async function cancelMercadoPagoPreference(
+  externalReference: string,
+  request: ApiRequest,
+  deps: ApiDeps
+): Promise<ApiResponse> {
+  if (!deps.mpAccessToken) {
+    return { status: 503, body: { error: 'MercadoPago is not configured on this server.' } };
+  }
+
+  const body = asObject(request.body);
+  const preferenceId = body !== null ? asNonEmptyString(body['preferenceId']) : null;
+  if (!MP_ID_PATTERN.test(externalReference) || preferenceId === null || !MP_ID_PATTERN.test(preferenceId)) {
+    return { status: 400, body: { error: 'A valid external reference and preferenceId are required.' } };
+  }
+
+  if (!mpCancelAllowed(externalReference, deps.nowSeconds() * 1000)) {
+    return { status: 429, body: { error: 'Too many cancel requests. Try again later.' } };
+  }
+
+  const doFetch = deps.fetch ?? globalThis.fetch;
+  const auth = { Authorization: `Bearer ${deps.mpAccessToken}` };
+  const preferenceUrl = `https://api.mercadopago.com/checkout/preferences/${encodeURIComponent(preferenceId)}`;
+
+  /** One MP round-trip; `null` means unreachable or non-2xx (already logged). */
+  const call: MpCall = async (label, url, init) => {
+    try {
+      const response = await doFetch(url, init);
+      if (response.ok) return response;
+      const errBody = await response.text().catch(() => '');
+      console.error(`[pos-api] MercadoPago cancel: ${label} ${response.status}`, errBody);
+      return null;
+    } catch (err) {
+      console.error(`[pos-api] MercadoPago cancel: ${label} unreachable`, err);
+      return null;
+    }
+  };
+  const upstreamFailed: ApiResponse = {
+    status: 502,
+    body: { error: 'Could not cancel the payment with MercadoPago.' },
+  };
+
+  // 1 — ownership.
+  const prefResponse = await call('read preference', preferenceUrl, { headers: auth });
+  if (prefResponse === null) return upstreamFailed;
+  const pref = (await prefResponse.json()) as MpPreferenceResponse;
+  if (pref.external_reference !== externalReference) {
+    return { status: 400, body: { error: 'preferenceId does not belong to this checkout.' } };
+  }
+
+  // 2 — has the buyer already paid?
+  const searchResponse = await call(
+    'search payments',
+    `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(externalReference)}&sort=date_created&criteria=desc&limit=${MP_CANCEL_SEARCH_LIMIT}`,
+    { headers: auth }
+  );
+  if (searchResponse === null) return upstreamFailed;
+  const search = (await searchResponse.json()) as { results?: MpPaymentResponse[] };
+  const payments = search.results ?? [];
+  const approved = payments.find((payment) => payment.status === 'approved');
+  if (approved !== undefined) {
+    return { status: 200, body: { status: 'approved', paymentId: String(approved.id) } };
+  }
+
+  // 3 — cancel whatever could still settle.
+  for (const payment of payments) {
+    if (!MP_CANCELLABLE_STATUSES.has(payment.status)) continue;
+    const verdict = await cancelOnePayment(payment, call, auth);
+    if (verdict === 'approved') {
+      return { status: 200, body: { status: 'approved', paymentId: String(payment.id) } };
+    }
+    if (verdict === 'failed') return upstreamFailed;
+  }
+
+  // 4 — nobody can start a new payment on this link.
+  const expired = await call('expire preference', preferenceUrl, {
+    method: 'PUT',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expires: true, expiration_date_to: deps.nowIso() }),
+  });
+  if (expired === null) return upstreamFailed;
+
+  return { status: 200, body: { status: 'cancelled' } };
+}
+
+type MpCall = (label: string, url: string, init?: RequestInit) => Promise<Response | null>;
+
+/**
+ * Cancel one pending / in_process payment. The PUT is refused once a payment
+ * leaves pending — most often because it was approved in the instant between
+ * the search and now — so a refusal re-reads it: a just-paid buyer gets their
+ * sale instead of a "cancelled" screen, and a payment that is somehow still
+ * open is a failure rather than a false "cancelled".
+ */
+async function cancelOnePayment(
+  payment: MpPaymentResponse,
+  call: MpCall,
+  auth: Record<string, string>
+): Promise<'cancelled' | 'approved' | 'failed'> {
+  const paymentUrl = `https://api.mercadopago.com/v1/payments/${encodeURIComponent(String(payment.id))}`;
+  const cancelled = await call('cancel payment', paymentUrl, {
+    method: 'PUT',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'cancelled' }),
+  });
+  if (cancelled !== null) return 'cancelled';
+  const reread = await call('re-read payment', paymentUrl, { headers: auth });
+  if (reread === null) return 'failed';
+  const current = (await reread.json()) as MpPaymentResponse;
+  if (current.status === 'approved') return 'approved';
+  return MP_CANCELLABLE_STATUSES.has(current.status) ? 'failed' : 'cancelled';
 }
 
 // ─── Image upload ─────────────────────────────────────────────────────────────

@@ -9,7 +9,10 @@ import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculat
 import { CircuitBreakerService } from '@core/infrastructure/resilience/circuit-breaker.service';
 import { RetryService } from '@core/infrastructure/resilience/retry.service';
 import { signal } from '@angular/core';
-import { MERCADOPAGO_PAYMENT_PORT } from '@core/application/ports/mercadopago.port';
+import {
+  MERCADOPAGO_PAYMENT_PORT,
+  type MercadoPagoPaymentResult,
+} from '@core/application/ports/mercadopago.port';
 import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
 
 /**
@@ -29,6 +32,20 @@ import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
  * - Cancellation closes the panel
  * - Cash payment validation and change calculation via use case
  */
+function mpResult(
+  status: MercadoPagoPaymentResult['status'],
+  extra: Partial<MercadoPagoPaymentResult> = {}
+): MercadoPagoPaymentResult {
+  return {
+    status,
+    paymentId: 'pay-1',
+    preferenceId: 'pref-1',
+    amount: 108.5,
+    timestamp: new Date(),
+    ...extra,
+  };
+}
+
 describe('CheckoutComponent', () => {
   let component: CheckoutComponent;
   let fixture: ComponentFixture<CheckoutComponent>;
@@ -42,6 +59,18 @@ describe('CheckoutComponent', () => {
   // real services' timers. Integration is covered by the e2e suite.
   let mockCircuitBreaker: { execute: ReturnType<typeof vi.fn> };
   let mockRetry: { execute: ReturnType<typeof vi.fn> };
+  /**
+   * MercadoPago port double. `useValue` hands the component this exact object,
+   * so MP tests replace its methods per test; the defaults are inert.
+   */
+  let mockMp: {
+    isEnabled: () => boolean;
+    loadSdk: () => Promise<void>;
+    createAndRender: ReturnType<typeof vi.fn>;
+    createWalletBrick: ReturnType<typeof vi.fn>;
+    cancelPayment: ReturnType<typeof vi.fn>;
+    destroy: ReturnType<typeof vi.fn>;
+  };
 
   const mockValidation = signal({ isValid: false, error: null as string | null });
   const mockAmountDue = signal(108.5);
@@ -256,6 +285,15 @@ describe('CheckoutComponent', () => {
       execute: vi.fn((_name: string, fn: () => Promise<unknown>) => fn()),
     };
 
+    mockMp = {
+      isEnabled: () => false,
+      loadSdk: () => Promise.resolve(),
+      createAndRender: vi.fn(() => Promise.reject(new Error('not tested'))),
+      createWalletBrick: vi.fn(() => Promise.reject(new Error('not tested'))),
+      cancelPayment: vi.fn(() => Promise.resolve(mpResult('cancelled'))),
+      destroy: vi.fn(),
+    };
+
     await TestBed.configureTestingModule({
       imports: [CheckoutComponent],
       providers: [
@@ -266,16 +304,8 @@ describe('CheckoutComponent', () => {
         { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
         { provide: CircuitBreakerService, useValue: mockCircuitBreaker },
         { provide: RetryService, useValue: mockRetry },
-        // No-op stub: checkout tests do not exercise the MercadoPago path
-        {
-          provide: MERCADOPAGO_PAYMENT_PORT,
-          useValue: {
-            isEnabled: () => false,
-            loadSdk: () => Promise.resolve(),
-            createAndRender: () => Promise.reject(new Error('not tested')),
-            destroy: () => undefined,
-          },
-        },
+        // Inert by default; the Mercado Pago cancellation suite drives it.
+        { provide: MERCADOPAGO_PAYMENT_PORT, useValue: mockMp },
         // No-op stub: checkout tests do not exercise the PayPal path
         {
           provide: PAYPAL_PAYMENT_PORT,
@@ -738,6 +768,220 @@ describe('CheckoutComponent', () => {
     it('should include rounded-up amount', () => {
       const amounts = component.quickAmounts();
       expect(amounts[0]).toBe(109); // Math.ceil(108.5)
+    });
+  });
+
+  describe('Mercado Pago cancellation', () => {
+    /** The pending wallet / card promise, settled by the test like the adapter would. */
+    let settleAttempt: (result: MercadoPagoPaymentResult) => void;
+    let onPollingStarted: (() => void) | undefined;
+    let onCancelling: (() => void) | undefined;
+
+    const el = () => fixture.nativeElement as HTMLElement;
+    const q = (testId: string) => el().querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+    const flush = async () => {
+      await fixture.whenStable();
+      fixture.detectChanges();
+    };
+
+    beforeEach(() => {
+      const pendingAttempt = () =>
+        new Promise<MercadoPagoPaymentResult>((resolve) => (settleAttempt = resolve));
+      mockMp.createWalletBrick.mockImplementation(
+        (_amount: number, _id: string, polling?: () => void, cancelling?: () => void) => {
+          onPollingStarted = polling;
+          onCancelling = cancelling;
+          return pendingAttempt();
+        }
+      );
+      mockMp.createAndRender.mockImplementation(pendingAttempt);
+    });
+
+    /** Open the wallet step; optionally have the buyer click Pay in the Brick. */
+    async function openWallet({ paid = false } = {}): Promise<void> {
+      component.selectAndProceed('mercadopago');
+      if (paid) onPollingStarted?.();
+      await flush();
+    }
+
+    async function clickCancel(result: MercadoPagoPaymentResult): Promise<void> {
+      // Like the adapter: cancel resolves and the attempt promise settles too.
+      mockMp.cancelPayment.mockImplementation(async () => {
+        settleAttempt(result);
+        return result;
+      });
+      q('btn-mp-cancel')!.click();
+      await flush();
+    }
+
+    it('shows Cancel payment on the wallet step before the buyer pays', async () => {
+      await openWallet();
+      expect(q('mp-wallet-brick-container')).toBeTruthy();
+      expect(q('btn-mp-cancel')).toBeTruthy();
+    });
+
+    it('shows Cancel payment while waiting for the MP tab', async () => {
+      await openWallet({ paid: true });
+      expect(q('mp-wallet-waiting')).toBeTruthy();
+      expect(q('btn-mp-cancel')?.textContent).toContain('Cancel payment');
+    });
+
+    it('cancel → Cancelling… (buttons disabled) → Payment cancelled, focus on the heading', async () => {
+      await openWallet({ paid: true });
+      let resolveCancel!: (r: MercadoPagoPaymentResult) => void;
+      mockMp.cancelPayment.mockImplementation(
+        () => new Promise<MercadoPagoPaymentResult>((r) => (resolveCancel = r))
+      );
+
+      q('btn-mp-cancel')!.click();
+      fixture.detectChanges();
+      expect(component.step()).toBe('mercadopago-cancelling');
+      const cancelling = q('mp-cancelling')!;
+      expect(cancelling.textContent).toContain('Cancelling payment…');
+      expect(cancelling.getAttribute('aria-live')).toBe('polite');
+      expect([...cancelling.querySelectorAll('button')].every((b) => b.disabled)).toBe(true);
+
+      const result = mpResult('cancelled', { cancellationConfirmed: true });
+      resolveCancel(result);
+      settleAttempt(result);
+      await flush();
+
+      const cancelled = q('mp-cancelled')!;
+      expect(cancelled.querySelector('h3')?.textContent).toContain('Payment cancelled');
+      expect(cancelled.textContent).toContain("You weren't charged. Your cart is still here.");
+      expect(q('mp-cancel-unconfirmed')).toBeNull();
+      expect(document.activeElement).toBe(cancelled.querySelector('h3'));
+      expect(mockMp.cancelPayment).toHaveBeenCalledOnce();
+    });
+
+    it('finalizes the sale when the gateway says the buyer already paid', async () => {
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+      await openWallet({ paid: true });
+
+      await clickCancel(mpResult('approved'));
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(spy.mock.calls[0][0]).toMatchObject({ method: 'mercadopago', amount: 108.5 });
+      expect(q('mp-cancelled')).toBeNull();
+    });
+
+    it('ignores a late approved that arrives after the cancel settled', async () => {
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+      await openWallet({ paid: true });
+      mockMp.cancelPayment.mockResolvedValue(mpResult('cancelled'));
+
+      q('btn-mp-cancel')!.click();
+      await flush();
+      expect(component.step()).toBe('mercadopago-cancelled');
+
+      settleAttempt(mpResult('approved'));
+      await flush();
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(component.step()).toBe('mercadopago-cancelled');
+    });
+
+    it('ignores a late approved after checkout went back to method selection', async () => {
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+      await openWallet();
+      component.goBack();
+
+      settleAttempt(mpResult('approved'));
+      await flush();
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(component.step()).toBe('select');
+    });
+
+    it('warns, but still does not finalize, when the gateway could not confirm', async () => {
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+      await openWallet({ paid: true });
+
+      await clickCancel(mpResult('cancelled', { cancellationConfirmed: false }));
+
+      expect(q('mp-cancelled')).toBeTruthy();
+      expect(q('mp-cancel-unconfirmed')?.textContent).toContain(
+        "We couldn't confirm the cancellation with Mercado Pago"
+      );
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('Try again returns to method selection; the next attempt starts fresh', async () => {
+      await openWallet({ paid: true });
+      await clickCancel(mpResult('cancelled', { cancellationConfirmed: false }));
+
+      q('btn-mp-try-again')!.click();
+      await flush();
+
+      expect(component.step()).toBe('select');
+      expect(component.mpCancelUnconfirmed()).toBe(false);
+
+      await openWallet();
+      expect(mockMp.createWalletBrick).toHaveBeenCalledTimes(2);
+      expect(component.step()).toBe('mercadopago-wallet');
+    });
+
+    it('Back to cart closes checkout', async () => {
+      const spy = vi.fn();
+      component.checkoutCancelled.subscribe(spy);
+      await openWallet({ paid: true });
+      await clickCancel(mpResult('cancelled'));
+
+      q('btn-mp-back-to-cart')!.click();
+
+      expect(spy).toHaveBeenCalledOnce();
+    });
+
+    it('closing checkout mid-payment cancels at the gateway instead of dropping it', async () => {
+      const spy = vi.fn();
+      component.checkoutCancelled.subscribe(spy);
+      await openWallet({ paid: true });
+      mockMp.cancelPayment.mockImplementation(() => new Promise(() => undefined));
+
+      component.cancel();
+      fixture.detectChanges();
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(component.step()).toBe('mercadopago-cancelling');
+      // Closing again while cancelling is ignored, not a second cancel.
+      component.cancel();
+      expect(mockMp.cancelPayment).toHaveBeenCalledOnce();
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('an adapter-initiated cancel (buyer returned from MP) shows Cancelling… then Payment cancelled', async () => {
+      await openWallet({ paid: true });
+
+      onCancelling?.();
+      fixture.detectChanges();
+      expect(q('mp-cancelling')).toBeTruthy();
+
+      settleAttempt(mpResult('cancelled', { cancellationConfirmed: true }));
+      await flush();
+      expect(q('mp-cancelled')).toBeTruthy();
+    });
+
+    it('the card Brick step offers Cancel payment too', async () => {
+      component.mpMode.set('card');
+      component.selectAndProceed('mercadopago');
+      await flush();
+      expect(q('mp-brick-container')).toBeTruthy();
+
+      await clickCancel(mpResult('cancelled', { cancellationConfirmed: true }));
+
+      expect(q('mp-cancelled')).toBeTruthy();
+    });
+
+    it('a wallet error after the attempt was abandoned is ignored', async () => {
+      mockMp.createWalletBrick.mockImplementation(() => Promise.reject(new Error('boom')));
+      component.selectAndProceed('mercadopago');
+      component.goBack();
+      await flush();
+      expect(component.step()).toBe('select');
     });
   });
 });
