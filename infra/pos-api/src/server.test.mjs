@@ -115,6 +115,27 @@ describe('POS API HTTP adapter', () => {
     assert.equal(clientRateLimitKey(request('spoofed, 198.51.100.7, 10.1.1.1'), 2), '198.51.100.7');
   });
 
+  it('rate-limits shop-session minting per forwarded client, not one shared bucket', async () => {
+    await withServer(async (url) => {
+      const mint = (clientAddress) =>
+        fetch(`${url}/api/shop/session`, {
+          method: 'POST',
+          headers: {
+            Origin: 'https://capy-pos.com',
+            'Content-Type': 'application/json',
+            'X-Forwarded-For': clientAddress,
+          },
+          body: JSON.stringify({ storeId: 'org/store-1' }),
+        });
+      for (let i = 0; i < 20; i += 1) {
+        assert.equal((await mint('198.51.100.20')).status, 201);
+      }
+      assert.equal((await mint('198.51.100.20')).status, 429);
+      // A second shopper is unaffected by the first one's spent bucket.
+      assert.equal((await mint('198.51.100.21')).status, 201);
+    });
+  });
+
   it('parses only exact configured origins', () => {
     assert.deepEqual(
       [...readAllowedOrigins({ ALLOWED_ORIGINS: 'https://capy-pos.com,http://localhost:4200' })],

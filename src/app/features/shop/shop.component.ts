@@ -11,6 +11,7 @@ import {
   ViewChild,
   afterNextRender,
   effect,
+  untracked,
   DestroyRef,
 } from '@angular/core';
 import { Router } from '@angular/router';
@@ -22,6 +23,7 @@ import { KioskSettingsService } from '@core/application/services/kiosk-settings.
 import { GeofencingService } from '@core/application/services/geofencing.service';
 import { KioskCustomerService } from '@features/kiosk/kiosk-customer.service';
 import { SyncService } from '@core/infrastructure/sync/sync.service';
+import { ShopSessionService } from '@core/infrastructure/sync/shop-session.service';
 import { PosFacade } from '@core/application/facades';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
@@ -41,9 +43,6 @@ import { environment } from '../../../environments/environment';
 const STORE_CURRENCY = environment.mercadopago.currency;
 
 const MAX_QTY = MAX_QTY_PER_PRODUCT;
-
-/** sessionStorage key for the shop-session JWT. */
-const SESSION_TOKEN_KEY = 'shop-session-token';
 
 /** How often the barcode decoder is polled while the sheet is open. */
 const SCAN_POLL_MS = 150;
@@ -68,7 +67,8 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
  *  1. Load KioskSettingsService — resolves store from Dexie or defaults.
  *  2. If exactly one store or GPS confirms location → use it.
  *     If multiple stores and GPS denied → show store picker.
- *  3. Call POST /api/shop/session { storeId } → store token in sessionStorage.
+ *  3. ShopSessionService gets or mints the store's capability token (and keeps it
+ *     valid while the shop is open).
  *  4. Show the full shopping UI (mirrors KioskShopComponent).
  *
  * Remote-first: checkout POSTs the basket to /api/transactions with the
@@ -892,6 +892,7 @@ export class ShopComponent implements OnInit, OnDestroy {
   private readonly customerRepo = inject(CUSTOMER_REPOSITORY);
   private readonly authGateway = inject(AUTH_GATEWAY);
   private readonly syncService = inject(SyncService);
+  private readonly shopSession = inject(ShopSessionService);
   private readonly telemetry = inject(TelemetryService);
 
   // ── View state ───────────────────────────────────────────────────────────────
@@ -983,6 +984,17 @@ export class ShopComponent implements OnInit, OnDestroy {
     // Camera must not outlive the component under any exit path.
     inject(DestroyRef).onDestroy(() => this.teardownScan());
 
+    // Re-read the catalog whenever a pull lands products in Dexie. Before the
+    // shop is showing there is nothing to refresh — startShopping() does the first
+    // read. After it, this is what takes a first-time visitor from "No products
+    // found." to the catalog once the worker's first authorized pull completes.
+    effect(() => {
+      const revision = this.syncService.productsRevision();
+      untracked(() => {
+        if (revision > 0 && this.view() === 'shopping') this.loadProducts({ quiet: true });
+      });
+    });
+
     effect(() => {
       const items = this.cartService.items();
       if (items.length > 0) {
@@ -1011,6 +1023,8 @@ export class ShopComponent implements OnInit, OnDestroy {
     this.clearIdleTimers();
     this.clearReceiptTimers();
     this.geofencing.reset();
+    // Hands the worker's credential back to any staff session on this device.
+    this.shopSession.release();
   }
 
   // ── Barcode scan ─────────────────────────────────────────────────────────────
@@ -1150,27 +1164,10 @@ export class ShopComponent implements OnInit, OnDestroy {
   // ── Session acquisition ──────────────────────────────────────────────────────
 
   private async acquireSession(storeId: string): Promise<void> {
-    // Reuse an existing valid session token from sessionStorage
-    const existing = sessionStorage.getItem(SESSION_TOKEN_KEY);
-    if (existing) {
-      this.syncService.updateConfig({ sessionToken: existing });
-      this.startShopping();
-      return;
-    }
-
     this.view.set('acquiring-session');
     try {
-      const response = await fetch(`${environment.apiUrl}/shop/session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storeId }),
-      });
-      if (!response.ok) {
-        throw new Error(`Session request failed: ${response.status}`);
-      }
-      const data = (await response.json()) as { token: string; expiresAt: string };
-      sessionStorage.setItem(SESSION_TOKEN_KEY, data.token);
-      this.syncService.updateConfig({ sessionToken: data.token });
+      // Reuses a stored token only while it has time left; mints otherwise.
+      await this.shopSession.acquire(storeId);
       this.startShopping();
     } catch (err) {
       this.sessionError.set(
@@ -1202,8 +1199,9 @@ export class ShopComponent implements OnInit, OnDestroy {
 
   // ── Product loading ──────────────────────────────────────────────────────────
 
-  private loadProducts(): void {
-    this.isLoading.set(true);
+  /** `quiet` re-reads without the loading state, so a refresh does not flash the grid. */
+  private loadProducts({ quiet = false }: { quiet?: boolean } = {}): void {
+    if (!quiet) this.isLoading.set(true);
     this.productService
       .getActiveProducts()
       .then((products) => {
@@ -1280,10 +1278,11 @@ export class ShopComponent implements OnInit, OnDestroy {
 
   handlePaymentComplete(result: PaymentResult): void {
     // Pass the shop-session token so PosFacade performs the remote-first write
-    // before clearing the cart. Token was stored in sessionStorage on page load.
-    const sessionToken = sessionStorage.getItem('shop-session-token') ?? undefined;
-    this.posFacade
-      .checkout(result, sessionToken)
+    // before clearing the cart. Asked for at this moment, not read from page load:
+    // a customer can shop past the token's hour, and an expired one 401s the write.
+    this.shopSession
+      .ensureValid()
+      .then((sessionToken) => this.posFacade.checkout(result, sessionToken))
       .then((receipt) => {
         this.checkoutError.set(null);
         this.telemetry.trackEvent('shop.checkout.completed', {

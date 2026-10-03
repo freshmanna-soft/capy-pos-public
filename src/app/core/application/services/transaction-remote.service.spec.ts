@@ -56,19 +56,6 @@ describe('TransactionRemoteService', () => {
     vi.unstubAllGlobals();
   });
 
-  // ── getShopSessionToken ───────────────────────────────────────────────────
-
-  it('returns the session token from sessionStorage', () => {
-    sessionStorage.setItem('shop-session-token', 'jwt-abc');
-    expect(service.getShopSessionToken()).toBe('jwt-abc');
-    sessionStorage.removeItem('shop-session-token');
-  });
-
-  it('returns null when there is no session token', () => {
-    sessionStorage.removeItem('shop-session-token');
-    expect(service.getShopSessionToken()).toBeNull();
-  });
-
   // ── persistTransaction — happy path ──────────────────────────────────────
 
   it('POSTs to /api/transactions with the correct body and resolves on 2xx', async () => {

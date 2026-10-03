@@ -453,6 +453,18 @@ describe('SyncService', () => {
       worker = start();
     });
 
+    it('AUTH_REJECTED → bumps authRejections without failing the status', () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      expect(service.authRejections()).toBe(0);
+
+      worker.emit({ type: 'AUTH_REJECTED', status: 401, endpoint: '/api/products' });
+      worker.emit({ type: 'AUTH_REJECTED', status: 401, endpoint: '/api/products' });
+
+      // A counter, so two refusals in a row are two notifications.
+      expect(service.authRejections()).toBe(2);
+      expect(service.status()).not.toBe(SyncStatus.FAILED);
+    });
+
     it('SYNC_STARTED → syncing', () => {
       worker.emit({ type: 'SYNC_STARTED' });
       expect(service.status()).toBe(SyncStatus.SYNCING);
@@ -673,6 +685,19 @@ describe('SyncService', () => {
         taxRate: 0.08,
         isActive: true,
       });
+      expect(service.productsSynced()).toBe(1);
+    });
+
+    it('bumps productsRevision on every write, even of the same count', async () => {
+      mockDb.products.get.mockResolvedValue(undefined);
+      const worker = emitProducts([{ id: 'a', name: 'One', category: 'c', price: 1 }]);
+      await vi.waitFor(() => expect(service.productsRevision()).toBe(1));
+
+      worker.emit({
+        type: 'PRODUCTS_SYNCED',
+        products: [{ id: 'a', name: 'One', category: 'c', price: 1 }],
+      });
+      await vi.waitFor(() => expect(service.productsRevision()).toBe(2));
       expect(service.productsSynced()).toBe(1);
     });
 

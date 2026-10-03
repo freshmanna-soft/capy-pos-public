@@ -36,8 +36,13 @@ export class ProductRemoteSyncHandler implements EventHandler<
     if (!product) return;
 
     if (!this.sync.isRunning()) throw new RetryLaterError('Sync worker is not running.');
-    if (!this.credential.token()) {
-      throw new RetryLaterError('Nobody is signed in; the product syncs after sign-in.');
+    // Staff specifically, not just "some token": on /shop the worker carries the
+    // customer's read-only capability token, and a push under it would only 403.
+    // The arbitration lives in SyncSessionCredentialService, so no token decoding here.
+    if (!this.credential.carriesStaffCredential()) {
+      throw new RetryLaterError(
+        'No staff session on the sync worker; the product syncs after sign-in.'
+      );
     }
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       throw new RetryLaterError('Offline; the product syncs when the connection is back.');

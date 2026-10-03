@@ -49,10 +49,10 @@ describe('ProductRemoteSyncHandler', () => {
   let handler: ProductRemoteSyncHandler;
   let db: DexieDatabase;
   let sync: { isRunning: ReturnType<typeof vi.fn>; pushUpsertAsync: ReturnType<typeof vi.fn> };
-  const token = signal('jwt');
+  const carriesStaffCredential = signal(true);
 
   beforeEach(() => {
-    token.set('jwt');
+    carriesStaffCredential.set(true);
     sync = {
       isRunning: vi.fn().mockReturnValue(true),
       pushUpsertAsync: vi.fn().mockResolvedValue({ productId: 'x', success: true, status: 201 }),
@@ -60,7 +60,7 @@ describe('ProductRemoteSyncHandler', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: SyncService, useValue: sync },
-        { provide: SyncSessionCredentialService, useValue: { token } },
+        { provide: SyncSessionCredentialService, useValue: { carriesStaffCredential } },
       ],
     });
     db = TestBed.inject(DexieDatabase);
@@ -105,9 +105,11 @@ describe('ProductRemoteSyncHandler', () => {
     expect(sync.pushUpsertAsync).not.toHaveBeenCalled();
   });
 
-  it('defers, without pushing, while nobody is signed in', async () => {
+  it('defers, without pushing, while the worker carries no staff credential', async () => {
+    // Covers both nobody signed in and the shop's capability token holding the
+    // worker's slot: either way a push would be refused (401/403), not applied.
     await db.products.add(product());
-    token.set('');
+    carriesStaffCredential.set(false);
 
     await expect(handler.handle(upserted(product().id))).rejects.toBeInstanceOf(RetryLaterError);
     expect(sync.pushUpsertAsync).not.toHaveBeenCalled();

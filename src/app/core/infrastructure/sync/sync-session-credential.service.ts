@@ -1,4 +1,4 @@
-import { Injectable, computed, effect, inject } from '@angular/core';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { SyncService } from './sync.service';
 
@@ -30,11 +30,38 @@ import { SyncService } from './sync.service';
  * `sync.worker.ts` is where that becomes "skip the authorized calls" — the worker
  * owns its own scheduling and the credential is just one input to it.
  *
+ * ## Which credential wins
+ *
+ * Two parties want the worker's one `Authorization` slot: the staff session above,
+ * and a *capability* session — the anonymous customer's shop token, which
+ * `ShopSessionService` holds while `/shop` is open. This service is the single
+ * place that decides between them (`workerCredential`): an active capability
+ * session wins, otherwise the staff token, otherwise none. Before this, both wrote
+ * to the worker directly, so a till with a leftover staff session overwrote the
+ * shop token on `/shop` whenever the staff session expired or refreshed, and the
+ * shop's pulls went out with `''` or a token the customer should never carry.
+ *
  * It also does not narrow what the token can do. The claim set is whatever the till
  * minted, and the ceiling is `session-auth.ts`'s own: the signing secret is shared
  * with a public bundle, so this bounds reachability, not identity. Closing that gap
  * needs a server-side issuer (#140/#200), which is where that note lives too.
  */
+export const WorkerCredentialKind = {
+  /** Nothing to present; the worker skips its authorized calls. */
+  NONE: 'none',
+  /** The signed-in operator's session JWT. */
+  STAFF: 'staff',
+  /** A narrow customer capability token (the anonymous shop session). */
+  CAPABILITY: 'capability',
+} as const;
+export type WorkerCredentialKind = (typeof WorkerCredentialKind)[keyof typeof WorkerCredentialKind];
+
+export interface WorkerCredential {
+  readonly kind: WorkerCredentialKind;
+  /** `''` exactly when `kind` is `none`. */
+  readonly token: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class SyncSessionCredentialService {
   private readonly currentUser = inject(CurrentUserService);
@@ -48,7 +75,33 @@ export class SyncSessionCredentialService {
    * and omits the header entirely, which is a cleaner denial to debug than
    * `Bearer undefined`.
    */
-  readonly token = computed<string>(() => this.currentUser.session()?.accessToken ?? '');
+  private readonly staffToken = computed<string>(
+    () => this.currentUser.session()?.accessToken ?? ''
+  );
+
+  /** The capability token holding the worker's slot, or null when none is active. */
+  private readonly capabilityToken = signal<string | null>(null);
+
+  /** The arbitration itself — see "Which credential wins" above. */
+  readonly workerCredential = computed<WorkerCredential>(() => {
+    const capability = this.capabilityToken();
+    if (capability) return { kind: WorkerCredentialKind.CAPABILITY, token: capability };
+    const staff = this.staffToken();
+    return staff
+      ? { kind: WorkerCredentialKind.STAFF, token: staff }
+      : { kind: WorkerCredentialKind.NONE, token: '' };
+  });
+
+  readonly token = computed<string>(() => this.workerCredential().token);
+
+  /**
+   * Whether the worker is presenting a staff session. Writes back to pos-api (the
+   * product outbox) need one: a capability token is read-only by design, so a push
+   * under it would only collect a 403 and burn a retry.
+   */
+  readonly carriesStaffCredential = computed(
+    () => this.workerCredential().kind === WorkerCredentialKind.STAFF
+  );
 
   /**
    * The value the worker already has. Seeded at construction because `app.config.ts`
@@ -59,14 +112,29 @@ export class SyncSessionCredentialService {
   private lastPushed: string = this.token();
 
   constructor() {
-    effect(() => {
-      const token = this.token();
-      if (token === this.lastPushed) {
-        return;
-      }
+    effect(() => this.pushIfChanged(this.token()));
+  }
 
-      this.lastPushed = token;
-      this.sync.updateConfig({ sessionToken: token });
-    });
+  /**
+   * Give the worker's credential slot to a capability session until
+   * `releaseCapability()`. Pushed synchronously rather than left to the effect so
+   * the worker already carries it when the caller's next message (a push, a pull)
+   * reaches it — effects only run at the next change-detection pass.
+   */
+  holdCapability(token: string): void {
+    this.capabilityToken.set(token);
+    this.pushIfChanged(this.token());
+  }
+
+  /** Hand the slot back: the worker carries the staff token again, or `''`. */
+  releaseCapability(): void {
+    this.capabilityToken.set(null);
+    this.pushIfChanged(this.token());
+  }
+
+  private pushIfChanged(token: string): void {
+    if (token === this.lastPushed) return;
+    this.lastPushed = token;
+    this.sync.updateConfig({ sessionToken: token });
   }
 }

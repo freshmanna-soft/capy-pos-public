@@ -22,6 +22,34 @@ import {
   DEFAULT_SYNC_CONFIG,
 } from './sync.types';
 
+// ─── HTTP status errors ─────────────────────────────────────────────────────
+
+/**
+ * A non-2xx answer from the API, keeping the status as a number.
+ *
+ * The message stays `HTTP <status>: <text>` because `WorkerRetry.isRetryable`
+ * classifies on it; the numeric status is what lets the breaker and the pull tell
+ * a refused credential apart from an outage without parsing that string.
+ */
+class HttpStatusError extends Error {
+  constructor(
+    readonly status: number,
+    statusText: string
+  ) {
+    super(`HTTP ${status}: ${statusText}`);
+    this.name = 'HttpStatusError';
+  }
+}
+
+/**
+ * A 401 means the API is up and answering — it just refused this token. Counting
+ * that toward the breaker would open the circuit on a credential problem and then
+ * stall the first pull after a fresh token arrives for the breaker timeout.
+ */
+function isCredentialRejection(error: unknown): error is HttpStatusError {
+  return error instanceof HttpStatusError && error.status === 401;
+}
+
 // ─── Worker Circuit Breaker ─────────────────────────────────────────────────
 
 class WorkerCircuitBreaker {
@@ -59,7 +87,8 @@ class WorkerCircuitBreaker {
       this.onSuccess();
       return result;
     } catch (error) {
-      this.onFailure();
+      // Neither a success nor a failure of the service — see isCredentialRejection.
+      if (!isCredentialRejection(error)) this.onFailure();
       throw error;
     }
   }
@@ -222,6 +251,12 @@ class WorkerRetry {
 let config: SyncWorkerConfig = DEFAULT_SYNC_CONFIG;
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
+/**
+ * Set when a new credential arrives while a cycle is already running. That cycle
+ * went out with the old token, so its result says nothing about the new one; one
+ * follow-up cycle runs as soon as it finishes instead of waiting for the interval.
+ */
+let resyncRequested = false;
 let totalSyncs = 0;
 let totalFailures = 0;
 let lastSyncTime: string | undefined;
@@ -367,7 +402,7 @@ async function fetchWithTimeout(
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      throw new HttpStatusError(response.status, response.statusText);
     }
 
     return response;
@@ -506,6 +541,17 @@ async function performSync(): Promise<void> {
     totalFailures++;
     lastError = error instanceof Error ? error.message : String(error);
 
+    // Told apart from the generic ERROR below so the main thread can fix the cause
+    // (mint a fresh token) instead of only reporting it. ERROR still follows, so the
+    // sync status and its listeners see the failure exactly as before.
+    if (isCredentialRejection(error)) {
+      postEvent({
+        type: 'AUTH_REJECTED',
+        status: error.status,
+        endpoint: config.endpoints.products,
+      });
+    }
+
     const circuitState = circuitBreaker.getState();
     if (circuitState === WorkerCircuitState.OPEN) {
       postEvent({
@@ -531,7 +577,29 @@ async function performSync(): Promise<void> {
     console.error('[Worker:Sync] Failed:', lastError);
   } finally {
     isSyncing = false;
+    if (resyncRequested) {
+      resyncRequested = false;
+      void performSync();
+    }
   }
+}
+
+/**
+ * A new non-empty credential means the next pull can succeed where the last one
+ * could not (first shop token, a re-minted one after a 401, a sign-in). Waiting
+ * for the interval left a first-time shop visitor on "No products found" for up
+ * to 30s, so pull now — or right after the cycle already in flight.
+ */
+function syncForNewCredential(previous: string | undefined): void {
+  const token = sessionToken();
+  if (token === null || token === previous?.trim()) return;
+  // Not started, or stopped: the worker owns no schedule to run this on.
+  if (syncInterval === null) return;
+  if (isSyncing) {
+    resyncRequested = true;
+    return;
+  }
+  void performSync();
 }
 
 // ─── PUSH Operations (Local → API) ─────────────────────────────────────────
@@ -896,7 +964,8 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
       circuitBreaker?.reset();
       break;
 
-    case 'UPDATE_CONFIG':
+    case 'UPDATE_CONFIG': {
+      const previousToken = config.sessionToken;
       config = { ...config, ...command.config };
       if (command.config.circuitBreaker) {
         circuitBreaker?.updateConfig(command.config.circuitBreaker);
@@ -909,7 +978,11 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
         clearInterval(syncInterval);
         syncInterval = setInterval(() => performSync(), config.syncIntervalMs);
       }
+      if (command.config.sessionToken !== undefined) {
+        syncForNewCredential(previousToken);
+      }
       break;
+    }
 
     case 'PUSH_PRODUCTS':
       pushProducts(command.products);

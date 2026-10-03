@@ -73,6 +73,15 @@ export type SyncWorkerEvent =
   | { type: 'CIRCUIT_STATE_CHANGED'; state: WorkerCircuitState; circuit: string }
   | { type: 'HEALTH_CHECK'; healthy: boolean; apiUrl: string }
   | { type: 'PUSH_COMPLETED'; pushed: number; failed: number; results: PushResult[] }
+  /**
+   * The API refused the credential the worker presented on a pull (401).
+   *
+   * Its own event rather than a field on `ERROR`/`SYNC_FAILED` because the main
+   * thread acts on it differently: it is a credential problem, not an outage, and
+   * the fix is a fresh token (the shop re-mints its capability session) rather
+   * than waiting out a backoff. The circuit breaker does not count it either.
+   */
+  | { type: 'AUTH_REJECTED'; status: number; endpoint: string }
   | { type: 'ERROR'; error: string; details?: string };
 
 /**
