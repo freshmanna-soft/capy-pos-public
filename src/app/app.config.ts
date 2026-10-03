@@ -22,6 +22,11 @@ import { PAYMENT_AGENT_PROVIDER } from '@app/agents/payment/infrastructure/payme
 import { AgentRegistry } from '@app/agents/agent.registry';
 import { SyncService, SyncSessionCredentialService } from '@core/infrastructure/sync';
 import { SyncKioskModeService } from '@core/infrastructure/sync/sync-kiosk-mode.service';
+import { ProductRemoteSyncHandler } from '@core/infrastructure/sync/product-remote-sync.handler';
+import {
+  EVENT_HANDLERS,
+  OutboxDispatcherService,
+} from '@core/infrastructure/messaging/outbox-dispatcher.service';
 import { AUTH_PROVIDERS } from '@core/infrastructure/auth/auth.providers';
 import { SessionExpiryNavigatorService } from '@core/infrastructure/auth/session-expiry-navigator.service';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
@@ -162,6 +167,13 @@ export const appConfig: ApplicationConfig = {
         circuitBreaker: environment.circuitBreaker,
         retry: environment.retry,
       });
+    }),
+    // Domain-event outbox (Epic #349). Handlers are registered here; the dispatcher
+    // starts after the sync worker so the first drain finds a worker to push through,
+    // and drains whatever a previous session left behind.
+    { provide: EVENT_HANDLERS, useExisting: ProductRemoteSyncHandler, multi: true },
+    provideAppInitializer(() => {
+      inject(OutboxDispatcherService).start();
     }),
   ],
 };

@@ -4,6 +4,7 @@ import { Component, signal } from '@angular/core';
 import { ImagePickerComponent } from './image-picker.component';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import { CameraService } from '@core/infrastructure/media/camera.service';
+import { ProductServerCopyService } from '@core/infrastructure/sync/product-remote-sync.handler';
 import { environment } from '../../../../environments/environment';
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,9 @@ function makeChangeEvent(file: File): Event {
 function testId(el: HTMLElement, id: string): HTMLElement | null {
   return el.querySelector(`[data-testid="${id}"]`);
 }
+
+/** The upload awaits its response, so its outcome lands a task after `req.flush`. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 // ---------------------------------------------------------------------------
 // Host component — supplies required inputs from outside, captures outputs.
@@ -68,8 +72,10 @@ describe('ImagePickerComponent', () => {
   const authGateway = {
     getAccessToken: vi.fn((): string | null => 'operator-token'),
   };
+  let serverCopy: { ensureOnServer: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
+    serverCopy = { ensureOnServer: vi.fn().mockResolvedValue(undefined) };
     cameraStart = vi.fn().mockResolvedValue(true);
     cameraStop = vi.fn();
     cameraAttach = vi.fn();
@@ -80,7 +86,10 @@ describe('ImagePickerComponent', () => {
 
     TestBed.configureTestingModule({
       imports: [HostComponent, HttpClientTestingModule],
-      providers: [{ provide: AUTH_GATEWAY, useValue: authGateway }],
+      providers: [
+        { provide: AUTH_GATEWAY, useValue: authGateway },
+        { provide: ProductServerCopyService, useValue: serverCopy },
+      ],
     });
 
     // The component provides its own CameraService instance (providers: [CameraService]).
@@ -122,7 +131,7 @@ describe('ImagePickerComponent', () => {
   // Test 1 — valid JPEG file → POST to correct URL → emits returned imageUrl
   // -------------------------------------------------------------------------
 
-  it('posts a valid JPEG file to the correct URL and emits the returned imageUrl', () => {
+  it('posts a valid JPEG file to the correct URL and emits the returned imageUrl', async () => {
     const file = makeFile('photo.jpg', 'image/jpeg', 512 * 1024); // 512 KB — within limit
     const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
 
@@ -138,9 +147,74 @@ describe('ImagePickerComponent', () => {
 
     const returnedUrl = 'https://cdn.example.com/products/prod-001.jpg';
     req.flush({ imageUrl: returnedUrl });
+    await settle();
     fixture.detectChanges();
 
     expect(host.emittedUrls).toContain(returnedUrl);
+    expect(serverCopy.ensureOnServer).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // 404 — the server has no copy of the product (the prod bug behind Epic #349's
+  // first slice): push the product up, then try once more.
+  // -------------------------------------------------------------------------
+
+  it('on 404, puts the product on the server and retries the upload once', async () => {
+    const file = makeFile('photo.jpg', 'image/jpeg', 512 * 1024);
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+    const expectedUrl = `${environment.apiUrl}${environment.imageApiPath}/prod-001/image`;
+
+    picker.onFileSelected(makeChangeEvent(file));
+    httpMock
+      .expectOne(expectedUrl)
+      .flush(
+        { error: 'Product not found', productId: 'prod-001' },
+        { status: 404, statusText: 'Not Found' }
+      );
+    await settle();
+
+    expect(serverCopy.ensureOnServer).toHaveBeenCalledWith('prod-001');
+    const retryUrl = 'https://cdn.example.com/products/prod-001.jpg';
+    httpMock.expectOne(expectedUrl).flush({ imageUrl: retryUrl });
+    await settle();
+
+    expect(host.emittedUrls).toEqual([retryUrl]);
+    expect(picker.uploadError()).toBeNull();
+    expect(picker.uploading()).toBe(false);
+  });
+
+  it('on 404, says why when the product still cannot reach the server', async () => {
+    serverCopy.ensureOnServer.mockRejectedValue(
+      new Error('Nobody is signed in; the product syncs after sign-in.')
+    );
+    const file = makeFile('photo.jpg', 'image/jpeg', 512 * 1024);
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+    const expectedUrl = `${environment.apiUrl}${environment.imageApiPath}/prod-001/image`;
+
+    picker.onFileSelected(makeChangeEvent(file));
+    httpMock.expectOne(expectedUrl).flush({}, { status: 404, statusText: 'Not Found' });
+    await settle();
+
+    httpMock.expectNone(expectedUrl);
+    expect(picker.uploadError()).toContain("isn't on the server yet");
+    expect(picker.uploadError()).toContain('Nobody is signed in');
+    expect(picker.uploading()).toBe(false);
+  });
+
+  it('does not loop when the retry is also refused', async () => {
+    const file = makeFile('photo.jpg', 'image/jpeg', 512 * 1024);
+    const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
+    const expectedUrl = `${environment.apiUrl}${environment.imageApiPath}/prod-001/image`;
+
+    picker.onFileSelected(makeChangeEvent(file));
+    httpMock.expectOne(expectedUrl).flush({}, { status: 404, statusText: 'Not Found' });
+    await settle();
+    httpMock.expectOne(expectedUrl).flush({}, { status: 404, statusText: 'Not Found' });
+    await settle();
+
+    httpMock.expectNone(expectedUrl);
+    expect(serverCopy.ensureOnServer).toHaveBeenCalledTimes(1);
+    expect(picker.uploadError()).toContain('failed');
   });
 
   // -------------------------------------------------------------------------
@@ -239,7 +313,7 @@ describe('ImagePickerComponent', () => {
     expect(host.emittedUrls).toHaveLength(0);
   });
 
-  it('sets uploadError when the HTTP upload fails', () => {
+  it('sets uploadError when the HTTP upload fails', async () => {
     const file = makeFile('photo.jpg', 'image/jpeg', 512 * 1024);
     const picker = fixture.debugElement.children[0].componentInstance as ImagePickerComponent;
 
@@ -249,7 +323,10 @@ describe('ImagePickerComponent', () => {
     const expectedUrl = `${environment.apiUrl}${environment.imageApiPath}/prod-001/image`;
     const req = httpMock.expectOne(expectedUrl);
     req.error(new ProgressEvent('error'), { status: 500 });
+    await settle();
     fixture.detectChanges();
+
+    expect(serverCopy.ensureOnServer).not.toHaveBeenCalled();
 
     expect(picker.uploadError()).toContain('failed');
     expect(picker.uploading()).toBe(false);
@@ -317,6 +394,7 @@ describe('ImagePickerComponent', () => {
 
     const returnedUrl = 'https://cdn.example.com/products/prod-001-cam.jpg';
     req.flush({ imageUrl: returnedUrl });
+    await settle();
     fixture.detectChanges();
 
     expect(host.emittedUrls).toContain(returnedUrl);

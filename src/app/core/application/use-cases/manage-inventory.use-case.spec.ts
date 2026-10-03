@@ -8,10 +8,13 @@ import {
 import { Product } from '@core/domain/entities/product.entity';
 import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
 import { AngularAuthorizationService } from '@core/application/auth/angular-authorization.service';
+import { DOMAIN_EVENT_OUTBOX } from '@core/infrastructure/messaging/outbox-dispatcher.service';
+import { DomainEventType } from '@core/domain/events/domain-event';
 
 describe('ManageInventoryUseCase', () => {
   let useCase: ManageInventoryUseCase;
   let mockRepository: Record<string, Mock>;
+  let mockOutbox: { record: Mock; flush: Mock };
 
   const createMockProduct = (overrides: Partial<Product> = {}): Product => {
     return new Product(
@@ -33,6 +36,7 @@ describe('ManageInventoryUseCase', () => {
   };
 
   beforeEach(() => {
+    mockOutbox = { record: vi.fn().mockResolvedValue('event-1'), flush: vi.fn() };
     mockRepository = {
       findAll: vi.fn(),
       findById: vi.fn(),
@@ -70,10 +74,80 @@ describe('ManageInventoryUseCase', () => {
           provide: AngularAuthorizationService,
           useValue: { assert: vi.fn(), can: () => true, atLeast: () => true },
         },
+        { provide: DOMAIN_EVENT_OUTBOX, useValue: mockOutbox },
       ],
     });
 
     useCase = TestBed.inject(ManageInventoryUseCase);
+  });
+
+  describe('server sync events (Epic #349)', () => {
+    beforeEach(() => {
+      mockRepository['getCategories'].mockResolvedValue([]);
+    });
+
+    it('records product.upserted for a created product', async () => {
+      mockRepository['create'].mockImplementation(async (p: Product) => p);
+
+      const created = await useCase.createProduct({
+        name: 'Hay',
+        sku: 'FEED-1',
+        category: 'Feed',
+        price: 3,
+        cost: 1,
+        stock: 5,
+      });
+
+      expect(mockOutbox.record).toHaveBeenCalledWith(
+        DomainEventType.PRODUCT_UPSERTED,
+        created!.id,
+        { productId: created!.id }
+      );
+    });
+
+    it('records product.upserted for an updated product', async () => {
+      mockRepository['findById'].mockResolvedValue(createMockProduct({ id: 'p9' }));
+      mockRepository['update'].mockImplementation(async (_id: string, p: Product) => p);
+
+      await useCase.updateProduct({ id: 'p9', price: 6 });
+
+      expect(mockOutbox.record).toHaveBeenCalledWith(DomainEventType.PRODUCT_UPSERTED, 'p9', {
+        productId: 'p9',
+      });
+    });
+
+    it('still saves when the outbox write fails', async () => {
+      mockOutbox.record.mockRejectedValue(new Error('QuotaExceededError'));
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      mockRepository['create'].mockImplementation(async (p: Product) => p);
+
+      const created = await useCase.createProduct({
+        name: 'Hay',
+        sku: 'FEED-1',
+        category: 'Feed',
+        price: 3,
+        cost: 1,
+        stock: 5,
+      });
+
+      expect(created).not.toBeNull();
+      expect(useCase.error()).toBeNull();
+    });
+
+    it('records nothing when the save itself fails', async () => {
+      mockRepository['create'].mockRejectedValue(new Error('disk full'));
+
+      await useCase.createProduct({
+        name: 'Hay',
+        sku: 'FEED-1',
+        category: 'Feed',
+        price: 3,
+        cost: 1,
+        stock: 5,
+      });
+
+      expect(mockOutbox.record).not.toHaveBeenCalled();
+    });
   });
 
   describe('loadProducts', () => {
