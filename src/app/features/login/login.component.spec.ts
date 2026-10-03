@@ -135,6 +135,16 @@ describe('LoginComponent', () => {
       expect(getEl(fixture, '[data-testid="email-error"]')).toBeNull();
       expect(getEl(fixture, '[data-testid="password-error"]')).toBeNull();
     });
+
+    it('offers customers a way out to the shop', async () => {
+      const gateway = makeGateway({ succeeds: true });
+      const fixture = await createComponent(gateway);
+
+      const link = getEl<HTMLAnchorElement>(fixture, '[data-testid="link-customer-shop"]');
+      expect(link).toBeTruthy();
+      expect(link.textContent).toContain('Customer? Go to the shop');
+      expect(link.getAttribute('href')).toBe('/shop');
+    });
   });
 
   // -------------------------------------------------------------------------

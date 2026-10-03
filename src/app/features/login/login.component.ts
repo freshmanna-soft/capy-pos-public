@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import {
@@ -44,7 +44,7 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="login-page" role="main">
@@ -242,6 +242,14 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
                 Forgot password?
               </button>
             }
+
+            <a
+              [routerLink]="customerShopRoute"
+              class="btn-quiet customer-login-link"
+              data-testid="link-customer-shop"
+            >
+              Customer? Go to the shop
+            </a>
           </form>
         } @else {
           <form
@@ -463,6 +471,13 @@ import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webaut
         margin-top: 0.25rem;
       }
 
+      .customer-login-link {
+        align-self: center;
+        margin-top: 0.25rem;
+        text-decoration: underline;
+        text-underline-offset: 0.2em;
+      }
+
       .divider {
         display: flex;
         align-items: center;
@@ -570,6 +585,11 @@ export class LoginComponent implements OnInit {
 
   readonly loading = signal(false);
   readonly authError = signal<string | null>(null);
+  /**
+   * Where a customer who lands on the staff sign-in belongs. It used to be the
+   * self-checkout sign-in; that lane is gone and /shop is the customer path now.
+   */
+  readonly customerShopRoute = '/shop';
 
   readonly forgotPasswordMode = signal(false);
   readonly forgotPasswordBusy = signal(false);
