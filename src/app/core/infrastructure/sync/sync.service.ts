@@ -340,7 +340,9 @@ export class SyncService implements OnDestroy {
         this._lastError.set(null);
         console.log('[SyncService] Sync completed:', event.data);
         this.eventBus.publish(
-          busEvent(EventType.SYNC_COMPLETED, EventSource.SYNC_SERVICE, event.data, 'normal')
+          busEvent(EventType.SYNC_COMPLETED, EventSource.SYNC_SERVICE, event.data, {
+            priority: 'normal',
+          })
         );
         break;
 
@@ -375,7 +377,7 @@ export class SyncService implements OnDestroy {
             EventType.CIRCUIT_STATE_CHANGED,
             EventSource.SYNC_SERVICE,
             { circuit: event.circuit, state: event.state },
-            'high'
+            { priority: 'high' }
           )
         );
         break;
@@ -400,8 +402,10 @@ export class SyncService implements OnDestroy {
               EventType.SYNC_PUSH_FAILED,
               EventSource.SYNC_SERVICE,
               { pushed: event.pushed, failed: event.failed, failedIds },
-              'high',
-              { traceIds: failed.map((r: PushResult) => r.traceId).filter(Boolean) }
+              {
+                priority: 'high',
+                metadata: { traceIds: failed.map((r: PushResult) => r.traceId).filter(Boolean) },
+              }
             )
           );
         } else {
@@ -410,7 +414,7 @@ export class SyncService implements OnDestroy {
               EventType.SYNC_PUSH_COMPLETED,
               EventSource.SYNC_SERVICE,
               { pushed: event.pushed },
-              'normal'
+              { priority: 'normal' }
             )
           );
         }
@@ -427,7 +431,7 @@ export class SyncService implements OnDestroy {
             EventType.SYNC_ERROR,
             EventSource.SYNC_SERVICE,
             { error: event.error, details: event.details },
-            'critical'
+            { priority: 'critical' }
           )
         );
         break;

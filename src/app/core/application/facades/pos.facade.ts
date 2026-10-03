@@ -153,7 +153,7 @@ export class PosFacade {
         EventType.CART_ITEM_ADDED,
         EventSource.POS_FACADE,
         { productId: product.id, name: product.name, price: product.price },
-        'normal'
+        { priority: 'normal' }
       )
     );
     return { added: true };
@@ -181,7 +181,12 @@ export class PosFacade {
   removeFromCart(productId: string): void {
     this.cartService.removeItem(productId);
     this.eventBus.publish(
-      busEvent(EventType.CART_ITEM_REMOVED, EventSource.POS_FACADE, { productId }, 'normal')
+      busEvent(
+        EventType.CART_ITEM_REMOVED,
+        EventSource.POS_FACADE,
+        { productId },
+        { priority: 'normal' }
+      )
     );
   }
 
@@ -239,7 +244,7 @@ export class PosFacade {
         EventType.CUSTOMER_ATTACHED,
         EventSource.POS_FACADE,
         { customerId: attached.id, tier: attached.tier },
-        'normal'
+        { priority: 'normal' }
       )
     );
 
@@ -268,7 +273,7 @@ export class PosFacade {
         EventType.CUSTOMER_ATTACHED,
         EventSource.POS_FACADE,
         { customerId: attached.id, tier: attached.tier },
-        'normal'
+        { priority: 'normal' }
       )
     );
   }
@@ -342,7 +347,7 @@ export class PosFacade {
           amount: paymentResult.amount,
           method: paymentResult.method,
         },
-        'high'
+        { priority: 'high' }
       )
     );
 
@@ -405,7 +410,7 @@ export class PosFacade {
         EventType.TRANSACTION_COMPLETED,
         EventSource.POS_FACADE,
         { itemCount: quote.lines.length, amount: payment.amount, method: payment.method },
-        'high'
+        { priority: 'high' }
       )
     );
     this.auditLog
@@ -489,7 +494,7 @@ export class PosFacade {
           tier: result.tier,
           promoted: result.previousTier !== result.tier,
         },
-        'normal'
+        { priority: 'normal' }
       )
     );
   }
