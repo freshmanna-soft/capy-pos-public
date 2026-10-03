@@ -11,6 +11,7 @@ import {
 } from './checkout-pricing.ts';
 import {
   assertCheckoutTransition,
+  canTransitionCheckout,
   CheckoutState,
   isCheckoutState,
   isTerminalCheckoutState,
@@ -39,6 +40,31 @@ export interface CheckoutFailure {
 export const CHECKOUT_SCHEMA_VERSION_V2 = 'v2' as const;
 export const CHECKOUT_FINGERPRINT_VERSION_V1 = 'items-v1' as const;
 export const CHECKOUT_FINGERPRINT_VERSION_V2 = 'customer-binding-v2' as const;
+
+/**
+ * Most transition records a checkout document keeps. Embedding the log keeps
+ * each event atomic with the state write that caused it (#361); the cap bounds
+ * document size, and the oldest records are trimmed first. Open question 10 on
+ * #349 — change it here if the decision lands elsewhere.
+ */
+export const CHECKOUT_TRANSITION_LOG_CAP = 32;
+
+/**
+ * One announced checkout transition (#349 Phase C).
+ *
+ * `from === to` only for a loyalty-only event (the award happens after the
+ * checkout is already completed), which is why `loyaltyStatus` is then required.
+ * `type` is deliberately an open PascalCase name, not a closed list: a rolled-back
+ * image must still read events a newer image learned to write.
+ */
+export interface CheckoutTransitionRecord {
+  readonly seq: number;
+  readonly type: string;
+  readonly from: CheckoutState;
+  readonly to: CheckoutState;
+  readonly at: string;
+  readonly loyaltyStatus?: CheckoutLoyaltyProjection['status'];
+}
 
 export interface DurableCustomerPrincipal {
   readonly issuer: string;
@@ -124,6 +150,11 @@ interface CheckoutDocumentBase extends StoredDocument {
   readonly requestFingerprintVersion?: typeof CHECKOUT_FINGERPRINT_VERSION_V2;
   readonly customerBinding?: CheckoutCustomerBinding;
   readonly loyalty?: CheckoutLoyaltyProjection;
+  /**
+   * Optional on V1 and V2 alike. Read and preserved since #360; written by #361.
+   * The reader shipped first so a rollback never meets a key it refuses.
+   */
+  readonly transitions?: readonly CheckoutTransitionRecord[];
 }
 
 export interface CheckoutDocumentV1 extends CheckoutDocumentBase {
@@ -387,6 +418,7 @@ export class DocumentCheckoutStore implements CheckoutRepository {
       }
     }
     assertImmutableCheckoutBindings(current.document, checkout);
+    assertTransitionLogAppendOnly(current.document.transitions, checkout.transitions);
     if (current.document.state !== checkout.state) {
       assertCheckoutTransition(current.document.state, checkout.state);
     }
@@ -735,6 +767,7 @@ function assertCheckoutDocument(value: unknown): asserts value is CheckoutDocume
       'updatedAt',
       'expiresAt',
       ...(v2 ? ['schemaVersion', 'requestFingerprintVersion', 'customerBinding', 'loyalty'] : []),
+      ...(hasOwn(value, 'transitions') ? ['transitions'] : []),
     ],
     'checkout'
   );
@@ -799,6 +832,116 @@ function assertCheckoutDocument(value: unknown): asserts value is CheckoutDocume
   }
   validateStateBindings(checkout);
   if (checkout.receipt !== null) validateReceipt(checkout.receipt, checkout);
+  if (hasOwn(document, 'transitions')) {
+    validateTransitions(document['transitions'], { v2, createdAt: created, updatedAt: updated });
+  }
+}
+
+const TRANSITION_TYPE = /^[A-Z][A-Za-z0-9]{0,63}$/;
+const LOYALTY_STATUSES: ReadonlySet<string> = new Set([
+  'not-applicable',
+  'pending',
+  'awarded',
+  'manual-review',
+]);
+
+function validateTransitions(
+  value: unknown,
+  bounds: { v2: boolean; createdAt: number; updatedAt: number }
+): asserts value is readonly CheckoutTransitionRecord[] {
+  if (!Array.isArray(value)) throw corrupt('transitions must be an array.');
+  if (value.length > CHECKOUT_TRANSITION_LOG_CAP) throw corrupt('transitions exceeds its cap.');
+  let previousAt = bounds.createdAt;
+  value.forEach((item, index) => {
+    const label = `transitions[${index}]`;
+    const record = exactRecord(
+      item,
+      [
+        'seq',
+        'type',
+        'from',
+        'to',
+        'at',
+        ...(isRecord(item) && hasOwn(item, 'loyaltyStatus') ? ['loyaltyStatus'] : []),
+      ],
+      label
+    );
+    const seq = record['seq'];
+    if (!Number.isSafeInteger(seq) || (seq as number) < 1)
+      throw corrupt(`${label}.seq is invalid.`);
+    if (index > 0 && seq !== (value[index - 1] as CheckoutTransitionRecord).seq + 1) {
+      throw corrupt('transitions seq must increase by one.');
+    }
+    if (typeof record['type'] !== 'string' || !TRANSITION_TYPE.test(record['type'])) {
+      throw corrupt(`${label}.type is invalid.`);
+    }
+    const loyaltyOnly = record['from'] === record['to'];
+    if (hasOwn(record, 'loyaltyStatus')) {
+      if (!bounds.v2) throw corrupt(`${label}.loyaltyStatus requires a V2 checkout.`);
+      if (!LOYALTY_STATUSES.has(String(record['loyaltyStatus']))) {
+        throw corrupt(`${label}.loyaltyStatus is invalid.`);
+      }
+    } else if (loyaltyOnly) {
+      throw corrupt(`${label} keeps the state but announces no loyalty change.`);
+    }
+    if (!isCheckoutState(record['from']) || !isCheckoutState(record['to'])) {
+      throw corrupt(`${label} names an unknown state.`);
+    }
+    if (!loyaltyOnly && !canTransitionCheckout(record['from'], record['to'])) {
+      throw corrupt(`${label} is not a legal transition.`);
+    }
+    const at = canonicalUtcEpoch(record['at'], `${label}.at`);
+    if (at < previousAt || at > bounds.updatedAt) {
+      throw corrupt(`${label}.at is out of order.`);
+    }
+    previousAt = at;
+  });
+}
+
+/**
+ * A compare-and-swap may only append to the log, trimming the oldest records
+ * when, and only as far as, the cap requires. Dropping the log, rewriting or
+ * skipping a record, or bringing back a trimmed one would hide a transition from
+ * whatever reads `_changes` (#362), so each is refused. Both sides have already
+ * passed `validateTransitions`, so each is contiguous.
+ */
+function assertTransitionLogAppendOnly(
+  current: readonly CheckoutTransitionRecord[] | undefined,
+  next: readonly CheckoutTransitionRecord[] | undefined
+): void {
+  const before = current ?? [];
+  const after = next ?? [];
+  const firstBefore = before[0]?.seq ?? 1;
+  // No log yet behaves like one that ended at seq 0, so the first append is seq 1.
+  const lastBefore = before[before.length - 1]?.seq ?? 0;
+  const lastAfter = after[after.length - 1]?.seq;
+  if (lastAfter === undefined) {
+    if (before.length === 0) return;
+    throw new Error('A checkout transition log cannot be dropped.');
+  }
+  if (lastAfter < lastBefore) throw new Error('A checkout transition log cannot be truncated.');
+  const appended = lastAfter - lastBefore;
+  if (after.length !== Math.min(CHECKOUT_TRANSITION_LOG_CAP, before.length + appended)) {
+    throw new Error('A checkout transition log may trim only its oldest overflow.');
+  }
+  for (const record of after) {
+    if (record.seq > lastBefore) continue;
+    const kept = before[record.seq - firstBefore];
+    if (kept === undefined || !sameTransition(kept, record)) {
+      throw new Error('A checkout transition log cannot rewrite or restore a record.');
+    }
+  }
+}
+
+function sameTransition(left: CheckoutTransitionRecord, right: CheckoutTransitionRecord): boolean {
+  return (
+    left.seq === right.seq &&
+    left.type === right.type &&
+    left.from === right.from &&
+    left.to === right.to &&
+    left.at === right.at &&
+    left.loyaltyStatus === right.loyaltyStatus
+  );
 }
 
 function assertImmutableCheckoutBindings(current: CheckoutDocument, next: CheckoutDocument): void {
