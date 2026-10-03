@@ -22,6 +22,7 @@ import {
   IOperatorDB,
   IOperatorCredentialDB,
   IRolePermissionDB,
+  IOutboxEventDB,
 } from './dexie-database.service';
 import { Role } from '@core/domain/auth';
 
@@ -986,5 +987,154 @@ describe('DexieDatabase v6 — operator credentials', () => {
     const admin = await db.operators.toCollection().first();
     // Absent, not empty string — the PIN path must not be offered to this operator.
     expect(admin?.pinHash).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v9: the domain-event outbox (Epic #349, #351)
+// ---------------------------------------------------------------------------
+
+describe('DexieDatabase v9 — outbox', () => {
+  let db: DexieDatabase;
+  let dbName: string;
+
+  const now = new Date('2026-10-02T12:00:00Z');
+
+  const outboxRow = (
+    id: string,
+    status: IOutboxEventDB['status'],
+    nextAttemptAt: number
+  ): IOutboxEventDB => ({
+    id,
+    type: 'product.upserted',
+    aggregateId: 'prod-v8',
+    payload: '{"productId":"prod-v8"}',
+    status,
+    attempts: 0,
+    nextAttemptAt,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  beforeEach(async () => {
+    // An install as it stands on v8, declared in one step: a fresh database needs
+    // no history, only the shape v8 left behind.
+    dbName = freshDbName();
+    const v8 = new Dexie(dbName);
+    v8.version(8).stores({
+      products:
+        'id, sku, barcode, category, tenantId, isActive, [tenantId+id], [category+isActive], deletedAt',
+      customers: 'id, email, phone, status, tier, tenantId, loyaltyCode, [status+tier], deletedAt',
+      transactions:
+        'id, customerId, status, type, tenantId, createdAt, completedAt, cancelledAt, deletedAt',
+      transactionItems: 'id, transactionId, productId, tenantId, [transactionId+productId]',
+      payments: 'id, orderId, method, status, tenantId, createdAt, completedAt',
+      stockReservations: 'id, productId, status, tenantId, expiresAt, [productId+status]',
+      stockAdjustments: 'id, productId, tenantId, createdAt',
+      loyaltyTransactions: 'id, customerId, transactionId, type, tenantId, createdAt',
+      rewards: 'id, isActive, tenantId, expiresAt',
+      rewardRedemptions: 'id, customerId, rewardId, status, tenantId, redeemedAt',
+      syncQueue: 'id, entityType, entityId, status, tenantId, createdAt, [entityType+status]',
+      settings: 'id, key, tenantId, [tenantId+key]',
+      userTenants: 'id, userId, tenantId, roleId, [userId+tenantId]',
+      rolePermissions: 'id, roleId, [roleId+permissionId]',
+      operators: 'id, email, roleId, tenantId, isActive',
+      roles: 'id, name',
+      recognitionLog: 'id, tenantId, tier, outcome, createdAt, [tenantId+createdAt]',
+      operatorCredentials: 'credentialId, operatorId, tenantId, createdAt, [operatorId+tenantId]',
+      recognitionSamples:
+        'id, tenantId, productId, tier, outcome, createdAt, [productId+createdAt]',
+    });
+    await v8.open();
+    await v8.table('products').add({
+      id: 'prod-v8',
+      tenantId: DEFAULT_TENANT_ID,
+      name: 'Hay bale',
+      sku: 'FEED-001',
+      category: 'Feed',
+      price: 3,
+      cost: 1,
+      quantity: 12,
+      minStockLevel: 2,
+      unit: 'piece',
+      taxRate: 0,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    } as IProductDB);
+    await v8.table('syncQueue').add({ id: 'never-used', entityType: 'x', entityId: 'y' });
+    v8.close();
+
+    db = makeDb(dbName);
+    await openDb(db);
+  });
+
+  afterEach(async () => {
+    await teardownDb(db);
+  });
+
+  it('opens a v8 database at v9 with existing rows intact', async () => {
+    expect(db.verno).toBe(9);
+    const product = await db.products.get('prod-v8');
+    expect(product?.name).toBe('Hay bale');
+    expect(product?.quantity).toBe(12);
+  });
+
+  it('retires syncQueue and adds the outbox tables', () => {
+    const names = db.tables.map((t) => t.name);
+    expect(names).not.toContain('syncQueue');
+    expect(names).toContain('outbox');
+    expect(names).toContain('outboxReceipts');
+  });
+
+  it('answers "what is due" through the [status+nextAttemptAt] index', async () => {
+    await db.outbox.bulkAdd([
+      outboxRow('due', 'pending', 100),
+      outboxRow('later', 'pending', 900),
+      outboxRow('done', 'handled', 100),
+    ]);
+
+    const due = await db.outbox
+      .where('[status+nextAttemptAt]')
+      .between(['pending', Dexie.minKey], ['pending', 500], true, true)
+      .primaryKeys();
+    expect(due).toEqual(['due']);
+  });
+
+  it('keys receipts by [eventId+handler]', async () => {
+    await db.outboxReceipts.put({
+      eventId: 'e1',
+      handler: 'h1',
+      status: 'handled',
+      nextAttemptAt: 0,
+      updatedAt: now,
+    });
+    expect((await db.outboxReceipts.get(['e1', 'h1']))?.status).toBe('handled');
+    expect(await db.outboxReceipts.get(['e1', 'h2'])).toBeUndefined();
+  });
+
+  it('leaves the outbox out of exports and ignores it on import', async () => {
+    await db.outbox.add(outboxRow('pending-edit', 'pending', 0));
+
+    const exported = JSON.parse(await db.exportToJSON()) as { data: Record<string, unknown[]> };
+    expect(exported.data['outbox']).toBeUndefined();
+    expect(exported.data['outboxReceipts']).toBeUndefined();
+    expect(exported.data['products']).toHaveLength(1);
+
+    // A snapshot that does carry outbox rows (or a pre-v9 syncQueue) must not restore
+    // them: they would re-push one device's pending edits from another.
+    await db.importFromJSON(
+      JSON.stringify({
+        schemaVersion: EXPORT_SCHEMA_VERSION,
+        exportedAt: now.toISOString(),
+        data: {
+          ...exported.data,
+          outbox: [outboxRow('smuggled', 'pending', 0)],
+          syncQueue: [{ id: 'old' }],
+        },
+      })
+    );
+    expect(await db.outbox.get('smuggled')).toBeUndefined();
+    expect(await db.outbox.get('pending-edit')).toBeDefined();
   });
 });

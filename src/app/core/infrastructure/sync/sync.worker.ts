@@ -675,6 +675,89 @@ async function pushUpdates(products: PushProductPayload[]): Promise<void> {
   console.log(`[Worker:Push] Update done. Updated: ${pushed}, Failed: ${failed}`);
 }
 
+/**
+ * Make the server's copy of each product match the local one: POST it, and when the
+ * server already has it (409) PATCH the mutable fields instead.
+ *
+ * This is what the outbox's product handler drives. Create-then-patch rather than
+ * patch-then-create because the products that most need this are the ones the server
+ * has never seen — every product saved in Inventory before the outbox existed.
+ * The PATCH leaves stock out for the same reason `pushUpdates` does; the POST sends
+ * it, because a product the server is meeting for the first time has no other stock.
+ */
+async function pushUpserts(products: PushProductPayload[]): Promise<void> {
+  if (!products.length) return;
+  const ids = products.map((p) => p.id);
+  if (refuseUnauthorizedPush(ids, 'upsert')) return;
+
+  const base = `${config.apiBaseUrl}${config.endpoints.products}`;
+  const results: PushResult[] = [];
+  let pushed = 0;
+  let failed = 0;
+
+  for (const product of products) {
+    const { id, ...changes } = product;
+    delete changes.stock;
+    // PATCH refuses an empty string for any text field (400), and most products have
+    // no description; POST accepts one, so only the PATCH body drops it.
+    if (!changes.description?.trim()) delete changes.description;
+    let traceId: string | undefined;
+
+    const send = (key: string, url: string, init: RequestInit, ok: number[]) =>
+      circuitBreaker.execute(() =>
+        retry.execute(key, async () => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000);
+          try {
+            const res = await fetch(url, {
+              ...init,
+              signal: controller.signal,
+              headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            });
+            traceId = readTraceId(res);
+            if (ok.includes(res.status)) return res;
+            if (res.status >= 400 && res.status < 500) {
+              throw new Error(`HTTP ${res.status}: ${res.statusText} (non-retryable)`);
+            }
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        })
+      );
+
+    try {
+      let response = await send(
+        `upsert-create-product-${id}`,
+        base,
+        { method: 'POST', body: JSON.stringify(product) },
+        [201, 409]
+      );
+      if (response.status === 409) {
+        response = await send(
+          `upsert-update-product-${id}`,
+          `${base}/${id}`,
+          { method: 'PATCH', body: JSON.stringify(changes) },
+          [200]
+        );
+      }
+
+      pushed++;
+      results.push({ productId: id, success: true, status: response.status, traceId });
+      console.log(`[Worker:Push] ✓ Product ${id} upserted (${response.status})`);
+    } catch (error) {
+      failed++;
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      results.push({ productId: id, success: false, error: errorMsg, traceId });
+      console.warn(
+        `[Worker:Push] ✗ Product ${id} upsert failed: ${errorMsg} [trace: ${traceId ?? 'none'}]`
+      );
+    }
+  }
+
+  postEvent({ type: 'PUSH_COMPLETED', pushed, failed, results });
+}
+
 async function pushDeletes(productIds: string[]): Promise<void> {
   if (!productIds.length) return;
   if (refuseUnauthorizedPush(productIds, 'delete')) return;
@@ -834,6 +917,10 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
 
     case 'PUSH_UPDATE_PRODUCTS':
       pushUpdates(command.products);
+      break;
+
+    case 'PUSH_UPSERT_PRODUCTS':
+      pushUpserts(command.products);
       break;
 
     case 'PUSH_DELETE_PRODUCTS':

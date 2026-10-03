@@ -44,6 +44,7 @@ export type SyncWorkerCommand =
   | { type: 'UPDATE_CONFIG'; config: Partial<SyncWorkerConfig> }
   | { type: 'PUSH_PRODUCTS'; products: PushProductPayload[] }
   | { type: 'PUSH_UPDATE_PRODUCTS'; products: PushProductPayload[] }
+  | { type: 'PUSH_UPSERT_PRODUCTS'; products: PushProductPayload[] }
   | { type: 'PUSH_DELETE_PRODUCTS'; productIds: string[] };
 
 /**

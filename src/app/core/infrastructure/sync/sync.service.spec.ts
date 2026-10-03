@@ -1,7 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SyncService, PushFailedError } from './sync.service';
-import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
+import {
+  DexieDatabase,
+  IOutboxEventDB,
+} from '@core/infrastructure/database/dexie-database.service';
+import { DomainEventType, OutboxStatus } from '@core/domain/events/domain-event';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventType } from '@core/infrastructure/messaging/event-bus.events';
 import {
@@ -58,7 +62,12 @@ class FakeWorker {
 
 describe('SyncService', () => {
   let service: SyncService;
-  let mockDb: { products: { get: ReturnType<typeof vi.fn>; bulkPut: ReturnType<typeof vi.fn> } };
+  let mockDb: {
+    products: { get: ReturnType<typeof vi.fn>; bulkPut: ReturnType<typeof vi.fn> };
+    outbox: { where: ReturnType<typeof vi.fn> };
+  };
+  /** Outbox rows the pull guard sees, whatever ids it asks about. */
+  let outboxRows: Partial<IOutboxEventDB>[];
   let mockEventBus: { publish: ReturnType<typeof vi.fn> };
   let originalWorker: typeof globalThis.Worker;
 
@@ -87,10 +96,16 @@ describe('SyncService', () => {
     originalWorker = globalThis.Worker;
     globalThis.Worker = FakeWorker as unknown as typeof globalThis.Worker;
 
+    outboxRows = [];
     mockDb = {
       products: {
         get: vi.fn().mockResolvedValue(undefined),
         bulkPut: vi.fn().mockResolvedValue(undefined),
+      },
+      outbox: {
+        where: vi.fn(() => ({
+          anyOf: vi.fn(() => ({ toArray: vi.fn(async () => outboxRows) })),
+        })),
       },
     };
 
@@ -288,6 +303,40 @@ describe('SyncService', () => {
   });
 
   // ─── Push (awaited) ───────────────────────────────────────────────────────
+
+  describe('pushUpsertAsync', () => {
+    it('rejects immediately when worker is not running', async () => {
+      await expect(service.pushUpsertAsync(product)).rejects.toThrow('Sync worker not running');
+    });
+
+    it('posts PUSH_UPSERT_PRODUCTS and resolves on the matching result', async () => {
+      const worker = start();
+      const promise = service.pushUpsertAsync(product);
+
+      expect(worker.commandsOfType('PUSH_UPSERT_PRODUCTS')).toEqual([
+        { type: 'PUSH_UPSERT_PRODUCTS', products: [product] },
+      ]);
+      worker.emit({
+        type: 'PUSH_COMPLETED',
+        pushed: 1,
+        failed: 0,
+        results: [{ productId: 'p1', success: true, status: 201 }],
+      });
+      await expect(promise).resolves.toMatchObject({ productId: 'p1', status: 201 });
+    });
+
+    it('rejects with PushFailedError when the upsert fails', async () => {
+      const worker = start();
+      const promise = service.pushUpsertAsync(product);
+      worker.emit({
+        type: 'PUSH_COMPLETED',
+        pushed: 0,
+        failed: 1,
+        results: [{ productId: 'p1', success: false, error: 'HTTP 400', traceId: 't-1' }],
+      });
+      await expect(promise).rejects.toBeInstanceOf(PushFailedError);
+    });
+  });
 
   describe('pushUpdateAsync', () => {
     it('rejects immediately when worker is not running', async () => {
@@ -667,6 +716,46 @@ describe('SyncService', () => {
       });
       expect(records[0].createdAt).toBeInstanceOf(Date);
       expect(records[0].updatedAt).toBeInstanceOf(Date);
+    });
+
+    it('keeps the local copy of a product whose edit has not reached the server', async () => {
+      outboxRows = [
+        {
+          aggregateId: 'edited',
+          type: DomainEventType.PRODUCT_UPSERTED,
+          status: OutboxStatus.FAILED,
+        },
+        {
+          aggregateId: 'synced',
+          type: DomainEventType.PRODUCT_UPSERTED,
+          status: OutboxStatus.HANDLED,
+        },
+        {
+          aggregateId: 'gave-up',
+          type: DomainEventType.PRODUCT_UPSERTED,
+          status: OutboxStatus.DEAD,
+        },
+      ];
+      emitProducts([
+        { id: 'edited', name: 'Server stale', category: 'c', price: 1 },
+        { id: 'synced', name: 'Server fresh', category: 'c', price: 1 },
+        { id: 'gave-up', name: 'Server wins', category: 'c', price: 1 },
+      ]);
+      await vi.waitFor(() => expect(mockDb.products.bulkPut).toHaveBeenCalled());
+
+      const [records] = mockDb.products.bulkPut.mock.calls[0];
+      expect(records.map((r: { id: string }) => r.id)).toEqual(['synced', 'gave-up']);
+    });
+
+    it('writes nothing when every pulled product has a pending edit', async () => {
+      outboxRows = [
+        { aggregateId: 'a', type: DomainEventType.PRODUCT_UPSERTED, status: OutboxStatus.PENDING },
+      ];
+      emitProducts([{ id: 'a', name: 'X', category: 'c', price: 1 }]);
+      await vi.waitFor(() => expect(mockDb.outbox.where).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(mockDb.products.bulkPut).not.toHaveBeenCalled();
     });
 
     it('swallows Dexie write errors', async () => {

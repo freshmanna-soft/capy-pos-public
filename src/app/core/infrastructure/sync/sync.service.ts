@@ -2,6 +2,7 @@ import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
+import { DomainEventType, OutboxStatus } from '@core/domain/events/domain-event';
 import {
   SyncWorkerCommand,
   SyncWorkerEvent,
@@ -259,6 +260,37 @@ export class SyncService implements OnDestroy {
    * isn't running or the push doesn't confirm within timeoutMs.
    */
   pushUpdateAsync(product: PushProductPayload, timeoutMs = 20000): Promise<PushResult> {
+    return this.awaitPush(product, 'PUSH_UPDATE_PRODUCTS', timeoutMs);
+  }
+
+  /**
+   * Create-or-update a product on the API and resolve when the push confirms.
+   *
+   * The outbox's product handler drives this. The longer default timeout covers the
+   * worst case of a POST and then a PATCH, each with its own retries.
+   */
+  pushUpsertAsync(product: PushProductPayload, timeoutMs = 60000): Promise<PushResult> {
+    return this.awaitPush(product, 'PUSH_UPSERT_PRODUCTS', timeoutMs);
+  }
+
+  /**
+   * Check if worker is running
+   */
+  isRunning(): boolean {
+    return this.worker !== null;
+  }
+
+  ngOnDestroy(): void {
+    this.stop();
+  }
+
+  // ─── Private Methods ────────────────────────────────────────────────────
+
+  private awaitPush(
+    product: PushProductPayload,
+    type: 'PUSH_UPDATE_PRODUCTS' | 'PUSH_UPSERT_PRODUCTS',
+    timeoutMs: number
+  ): Promise<PushResult> {
     if (!this.worker) {
       return Promise.reject(new Error('Sync worker not running. Call start() first.'));
     }
@@ -280,22 +312,9 @@ export class SyncService implements OnDestroy {
         },
       });
 
-      this.postCommand({ type: 'PUSH_UPDATE_PRODUCTS', products: [product] });
+      this.postCommand({ type, products: [product] });
     });
   }
-
-  /**
-   * Check if worker is running
-   */
-  isRunning(): boolean {
-    return this.worker !== null;
-  }
-
-  ngOnDestroy(): void {
-    this.stop();
-  }
-
-  // ─── Private Methods ────────────────────────────────────────────────────
 
   private postCommand(command: SyncWorkerCommand): void {
     if (this.worker) {
@@ -304,7 +323,7 @@ export class SyncService implements OnDestroy {
   }
 
   /**
-   * Resolve any pushUpdateAsync() promises whose product appears in a
+   * Resolve any pushUpdateAsync()/pushUpsertAsync() promises whose product appears in a
    * PUSH_COMPLETED result. Failed results reject; successful ones resolve.
    */
   private settlePendingPushes(results: PushResult[]): void {
@@ -456,10 +475,18 @@ export class SyncService implements OnDestroy {
    * We map this to the full IProductDB schema, filling defaults for missing fields.
    * Existing local records are merged (not overwritten) to preserve local-only data.
    */
-  private async writeProductsToDexie(products: SyncedProduct[]): Promise<void> {
-    if (!products.length) return;
+  private async writeProductsToDexie(pulled: SyncedProduct[]): Promise<void> {
+    if (!pulled.length) return;
 
     try {
+      // A product with a local edit still on its way up keeps the local copy. The
+      // server's row is older than that edit, and writing it here would undo the
+      // edit on screen and then — because the handler reads the row when it runs —
+      // push the server's own stale values back to it (Epic #349 cross-phase risk).
+      const awaitingPush = await this.productsAwaitingPush(pulled.map((p) => p.id));
+      const products = pulled.filter((p) => !awaitingPush.has(p.id));
+      if (!products.length) return;
+
       const now = new Date();
       const dbRecords = await Promise.all(
         products.map(async (p) => {
@@ -496,5 +523,18 @@ export class SyncService implements OnDestroy {
     } catch (error) {
       console.error('[SyncService] Failed to write products to Dexie:', error);
     }
+  }
+
+  private async productsAwaitingPush(ids: string[]): Promise<Set<string>> {
+    const rows = await this.db.outbox.where('aggregateId').anyOf(ids).toArray();
+    return new Set(
+      rows
+        .filter(
+          (row) =>
+            row.type === DomainEventType.PRODUCT_UPSERTED &&
+            (row.status === OutboxStatus.PENDING || row.status === OutboxStatus.FAILED)
+        )
+        .map((row) => row.aggregateId)
+    );
   }
 }

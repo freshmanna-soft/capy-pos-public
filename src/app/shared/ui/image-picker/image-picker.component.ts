@@ -10,9 +10,11 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import { CameraService } from '@core/infrastructure/media/camera.service';
+import { ProductServerCopyService } from '@core/infrastructure/sync/product-remote-sync.handler';
 import { environment } from '../../../../environments/environment';
 
 const MAX_BYTES = 2_097_152;
@@ -202,6 +204,7 @@ export class ImagePickerComponent {
   private readonly camera = inject(CameraService);
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AUTH_GATEWAY);
+  private readonly serverCopy = inject(ProductServerCopyService);
 
   // ----- Inputs / Outputs -----
 
@@ -272,7 +275,7 @@ export class ImagePickerComponent {
       return;
     }
 
-    this.uploadBlob(file, file.type);
+    void this.uploadBlob(file, file.type);
   }
 
   /**
@@ -302,7 +305,7 @@ export class ImagePickerComponent {
     }
 
     const blob = await fetch('data:image/jpeg;base64,' + frame.base64).then((r) => r.blob());
-    this.uploadBlob(blob, 'image/jpeg');
+    void this.uploadBlob(blob, 'image/jpeg');
     this.stopCamera();
   }
 
@@ -319,14 +322,15 @@ export class ImagePickerComponent {
 
   // ----- Private helpers -----
 
-  private uploadBlob(blob: Blob, _mimeType: string): void {
+  private async uploadBlob(blob: Blob, _mimeType: string): Promise<void> {
     this.uploading.set(true);
     this.uploadError.set(null);
 
     const formData = new FormData();
     formData.append('image', blob);
 
-    const url = `${environment.apiUrl}${environment.imageApiPath}/${this.productId()}/image`;
+    const productId = this.productId();
+    const url = `${environment.apiUrl}${environment.imageApiPath}/${productId}/image`;
 
     const token = this.auth.getAccessToken();
     if (token === null) {
@@ -335,20 +339,39 @@ export class ImagePickerComponent {
       return;
     }
 
-    this.http
-      .post<{ imageUrl: string }>(url, formData, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .subscribe({
-        next: (result) => {
-          this.imageUrlChange.emit(result.imageUrl);
-          this.uploading.set(false);
-        },
-        error: () => {
-          this.uploadError.set('Upload failed. Please try again.');
-          this.uploading.set(false);
-        },
-      });
+    const post = () =>
+      firstValueFrom(
+        this.http.post<{ imageUrl: string }>(url, formData, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      );
+
+    try {
+      let result: { imageUrl: string };
+      try {
+        result = await post();
+      } catch (error) {
+        // The server stores the image against its own copy of the product. A 404 means
+        // it has no copy yet — saved here but not synced, or saved before products were
+        // synced at all — so push the product up and try once more.
+        if (!(error instanceof HttpErrorResponse) || error.status !== 404) throw error;
+        try {
+          await this.serverCopy.ensureOnServer(productId);
+        } catch (syncError) {
+          const reason = syncError instanceof Error ? syncError.message : String(syncError);
+          this.uploadError.set(
+            `This product isn't on the server yet, so the image can't be stored. ${reason}`
+          );
+          return;
+        }
+        result = await post();
+      }
+      this.imageUrlChange.emit(result.imageUrl);
+    } catch {
+      this.uploadError.set('Upload failed. Please try again.');
+    } finally {
+      this.uploading.set(false);
+    }
   }
 
   private stopCamera(): void {
