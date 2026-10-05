@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/presentation/guards/auth.guard';
 import { permissionGuard } from '@core/presentation/guards/permission.guard';
+import { SHOP_CUSTOMER_IDENTITY_PROVIDERS } from '@features/shop/customer-account/shop-customer-identity.providers';
 import { Permission } from '@core/domain/auth';
 
 export const routes: Routes = [
@@ -26,7 +27,15 @@ export const routes: Routes = [
   {
     // Customer-phone scan-and-go route — no auth guard, no URL params.
     // Store is resolved at runtime from geofence / settings / fallback.
+    //
+    // The customer identity (App ID customer application) is bound HERE, on
+    // this route's own injector, and never in the root: the account modal signs
+    // a shopper in, and nothing outside /shop (or /self-checkout) may resolve
+    // that identity — least of all staff authorization. ShopComponent hydrates a
+    // persisted session on entry. /kiosk/shop deliberately does not get it — a
+    // shared device must not keep a customer signed in for the next shopper.
     path: 'shop',
+    providers: SHOP_CUSTOMER_IDENTITY_PROVIDERS,
     loadComponent: () => import('./features/shop/shop.component').then((m) => m.ShopComponent),
     title: 'Shop · Capy Shop',
   },
