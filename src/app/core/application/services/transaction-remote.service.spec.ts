@@ -76,6 +76,8 @@ describe('TransactionRemoteService', () => {
 
     const parsed = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(parsed['paymentMethod']).toBe('cash');
+    // pos-api keeps the till's id so the sale's event can be matched to it (#358).
+    expect(parsed['transactionId']).toBe('txn-001');
     expect(parsed['total']).toBe(27.5);
     expect(Array.isArray(parsed['items'])).toBe(true);
   });

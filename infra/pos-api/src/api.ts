@@ -41,6 +41,7 @@ import {
 import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
 import type { CheckoutInventoryMarkers } from './checkout-inventory.ts';
 import type { SaleEventMarkers } from './sale-events.ts';
+import { ingestEvents } from './events-ingest.ts';
 import {
   productAvailableStock,
   productHasActiveReservations,
@@ -138,6 +139,11 @@ export interface KioskTransactionDocument extends StoredDocument {
   /** `sub` claim of the kiosk-device or shop-session token. */
   readonly operatorId: string;
   readonly tenantId: string;
+  /**
+   * The till's own id for this sale. A kiosk or shop `SaleCompleted` event is accepted
+   * only when it matches a recorded sale by this id (#358). Absent on older records.
+   */
+  readonly clientTransactionId?: string;
 }
 
 /**
@@ -220,6 +226,8 @@ export interface ApiDeps {
    * In production this is the public HTTPS origin (e.g. https://capy-pos.example.com).
    */
   readonly appBaseUrl: string;
+  /** `POST /api/events` answers 404 unless this is set (EVENTS_INGEST_ENABLED, #358). */
+  readonly eventsIngestEnabled?: boolean;
   /** Injected so tests can stub fetch without patching globals. */
   readonly fetch?: typeof globalThis.fetch;
   readonly nowSeconds: () => number;
@@ -295,6 +303,12 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
     return createKioskTransaction(request, deps);
   }
 
+  // Accepts staff (PROCESS_SALE) and kiosk/shop device tokens under a guardrail, so
+  // it does its own authorization rather than the staff-only boundary below.
+  if (route.kind === 'ingestEvents') {
+    return ingestEvents(request, deps);
+  }
+
   // `rolesSource: deps.roles` merged in here, not stored on `deps.appId`
   // itself: `deps.appId` is built once at startup from env vars only
   // (`server.ts`'s `readAppIdConfig()`), while the roles store is a request
@@ -356,6 +370,7 @@ type Route =
   | { readonly kind: 'listTransactions'; readonly permission: Permission }
   | { readonly kind: 'createKioskDeviceToken'; readonly permission: Permission }
   | { readonly kind: 'createKioskTransaction' }
+  | { readonly kind: 'ingestEvents' }
   | { readonly kind: 'replaceProduct'; readonly permission: Permission; readonly id: string }
   | { readonly kind: 'patchProduct'; readonly permission: Permission; readonly id: string }
   | { readonly kind: 'deleteProduct'; readonly permission: Permission; readonly id: string }
@@ -385,6 +400,10 @@ export function matchRoute(method: string, path: string): Route | null {
 
   if (segments.length === 2 && segments[1] === 'health') {
     return upper === 'GET' ? { kind: 'health' } : null;
+  }
+
+  if (segments.length === 2 && segments[1] === 'events') {
+    return upper === 'POST' ? { kind: 'ingestEvents' } : null;
   }
 
   if (segments.length === 2 && segments[1] === 'transactions') {
@@ -518,6 +537,8 @@ function health(deps: ApiDeps): ApiResponse {
         sellProduct: 'POST /api/products/{id}/sell',
         getTransactions: 'GET /api/transactions',
         createTransaction: 'POST /api/transactions (kiosk-device or shop-session token)',
+        ingestEvents:
+          'POST /api/events (staff PROCESS_SALE, or a device token for a recorded sale)',
         createShopSession: 'POST /api/shop/session (open, rate-limited)',
         createKioskDeviceToken: 'POST /api/kiosk-device-token (MANAGE_INVENTORY)',
         health: 'GET /api/health',
@@ -722,6 +743,8 @@ async function listTransactions(
   deps: ApiDeps
 ): Promise<{ transactions: readonly PublicTransactionDocument[]; count: number }> {
   const transactions = [...(await deps.transactions.list())]
+    // `sale-event:*` claims (#357/#358) live in this store too; they are not sales.
+    .filter((document) => (document as { kind?: unknown }).kind !== 'sale-event')
     .sort((left, right) => {
       const leftMs = Date.parse(right.timestamp);
       const rightMs = Date.parse(left.timestamp);
@@ -864,6 +887,9 @@ async function createKioskTransaction(request: ApiRequest, deps: ApiDeps): Promi
     timestamp: deps.nowIso(),
     operatorId: claims.operatorId,
     tenantId: claims.tenantId,
+    ...(asNonEmptyString(body['transactionId']) === null
+      ? {}
+      : { clientTransactionId: asNonEmptyString(body['transactionId']) as string }),
   };
 
   // deps.transactions is DocumentStore<TransactionDocument>; KioskTransactionDocument
