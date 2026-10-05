@@ -126,6 +126,9 @@ export const environment = {
 
   // Feature Flags
   features: {
+    // Drain SaleCompleted events from the outbox to POST /api/events (#359).
+    // Off until pos-api has EVENTS_INGEST_ENABLED set (#358).
+    eventSync: false,
     analytics: false,
     telemetry: false,
     auditLogging: true,

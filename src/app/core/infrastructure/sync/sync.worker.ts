@@ -19,6 +19,8 @@ import {
   SyncedProduct,
   PushProductPayload,
   PushResult,
+  PushEventPayload,
+  EventAck,
   DEFAULT_SYNC_CONFIG,
 } from './sync.types';
 
@@ -826,6 +828,78 @@ async function pushUpserts(products: PushProductPayload[]): Promise<void> {
   postEvent({ type: 'PUSH_COMPLETED', pushed, failed, results });
 }
 
+/**
+ * Send a batch of outbox events to `POST /api/events` and report pos-api's verdict on
+ * each (#359). The outbox's sale handler drives this, one event at a time.
+ *
+ * Answers it can't act on are not failures of the server, and stay outside the circuit
+ * breaker: a 401 or 403 (session expired or wrong token) or a 404 (EVENTS_INGEST_ENABLED
+ * still off) comes back as `retryLater`, so the outbox parks the event and tries again,
+ * and the breaker that guards the product sync is never tripped by it. Only network
+ * faults and 5xx count against the breaker, as for every other push.
+ */
+async function pushEvents(requestId: string, events: PushEventPayload[]): Promise<void> {
+  if (sessionToken() === null) {
+    postEvent({
+      type: 'EVENTS_FAILED',
+      requestId,
+      error: 'No session; events sync after sign-in.',
+      retryLater: true,
+    });
+    return;
+  }
+
+  const url = `${config.apiBaseUrl}${config.endpoints.events ?? '/api/events'}`;
+  try {
+    const response = await circuitBreaker.execute(() =>
+      retry.execute(`push-events-${requestId}`, async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ events }),
+          });
+          if (res.status >= 500) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          return res;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      })
+    );
+
+    if (response.status === 401 || response.status === 403 || response.status === 404) {
+      postEvent({
+        type: 'EVENTS_FAILED',
+        requestId,
+        error: `pos-api answered ${response.status}; events wait and retry.`,
+        retryLater: true,
+      });
+      return;
+    }
+    if (!response.ok) {
+      postEvent({
+        type: 'EVENTS_FAILED',
+        requestId,
+        error: `HTTP ${response.status}: ${response.statusText}`,
+        retryLater: false,
+      });
+      return;
+    }
+    const body = (await response.json()) as { results?: EventAck[] };
+    postEvent({ type: 'EVENTS_ACKED', requestId, results: body.results ?? [] });
+  } catch (error) {
+    postEvent({
+      type: 'EVENTS_FAILED',
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+      retryLater: false,
+    });
+  }
+}
+
 async function pushDeletes(productIds: string[]): Promise<void> {
   if (!productIds.length) return;
   if (refuseUnauthorizedPush(productIds, 'delete')) return;
@@ -998,6 +1072,10 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
 
     case 'PUSH_DELETE_PRODUCTS':
       pushDeletes(command.productIds);
+      break;
+
+    case 'PUSH_EVENTS':
+      pushEvents(command.requestId, command.events);
       break;
   }
 });
