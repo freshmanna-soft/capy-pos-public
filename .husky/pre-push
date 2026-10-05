@@ -53,6 +53,15 @@ echo "🧪 Running E2E Playwright tests before push..."
 echo "   This gate ensures no disconnected features or UX regressions are pushed."
 echo ""
 
+# Formatting, for src/ and infra/ alike (#393): infra/ was never gated, and drifted.
+npm run format:check
+if [ $? -ne 0 ]; then
+  echo ""
+  echo "❌ Formatting check failed. Push aborted."
+  echo "   Run 'npm run format' to fix it."
+  exit 1
+fi
+
 # Type-check everything, specs included. Vitest does not check types, so this is
 # the only thing that fails on a stale spec or a vacuous @ts-expect-error.
 npm run typecheck
