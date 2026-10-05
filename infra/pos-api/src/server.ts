@@ -317,6 +317,8 @@ function buildRuntimeDeps(): {
         mpAccessToken: readMpAccessToken(),
         mpCurrencyId: readMpCurrencyId(),
         appBaseUrl: readAppBaseUrl(),
+        // Off unless explicitly 'true': POST /api/events then answers 404 (#358).
+        eventsIngestEnabled: process.env['EVENTS_INGEST_ENABLED'] === 'true',
         nowSeconds: () => Math.floor(Date.now() / 1000),
         nowIso: () => new Date().toISOString(),
         newId: () => randomUUID(),

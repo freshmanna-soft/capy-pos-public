@@ -56,6 +56,9 @@ export class TransactionRemoteService {
     const total = this.cart.total();
 
     const body = {
+      // The till's own id for this sale. pos-api keeps it, so this sale's
+      // SaleCompleted event can later be matched to it (#358).
+      transactionId: paymentResult.transactionId,
       paymentMethod: paymentResult.method,
       subtotal,
       taxAmount: tax,
