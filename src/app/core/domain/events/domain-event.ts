@@ -36,6 +36,11 @@ export interface SaleCompletedPayload {
   amount: number;
   method: string;
   customerId?: string;
+  /**
+   * The customer's tier at the moment of the sale, so a retried award is priced the
+   * same as the first attempt and matches the receipt (Epic #349, decision 4).
+   */
+  customerTier?: string;
   occurredAt: string;
 }
 

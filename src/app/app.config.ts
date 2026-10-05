@@ -24,6 +24,7 @@ import { SyncService, SyncSessionCredentialService } from '@core/infrastructure/
 import { SyncKioskModeService } from '@core/infrastructure/sync/sync-kiosk-mode.service';
 import { ProductRemoteSyncHandler } from '@core/infrastructure/sync/product-remote-sync.handler';
 import { AdjustStockOnSaleHandler } from '@core/application/handlers/adjust-stock-on-sale.handler';
+import { AwardLoyaltyPointsHandler } from '@core/application/handlers/award-loyalty-points.handler';
 import {
   EVENT_HANDLERS,
   OutboxDispatcherService,
@@ -179,6 +180,8 @@ export const appConfig: ApplicationConfig = {
     { provide: EVENT_HANDLERS, useExisting: ProductRemoteSyncHandler, multi: true },
     // Takes a sale's items off stock; blocking, so checkout() waits for it (#354)
     { provide: EVENT_HANDLERS, useExisting: AdjustStockOnSaleHandler, multi: true },
+    // Awards a sale's loyalty points; not blocking (#355)
+    { provide: EVENT_HANDLERS, useExisting: AwardLoyaltyPointsHandler, multi: true },
     provideAppInitializer(() => {
       inject(OutboxDispatcherService).start();
     }),

@@ -26,6 +26,8 @@ export interface PersistTransactionRequest {
   changeGiven?: number;
   /** Optional customer ID */
   customerId?: string;
+  /** The attached customer's tier at the moment of sale; priced on retry (#355). */
+  customerTier?: string;
   /**
    * Record a `SaleCompleted` event in the same local transaction (#352). Omit it and
    * the row is written alone, as before.
@@ -163,6 +165,7 @@ export class PersistTransactionUseCase {
               amount: request.sale.amount,
               method: paymentMethod,
               ...(customerId ? { customerId } : {}),
+              ...(customerId && request.customerTier ? { customerTier: request.customerTier } : {}),
               occurredAt: now.toISOString(),
             },
             appliedInline: request.sale.appliedInline ?? [],

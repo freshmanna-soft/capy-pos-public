@@ -536,8 +536,15 @@ describe('PosFacade', () => {
     });
   });
 
-  describe('earning loyalty points at checkout', () => {
+  // Loyalty is the SaleCompleted handler's job since #355; checkout() awards inline
+  // only when the sale has no event behind it. These cover that inline fallback.
+  describe('earning loyalty points at checkout when the record is deferred', () => {
     const payment = { method: 'cash', amount: 42.75, transactionId: 'TXN-9' };
+
+    beforeEach(() => {
+      mockPersistTransaction.execute.mockResolvedValue({ success: false, outcome: 'deferred' });
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
 
     async function attach(): Promise<void> {
       mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(
@@ -795,7 +802,7 @@ describe('PosFacade', () => {
           correlationId: expect.stringMatching(UUID_V4),
           amount: 12.5,
           appliedInline: [],
-          fallbackInline: ['adjust-stock-on-sale'],
+          fallbackInline: ['adjust-stock-on-sale', 'award-loyalty-points'],
         },
       });
     });
@@ -820,13 +827,26 @@ describe('PosFacade', () => {
       expect(first).not.toBe(second);
     });
 
-    it('records the attached customer on the sale', async () => {
+    it('records the attached customer and their tier at the time of sale', async () => {
       mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(regular());
       await facade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
 
       await facade.checkout(payment as never);
 
-      expect(mockPersistTransaction.execute.mock.calls[0][0].customerId).toBe('customer-352');
+      expect(mockPersistTransaction.execute.mock.calls[0][0]).toMatchObject({
+        customerId: 'customer-352',
+        customerTier: CustomerTier.BRONZE,
+      });
+    });
+
+    it('leaves loyalty to the SaleCompleted handler once the sale is recorded (#355)', async () => {
+      mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(regular());
+      await facade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+
+      await facade.checkout(payment as never);
+      await Promise.resolve();
+
+      expect(mockAwardLoyalty.execute).not.toHaveBeenCalled();
     });
 
     it('records locally only after the remote write succeeds (kiosk and shop)', async () => {
