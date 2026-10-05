@@ -23,6 +23,7 @@ import { AgentRegistry } from '@app/agents/agent.registry';
 import { SyncService, SyncSessionCredentialService } from '@core/infrastructure/sync';
 import { SyncKioskModeService } from '@core/infrastructure/sync/sync-kiosk-mode.service';
 import { ProductRemoteSyncHandler } from '@core/infrastructure/sync/product-remote-sync.handler';
+import { SaleRemoteSyncHandler } from '@core/infrastructure/sync/sale-remote-sync.handler';
 import { AdjustStockOnSaleHandler } from '@core/application/handlers/adjust-stock-on-sale.handler';
 import { AwardLoyaltyPointsHandler } from '@core/application/handlers/award-loyalty-points.handler';
 import { AuditSaleHandler } from '@core/application/handlers/audit-sale.handler';
@@ -187,6 +188,10 @@ export const appConfig: ApplicationConfig = {
     // Audit row (idempotent by event id) and payment telemetry (at most once) (#356)
     { provide: EVENT_HANDLERS, useExisting: AuditSaleHandler, multi: true },
     { provide: EVENT_HANDLERS, useExisting: TelemetrySaleHandler, multi: true },
+    // Delivers each sale to POST /api/events; only with features.eventSync on (#359)
+    ...(environment.features.eventSync
+      ? [{ provide: EVENT_HANDLERS, useExisting: SaleRemoteSyncHandler, multi: true }]
+      : []),
     provideAppInitializer(() => {
       inject(OutboxDispatcherService).start();
     }),

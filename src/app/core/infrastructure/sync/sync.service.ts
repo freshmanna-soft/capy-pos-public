@@ -13,8 +13,31 @@ import {
   SyncedProduct,
   PushProductPayload,
   PushResult,
+  PushEventPayload,
+  EventAck,
   DEFAULT_SYNC_CONFIG,
 } from './sync.types';
+import { generateUUID } from '@core/domain/utils/uuid';
+
+/**
+ * What became of one `pushEventsAsync` request. Never a rejection: the outbox handler
+ * needs to tell "the server judged these events" from "try again later" from "failed".
+ */
+/** The products a stored SaleCompleted payload names; none if it cannot be read. */
+function saleProductIds(payload: string): string[] {
+  try {
+    const items = (JSON.parse(payload) as { items?: { productId?: unknown }[] }).items;
+    return Array.isArray(items)
+      ? items.map((item) => item?.productId).filter((id): id is string => typeof id === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export type EventPushOutcome =
+  | { readonly ok: true; readonly results: readonly EventAck[] }
+  | { readonly ok: false; readonly retryLater: boolean; readonly error: string };
 
 /**
  * Error raised when an awaited push (pushUpdateAsync) fails on the server.
@@ -57,6 +80,9 @@ export class SyncService implements OnDestroy {
     string,
     { resolve: (result: PushResult) => void; reject: (error: Error) => void }
   >();
+
+  // `pushEventsAsync` requests awaiting EVENTS_ACKED / EVENTS_FAILED, keyed by request id.
+  private readonly pendingEventPushes = new Map<string, (outcome: EventPushOutcome) => void>();
 
   // ─── Reactive State (Signals) ───────────────────────────────────────────
 
@@ -154,6 +180,10 @@ export class SyncService implements OnDestroy {
         pending.reject(new Error('Sync worker stopped before push confirmed'));
       }
       this.pendingPushes.clear();
+      for (const settle of this.pendingEventPushes.values()) {
+        settle({ ok: false, retryLater: true, error: 'Sync worker stopped.' });
+      }
+      this.pendingEventPushes.clear();
 
       console.log('[SyncService] Worker stopped.');
     }
@@ -286,6 +316,34 @@ export class SyncService implements OnDestroy {
    */
   pushUpsertAsync(product: PushProductPayload, timeoutMs = 60000): Promise<PushResult> {
     return this.awaitPush(product, 'PUSH_UPSERT_PRODUCTS', timeoutMs);
+  }
+
+  /**
+   * Send outbox events to `POST /api/events` through the worker (#359) and resolve with
+   * pos-api's verdict on each. Resolves rather than rejects; see `EventPushOutcome`.
+   */
+  pushEventsAsync(events: PushEventPayload[], timeoutMs = 60000): Promise<EventPushOutcome> {
+    if (!this.worker) {
+      return Promise.resolve({ ok: false, retryLater: true, error: 'Sync worker not running.' });
+    }
+    const requestId = generateUUID();
+    return new Promise<EventPushOutcome>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingEventPushes.delete(requestId);
+        // Unknown outcome: the server may have applied them. A resend is safe, since
+        // it answers `duplicate`, so this is "try again", not a failure.
+        resolve({
+          ok: false,
+          retryLater: true,
+          error: `Event push timed out after ${timeoutMs}ms.`,
+        });
+      }, timeoutMs);
+      this.pendingEventPushes.set(requestId, (outcome) => {
+        clearTimeout(timer);
+        resolve(outcome);
+      });
+      this.postCommand({ type: 'PUSH_EVENTS', requestId, events });
+    });
   }
 
   /**
@@ -423,6 +481,19 @@ export class SyncService implements OnDestroy {
         );
         break;
 
+      case 'EVENTS_ACKED':
+      case 'EVENTS_FAILED': {
+        const settle = this.pendingEventPushes.get(event.requestId);
+        if (!settle) break;
+        this.pendingEventPushes.delete(event.requestId);
+        settle(
+          event.type === 'EVENTS_ACKED'
+            ? { ok: true, results: event.results }
+            : { ok: false, retryLater: event.retryLater, error: event.error }
+        );
+        break;
+      }
+
       case 'PUSH_COMPLETED':
         console.log(
           `[SyncService] Push completed. Pushed: ${event.pushed}, Failed: ${event.failed}`
@@ -547,15 +618,31 @@ export class SyncService implements OnDestroy {
   }
 
   private async productsAwaitingPush(ids: string[]): Promise<Set<string>> {
+    const unfinished = (status: OutboxStatus) =>
+      status === OutboxStatus.PENDING || status === OutboxStatus.FAILED;
     const rows = await this.db.outbox.where('aggregateId').anyOf(ids).toArray();
-    return new Set(
+    const awaiting = new Set(
       rows
-        .filter(
-          (row) =>
-            row.type === DomainEventType.PRODUCT_UPSERTED &&
-            (row.status === OutboxStatus.PENDING || row.status === OutboxStatus.FAILED)
-        )
+        .filter((row) => row.type === DomainEventType.PRODUCT_UPSERTED && unfinished(row.status))
         .map((row) => row.aggregateId)
     );
+
+    // A sale still on its way to pos-api (#359) has taken stock off locally that the
+    // server has not taken off yet; writing the server's figure would undo the sale on
+    // screen until the event lands. A sale event's aggregate is its transaction, so the
+    // products are read from its payload. With features.eventSync off, sale events are
+    // handled locally at once and never wait here, so nothing changes.
+    const wanted = new Set(ids);
+    const sales = await this.db.outbox
+      .where('status')
+      .anyOf([OutboxStatus.PENDING, OutboxStatus.FAILED])
+      .toArray();
+    for (const row of sales) {
+      if (row.type !== DomainEventType.SALE_COMPLETED || !unfinished(row.status)) continue;
+      for (const productId of saleProductIds(row.payload)) {
+        if (wanted.has(productId)) awaiting.add(productId);
+      }
+    }
+    return awaiting;
   }
 }

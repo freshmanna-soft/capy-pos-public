@@ -338,6 +338,73 @@ describe('SyncService', () => {
     });
   });
 
+  describe('pushEventsAsync (#359)', () => {
+    const events = [{ eventId: 'evt-1', type: 'sale.completed', payload: {} }];
+
+    it('says to retry later, without posting, when the worker is not running', async () => {
+      await expect(service.pushEventsAsync(events)).resolves.toMatchObject({
+        ok: false,
+        retryLater: true,
+      });
+    });
+
+    it('posts PUSH_EVENTS and resolves with the verdicts for its own request', async () => {
+      const worker = start();
+      const promise = service.pushEventsAsync(events);
+      const [command] = worker.commandsOfType('PUSH_EVENTS');
+      expect(command.events).toEqual(events);
+
+      // Another request's answer must not settle this one.
+      worker.emit({ type: 'EVENTS_ACKED', requestId: 'someone-else', results: [] });
+      worker.emit({
+        type: 'EVENTS_ACKED',
+        requestId: command.requestId,
+        results: [{ eventId: 'evt-1', status: 'applied' }],
+      });
+
+      await expect(promise).resolves.toEqual({
+        ok: true,
+        results: [{ eventId: 'evt-1', status: 'applied' }],
+      });
+    });
+
+    it("resolves a failure with the worker's retryLater verdict", async () => {
+      const worker = start();
+      const promise = service.pushEventsAsync(events);
+      const [command] = worker.commandsOfType('PUSH_EVENTS');
+
+      worker.emit({
+        type: 'EVENTS_FAILED',
+        requestId: command.requestId,
+        error: 'HTTP 400',
+        retryLater: false,
+      });
+
+      await expect(promise).resolves.toEqual({ ok: false, retryLater: false, error: 'HTTP 400' });
+    });
+
+    it('treats a timeout as retry-later, since a resend is safe', async () => {
+      start();
+      vi.useFakeTimers();
+      try {
+        const promise = service.pushEventsAsync(events, 50);
+        vi.advanceTimersByTime(60);
+        await expect(promise).resolves.toMatchObject({ ok: false, retryLater: true });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('settles in-flight requests as retry-later when the worker stops', async () => {
+      start();
+      const promise = service.pushEventsAsync(events);
+
+      service.stop();
+
+      await expect(promise).resolves.toMatchObject({ ok: false, retryLater: true });
+    });
+  });
+
   describe('pushUpdateAsync', () => {
     it('rejects immediately when worker is not running', async () => {
       await expect(service.pushUpdateAsync(product)).rejects.toThrow('Sync worker not running');
@@ -770,6 +837,47 @@ describe('SyncService', () => {
 
       const [records] = mockDb.products.bulkPut.mock.calls[0];
       expect(records.map((r: { id: string }) => r.id)).toEqual(['synced', 'gave-up']);
+    });
+
+    it('keeps the local stock of a product whose sale has not reached the server (#359)', async () => {
+      const sale = (productIds: string[]) =>
+        JSON.stringify({ items: productIds.map((productId) => ({ productId, quantity: 1 })) });
+      outboxRows = [
+        {
+          aggregateId: 'TXN-1',
+          type: DomainEventType.SALE_COMPLETED,
+          status: OutboxStatus.PENDING,
+          payload: sale(['sold-pending']),
+        },
+        {
+          aggregateId: 'TXN-2',
+          type: DomainEventType.SALE_COMPLETED,
+          status: OutboxStatus.FAILED,
+          payload: sale(['sold-retrying']),
+        },
+        {
+          aggregateId: 'TXN-3',
+          type: DomainEventType.SALE_COMPLETED,
+          status: OutboxStatus.HANDLED,
+          payload: sale(['sold-delivered']),
+        },
+        {
+          aggregateId: 'TXN-4',
+          type: DomainEventType.SALE_COMPLETED,
+          status: OutboxStatus.PENDING,
+          payload: '{not json',
+        },
+      ];
+      emitProducts([
+        { id: 'sold-pending', name: 'A', category: 'c', price: 1 },
+        { id: 'sold-retrying', name: 'B', category: 'c', price: 1 },
+        { id: 'sold-delivered', name: 'C', category: 'c', price: 1 },
+        { id: 'untouched', name: 'D', category: 'c', price: 1 },
+      ]);
+      await vi.waitFor(() => expect(mockDb.products.bulkPut).toHaveBeenCalled());
+
+      const [records] = mockDb.products.bulkPut.mock.calls[0];
+      expect(records.map((r: { id: string }) => r.id)).toEqual(['sold-delivered', 'untouched']);
     });
 
     it('writes nothing when every pulled product has a pending edit', async () => {

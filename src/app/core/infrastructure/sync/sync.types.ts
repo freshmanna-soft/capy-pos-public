@@ -45,7 +45,8 @@ export type SyncWorkerCommand =
   | { type: 'PUSH_PRODUCTS'; products: PushProductPayload[] }
   | { type: 'PUSH_UPDATE_PRODUCTS'; products: PushProductPayload[] }
   | { type: 'PUSH_UPSERT_PRODUCTS'; products: PushProductPayload[] }
-  | { type: 'PUSH_DELETE_PRODUCTS'; productIds: string[] };
+  | { type: 'PUSH_DELETE_PRODUCTS'; productIds: string[] }
+  | { type: 'PUSH_EVENTS'; requestId: string; events: PushEventPayload[] };
 
 /**
  * Product payload for PUSH sync (local → API)
@@ -73,6 +74,8 @@ export type SyncWorkerEvent =
   | { type: 'CIRCUIT_STATE_CHANGED'; state: WorkerCircuitState; circuit: string }
   | { type: 'HEALTH_CHECK'; healthy: boolean; apiUrl: string }
   | { type: 'PUSH_COMPLETED'; pushed: number; failed: number; results: PushResult[] }
+  | { type: 'EVENTS_ACKED'; requestId: string; results: EventAck[] }
+  | { type: 'EVENTS_FAILED'; requestId: string; error: string; retryLater: boolean }
   /**
    * The API refused the credential the worker presented on a pull (401).
    *
@@ -83,6 +86,21 @@ export type SyncWorkerEvent =
    */
   | { type: 'AUTH_REJECTED'; status: number; endpoint: string }
   | { type: 'ERROR'; error: string; details?: string };
+
+/** One outbox event as `POST /api/events` takes it (#358, #359). */
+export interface PushEventPayload {
+  eventId: string;
+  type: string;
+  correlationId?: string;
+  payload: unknown;
+}
+
+/** pos-api's verdict on one event. */
+export interface EventAck {
+  eventId: string;
+  status: 'applied' | 'duplicate' | 'conflict' | 'rejected' | 'retry';
+  error?: string;
+}
 
 /**
  * Result of pushing a single product to the API
@@ -152,6 +170,8 @@ export interface SyncWorkerConfig {
     products: string;
     transactions: string;
     health: string;
+    /** Where the outbox drains SaleCompleted events (#359). Optional for older configs. */
+    events?: string;
   };
 }
 
@@ -236,5 +256,6 @@ export const DEFAULT_SYNC_CONFIG: SyncWorkerConfig = {
     products: '/api/products',
     transactions: '/api/transactions',
     health: '/api/health',
+    events: '/api/events',
   },
 };
