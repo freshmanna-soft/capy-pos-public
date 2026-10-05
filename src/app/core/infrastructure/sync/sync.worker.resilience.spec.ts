@@ -196,6 +196,123 @@ describe('sync worker resilience (#206)', () => {
     });
   });
 
+  describe('a 401 is a credential problem, not an outage', () => {
+    const rejecting = async (url: string) =>
+      url.includes('/api/health') ? json({ status: 'healthy' }) : json({}, 401);
+
+    it('reports AUTH_REJECTED so the main thread can replace the token', async () => {
+      const worker = await loadWorker(rejecting);
+
+      worker.send({ type: 'START_SYNC', config: config() });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(worker.ofType('AUTH_REJECTED')).toEqual([
+        { type: 'AUTH_REJECTED', status: 401, endpoint: '/api/products' },
+      ]);
+    });
+
+    it('does not open the circuit, however many pulls are refused', async () => {
+      // failureThreshold is 2 in this suite's config: two counted failures would
+      // open it and stall the first pull under a fresh token for the timeout.
+      const worker = await loadWorker(rejecting);
+
+      worker.send({ type: 'START_SYNC', config: config() });
+      await worker.settle();
+      for (let i = 0; i < 4; i++) {
+        worker.send({ type: 'FORCE_SYNC' });
+        await worker.settle();
+      }
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(worker.ofType('CIRCUIT_STATE_CHANGED')).toHaveLength(0);
+      expect(worker.urls.filter((url) => url.includes('/api/products'))).toHaveLength(5);
+    });
+
+    it('does not report AUTH_REJECTED for an outage', async () => {
+      const worker = await loadWorker(async (url) =>
+        url.includes('/api/health') ? json({ status: 'healthy' }) : json({}, 503)
+      );
+
+      worker.send({ type: 'START_SYNC', config: config() });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(worker.ofType('AUTH_REJECTED')).toHaveLength(0);
+    });
+  });
+
+  describe('a new credential pulls at once', () => {
+    const healthy = async () => json({ status: 'healthy', products: [], transactions: [] });
+    const productCalls = (urls: string[]) => urls.filter((url) => url.includes('/api/products'));
+
+    it('syncs when UPDATE_CONFIG brings a token, instead of waiting for the interval', async () => {
+      const worker = await loadWorker(healthy);
+      worker.send({ type: 'START_SYNC', config: config({ sessionToken: '' }) });
+      await worker.settle();
+      expect(productCalls(worker.urls)).toHaveLength(0);
+
+      worker.send({ type: 'UPDATE_CONFIG', config: { sessionToken: 'shop.token.sig' } });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(productCalls(worker.urls)).toHaveLength(1);
+      expect(worker.ofType('PRODUCTS_SYNCED')).toHaveLength(1);
+    });
+
+    it('does not sync again for the token it already has, or for a cleared one', async () => {
+      const worker = await loadWorker(healthy);
+      worker.send({ type: 'START_SYNC', config: config() });
+      await worker.settle();
+      const before = productCalls(worker.urls).length;
+
+      worker.send({ type: 'UPDATE_CONFIG', config: { sessionToken: config().sessionToken } });
+      worker.send({ type: 'UPDATE_CONFIG', config: { sessionToken: '' } });
+      worker.send({ type: 'UPDATE_CONFIG', config: { kioskMode: true } });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(productCalls(worker.urls)).toHaveLength(before);
+    });
+
+    it('runs one follow-up cycle when the token changes mid-cycle', async () => {
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let first = true;
+      const worker = await loadWorker(async (url) => {
+        if (url.includes('/api/products') && first) {
+          first = false;
+          await gate;
+        }
+        return healthy();
+      });
+
+      worker.send({ type: 'START_SYNC', config: config() });
+      await worker.settle(2);
+      worker.send({ type: 'UPDATE_CONFIG', config: { sessionToken: 'new.token.sig' } });
+      await worker.settle(2);
+      expect(productCalls(worker.urls)).toHaveLength(1);
+
+      release?.();
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      expect(productCalls(worker.urls)).toHaveLength(2);
+    });
+
+    it('does not sync for a token that arrives after STOP_SYNC', async () => {
+      const worker = await loadWorker(healthy);
+      worker.send({ type: 'START_SYNC', config: config({ sessionToken: '' }) });
+      await worker.settle();
+      worker.send({ type: 'STOP_SYNC' });
+
+      worker.send({ type: 'UPDATE_CONFIG', config: { sessionToken: 'late.token.sig' } });
+      await worker.settle();
+
+      expect(productCalls(worker.urls)).toHaveLength(0);
+    });
+  });
+
   describe('a 5xx is retried', () => {
     it('retries the products pull up to maxAttempts and reports each attempt', async () => {
       const worker = await loadWorker(async (url) =>

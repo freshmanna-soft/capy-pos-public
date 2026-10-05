@@ -166,6 +166,14 @@ export interface ApiRequest {
   readonly rawBody?: Uint8Array;
   /** Value of the `Content-Type` request header (lower-cased). */
   readonly contentType?: string;
+  /**
+   * The caller's rate-limit identity (`server.ts`'s `clientRateLimitKey`, the
+   * same key checkout limits by). Only the open `POST /api/shop/session` route
+   * reads it: an anonymous customer has no Authorization header to tell one
+   * phone from another, so keying on that header put every customer in one
+   * shared bucket and the 21st shopper of the hour got a 429.
+   */
+  readonly clientKey?: string;
 }
 
 export interface ApiResponse {
@@ -526,10 +534,10 @@ const SHOP_SESSION_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 interface RateBucket { count: number; windowStart: number }
 const shopSessionBuckets = new Map<string, RateBucket>();
 
-function shopSessionAllowed(ip: string, nowMs: number): boolean {
-  const bucket = shopSessionBuckets.get(ip);
+function shopSessionAllowed(clientKey: string, nowMs: number): boolean {
+  const bucket = shopSessionBuckets.get(clientKey);
   if (bucket === undefined || nowMs - bucket.windowStart >= SHOP_SESSION_WINDOW_MS) {
-    shopSessionBuckets.set(ip, { count: 1, windowStart: nowMs });
+    shopSessionBuckets.set(clientKey, { count: 1, windowStart: nowMs });
     return true;
   }
   if (bucket.count >= SHOP_SESSION_MAX_PER_HOUR) {
@@ -719,13 +727,11 @@ async function listTransactions(
  */
 function createShopSession(request: ApiRequest, deps: ApiDeps): ApiResponse {
   const nowMs = deps.nowSeconds() * 1000;
-  // Use the Authorization header as a proxy for the client IP when the real
-  // IP isn't available (e.g. test harness). In production the request arrives
-  // via Code Engine's ingress which forwards the real IP in X-Forwarded-For;
-  // for the in-process test the authorization string is undefined, so we fall
-  // back to 'test' — a value that only appears in tests.
-  const ip = (request.authorization ?? 'test').slice(0, 64);
-  if (!shopSessionAllowed(ip, nowMs)) {
+  // Keyed on the client address `server.ts` resolved from X-Forwarded-For.
+  // An in-process caller that supplies none (tests, a future internal caller)
+  // shares one 'unknown' bucket — the conservative direction for an open route.
+  const clientKey = (request.clientKey ?? 'unknown').slice(0, 500);
+  if (!shopSessionAllowed(clientKey, nowMs)) {
     return { status: 429, body: { error: 'Too many session requests. Try again later.' } };
   }
 

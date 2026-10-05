@@ -68,6 +68,8 @@ export class SyncService implements OnDestroy {
   private readonly _totalFailures = signal<number>(0);
   private readonly _isHealthy = signal<boolean>(false);
   private readonly _productsSynced = signal<number>(0);
+  private readonly _productsRevision = signal<number>(0);
+  private readonly _authRejections = signal<number>(0);
 
   // ─── Public Computed Signals ────────────────────────────────────────────
 
@@ -79,6 +81,19 @@ export class SyncService implements OnDestroy {
   readonly totalFailures = this._totalFailures.asReadonly();
   readonly isHealthy = this._isHealthy.asReadonly();
   readonly productsSynced = this._productsSynced.asReadonly();
+  /**
+   * Bumps every time pulled products land in Dexie. A counter rather than
+   * `productsSynced`, which holds a count and so does not change — or notify —
+   * when two pulls write the same number of rows. Screens that read the catalog
+   * once (the customer shop) watch this to re-read it.
+   */
+  readonly productsRevision = this._productsRevision.asReadonly();
+  /**
+   * Bumps every time the API refuses the worker's credential on a pull (401). The
+   * owner of that credential decides what a refusal means — the shop re-mints its
+   * capability session; a staff session is left to its own expiry handling.
+   */
+  readonly authRejections = this._authRejections.asReadonly();
 
   readonly isSyncing = computed(() => this._status() === SyncStatus.SYNCING);
   readonly isCircuitOpen = computed(() => this._circuitState() === WorkerCircuitState.OPEN);
@@ -440,6 +455,11 @@ export class SyncService implements OnDestroy {
         this.settlePendingPushes(event.results);
         break;
 
+      case 'AUTH_REJECTED':
+        console.warn(`[SyncService] Credential rejected (${event.status}) on ${event.endpoint}.`);
+        this._authRejections.update((n) => n + 1);
+        break;
+
       case 'ERROR':
         this._status.set(SyncStatus.FAILED);
         this._lastError.set(event.error);
@@ -518,6 +538,7 @@ export class SyncService implements OnDestroy {
 
       await this.db.products.bulkPut(dbRecords);
       this._productsSynced.set(products.length);
+      this._productsRevision.update((n) => n + 1);
 
       console.log(`[SyncService] Wrote ${products.length} products to Dexie.`);
     } catch (error) {

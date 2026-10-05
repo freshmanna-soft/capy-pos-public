@@ -15,6 +15,9 @@ import { CUSTOMER_REPOSITORY } from '@core/infrastructure/factories/repository.f
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import type { ScannedCode } from '@core/infrastructure/media/barcode-gate';
 import { Product } from '@core/domain/entities/product.entity';
+import { ShopSessionService } from '@core/infrastructure/sync/shop-session.service';
+import { SyncService } from '@core/infrastructure/sync/sync.service';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
 
 // ---------------------------------------------------------------------------
 // Minimal product factory
@@ -92,6 +95,13 @@ function setup(
   const camera = { ...makeCamera(), ...cameraOverrides };
   const scanner = { ...makeScanner(), ...scannerOverrides };
   const cart = makeCartStub();
+  // These suites exercise the shopping UI, not token lifetimes — the real service
+  // is covered in shop-session.service.spec.ts and by the session suites below.
+  const shopSession = {
+    acquire: vi.fn().mockResolvedValue('test-token'),
+    ensureValid: vi.fn().mockResolvedValue('test-token'),
+    release: vi.fn(),
+  };
 
   vi.stubGlobal(
     'fetch',
@@ -144,6 +154,7 @@ function setup(
       { provide: BarcodeScannerService, useValue: scanner },
       { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
       { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
+      { provide: ShopSessionService, useValue: shopSession },
     ],
   });
 
@@ -157,7 +168,7 @@ function setup(
   const fixture = TestBed.createComponent(ShopComponent);
   const component = fixture.componentInstance;
 
-  return { fixture, component, camera, scanner, cart };
+  return { fixture, component, camera, scanner, cart, shopSession };
 }
 
 // ---------------------------------------------------------------------------
@@ -1453,5 +1464,200 @@ describe('ShopComponent — resolveStore geofence inside multi-store', () => {
     await flushMicrotasks();
 
     expect(component.view()).toBe('store-picker');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shop session lifetime — the /shop 401 regression
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — shop session lifetime', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.resetTestingModule();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * The real ShopSessionService over a stubbed SyncService, so what reaches the
+   * worker (`updateConfig`) and what the shop re-reads after a pull are observable.
+   */
+  function setupSessionFlow(options: { stored?: string; products?: () => Promise<Product[]> }) {
+    const storage = new Map<string, string>();
+    if (options.stored !== undefined) storage.set('shop-session', options.stored);
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
+    const fetchStub = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          token: 'minted-token',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+    });
+    vi.stubGlobal('fetch', fetchStub);
+
+    const sync = {
+      productsRevision: signal(0),
+      authRejections: signal(0),
+      updateConfig: vi.fn(),
+    };
+    const getActiveProducts = vi.fn(options.products ?? (() => Promise.resolve([])));
+    const checkout = vi.fn().mockResolvedValue({ total: 1, items: [] });
+
+    TestBed.configureTestingModule({
+      imports: [ShopComponent],
+      providers: [
+        { provide: Router, useValue: { navigate: vi.fn() } },
+        { provide: CartService, useValue: makeCartStub() },
+        { provide: ProductService, useValue: { getActiveProducts } },
+        {
+          provide: KioskSettingsService,
+          useValue: {
+            load: vi.fn().mockResolvedValue(undefined),
+            stores: signal([{ storeId: 'store-1', name: 'Test Store' }]),
+            storeId: signal('store-1'),
+            storeName: signal('Test Store'),
+            storeAddress: signal(''),
+            terminals: signal([]),
+            hasFencePolygon: vi.fn().mockReturnValue(false),
+            setActiveTerminal: vi.fn(),
+            mercadopagoActive: signal(false),
+          },
+        },
+        {
+          provide: GeofencingService,
+          useValue: { checkFence: vi.fn().mockResolvedValue('inside'), reset: vi.fn() },
+        },
+        {
+          provide: KioskCustomerService,
+          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
+        },
+        {
+          provide: PosFacade,
+          useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout },
+        },
+        { provide: BarcodeScannerService, useValue: makeScanner() },
+        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
+        { provide: SyncService, useValue: sync },
+      ],
+    });
+    TestBed.overrideComponent(ShopComponent, {
+      remove: { providers: [CameraService] },
+      add: { providers: [{ provide: CameraService, useValue: makeCamera() }] },
+    });
+
+    const fixture = TestBed.createComponent(ShopComponent);
+    return {
+      fixture,
+      component: fixture.componentInstance,
+      fetchStub,
+      sync,
+      storage,
+      getActiveProducts,
+      checkout,
+    };
+  }
+
+  const mintCalls = (fetchStub: ReturnType<typeof vi.fn>) =>
+    fetchStub.mock.calls.filter(([url]) => String(url).endsWith('/shop/session'));
+
+  it('does not reuse a stored token that has expired — it mints a new one', async () => {
+    const { component, fetchStub, sync } = setupSessionFlow({
+      stored: JSON.stringify({
+        storeId: 'store-1',
+        token: 'expired-token',
+        expiresAt: Date.now() - 1_000,
+      }),
+    });
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    expect(component.view()).toBe('shopping');
+    expect(mintCalls(fetchStub)).toHaveLength(1);
+    expect(sync.updateConfig).toHaveBeenCalledWith({ sessionToken: 'minted-token' });
+    expect(sync.updateConfig).not.toHaveBeenCalledWith({ sessionToken: 'expired-token' });
+  });
+
+  it('reuses a stored token that still has time left', async () => {
+    const { fetchStub, sync } = setupSessionFlow({
+      stored: JSON.stringify({
+        storeId: 'store-1',
+        token: 'stored-token',
+        expiresAt: Date.now() + 40 * 60_000,
+      }),
+    });
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    expect(mintCalls(fetchStub)).toHaveLength(0);
+    expect(sync.updateConfig).toHaveBeenCalledWith({ sessionToken: 'stored-token' });
+  });
+
+  it('checks out with a freshly minted token once the reused one has gone stale', async () => {
+    const { component, fetchStub, checkout } = setupSessionFlow({
+      stored: JSON.stringify({
+        storeId: 'store-1',
+        token: 'stored-token',
+        expiresAt: Date.now() + 40 * 60_000,
+      }),
+    });
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+    // The shopper lingers until the reused token has under five minutes left. Moving
+    // the clock (not running timers) stands in for a proactive refresh that failed.
+    vi.setSystemTime(Date.now() + 36 * 60_000);
+
+    const result = {
+      method: 'cash',
+      amount: 1,
+      transactionId: 'tx',
+      timestamp: new Date(),
+    } as PaymentResult;
+    component.handlePaymentComplete(result);
+    await flushMicrotasks();
+
+    expect(mintCalls(fetchStub)).toHaveLength(1);
+    expect(checkout).toHaveBeenCalledWith(result, 'minted-token');
+  });
+
+  it('re-reads the catalog after a pull lands products in Dexie', async () => {
+    const coffee = makeProduct();
+    let catalog: Product[] = [];
+    const { component, sync, getActiveProducts } = setupSessionFlow({
+      products: () => Promise.resolve(catalog),
+    });
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+    expect(component.view()).toBe('shopping');
+    const readsBefore = getActiveProducts.mock.calls.length;
+
+    catalog = [coffee];
+    sync.productsRevision.set(1);
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    expect(getActiveProducts.mock.calls.length).toBe(readsBefore + 1);
+    expect(component.isLoading()).toBe(false);
+  });
+
+  it('hands the worker credential back when the shop is left', async () => {
+    const { fixture, sync } = setupSessionFlow({});
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+    sync.updateConfig.mockClear();
+
+    fixture.destroy();
+
+    // No staff session in this test, so the worker goes back to no credential.
+    expect(sync.updateConfig).toHaveBeenCalledWith({ sessionToken: '' });
   });
 });

@@ -174,6 +174,28 @@ describe('POST /api/shop/session', () => {
     assert.equal(res.body.count, 1);
     assert.equal(res.body.products[0].id, 'p1');
   });
+
+  test('expiresAt is the ISO form of the token exp claim', async () => {
+    const res = await handle(req({ storeId: 'org/store-1' }), makeDeps());
+    const claims = verifySessionToken(res.body.token, SECRET, NOW);
+    assert.ok(claims !== null);
+    assert.equal(res.body.expiresAt, new Date((NOW + 3600) * 1000).toISOString());
+  });
+
+  // The limiter's buckets are module-level, so these keys are unique to this
+  // test — every other test here shares the 'unknown' bucket.
+  test('rate limit is per client key: one client is capped, another is not', async () => {
+    const deps = makeDeps();
+    const from = (clientKey) => ({ ...req({ storeId: 'org/store-1' }), clientKey });
+    for (let i = 0; i < 20; i += 1) {
+      const ok = await handle(from('203.0.113.10-rate-limit-test'), deps);
+      assert.equal(ok.status, 201, `request ${i + 1} should be allowed`);
+    }
+    const limited = await handle(from('203.0.113.10-rate-limit-test'), deps);
+    assert.equal(limited.status, 429);
+    const other = await handle(from('203.0.113.11-rate-limit-test'), deps);
+    assert.equal(other.status, 201);
+  });
 });
 
 // ── POST /api/kiosk-device-token ───────────────────────────────────────────────

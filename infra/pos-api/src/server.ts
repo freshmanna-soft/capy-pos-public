@@ -526,6 +526,7 @@ export function createPosRequestHandler(input: {
               body,
               rawBody,
               contentType: reqContentType,
+              clientKey: clientRateLimitKey(req),
             },
             input.api
           );
