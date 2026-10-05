@@ -4,11 +4,14 @@ import { isRejection, validate } from './validate.ts';
 
 describe('validate — password grant', () => {
   it('accepts a well-formed password grant', () => {
-    assert.deepEqual(validate({ grant_type: 'password', username: 'a@b.com', password: 'secret' }), {
-      grantType: 'password',
-      username: 'a@b.com',
-      password: 'secret',
-    });
+    assert.deepEqual(
+      validate({ grant_type: 'password', username: 'a@b.com', password: 'secret' }),
+      {
+        grantType: 'password',
+        username: 'a@b.com',
+        password: 'secret',
+      }
+    );
   });
 
   it('refuses a missing or blank username', () => {
@@ -42,7 +45,11 @@ describe('validate — refresh_token grant', () => {
   });
 
   it('refuses a missing or empty refresh_token', () => {
-    for (const body of [{ grant_type: 'refresh_token' }, { grant_type: 'refresh_token', refresh_token: '' }, { grant_type: 'refresh_token', refresh_token: 7 }]) {
+    for (const body of [
+      { grant_type: 'refresh_token' },
+      { grant_type: 'refresh_token', refresh_token: '' },
+      { grant_type: 'refresh_token', refresh_token: 7 },
+    ]) {
       assert.ok(isRejection(validate(body)), JSON.stringify(body));
     }
   });
@@ -64,7 +71,11 @@ describe('validate — everything else', () => {
   it('never forwards a grant type this relay does not support', () => {
     // AppIdAuthAdapter only ever sends 'password' or 'refresh_token'; a caller
     // sending 'authorization_code' or 'client_credentials' must not slip through.
-    const result = validate({ grant_type: 'client_credentials', client_id: 'x', client_secret: 'y' });
+    const result = validate({
+      grant_type: 'client_credentials',
+      client_id: 'x',
+      client_secret: 'y',
+    });
     assert.ok(isRejection(result));
   });
 });

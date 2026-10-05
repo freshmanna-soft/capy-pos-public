@@ -153,7 +153,10 @@ interface Window {
  * there is no socket address either, which keeps a bucket rather than opening a
  * hole.
  */
-export function clientIp(req: IncomingMessage, trustedProxyHops = DEFAULT_TRUSTED_PROXY_HOPS): string {
+export function clientIp(
+  req: IncomingMessage,
+  trustedProxyHops = DEFAULT_TRUSTED_PROXY_HOPS
+): string {
   const raw = req.headers['x-forwarded-for'];
   const header = Array.isArray(raw) ? raw.join(',') : raw;
   const entries = (header ?? '')
@@ -246,7 +249,12 @@ export function createRateLimiter(
 }
 
 /** The verdict for a window that has just counted the request in hand. */
-function decide(window: Window, now: number, limit: number, windowSeconds: number): RateLimitDecision {
+function decide(
+  window: Window,
+  now: number,
+  limit: number,
+  windowSeconds: number
+): RateLimitDecision {
   if (window.count <= limit) {
     return { allowed: true, retryAfterSeconds: 0 };
   }
@@ -272,7 +280,12 @@ function decide(window: Window, now: number, limit: number, windowSeconds: numbe
  * Both steps are bounded by `maxKeys`, so no request can trigger a scan that
  * grows with traffic — which is the other half of the ceiling's job.
  */
-function makeRoom(windows: Map<string, Window>, now: number, windowSeconds: number, maxKeys: number): void {
+function makeRoom(
+  windows: Map<string, Window>,
+  now: number,
+  windowSeconds: number,
+  maxKeys: number
+): void {
   for (const [key, window] of windows) {
     if (now - window.startedAt < windowSeconds) {
       break;

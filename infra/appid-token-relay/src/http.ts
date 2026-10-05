@@ -83,7 +83,9 @@ export interface BoundaryConfig<TRequest> {
   /** Refuses or narrows the parsed body. Pure. */
   readonly validate: (body: unknown) => TRequest | Rejection;
   /** The App ID call. Resolves with App ID's real status+body; throws only on transport failure. */
-  readonly handle: (request: TRequest) => Promise<{ readonly status: number; readonly body: unknown }>;
+  readonly handle: (
+    request: TRequest
+  ) => Promise<{ readonly status: number; readonly body: unknown }>;
   /** The 502 body for a genuine transport failure. Says nothing about why. */
   readonly unavailable: string;
   /**
@@ -121,7 +123,11 @@ export function createRequestListener<TRequest>(
     // `extraHeaders` exists for exactly one caller (the 429's `Retry-After`), so
     // that refusal is the same two lines as the 403 and 404 rather than a
     // hand-rolled `writeHead`/`end` pair that can drift from them.
-    const send = (status: number, body: unknown, extraHeaders: Record<string, string> = {}): void => {
+    const send = (
+      status: number,
+      body: unknown,
+      extraHeaders: Record<string, string> = {}
+    ): void => {
       res.writeHead(status, { ...cors, 'Content-Type': 'application/json', ...extraHeaders });
       res.end(JSON.stringify(body));
     };
@@ -151,9 +157,13 @@ export function createRequestListener<TRequest>(
       // refusals (`http.test.mjs`, `rate-limit.test.mjs`). The 413 below is the
       // one that destroys instead, because there the body is being read and the
       // point is to stop reading it.
-      send(429, { error: config.tooManyRequests ?? DEFAULT_TOO_MANY_REQUESTS }, {
-        'Retry-After': String(limit.retryAfterSeconds),
-      });
+      send(
+        429,
+        { error: config.tooManyRequests ?? DEFAULT_TOO_MANY_REQUESTS },
+        {
+          'Retry-After': String(limit.retryAfterSeconds),
+        }
+      );
       return;
     }
 

@@ -47,7 +47,13 @@
  *    real error in the log and out of the response.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { Permission, authorize, corsHeaders, originAllowed, type AppIdVerificationConfig } from './session-guard.ts';
+import {
+  Permission,
+  authorize,
+  corsHeaders,
+  originAllowed,
+  type AppIdVerificationConfig,
+} from './session-guard.ts';
 
 /** Both proxies are one POST route. `OPTIONS` is the preflight for it. */
 export const ALLOWED_METHODS = 'POST, OPTIONS';
@@ -175,7 +181,10 @@ export function createRequestListener<TRequest>(
           } catch (error) {
             // Never leak a model error, a key, or a stack to the till. The operator id
             // stays in the log so a 502 can be traced to a session.
-            console.error(`${config.logPrefix} request failed`, { operatorId: outcome.claims.operatorId, error });
+            console.error(`${config.logPrefix} request failed`, {
+              operatorId: outcome.claims.operatorId,
+              error,
+            });
             send(502, { error: config.unavailable });
           }
         })();

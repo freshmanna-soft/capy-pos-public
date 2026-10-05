@@ -379,7 +379,8 @@ export function matchRoute(method: string, path: string): Route | null {
   }
 
   if (segments.length === 2 && segments[1] === 'transactions') {
-    if (upper === 'GET') return { kind: 'listTransactions', permission: Permission.VIEW_TRANSACTIONS };
+    if (upper === 'GET')
+      return { kind: 'listTransactions', permission: Permission.VIEW_TRANSACTIONS };
     if (upper === 'POST') return { kind: 'createKioskTransaction' };
     return null;
   }
@@ -531,7 +532,10 @@ function health(deps: ApiDeps): ApiResponse {
 const SHOP_SESSION_MAX_PER_HOUR = 20;
 const SHOP_SESSION_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
-interface RateBucket { count: number; windowStart: number }
+interface RateBucket {
+  count: number;
+  windowStart: number;
+}
 const shopSessionBuckets = new Map<string, RateBucket>();
 
 function shopSessionAllowed(clientKey: string, nowMs: number): boolean {
@@ -769,10 +773,7 @@ function createKioskDeviceToken(rawBody: unknown, tenantId: string, deps: ApiDep
   }
 
   const exp = deps.nowSeconds() + 365 * 24 * 3600; // 1 year
-  const token = signToken(
-    { sub: terminalId, type: 'kiosk-device', tenantId, exp },
-    deps.secret
-  );
+  const token = signToken({ sub: terminalId, type: 'kiosk-device', tenantId, exp }, deps.secret);
   return { status: 201, body: { token, expiresAt: new Date(exp * 1000).toISOString() } };
 }
 
@@ -854,7 +855,8 @@ async function createKioskTransaction(request: ApiRequest, deps: ApiDeps): Promi
   // is a different shape. Both extend StoredDocument and the runtime store accepts
   // either — cast through unknown to silence the structural mismatch without
   // widening the ApiDeps interface.
-  const txStore = deps.transactions as unknown as import('../../shared/src/document-store.ts').DocumentStore<KioskTransactionDocument>;
+  const txStore =
+    deps.transactions as unknown as import('../../shared/src/document-store.ts').DocumentStore<KioskTransactionDocument>;
   const outcome = await txStore.create(transaction);
   if (outcome === 'conflict') {
     // UUID collision — extremely rare but log loudly rather than 500.
@@ -1407,8 +1409,7 @@ async function getMercadoPagoPreferenceStatus(
   // The MP Payments Search API does not accept `preference_id` as a filter —
   // the correct param is `external_reference`, which we set to our own UUID
   // when creating the preference so we can correlate it here.
-  const url =
-    `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(preferenceId)}&sort=date_created&criteria=desc&limit=1`;
+  const url = `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(preferenceId)}&sort=date_created&criteria=desc&limit=1`;
 
   let mpResponse: Response;
   try {
@@ -1473,8 +1474,15 @@ async function cancelMercadoPagoPreference(
 
   const body = asObject(request.body);
   const preferenceId = body !== null ? asNonEmptyString(body['preferenceId']) : null;
-  if (!MP_ID_PATTERN.test(externalReference) || preferenceId === null || !MP_ID_PATTERN.test(preferenceId)) {
-    return { status: 400, body: { error: 'A valid external reference and preferenceId are required.' } };
+  if (
+    !MP_ID_PATTERN.test(externalReference) ||
+    preferenceId === null ||
+    !MP_ID_PATTERN.test(preferenceId)
+  ) {
+    return {
+      status: 400,
+      body: { error: 'A valid external reference and preferenceId are required.' },
+    };
   }
 
   if (!mpCancelAllowed(externalReference, deps.nowSeconds() * 1000)) {
@@ -1654,7 +1662,9 @@ export function parseMultipartImage(
     if (blankLineMatch === null) {
       continue;
     }
-    const bodyOffset = new TextEncoder().encode(partText.slice(0, blankLineMatch.index! + blankLineMatch[0].length)).length;
+    const bodyOffset = new TextEncoder().encode(
+      partText.slice(0, blankLineMatch.index! + blankLineMatch[0].length)
+    ).length;
     const data = partBytes.subarray(bodyOffset);
 
     return { mimeType, data };

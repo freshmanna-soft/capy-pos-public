@@ -80,7 +80,10 @@ describe('createCustomerSignupHandler — the happy path', () => {
     const handle = createCustomerSignupHandler(CONFIG, deps());
     const response = await handle(REQUEST);
 
-    assert.deepEqual(response, { status: 201, body: { id: 'profile-1', email: 'shopper@capy.test' } });
+    assert.deepEqual(response, {
+      status: 201,
+      body: { id: 'profile-1', email: 'shopper@capy.test' },
+    });
     assert.deepEqual(
       calls.map((c) => c.call),
       ['resolveRoleId', 'createUser', 'assignRole'],
@@ -104,10 +107,16 @@ describe('createCustomerSignupHandler — the happy path', () => {
   });
 
   it('assigns exactly the resolved customer role to the account it just created', async () => {
-    const handle = createCustomerSignupHandler(CONFIG, deps({ resolveRoleId: async () => 'resolved-role-9' }));
+    const handle = createCustomerSignupHandler(
+      CONFIG,
+      deps({ resolveRoleId: async () => 'resolved-role-9' })
+    );
     await handle(REQUEST);
     const assign = calls.find((c) => c.call === 'assignRole');
-    assert.deepEqual({ userId: assign.userId, roleId: assign.roleId }, { userId: 'profile-1', roleId: 'resolved-role-9' });
+    assert.deepEqual(
+      { userId: assign.userId, roleId: assign.roleId },
+      { userId: 'profile-1', roleId: 'resolved-role-9' }
+    );
   });
 
   it('makes every call against the same Management config it was built with', async () => {
@@ -121,7 +130,14 @@ describe('createCustomerSignupHandler — the happy path', () => {
   it('returns the profile id, which is the sub every later call about this customer keys off', async () => {
     const handle = createCustomerSignupHandler(
       CONFIG,
-      deps({ createUser: async (email) => ({ id: 'sub-42', scimId: 'scim-42', email, displayName: email }) })
+      deps({
+        createUser: async (email) => ({
+          id: 'sub-42',
+          scimId: 'scim-42',
+          email,
+          displayName: email,
+        }),
+      })
     );
     assert.deepEqual((await handle(REQUEST)).body, { id: 'sub-42', email: 'shopper@capy.test' });
   });
@@ -249,7 +265,11 @@ describe('createCustomerSignupHandler — a failing role assignment', () => {
     await assert.rejects(
       () => handle(REQUEST),
       (error) => {
-        assert.match(error.message, /profile-1/, 'an operator has to be able to find the account left behind');
+        assert.match(
+          error.message,
+          /profile-1/,
+          'an operator has to be able to find the account left behind'
+        );
         assert.match(error.message, /403/);
         assert.match(error.cause.message, /500/, 'the failure that started this is still readable');
         return true;
@@ -283,7 +303,10 @@ describe('createCustomerSignupHandler — a failing role assignment', () => {
         },
       })
     );
-    await assert.rejects(() => handle(REQUEST), (error) => !error.message.includes(REQUEST.email, REQUEST.password));
+    await assert.rejects(
+      () => handle(REQUEST),
+      (error) => !error.message.includes(REQUEST.email, REQUEST.password)
+    );
   });
 });
 
@@ -293,10 +316,13 @@ describe('createCustomerSignupHandler — a failing role assignment', () => {
 
 /** How App ID reports the failure, as `createUser` now packages it. */
 function upstream(status, detail) {
-  return new ManagementApiError(`Creating the App ID user failed: ${detail ?? `status ${status}`}`, {
-    status,
-    detail,
-  });
+  return new ManagementApiError(
+    `Creating the App ID user failed: ${detail ?? `status ${status}`}`,
+    {
+      status,
+      detail,
+    }
+  );
 }
 
 /** A `createUser` that fails the way App ID would, for a handler-level assertion. */
@@ -314,8 +340,12 @@ describe('signupRefusal — duplicate email', () => {
   // changing what this route tells an unauthenticated caller about who has an
   // account here, which is a security decision and has to be made on purpose —
   // see `customer-signup.ts`'s header for the argument this pins.
-  it('answers 409 with one fixed message, and #253\'s uniform-outcome path is deliberately NOT what this route does', () => {
-    const refusal = signupRefusal(upstream(409, 'The email address already exists.'), REQUEST.email, REQUEST.password);
+  it("answers 409 with one fixed message, and #253's uniform-outcome path is deliberately NOT what this route does", () => {
+    const refusal = signupRefusal(
+      upstream(409, 'The email address already exists.'),
+      REQUEST.email,
+      REQUEST.password
+    );
 
     assert.equal(refusal.status, 409, 'a duplicate is answered distinguishably, on purpose');
     assert.equal(refusal.body.error, DUPLICATE_EMAIL_MESSAGE);
@@ -324,7 +354,8 @@ describe('signupRefusal — duplicate email', () => {
   it('never quotes the address, the existing account, or App ID back at the caller', () => {
     const refusal = signupRefusal(
       upstream(409, `A user with email ${REQUEST.email} already exists (profileId 9c1f).`),
-      REQUEST.email, REQUEST.password
+      REQUEST.email,
+      REQUEST.password
     );
 
     assert.equal(refusal.body.error.includes(REQUEST.email, REQUEST.password), false);
@@ -338,7 +369,11 @@ describe('signupRefusal — duplicate email', () => {
       'That email is already registered',
       'Email already taken',
     ]) {
-      assert.equal(signupRefusal(upstream(400, detail), REQUEST.email, REQUEST.password).status, 409, detail);
+      assert.equal(
+        signupRefusal(upstream(400, detail), REQUEST.email, REQUEST.password).status,
+        409,
+        detail
+      );
     }
   });
 
@@ -349,10 +384,11 @@ describe('signupRefusal — duplicate email', () => {
 });
 
 describe('signupRefusal — password policy', () => {
-  it('answers 400 with the tenant policy\'s own words appended to a usable lead', () => {
+  it("answers 400 with the tenant policy's own words appended to a usable lead", () => {
     const refusal = signupRefusal(
       upstream(400, 'Password must be at least 12 characters and contain a digit'),
-      REQUEST.email, REQUEST.password
+      REQUEST.email,
+      REQUEST.password
     );
 
     assert.equal(refusal.status, 400);
@@ -376,15 +412,16 @@ describe('signupRefusal — password policy', () => {
     }
   });
 
-  it('drops an explanation that quotes the caller\'s own address back', () => {
+  it("drops an explanation that quotes the caller's own address back", () => {
     const refusal = signupRefusal(
       upstream(400, `password for ${REQUEST.email} is too weak`),
-      REQUEST.email, REQUEST.password
+      REQUEST.email,
+      REQUEST.password
     );
     assert.equal(refusal.body.error, PASSWORD_POLICY_MESSAGE);
   });
 
-  it('never forwards an explanation that quotes the caller\'s own password back', () => {
+  it("never forwards an explanation that quotes the caller's own password back", () => {
     // The sibling of the email guard above, and the more serious of the two. This
     // branch is the ONLY path that forwards upstream text into a response body, and it
     // is reached exactly when the upstream is complaining about the password — so a
@@ -411,7 +448,11 @@ describe('signupRefusal — password policy', () => {
     // The deliberate cost of having no length threshold on that guard: a password
     // short enough to appear inside ordinary words loses the more helpful wording.
     // That is the safe direction to fail — the alternative is a leak-sized gap.
-    const refusal = signupRefusal(upstream(400, 'Password must be at least 12 characters'), REQUEST.email, 'pass');
+    const refusal = signupRefusal(
+      upstream(400, 'Password must be at least 12 characters'),
+      REQUEST.email,
+      'pass'
+    );
     assert.equal(refusal.body.error, PASSWORD_POLICY_MESSAGE);
   });
 
@@ -422,24 +463,47 @@ describe('signupRefusal — password policy', () => {
       REQUEST.email,
       REQUEST.password
     );
-    assert.equal(refusal.body.error, `${PASSWORD_POLICY_MESSAGE} Password must contain at least one digit.`);
+    assert.equal(
+      refusal.body.error,
+      `${PASSWORD_POLICY_MESSAGE} Password must contain at least one digit.`
+    );
   });
 
   it('collapses a multi-line explanation into one readable line', () => {
-    const refusal = signupRefusal(upstream(400, 'Password too short.\n\n  Minimum is 10.'), REQUEST.email, REQUEST.password);
-    assert.equal(refusal.body.error, `${PASSWORD_POLICY_MESSAGE} Password too short. Minimum is 10.`);
+    const refusal = signupRefusal(
+      upstream(400, 'Password too short.\n\n  Minimum is 10.'),
+      REQUEST.email,
+      REQUEST.password
+    );
+    assert.equal(
+      refusal.body.error,
+      `${PASSWORD_POLICY_MESSAGE} Password too short. Minimum is 10.`
+    );
   });
 });
 
 describe('signupRefusal — everything else is still an outage', () => {
   it('does not answer for a 500, a transport failure, or a non-Management error', () => {
-    assert.equal(signupRefusal(upstream(500, 'Internal error'), REQUEST.email, REQUEST.password), null);
-    assert.equal(signupRefusal(new ManagementApiError('App ID request failed: socket hang up'), REQUEST.email, REQUEST.password), null);
+    assert.equal(
+      signupRefusal(upstream(500, 'Internal error'), REQUEST.email, REQUEST.password),
+      null
+    );
+    assert.equal(
+      signupRefusal(
+        new ManagementApiError('App ID request failed: socket hang up'),
+        REQUEST.email,
+        REQUEST.password
+      ),
+      null
+    );
     assert.equal(signupRefusal(new Error('boom'), REQUEST.email, REQUEST.password), null);
   });
 
   it('does not turn an unrelated 400 into a password answer', () => {
-    assert.equal(signupRefusal(upstream(400, 'userName is required'), REQUEST.email, REQUEST.password), null);
+    assert.equal(
+      signupRefusal(upstream(400, 'userName is required'), REQUEST.email, REQUEST.password),
+      null
+    );
   });
 
   // Both wording signals are read under exactly one upstream status, and for the
@@ -449,7 +513,11 @@ describe('signupRefusal — everything else is still an outage', () => {
   it('does not read a duplicate out of an outage that merely mentions an existing account', () => {
     for (const status of [500, 502, 503, 504]) {
       assert.equal(
-        signupRefusal(upstream(status, 'backend error: email already exists in cache'), REQUEST.email, REQUEST.password),
+        signupRefusal(
+          upstream(status, 'backend error: email already exists in cache'),
+          REQUEST.email,
+          REQUEST.password
+        ),
         null,
         `status ${status}`
       );
@@ -459,7 +527,11 @@ describe('signupRefusal — everything else is still an outage', () => {
   it('does not read a password refusal out of an outage that merely mentions a password', () => {
     for (const status of [500, 502, 503, 504]) {
       assert.equal(
-        signupRefusal(upstream(status, 'password service unavailable'), REQUEST.email, REQUEST.password),
+        signupRefusal(
+          upstream(status, 'password service unavailable'),
+          REQUEST.email,
+          REQUEST.password
+        ),
         null,
         `status ${status}`
       );
@@ -468,18 +540,32 @@ describe('signupRefusal — everything else is still an outage', () => {
 
   it('reads neither wording signal when App ID never got far enough to have a status', () => {
     assert.equal(
-      signupRefusal(new ManagementApiError('boom', { detail: 'email already exists' }), REQUEST.email, REQUEST.password),
+      signupRefusal(
+        new ManagementApiError('boom', { detail: 'email already exists' }),
+        REQUEST.email,
+        REQUEST.password
+      ),
       null
     );
     assert.equal(
-      signupRefusal(new ManagementApiError('boom', { detail: 'password too weak' }), REQUEST.email, REQUEST.password),
+      signupRefusal(
+        new ManagementApiError('boom', { detail: 'password too weak' }),
+        REQUEST.email,
+        REQUEST.password
+      ),
       null
     );
   });
 
   it('still answers a 409 whatever it says — that status *is* the conflict, not a wording guess', () => {
-    assert.equal(signupRefusal(upstream(409, undefined), REQUEST.email, REQUEST.password).status, 409);
-    assert.equal(signupRefusal(upstream(409, 'conflict'), REQUEST.email, REQUEST.password).body.error, DUPLICATE_EMAIL_MESSAGE);
+    assert.equal(
+      signupRefusal(upstream(409, undefined), REQUEST.email, REQUEST.password).status,
+      409
+    );
+    assert.equal(
+      signupRefusal(upstream(409, 'conflict'), REQUEST.email, REQUEST.password).body.error,
+      DUPLICATE_EMAIL_MESSAGE
+    );
   });
 });
 
@@ -517,13 +603,16 @@ describe('createCustomerSignupHandler — rejected sign-ups', () => {
     );
   });
 
-  it('still throws for a failure that is this service\'s problem, so http.ts answers its generic 502', async () => {
-    const handle = createCustomerSignupHandler(CONFIG, deps(createUserFails(upstream(500, 'Internal error'))));
+  it("still throws for a failure that is this service's problem, so http.ts answers its generic 502", async () => {
+    const handle = createCustomerSignupHandler(
+      CONFIG,
+      deps(createUserFails(upstream(500, 'Internal error')))
+    );
 
     await assert.rejects(() => handle(REQUEST), /Creating the App ID user failed/);
   });
 
-  it('leaves the happy path\'s contract exactly as item 8a shipped it', async () => {
+  it("leaves the happy path's contract exactly as item 8a shipped it", async () => {
     const handle = createCustomerSignupHandler(CONFIG, deps());
 
     assert.deepEqual(await handle(REQUEST), {
@@ -568,7 +657,11 @@ describe('createCustomerSignupHandler — rejected sign-ups, end to end over the
     globalThis.fetch = async (url, init) => {
       const href = String(url);
       if (href === 'https://iam.cloud.ibm.com/identity/token') {
-        return { ok: true, status: 200, json: async () => ({ access_token: 'iam-token-1', expires_in: 3600 }) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ access_token: 'iam-token-1', expires_in: 3600 }),
+        };
       }
       if (href.endsWith('/roles')) {
         return {
@@ -576,7 +669,9 @@ describe('createCustomerSignupHandler — rejected sign-ups, end to end over the
           status: 200,
           json: async () => ({
             // Matched by `access[].scopes`, never the display name — see `AppIdRoleWire`.
-            roles: [{ id: 'customer-role-1', name: 'customer', access: [{ scopes: [CUSTOMER_SCOPE] }] }],
+            roles: [
+              { id: 'customer-role-1', name: 'customer', access: [{ scopes: [CUSTOMER_SCOPE] }] },
+            ],
           }),
         };
       }

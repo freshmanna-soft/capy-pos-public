@@ -156,7 +156,8 @@ export const DUPLICATE_EMAIL_STATUS = 409;
  * caller gets when it did not, because "invalid password" with no upstream text
  * is still better than a blob.
  */
-export const PASSWORD_POLICY_MESSAGE = 'That password does not meet the password policy for this store.';
+export const PASSWORD_POLICY_MESSAGE =
+  'That password does not meet the password policy for this store.';
 
 /** `400`: the caller can fix this by sending a different password. */
 export const PASSWORD_POLICY_STATUS = 400;
@@ -188,7 +189,11 @@ const MAX_DETAIL_LENGTH = 200;
  * kept *out* of the answer: an upstream explanation that quotes the address back is
  * not forwarded.
  */
-export function signupRefusal(error: unknown, email: string, password: string): RelayResponse | null {
+export function signupRefusal(
+  error: unknown,
+  email: string,
+  password: string
+): RelayResponse | null {
   if (!(error instanceof ManagementApiError)) {
     return null;
   }
@@ -208,7 +213,9 @@ export function signupRefusal(error: unknown, email: string, password: string): 
     const usable = usableDetail(detail, email, password);
     return {
       status: PASSWORD_POLICY_STATUS,
-      body: { error: usable === null ? PASSWORD_POLICY_MESSAGE : `${PASSWORD_POLICY_MESSAGE} ${usable}` },
+      body: {
+        error: usable === null ? PASSWORD_POLICY_MESSAGE : `${PASSWORD_POLICY_MESSAGE} ${usable}`,
+      },
     };
   }
 

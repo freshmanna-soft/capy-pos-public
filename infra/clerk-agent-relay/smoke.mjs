@@ -82,7 +82,9 @@ const STOCK = { 'p-oat': 4, 'p-soy': 9, 'p-ban': 26, 'p-avo': 7, 'p-cuc': 0 };
 
 function findProducts(spoken) {
   const needle = String(spoken ?? '').toLowerCase();
-  return CATALOG.filter((hint) => hint.name.toLowerCase().includes(needle) || needle.includes(hint.name.toLowerCase()));
+  return CATALOG.filter(
+    (hint) => hint.name.toLowerCase().includes(needle) || needle.includes(hint.name.toLowerCase())
+  );
 }
 
 function execute(call) {
@@ -103,7 +105,9 @@ function execute(call) {
         ? { added: matches[0].name, quantity: Number(call.input.quantity ?? 1) }
         : { error: 'ask her which one she meant', choices: matches.map((hint) => hint.name) };
     case 'remove_by_name':
-      return matches.length === 1 ? { removed: matches[0].name } : { error: 'nothing by that name in the cart' };
+      return matches.length === 1
+        ? { removed: matches[0].name }
+        : { error: 'nothing by that name in the cart' };
     default:
       return { error: 'no such tool' };
   }
@@ -123,19 +127,29 @@ async function post(body) {
 async function turn(utterance) {
   const transcript = [];
   for (let hop = 0; hop < MAX_HOPS; hop++) {
-    const { status, ms, body } = await post({ utterance, catalog: CATALOG, context: CONTEXT, transcript });
+    const { status, ms, body } = await post({
+      utterance,
+      catalog: CATALOG,
+      context: CONTEXT,
+      transcript,
+    });
     if (status !== 200) {
       console.log(`  hop ${hop + 1}: HTTP ${status} in ${ms}ms — ${JSON.stringify(body)}`);
       return;
     }
     if (body.kind !== 'tools') {
-      console.log(`  hop ${hop + 1}: ${body.kind} in ${ms}ms${body.speech ? ` — "${body.speech}"` : ''}`);
+      console.log(
+        `  hop ${hop + 1}: ${body.kind} in ${ms}ms${body.speech ? ` — "${body.speech}"` : ''}`
+      );
       return;
     }
     const results = body.calls.map((call) => ({ id: call.id, output: execute(call) }));
     console.log(
       `  hop ${hop + 1}: tools in ${ms}ms — ${body.calls
-        .map((call, at) => `${call.name}(${JSON.stringify(call.input)}) -> ${JSON.stringify(results[at].output)}`)
+        .map(
+          (call, at) =>
+            `${call.name}(${JSON.stringify(call.input)}) -> ${JSON.stringify(results[at].output)}`
+        )
         .join(', ')}`
     );
     transcript.push({ assistant: body.assistant, results });

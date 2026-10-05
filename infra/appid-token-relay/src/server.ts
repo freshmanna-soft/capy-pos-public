@@ -33,7 +33,11 @@ import { relay } from './relay.ts';
 import { validate, MAX_BODY_BYTES } from './validate.ts';
 import { createRequestListener, ALLOWED_METHODS as TOKEN_METHODS } from './http.ts';
 import { createAdminRequestListener, ALLOWED_METHODS as ADMIN_METHODS } from './admin-http.ts';
-import { validateCreate, validateAssignRole, MAX_BODY_BYTES as ADMIN_MAX_BODY_BYTES } from './admin-validate.ts';
+import {
+  validateCreate,
+  validateAssignRole,
+  MAX_BODY_BYTES as ADMIN_MAX_BODY_BYTES,
+} from './admin-validate.ts';
 import {
   validate as validateForgotPassword,
   MAX_BODY_BYTES as FORGOT_PASSWORD_MAX_BODY_BYTES,
@@ -95,7 +99,12 @@ function requireConfig(): {
   const clientId = process.env['APPID_CLIENT_ID'] ?? '';
   const clientSecret = process.env['APPID_CLIENT_SECRET'] ?? '';
 
-  if (region.length === 0 || tenantId.length === 0 || clientId.length === 0 || clientSecret.length === 0) {
+  if (
+    region.length === 0 ||
+    tenantId.length === 0 ||
+    clientId.length === 0 ||
+    clientSecret.length === 0
+  ) {
     console.error(
       '[appid-relay] APPID_REGION, APPID_TENANT_ID, APPID_CLIENT_ID and APPID_CLIENT_SECRET ' +
         "must all be set — this service's whole purpose is attaching the client secret to " +
@@ -113,8 +122,8 @@ function requireConfig(): {
     console.warn(
       '[appid-relay] APPID_CUSTOMER_CLIENT_ID/APPID_CUSTOMER_CLIENT_SECRET are not both set — ' +
         `staff sign-in works as before, but ${CUSTOMER_TOKEN_ROUTE} answers 502 until the ` +
-        'customer application\'s credentials are deployed. Customer grants are never exchanged ' +
-        "under the staff client."
+        "customer application's credentials are deployed. Customer grants are never exchanged " +
+        'under the staff client.'
     );
   }
 
@@ -136,7 +145,7 @@ function requireConfig(): {
       '[appid-relay] ALLOWED_ORIGINS is not set. Give it a comma-separated list of browser ' +
         'origins (e.g. http://localhost:4200). Refusing to start: the alternative — ' +
         'Access-Control-Allow-Origin: * in front of the login endpoint — would let any page ' +
-        "on the internet spend attempts against the real tenant."
+        'on the internet spend attempts against the real tenant.'
     );
     process.exit(1);
   }
@@ -154,8 +163,16 @@ function requireConfig(): {
   };
 }
 
-const { region, tenantId, clientId, clientSecret, customerClientId, customerClientSecret, managementApiKey, origins } =
-  requireConfig();
+const {
+  region,
+  tenantId,
+  clientId,
+  clientSecret,
+  customerClientId,
+  customerClientSecret,
+  managementApiKey,
+  origins,
+} = requireConfig();
 
 const managementConfig: ManagementConfig = { region, tenantId, apiKey: managementApiKey };
 
@@ -309,9 +326,24 @@ const adminListener = createAdminRequestListener({
  */
 const ROUTES: readonly Route[] = [
   { match: 'exact', path: TOKEN_ROUTE, methods: TOKEN_METHODS, listener: tokenListener },
-  { match: 'exact', path: CUSTOMER_TOKEN_ROUTE, methods: TOKEN_METHODS, listener: customerTokenListener },
-  { match: 'exact', path: CUSTOMER_SIGNUP_ROUTE, methods: TOKEN_METHODS, listener: customerSignupListener },
-  { match: 'exact', path: FORGOT_PASSWORD_ROUTE, methods: TOKEN_METHODS, listener: forgotPasswordListener },
+  {
+    match: 'exact',
+    path: CUSTOMER_TOKEN_ROUTE,
+    methods: TOKEN_METHODS,
+    listener: customerTokenListener,
+  },
+  {
+    match: 'exact',
+    path: CUSTOMER_SIGNUP_ROUTE,
+    methods: TOKEN_METHODS,
+    listener: customerSignupListener,
+  },
+  {
+    match: 'exact',
+    path: FORGOT_PASSWORD_ROUTE,
+    methods: TOKEN_METHODS,
+    listener: forgotPasswordListener,
+  },
   // Prefix, not exact: `admin-http.ts` resolves `/staff`, `/roles` and
   // `/staff/{id}/role` itself — including its own 404 for an admin path that is
   // none of those — because only it knows which of them take a body.

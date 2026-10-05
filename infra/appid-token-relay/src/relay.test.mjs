@@ -54,7 +54,10 @@ describe('relay — request shape', () => {
 
   it('sends a password grant as multipart form fields, not JSON', async () => {
     stub(() => jsonResponse(200, {}));
-    await relay({ grantType: 'password', username: 'user@example.com', password: 'secret' }, CONFIG);
+    await relay(
+      { grantType: 'password', username: 'user@example.com', password: 'secret' },
+      CONFIG
+    );
     const form = calls[0].options.body;
     assert.ok(form instanceof FormData);
     assert.equal(form.get('grant_type'), 'password');
@@ -74,16 +77,25 @@ describe('relay — request shape', () => {
   });
 });
 
-describe('relay — passing App ID\'s own answer through', () => {
+describe("relay — passing App ID's own answer through", () => {
   it('resolves with a successful token response untouched', async () => {
-    const body = { access_token: 'a', refresh_token: 'r', token_type: 'Bearer', expires_in: 3600, scope: 'admin' };
+    const body = {
+      access_token: 'a',
+      refresh_token: 'r',
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: 'admin',
+    };
     stub(() => jsonResponse(200, body));
     const result = await relay({ grantType: 'password', username: 'u', password: 'p' }, CONFIG);
     assert.deepEqual(result, { status: 200, body });
   });
 
   it('resolves (does not throw) for a well-formed OAuth error — invalid_grant is App ID answering correctly', async () => {
-    const body = { error: 'invalid_grant', error_description: 'The username or password is incorrect' };
+    const body = {
+      error: 'invalid_grant',
+      error_description: 'The username or password is incorrect',
+    };
     stub(() => jsonResponse(400, body));
     const result = await relay({ grantType: 'password', username: 'u', password: 'wrong' }, CONFIG);
     assert.deepEqual(result, { status: 400, body });
@@ -103,7 +115,10 @@ describe('relay — genuine transport failure', () => {
     stub(() => {
       throw new Error('getaddrinfo ENOTFOUND');
     });
-    await assert.rejects(() => relay({ grantType: 'password', username: 'u', password: 'p' }, CONFIG), /App ID request failed/);
+    await assert.rejects(
+      () => relay({ grantType: 'password', username: 'u', password: 'p' }, CONFIG),
+      /App ID request failed/
+    );
   });
 
   it('throws when App ID answers with something that is not JSON', async () => {

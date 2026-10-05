@@ -38,14 +38,19 @@ const preflight = await fetch(URL, {
 });
 console.log(`  preflight from allowed origin: HTTP ${preflight.status}`);
 
-const wrongOrigin = await post({ grant_type: 'password', username: 'a', password: 'b' }, { origin: 'https://not-listed.example' });
+const wrongOrigin = await post(
+  { grant_type: 'password', username: 'a', password: 'b' },
+  { origin: 'https://not-listed.example' }
+);
 console.log(`  unlisted origin: HTTP ${wrongOrigin.status} — ${JSON.stringify(wrongOrigin.body)}`);
 
 const badGrant = await post({ grant_type: 'nonsense' });
 console.log(`  unknown grant_type: HTTP ${badGrant.status} — ${JSON.stringify(badGrant.body)}`);
 
 const missingPassword = await post({ grant_type: 'password', username: 'a' });
-console.log(`  missing password: HTTP ${missingPassword.status} — ${JSON.stringify(missingPassword.body)}`);
+console.log(
+  `  missing password: HTTP ${missingPassword.status} — ${JSON.stringify(missingPassword.body)}`
+);
 
 const notJson = await fetch(URL, {
   method: 'POST',
@@ -63,7 +68,9 @@ for (const path of ['/nope', '/anything/appid/token']) {
     headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
     body: JSON.stringify({ grant_type: 'password', username: 'a', password: 'b' }),
   });
-  console.log(`  unrouted ${path}: HTTP ${unrouted.status} — ${JSON.stringify(await unrouted.json())}`);
+  console.log(
+    `  unrouted ${path}: HTTP ${unrouted.status} — ${JSON.stringify(await unrouted.json())}`
+  );
 }
 
 // ─── The customer route, which is the same shape under a different client ──────
@@ -85,13 +92,17 @@ const customerPreflight = await fetch(CUSTOMER_URL, {
 console.log(`  preflight from allowed origin: HTTP ${customerPreflight.status}`);
 
 const customerBadGrant = await post({ grant_type: 'nonsense' }, { url: CUSTOMER_URL });
-console.log(`  unknown grant_type: HTTP ${customerBadGrant.status} — ${JSON.stringify(customerBadGrant.body)}`);
+console.log(
+  `  unknown grant_type: HTTP ${customerBadGrant.status} — ${JSON.stringify(customerBadGrant.body)}`
+);
 
 const customerWrongOrigin = await post(
   { grant_type: 'password', username: 'a', password: 'b' },
   { origin: 'https://not-listed.example', url: CUSTOMER_URL }
 );
-console.log(`  unlisted origin: HTTP ${customerWrongOrigin.status} — ${JSON.stringify(customerWrongOrigin.body)}`);
+console.log(
+  `  unlisted origin: HTTP ${customerWrongOrigin.status} — ${JSON.stringify(customerWrongOrigin.body)}`
+);
 
 // 502 when the customer client is not deployed yet; a real App ID answer (400
 // invalid_grant for this made-up account) once it is. Either is a pass — what
@@ -100,7 +111,9 @@ const customerGrant = await post(
   { grant_type: 'password', username: 'nobody@example.com', password: 'nope' },
   { url: CUSTOMER_URL }
 );
-console.log(`  password grant: HTTP ${customerGrant.status} — ${JSON.stringify(customerGrant.body)}`);
+console.log(
+  `  password grant: HTTP ${customerGrant.status} — ${JSON.stringify(customerGrant.body)}`
+);
 
 // ─── Customer sign-up, bounds only and deliberately never a valid body ─────────
 //
@@ -134,16 +147,25 @@ console.log(`  preflight from allowed origin: HTTP ${signupPreflight.status}`);
 // 400 from the route's own validator — the proof it is routed. A 404 here would
 // mean the route table never claimed the path.
 const signupNoPassword = await post({ email: 'nobody@example.com' }, { url: CUSTOMER_SIGNUP_URL });
-console.log(`  no password: HTTP ${signupNoPassword.status} — ${JSON.stringify(signupNoPassword.body)}`);
+console.log(
+  `  no password: HTTP ${signupNoPassword.status} — ${JSON.stringify(signupNoPassword.body)}`
+);
 
-const signupBadEmail = await post({ email: 'not-an-email', password: 'x' }, { url: CUSTOMER_SIGNUP_URL });
-console.log(`  malformed email: HTTP ${signupBadEmail.status} — ${JSON.stringify(signupBadEmail.body)}`);
+const signupBadEmail = await post(
+  { email: 'not-an-email', password: 'x' },
+  { url: CUSTOMER_SIGNUP_URL }
+);
+console.log(
+  `  malformed email: HTTP ${signupBadEmail.status} — ${JSON.stringify(signupBadEmail.body)}`
+);
 
 const signupWrongOrigin = await post(
   { email: 'nobody@example.com', password: 'x' },
   { origin: 'https://not-listed.example', url: CUSTOMER_SIGNUP_URL }
 );
-console.log(`  unlisted origin: HTTP ${signupWrongOrigin.status} — ${JSON.stringify(signupWrongOrigin.body)}`);
+console.log(
+  `  unlisted origin: HTTP ${signupWrongOrigin.status} — ${JSON.stringify(signupWrongOrigin.body)}`
+);
 
 // ─── Then a real grant, if credentials were given ──────────────────────────────
 
@@ -154,16 +176,27 @@ if (username.length === 0 || password.length === 0) {
   console.log('\nSMOKE_APPID_USERNAME/_PASSWORD not set — skipping the real App ID grant.');
 } else {
   console.log(`\nreal grant for ${username}:`);
-  const wrongPassword = await post({ grant_type: 'password', username, password: `${password}-wrong` });
-  console.log(`  wrong password: HTTP ${wrongPassword.status} — ${JSON.stringify(wrongPassword.body)}`);
+  const wrongPassword = await post({
+    grant_type: 'password',
+    username,
+    password: `${password}-wrong`,
+  });
+  console.log(
+    `  wrong password: HTTP ${wrongPassword.status} — ${JSON.stringify(wrongPassword.body)}`
+  );
 
   const correct = await post({ grant_type: 'password', username, password });
   console.log(`  correct password: HTTP ${correct.status} in ${correct.ms}ms`);
   if (correct.status === 200 && typeof correct.body.access_token === 'string') {
-    const payload = JSON.parse(Buffer.from(correct.body.access_token.split('.')[1], 'base64url').toString('utf8'));
+    const payload = JSON.parse(
+      Buffer.from(correct.body.access_token.split('.')[1], 'base64url').toString('utf8')
+    );
     console.log(`  scope: ${payload.scope}`);
 
-    const refreshed = await post({ grant_type: 'refresh_token', refresh_token: correct.body.refresh_token });
+    const refreshed = await post({
+      grant_type: 'refresh_token',
+      refresh_token: correct.body.refresh_token,
+    });
     console.log(`  refresh_token grant: HTTP ${refreshed.status} in ${refreshed.ms}ms`);
   }
 }

@@ -16,7 +16,11 @@ describe('validate', () => {
   });
 
   it('refuses a missing or malformed email', () => {
-    for (const body of [{ password: 'p' }, { email: 'not-an-email', password: 'p' }, { email: 42, password: 'p' }]) {
+    for (const body of [
+      { password: 'p' },
+      { email: 'not-an-email', password: 'p' },
+      { email: 42, password: 'p' },
+    ]) {
       assert.match(validate(body).error, /email/);
     }
   });
@@ -38,10 +42,13 @@ describe('validate', () => {
   });
 
   it('ignores anything else the caller sent — a role or scope is never a caller-supplied field', () => {
-    assert.deepEqual(validate({ email: 'shopper@capy.test', password: 'p', roleId: 'admin-role', scope: 'admin' }), {
-      email: 'shopper@capy.test',
-      password: 'p',
-    });
+    assert.deepEqual(
+      validate({ email: 'shopper@capy.test', password: 'p', roleId: 'admin-role', scope: 'admin' }),
+      {
+        email: 'shopper@capy.test',
+        password: 'p',
+      }
+    );
   });
 
   it('caps the body at a size one address and one passphrase never exceed', () => {
@@ -62,7 +69,10 @@ describe('shape bounds (item 8b)', () => {
   it('refuses a password past the upper bound, and accepts one exactly at it', () => {
     const atBound = 'p'.repeat(MAX_PASSWORD_LENGTH);
     assert.equal(validate({ email: 'shopper@capy.test', password: atBound }).password, atBound);
-    assert.match(validate({ email: 'shopper@capy.test', password: `${atBound}p` }).error, /password/);
+    assert.match(
+      validate({ email: 'shopper@capy.test', password: `${atBound}p` }).error,
+      /password/
+    );
   });
 
   it('states no password *minimum* — the tenant policy is the only authority on strength', () => {

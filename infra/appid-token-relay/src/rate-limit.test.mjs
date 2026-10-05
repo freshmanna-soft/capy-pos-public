@@ -106,7 +106,8 @@ async function withRoutedServer(run) {
       route,
       origins: ORIGINS,
       maxBodyBytes: 2048,
-      validate: (body) => (typeof body === 'object' && body !== null ? body : { error: 'bad body' }),
+      validate: (body) =>
+        typeof body === 'object' && body !== null ? body : { error: 'bad body' },
       handle: async () => {
         handled[route] += 1;
         return { status: 201, body: { ok: true } };
@@ -118,7 +119,12 @@ async function withRoutedServer(run) {
   const listener = createRouter({
     origins: ORIGINS,
     routes: [
-      { match: 'exact', path: TOKEN_ROUTE, methods: ALLOWED_METHODS, listener: boundary(TOKEN_ROUTE) },
+      {
+        match: 'exact',
+        path: TOKEN_ROUTE,
+        methods: ALLOWED_METHODS,
+        listener: boundary(TOKEN_ROUTE),
+      },
       {
         match: 'exact',
         path: CUSTOMER_TOKEN_ROUTE,
@@ -220,10 +226,16 @@ describe('the limiter, over a socket, on the sign-up route', () => {
         await post(port);
       }
 
-      const existing = await post(port, { body: { email: 'already@example.com', password: 'Sup3rSecret!' } });
-      const fresh = await post(port, { body: { email: 'brand-new@example.com', password: 'Sup3rSecret!' } });
+      const existing = await post(port, {
+        body: { email: 'already@example.com', password: 'Sup3rSecret!' },
+      });
+      const fresh = await post(port, {
+        body: { email: 'brand-new@example.com', password: 'Sup3rSecret!' },
+      });
 
-      assert.deepEqual(existing.json, { error: 'Too many sign-up attempts. Please try again later.' });
+      assert.deepEqual(existing.json, {
+        error: 'Too many sign-up attempts. Please try again later.',
+      });
       assert.deepEqual(fresh.json, existing.json);
       assert.equal(fresh.status, existing.status);
       const body = JSON.stringify(existing.json);
@@ -396,7 +408,10 @@ describe('the counters as a bounded map', () => {
 
     for (let index = 0; index < 5000; index += 1) {
       limiter(fakeRequest({ 'x-forwarded-for': `10.${Math.floor(index / 256)}.${index % 256}.1` }));
-      assert.ok(limiter.size() <= 10, `held ${limiter.size()} windows after ${index + 1} distinct keys`);
+      assert.ok(
+        limiter.size() <= 10,
+        `held ${limiter.size()} windows after ${index + 1} distinct keys`
+      );
     }
     assert.equal(limiter.size(), 10);
   });
