@@ -40,6 +40,7 @@ import {
 } from './session-auth.ts';
 import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
 import type { CheckoutInventoryMarkers } from './checkout-inventory.ts';
+import type { SaleEventMarkers } from './sale-events.ts';
 import {
   productAvailableStock,
   productHasActiveReservations,
@@ -58,6 +59,14 @@ export interface ProductDocument extends StoredDocument {
   readonly stock: number;
   /** Server-owned. Missing on pre-checkout catalogue documents and interpreted as an empty map. */
   readonly checkoutMarkers?: CheckoutInventoryMarkers;
+  /** Server-owned: one entry per sale event applied to this product, its replay guard (#357). */
+  readonly eventMarkers?: SaleEventMarkers;
+  /**
+   * A sale event took more than was in stock. Stock floored at 0; `oversoldQuantity`
+   * counts the units sold beyond it. A staff restock clears both (#357).
+   */
+  readonly oversold?: boolean;
+  readonly oversoldQuantity?: number;
   readonly description: string;
   readonly isActive?: boolean;
   readonly imageUrl?: string;
@@ -65,8 +74,8 @@ export interface ProductDocument extends StoredDocument {
   readonly updatedAt: string;
 }
 
-/** Reservation markers are persistence metadata and never cross the HTTP boundary. */
-export type PublicProductDocument = Omit<ProductDocument, 'checkoutMarkers'>;
+/** Reservation and sale-event markers are persistence metadata and never cross the HTTP boundary. */
+export type PublicProductDocument = Omit<ProductDocument, 'checkoutMarkers' | 'eventMarkers'>;
 
 /** The legacy one-product sale record, kept compatible with the existing till. */
 export interface LegacyTransactionDocument extends StoredDocument {
@@ -683,8 +692,14 @@ async function listProducts(
 
 /** Strips server-owned reservation markers from every product response. */
 function publicProduct(product: ProductDocument): PublicProductDocument {
-  const { checkoutMarkers: _checkoutMarkers, ...projection } = product;
+  const { checkoutMarkers: _checkoutMarkers, eventMarkers: _eventMarkers, ...projection } = product;
   return projection;
+}
+
+/** Staff setting stock is a restock: whatever a sale event oversold is settled. */
+function withoutOversell(product: ProductDocument): ProductDocument {
+  const { oversold: _oversold, oversoldQuantity: _oversoldQuantity, ...settled } = product;
+  return settled;
 }
 
 /** Strips internal V2 checkout ownership fields before staff history leaves the API. */
@@ -933,6 +948,10 @@ async function replaceProduct(id: string, rawBody: unknown, deps: ApiDeps): Prom
     ...(existing.document.checkoutMarkers === undefined
       ? {}
       : { checkoutMarkers: existing.document.checkoutMarkers }),
+    // Kept across a replace: dropping them would let a replayed sale event apply twice.
+    ...(existing.document.eventMarkers === undefined
+      ? {}
+      : { eventMarkers: existing.document.eventMarkers }),
     description: asString(body['description']) ?? '',
     ...(requestedIsActive === undefined
       ? existing.document.isActive === undefined
@@ -1008,7 +1027,8 @@ async function patchProduct(id: string, rawBody: unknown, deps: ApiDeps): Promis
   });
   if (reservationConflict !== null) return reservationConflict;
 
-  const updated = { ...existing.document, ...patch, updatedAt: deps.nowIso() } as ProductDocument;
+  const merged = { ...existing.document, ...patch, updatedAt: deps.nowIso() } as ProductDocument;
+  const updated = typeof patch['stock'] === 'number' ? withoutOversell(merged) : merged;
   const outcome = await deps.products.write(updated, existing.rev);
   if (outcome === 'conflict') {
     return { status: 409, body: { error: 'Product was modified concurrently. Retry.' } };

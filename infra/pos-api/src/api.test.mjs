@@ -1222,3 +1222,84 @@ describe('GET /api/mercadopago/preference/:id', () => {
     assert.ok(capturedUrl.includes('pref-abc'), 'preference id should be in the search URL');
   });
 });
+
+// ── Sale-event markers and oversell on the catalogue (#357) ─────────────────────
+
+describe('product documents carrying sale-event state (#357)', () => {
+  const OVERSOLD = {
+    id: 'oats',
+    name: 'Oats',
+    price: 2,
+    category: 'feed',
+    stock: 0,
+    description: '',
+    createdAt: '2026-10-05T12:00:00.000Z',
+    updatedAt: '2026-10-05T12:00:00.000Z',
+    eventMarkers: { 'evt-1': { quantity: 3, appliedAt: '2026-10-05T12:00:00.000Z' } },
+    oversold: true,
+    oversoldQuantity: 2,
+  };
+  const call = (method, path, body) => ({
+    method,
+    path,
+    authorization: `Bearer ${staffToken(['inventory:manage', 'inventory:view'])}`,
+    internalSecret: undefined,
+    body,
+  });
+
+  test('never exposes eventMarkers, but does show the oversell to staff', async () => {
+    const deps = makeDeps({ products: new MemoryStore([OVERSOLD]) });
+
+    const res = await handle(call('GET', '/api/products'), deps);
+
+    const list = Array.isArray(res.body) ? res.body : res.body.products;
+    const [oats] = list;
+    assert.equal('eventMarkers' in oats, false);
+    assert.equal(oats.oversold, true);
+    assert.equal(oats.oversoldQuantity, 2);
+  });
+
+  test('a PUT keeps eventMarkers, so a replayed sale event cannot apply twice', async () => {
+    const products = new MemoryStore([OVERSOLD]);
+
+    const res = await handle(
+      call('PUT', '/api/products/oats', { name: 'Oats', price: 2, category: 'feed', stock: 10 }),
+      makeDeps({ products })
+    );
+
+    assert.equal(res.status, 200);
+    assert.deepEqual((await products.read('oats')).document.eventMarkers, OVERSOLD.eventMarkers);
+  });
+
+  test('a PUT restock clears the oversell', async () => {
+    const products = new MemoryStore([OVERSOLD]);
+
+    await handle(
+      call('PUT', '/api/products/oats', { name: 'Oats', price: 2, category: 'feed', stock: 10 }),
+      makeDeps({ products })
+    );
+
+    const stored = (await products.read('oats')).document;
+    assert.equal(stored.oversold, undefined);
+    assert.equal(stored.oversoldQuantity, undefined);
+  });
+
+  test('a PATCH of stock clears the oversell and keeps the markers', async () => {
+    const products = new MemoryStore([OVERSOLD]);
+
+    await handle(call('PATCH', '/api/products/oats', { stock: 6 }), makeDeps({ products }));
+
+    const stored = (await products.read('oats')).document;
+    assert.equal(stored.stock, 6);
+    assert.equal(stored.oversold, undefined);
+    assert.deepEqual(stored.eventMarkers, OVERSOLD.eventMarkers);
+  });
+
+  test('a PATCH that leaves stock alone keeps the oversell flag', async () => {
+    const products = new MemoryStore([OVERSOLD]);
+
+    await handle(call('PATCH', '/api/products/oats', { price: 3 }), makeDeps({ products }));
+
+    assert.equal((await products.read('oats')).document.oversold, true);
+  });
+});
