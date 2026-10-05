@@ -28,6 +28,7 @@ import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { TransactionRemoteService } from '@core/application/services/transaction-remote.service';
 import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
 import { generateUUID } from '@core/domain/utils/uuid';
+import { ADJUST_STOCK_ON_SALE_HANDLER } from '@core/application/handlers/adjust-stock-on-sale.handler';
 
 /**
  * The customer attached to the sale in progress.
@@ -325,16 +326,21 @@ export class PosFacade {
     // The local record and its SaleCompleted event, written together (#352). After
     // the remote write, so a sale the server refused is never recorded here, and
     // before the cart is cleared, because the record is built from it.
-    await this.recordSale(paymentResult, attachedCustomer, correlationId);
+    const recorded = await this.recordSale(paymentResult, attachedCustomer, correlationId);
 
-    // Adjust stock levels (fire-and-forget, best-effort)
-    try {
-      const result: StockAdjustmentResult = await this.adjustStock.execute(stockAdjustmentItems);
-      if (!result.success) {
-        console.error('[PosFacade] Stock adjustment partially failed:', result.failedAdjustments);
+    // Stock is the SaleCompleted handler's job now (#354), and it has run once by the
+    // time `recordSale` resolves. Only a sale with no event behind it — the local
+    // write deferred or refused — still takes stock off inline, so the till never
+    // shows sold items as available.
+    if (!recorded) {
+      try {
+        const result: StockAdjustmentResult = await this.adjustStock.execute(stockAdjustmentItems);
+        if (!result.success) {
+          console.error('[PosFacade] Stock adjustment partially failed:', result.failedAdjustments);
+        }
+      } catch (error) {
+        console.error('[PosFacade] Stock adjustment failed entirely:', error);
       }
-    } catch (error) {
-      console.error('[PosFacade] Stock adjustment failed entirely:', error);
     }
 
     // Clear cart after checkout
@@ -393,20 +399,29 @@ export class PosFacade {
    * Records the sale locally with its `SaleCompleted` event. Never throws: the sale
    * has been paid for, so a failed local write is logged, retried in the background
    * by the sale outbox, and kept out of what the cashier sees.
+   *
+   * @returns whether an event now stands behind this sale, i.e. its handlers own the
+   *   side effects. False means the caller must apply them inline.
    */
   private async recordSale(
     paymentResult: PaymentResult,
     customer: AttachedCustomer | null,
     correlationId: string
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const result = await this.persistTransaction.execute({
         paymentMethod: paymentResult.method,
         transactionId: paymentResult.transactionId,
         ...(customer ? { customerId: customer.id } : {}),
-        // Every side effect still runs inline below and no SaleCompleted handler
-        // exists yet; #354 and #355 move them into handlers and list them here.
-        sale: { correlationId, amount: paymentResult.amount, appliedInline: [] },
+        sale: {
+          correlationId,
+          amount: paymentResult.amount,
+          // Loyalty, audit and telemetry still run inline but have no SaleCompleted
+          // handler yet (#355, #356), so nothing is listed as applied.
+          appliedInline: [],
+          // Stock runs inline only if this record is deferred; see checkout().
+          fallbackInline: [ADJUST_STOCK_ON_SALE_HANDLER],
+        },
       });
       if (!result.success) {
         console.warn(
@@ -414,8 +429,10 @@ export class PosFacade {
           result.error ?? result.outcome
         );
       }
+      return result.outcome === 'recorded' || result.outcome === 'already-recorded';
     } catch (error) {
       console.error('[PosFacade] Recording the sale locally failed:', error);
+      return false;
     }
   }
 

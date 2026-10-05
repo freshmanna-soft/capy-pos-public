@@ -67,6 +67,18 @@ export class RetryLaterError extends Error {
   }
 }
 
+/**
+ * Thrown by a handler whose work can never succeed for this event: a sold product
+ * that no longer exists, say. Its receipt is marked dead and never run again; the
+ * event's other handlers carry on as usual (#354).
+ */
+export class TerminalHandlerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TerminalHandlerError';
+  }
+}
+
 export const OUTBOX_MAX_ATTEMPTS = 10;
 export const OUTBOX_DRAIN_INTERVAL_MS = 30_000;
 /** How long a RetryLaterError parks an event. Matches the drain interval. */
@@ -112,6 +124,16 @@ export function newOutboxRow<K extends DomainEventType>(
     createdAt: at,
     updatedAt: at,
   };
+}
+
+/** A receipt that says this handler is finished with the event, one way or the other. */
+function isSettled(status: OutboxStatus | undefined): boolean {
+  return status === OutboxStatus.HANDLED || status === OutboxStatus.DEAD;
+}
+
+/** A terminal failure is final; any other failure is worth another attempt. */
+function receiptStatusFor(error: Error): OutboxStatus {
+  return error instanceof TerminalHandlerError ? OutboxStatus.DEAD : OutboxStatus.FAILED;
 }
 
 /** Statuses a drain or flush still has work for. */
@@ -177,6 +199,20 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
       dispatched.catch((error) => console.warn('[Outbox] Dispatch after record failed:', error));
     }
     return row.id;
+  }
+
+  /**
+   * Run one already-written event now — for writers that add the row inside their own
+   * Dexie transaction (the sale outbox, #352/#354). Resolves once its blocking handlers
+   * have run once, like `record`; never rejects, since the event is safely stored.
+   */
+  async dispatch(eventId: string): Promise<void> {
+    const row = await this.db.outbox.get(eventId);
+    if (!row) return;
+    const dispatched = this.serialize(() => this.process(eventId)).catch((error) =>
+      console.warn('[Outbox] Dispatch failed:', error)
+    );
+    if (this.handlersFor(row.type).some((h) => h.blocking)) await dispatched;
   }
 
   async flush(aggregateId: string): Promise<void> {
@@ -248,12 +284,15 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
   }
 
   /**
-   * Run every handler that has no `handled` receipt for this event yet, writing a
-   * receipt for each. Returns the last real failure and the last deferral, if any.
+   * Run every handler that has no `handled` or `dead` receipt for this event yet,
+   * writing a receipt for each. Returns the last real failure, the last deferral and
+   * the last terminal failure, if any.
    */
-  private async runHandlers(
-    row: IOutboxEventDB
-  ): Promise<{ failure: Error | null; deferral: RetryLaterError | null }> {
+  private async runHandlers(row: IOutboxEventDB): Promise<{
+    failure: Error | null;
+    deferral: RetryLaterError | null;
+    terminal: TerminalHandlerError | null;
+  }> {
     const event: DomainEvent = {
       id: row.id,
       type: row.type as DomainEventType,
@@ -266,10 +305,11 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
 
     let failure: Error | null = null;
     let deferral: RetryLaterError | null = null;
+    let terminal: TerminalHandlerError | null = null;
 
     for (const handler of this.handlersFor(row.type)) {
       const receipt = await this.db.outboxReceipts.get([row.id, handler.name]);
-      if (receipt?.status === OutboxStatus.HANDLED) continue;
+      if (isSettled(receipt?.status)) continue;
 
       const base = { eventId: row.id, handler: handler.name, nextAttemptAt: 0 };
       try {
@@ -282,17 +322,18 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         if (err instanceof RetryLaterError) deferral = err;
+        else if (err instanceof TerminalHandlerError) terminal = err;
         else failure = err;
         await this.db.outboxReceipts.put({
           ...base,
-          status: OutboxStatus.FAILED,
+          status: receiptStatusFor(err),
           lastError: `${handler.name}: ${err.message}`,
           updatedAt: new Date(this.now()),
         });
       }
     }
 
-    return { failure, deferral };
+    return { failure, deferral, terminal };
   }
 
   /**
@@ -305,9 +346,28 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
     const row = await this.db.outbox.get(eventId);
     if (!row || !UNFINISHED.includes(row.status)) return;
 
-    const { failure, deferral } = await this.runHandlers(row);
+    const { failure, deferral, terminal } = await this.runHandlers(row);
     const now = this.now();
     const updatedAt = new Date(now);
+
+    // Every handler that can still succeed has; one never will. Nothing is left to
+    // retry, so the event is dead now rather than after ten pointless attempts.
+    if (!failure && !deferral && terminal) {
+      await this.db.outbox.update(row.id, {
+        status: OutboxStatus.DEAD,
+        attempts: row.attempts + 1,
+        lastError: terminal.message,
+        updatedAt,
+      });
+      await this.reportDead(
+        row,
+        row.attempts + 1,
+        terminal.message,
+        "A completed sale couldn't be fully applied and won't be retried. " +
+          'Details are in the Agent Monitor.'
+      );
+      return;
+    }
 
     if (!failure && !deferral) {
       await this.db.outbox.update(row.id, {
@@ -354,7 +414,13 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
    * the audit log, which the agent monitor lists, and to a toast for whoever can fix
    * it (Epic #349, open question 6). Cashiers are not interrupted with it.
    */
-  private async reportDead(row: IOutboxEventDB, attempts: number, lastError: string) {
+  private async reportDead(
+    row: IOutboxEventDB,
+    attempts: number,
+    lastError: string,
+    message = `A saved change couldn't reach the server after ${attempts} tries. ` +
+      'Details are in the Agent Monitor.'
+  ) {
     console.error(
       `[Outbox] Event ${row.id} (${row.type}) is dead after ${attempts} attempts:`,
       lastError
@@ -372,10 +438,7 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
     });
 
     if (this.authz.can(Permission.MANAGE_INVENTORY)) {
-      this.toast.error(
-        `A saved change couldn't reach the server after ${attempts} tries. ` +
-          'Details are in the Agent Monitor.'
-      );
+      this.toast.error(message);
     }
   }
 }
