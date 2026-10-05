@@ -261,6 +261,11 @@ export interface IOutboxEventDB {
   aggregateId: string;
   /** JSON-encoded payload, parsed by the dispatcher before a handler sees it. */
   payload: string;
+  /**
+   * Ties the event to the business action that caused it (#352). Not indexed, so
+   * adding it needed no schema version.
+   */
+  correlationId?: string;
   status: OutboxStatus;
   attempts: number;
   nextAttemptAt: number;

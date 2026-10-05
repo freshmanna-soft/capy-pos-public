@@ -36,6 +36,8 @@ import { TraceContextInterceptor } from '@core/infrastructure/telemetry/trace-co
 import { environment } from '../environments/environment';
 import { MERCADOPAGO_PROVIDER } from '@core/infrastructure/payment/mercadopago.provider';
 import { PAYPAL_PROVIDER } from '@core/infrastructure/payment/paypal.provider';
+import { SALE_OUTBOX } from '@core/application/ports/sale-outbox.port';
+import { DexieSaleOutboxAdapter } from '@core/infrastructure/messaging/dexie-sale-outbox.adapter';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -128,6 +130,8 @@ export const appConfig: ApplicationConfig = {
       provide: 'ITransactionRepository',
       useExisting: TRANSACTION_REPOSITORY,
     },
+    // A sale and its SaleCompleted event, written in one Dexie transaction (#352)
+    { provide: SALE_OUTBOX, useExisting: DexieSaleOutboxAdapter },
     // AI clerk recognizer — mock or Claude, chosen by environment.features.aiVision
     ...VISION_PROVIDERS,
     // AI clerk agent — the mock today; environment.features.clerkAgent selects the relay

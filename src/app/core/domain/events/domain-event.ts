@@ -54,6 +54,8 @@ export interface DomainEvent<K extends DomainEventType = DomainEventType> {
   type: K;
   aggregateId: string;
   payload: DomainEventPayloadMap[K];
+  /** Shared by every event one business action caused, e.g. a sale (#352). */
+  correlationId?: string;
   attempts: number;
   createdAt: Date;
 }

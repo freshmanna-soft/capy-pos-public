@@ -17,7 +17,6 @@ import { FormsModule } from '@angular/forms';
 import { CartService } from '@core/application/services/cart.service';
 import { ProcessCashPaymentUseCase } from '@core/application/use-cases/process-cash-payment.use-case';
 import { ProcessCardPaymentUseCase } from '@core/application/use-cases/process-card-payment.use-case';
-import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
 import { CircuitBreakerService } from '@core/infrastructure/resilience/circuit-breaker.service';
 import { RetryService } from '@core/infrastructure/resilience/retry.service';
 import {
@@ -1337,7 +1336,6 @@ export class CheckoutComponent implements OnDestroy {
   readonly cardPayment = inject(ProcessCardPaymentUseCase);
   readonly mercadopago = inject(MERCADOPAGO_PAYMENT_PORT);
   readonly paypal = inject(PAYPAL_PAYMENT_PORT);
-  private readonly persistTransaction = inject(PersistTransactionUseCase);
   private readonly circuitBreaker = inject(CircuitBreakerService);
   private readonly retry = inject(RetryService);
   private readonly injector = inject(Injector);
@@ -1907,8 +1905,8 @@ export class CheckoutComponent implements OnDestroy {
   }
 
   /**
-   * Completes a payment: persists the transaction, releases the use-cases, and
-   * emits the result. Shared by the cash/mobile timeout path and the card
+   * Completes a payment: releases the use-cases and emits the result. The sale is
+   * recorded by `PosFacade.checkout()`, once any remote write has succeeded (#352). Shared by the cash/mobile timeout path and the card
    * gateway path so completion behaviour stays identical across methods.
    */
   private finalizePayment(method: PaymentMethod, transactionId: string): void {
@@ -1919,18 +1917,6 @@ export class CheckoutComponent implements OnDestroy {
       transactionId,
       timestamp: new Date(),
     };
-
-    // Persist transaction to IndexedDB (fire-and-forget for offline-first)
-    this.persistTransaction
-      .execute({
-        paymentMethod: method,
-        transactionId,
-        amountTendered: method === 'cash' ? this.cashTendered : undefined,
-        changeGiven: method === 'cash' ? this.cashPayment.changeAmount() : undefined,
-      })
-      .catch(() => {
-        // Persistence failure is non-blocking; transaction completes regardless
-      });
 
     this.cashPayment.completeProcessing();
     this.cardPayment.completeProcessing();

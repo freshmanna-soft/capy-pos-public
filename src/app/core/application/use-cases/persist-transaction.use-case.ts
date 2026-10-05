@@ -10,6 +10,7 @@ import {
 import { TransactionBuilder } from '@core/domain/entities/transaction.builder';
 import { EmptyCartException, TransactionPersistenceException } from '@core/application/exceptions';
 import { PaymentMethod } from '@core/application/dtos/payment.dto';
+import { SALE_OUTBOX, SaleRecordOutcome } from '@core/application/ports/sale-outbox.port';
 
 /**
  * Request DTO for persisting a transaction
@@ -25,6 +26,18 @@ export interface PersistTransactionRequest {
   changeGiven?: number;
   /** Optional customer ID */
   customerId?: string;
+  /**
+   * Record a `SaleCompleted` event in the same local transaction (#352). Omit it and
+   * the row is written alone, as before.
+   */
+  sale?: {
+    /** Shared by every event this sale caused. */
+    correlationId: string;
+    /** What was charged, i.e. the receipt total. */
+    amount: number;
+    /** Handlers whose side effect the caller applies inline; see `SaleOutboxPort`. */
+    appliedInline?: readonly string[];
+  };
 }
 
 /**
@@ -41,6 +54,8 @@ export interface PersistTransactionResult {
   timestamp: Date;
   /** Error message if persistence failed */
   error?: string;
+  /** How the sale's local record went, when a `sale` was requested. */
+  outcome?: SaleRecordOutcome;
 }
 
 /**
@@ -73,6 +88,7 @@ export class PersistTransactionUseCase {
   private readonly transactionRepository: ITransactionRepository = inject<ITransactionRepository>(
     'ITransactionRepository' as never
   );
+  private readonly saleOutbox = inject(SALE_OUTBOX, { optional: true });
 
   /**
    * Executes the persist transaction use case.
@@ -128,6 +144,38 @@ export class PersistTransactionUseCase {
       }
 
       const transaction = builder.build();
+
+      if (request.sale) {
+        if (!this.saleOutbox) throw new Error('No sale outbox is provided.');
+        const outcome = await this.saleOutbox.record(
+          {
+            transactionId,
+            correlationId: request.sale.correlationId,
+            payload: {
+              transactionId,
+              items: items.map(({ productId, quantity, unitPrice }) => ({
+                productId,
+                quantity,
+                unitPrice,
+              })),
+              amount: request.sale.amount,
+              method: paymentMethod,
+              ...(customerId ? { customerId } : {}),
+              occurredAt: now.toISOString(),
+            },
+            appliedInline: request.sale.appliedInline ?? [],
+          },
+          () => this.transactionRepository.create(transaction)
+        );
+        return {
+          success: outcome !== 'deferred',
+          transactionId,
+          paymentMethod,
+          timestamp: now,
+          outcome,
+          ...(outcome === 'deferred' ? { error: 'Local record deferred; retrying.' } : {}),
+        };
+      }
 
       // Persist to repository
       await this.transactionRepository.create(transaction);
