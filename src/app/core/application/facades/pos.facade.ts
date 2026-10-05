@@ -29,6 +29,7 @@ import { TransactionRemoteService } from '@core/application/services/transaction
 import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
 import { generateUUID } from '@core/domain/utils/uuid';
 import { ADJUST_STOCK_ON_SALE_HANDLER } from '@core/application/handlers/adjust-stock-on-sale.handler';
+import { AWARD_LOYALTY_POINTS_HANDLER } from '@core/application/handlers/award-loyalty-points.handler';
 
 /**
  * The customer attached to the sale in progress.
@@ -382,9 +383,10 @@ export class PosFacade {
       console.error('[PosFacade] Telemetry failed:', error);
     }
 
-    // Loyalty (fire-and-forget): the sale is already paid for, so a points write is
-    // not allowed to fail it or to hold the queue up behind an IndexedDB round trip.
-    if (attachedCustomer) {
+    // Loyalty is the SaleCompleted handler's job now (#355). Only a sale with no event
+    // behind it awards inline, fire-and-forget as before: the sale is paid for, so a
+    // points write may neither fail it nor hold it up.
+    if (attachedCustomer && !recorded) {
       this.awardPointsForSale(attachedCustomer, paymentResult.amount);
     }
 
@@ -412,15 +414,14 @@ export class PosFacade {
       const result = await this.persistTransaction.execute({
         paymentMethod: paymentResult.method,
         transactionId: paymentResult.transactionId,
-        ...(customer ? { customerId: customer.id } : {}),
+        ...(customer ? { customerId: customer.id, customerTier: customer.tier } : {}),
         sale: {
           correlationId,
           amount: paymentResult.amount,
-          // Loyalty, audit and telemetry still run inline but have no SaleCompleted
-          // handler yet (#355, #356), so nothing is listed as applied.
+          // Audit and telemetry still run inline but have no handler yet (#356).
           appliedInline: [],
-          // Stock runs inline only if this record is deferred; see checkout().
-          fallbackInline: [ADJUST_STOCK_ON_SALE_HANDLER],
+          // Stock and loyalty run inline only if this record is deferred; see checkout().
+          fallbackInline: [ADJUST_STOCK_ON_SALE_HANDLER, AWARD_LOYALTY_POINTS_HANDLER],
         },
       });
       if (!result.success) {

@@ -13,6 +13,11 @@ export interface AwardLoyaltyPointsRequest {
   customerId: string;
   /** What the customer paid, in currency units (i.e. the receipt total). */
   purchaseAmount: number;
+  /**
+   * Price the points at this tier instead of the customer's current one: the tier
+   * they held when the sale happened, so a retried award matches the first (#355).
+   */
+  pricingTier?: CustomerTier;
 }
 
 /**
@@ -155,7 +160,10 @@ export class AwardLoyaltyPointsUseCase {
         return { ...this.nothing('customer-blocked'), previousTier };
       }
 
-      const { totalPoints } = this.loyalty.calculatePoints(wholeUnits, toLoyaltyTier(previousTier));
+      const { totalPoints } = this.loyalty.calculatePoints(
+        wholeUnits,
+        toLoyaltyTier(request.pricingTier ?? previousTier)
+      );
 
       if (totalPoints <= 0) {
         // Unreachable at the current rate, and guarded anyway: `addPoints` rejects a
