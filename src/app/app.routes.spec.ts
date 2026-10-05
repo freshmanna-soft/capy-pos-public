@@ -6,6 +6,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { authGuard } from '@core/presentation/guards/auth.guard';
 import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
 import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
+import { AppIdCustomerAuthAdapter } from '@core/infrastructure/auth/appid-customer-auth.adapter';
 import { appConfig } from './app.config';
 import { routes } from './app.routes';
 
@@ -19,7 +20,7 @@ class ShopStubComponent {}
  * The properties pinned here are route-level, so a component spec cannot see
  * them: which lanes a customer can reach without a staff session, that the
  * retired `/self-checkout` URLs still land somewhere useful, and that a customer
- * identity stays unresolvable app-wide now that no route binds one.
+ * identity is bound on /shop alone and stays unresolvable app-wide.
  */
 describe('routes', () => {
   it('leaves /clerk unguarded so an anonymous customer can reach the capybara', () => {
@@ -75,10 +76,10 @@ describe('routes', () => {
   });
 
   /**
-   * The customer identity domain (`CurrentCustomerService`, the App ID customer
-   * adapter) is kept for a future customer lane, but nothing binds it today.
-   * It must stay that way until a route opts in: a customer identity resolvable
-   * from the root injector could be consulted for authorization anywhere.
+   * The customer identity (`CurrentCustomerService`, the App ID customer adapter)
+   * is bound on /shop, for its account modal, and nowhere else. A customer
+   * identity resolvable from the root injector could be consulted for
+   * authorization anywhere, so the root must keep refusing it.
    *
    * The root injector is built from `appConfig.providers` — the application's
    * real composition root — and not from `TestBed.inject(EnvironmentInjector)`,
@@ -102,9 +103,35 @@ describe('routes', () => {
       expect(appRoot.get(CurrentCustomerService, null)).toBeNull();
     });
 
-    it('is bound on no route', () => {
-      expect(routesProviding(CUSTOMER_AUTH_GATEWAY)).toEqual([]);
-      expect(routesProviding(CurrentCustomerService)).toEqual([]);
+    it('is bound on /shop and no other route', () => {
+      expect(routesProviding(CUSTOMER_AUTH_GATEWAY)).toEqual(['shop']);
+      expect(routesProviding(CurrentCustomerService)).toEqual(['shop']);
+    });
+
+    /**
+     * /shop's account modal signs customers in for real (App ID), so the route
+     * has to resolve the identity — and the root still must not. The negative
+     * half is the root-injector test above; this is the positive half, built
+     * the same way the router builds a route's environment injector.
+     */
+    describe('/shop', () => {
+      const shop = routes.find((r) => r.path === 'shop');
+      let shopRoute: EnvironmentInjector;
+
+      beforeEach(() => {
+        shopRoute = createEnvironmentInjector(shop?.providers ?? [], appRoot);
+      });
+
+      afterEach(() => shopRoute.destroy());
+
+      it('resolves the App ID customer gateway and CurrentCustomerService', () => {
+        expect(shopRoute.get(CUSTOMER_AUTH_GATEWAY)).toBeInstanceOf(AppIdCustomerAuthAdapter);
+        expect(shopRoute.get(CurrentCustomerService)).toBeInstanceOf(CurrentCustomerService);
+      });
+
+      it('stays unguarded so an anonymous shopper can still reach it', () => {
+        expect(shop?.canActivate).toBeUndefined();
+      });
     });
   });
 

@@ -15,13 +15,11 @@ import {
   DestroyRef,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { FormsModule } from '@angular/forms';
 import { CurrencyPipe } from '@angular/common';
 import { CartService, MAX_QTY_PER_PRODUCT } from '@core/application/services/cart.service';
 import { ProductService } from '@core/application/services/product.service';
 import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
 import { GeofencingService } from '@core/application/services/geofencing.service';
-import { KioskCustomerService } from '@features/kiosk/kiosk-customer.service';
 import { SyncService } from '@core/infrastructure/sync/sync.service';
 import { ShopSessionService } from '@core/infrastructure/sync/shop-session.service';
 import { PosFacade } from '@core/application/facades';
@@ -33,9 +31,8 @@ import { CheckoutComponent } from '@features/pos-terminal/components/checkout/ch
 import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
 import { ReceiptData } from '@core/application/use-cases/generate-receipt.use-case';
-import { CustomerBuilder } from '@core/domain/entities/customer.builder';
-import { CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
-import { CUSTOMER_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
+import { ShopAccountModalComponent } from './customer-account/shop-account-modal.component';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.service';
 import { environment } from '../../../environments/environment';
@@ -78,7 +75,7 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
 @Component({
   selector: 'app-shop',
   standalone: true,
-  imports: [CheckoutComponent, ReceiptComponent, FormsModule, CurrencyPipe],
+  imports: [CheckoutComponent, ReceiptComponent, CurrencyPipe, ShopAccountModalComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [CameraService],
   template: `
@@ -201,18 +198,19 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
 
             <!-- Account button -->
             <button
+              #accountBtn
               class="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-onsen-surface/40 border border-onsen-surface/60
                      text-steam/80 active:bg-onsen-surface/70 transition-colors text-sm font-medium min-h-[44px]
-                     focus:outline-none focus-visible:ring-2 focus-visible:ring-steam/40"
-              (click)="showAuthModal.set(true)"
-              aria-label="Your account"
+                     max-w-[45vw] focus:outline-none focus-visible:ring-2 focus-visible:ring-steam/40"
+              (click)="openAuthModal()"
+              aria-haspopup="dialog"
+              [attr.aria-label]="
+                customerEmail() ? 'Your account, signed in as ' + customerEmail() : 'Your account'
+              "
               data-testid="shop-account-btn"
             >
-              {{
-                kioskCustomer.customer()
-                  ? '👤 ' + (kioskCustomer.customer()?.name ?? 'You')
-                  : '👤 Account'
-              }}
+              <span aria-hidden="true">👤</span>
+              <span class="truncate">{{ customerEmail() ?? 'Account' }}</span>
             </button>
 
             <!-- Scan button — shown only when BarcodeDetector is available -->
@@ -793,85 +791,9 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
           </div>
         }
 
-        <!-- Auth modal (email-only account) -->
+        <!-- Account modal — real App ID customer sign-in / sign-up -->
         @if (showAuthModal()) {
-          <div
-            class="fixed inset-0 z-[1300] flex items-end sm:items-center justify-center bg-black/60 p-4"
-            role="presentation"
-            tabindex="-1"
-            (click)="showAuthModal.set(false)"
-            (keydown.escape)="showAuthModal.set(false)"
-          >
-            <div
-              class="relative w-full max-w-sm bg-onsen-water rounded-3xl shadow-2xl p-8 flex flex-col gap-6"
-              (click)="$event.stopPropagation()"
-              (keydown)="$event.stopPropagation()"
-              tabindex="0"
-            >
-              <button
-                class="absolute top-4 right-4 w-10 h-10 rounded-full bg-onsen-surface/60 text-steam/80 hover:text-steam flex items-center justify-center"
-                (click)="showAuthModal.set(false)"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-              <h2 class="font-display text-2xl font-bold text-steam text-center">Your Account</h2>
-              <div class="flex flex-col gap-2">
-                <label for="shop-email" class="text-steam/80 text-sm font-medium"
-                  >Email address</label
-                >
-                <input
-                  id="shop-email"
-                  type="email"
-                  [(ngModel)]="authEmail"
-                  placeholder="you@example.com"
-                  class="min-h-[56px] rounded-xl bg-onsen-deep border border-onsen-surface/60 text-steam placeholder-kelp/60 px-4 text-base focus:outline-none focus:ring-2 focus:ring-yuzu/60"
-                  autocomplete="email"
-                  data-testid="shop-auth-email"
-                  (keydown.enter)="handleSignIn()"
-                />
-              </div>
-              @if (authError()) {
-                <p
-                  class="text-red-400 text-sm text-center"
-                  role="alert"
-                  data-testid="shop-auth-error"
-                >
-                  {{ authError() }}
-                </p>
-              }
-              <div class="flex flex-col gap-3">
-                <button
-                  class="w-full min-h-[56px] rounded-xl bg-yuzu text-onsen-deep font-display text-lg font-bold active:scale-95"
-                  [disabled]="authBusy()"
-                  (click)="handleSignIn()"
-                  data-testid="shop-sign-in-submit"
-                >
-                  {{ authBusy() ? 'Signing in…' : 'Sign In' }}
-                </button>
-                <button
-                  class="w-full min-h-[56px] rounded-xl border-2 border-onsen-surface text-steam font-display text-lg font-semibold active:bg-onsen-surface/40"
-                  [disabled]="authBusy()"
-                  (click)="handleCreateAccount()"
-                  data-testid="shop-create-account"
-                >
-                  {{ authBusy() ? 'Creating…' : 'Create Account' }}
-                </button>
-              </div>
-              <p class="text-kelp/70 text-xs text-center">
-                A customer account lets you earn loyalty points and track your orders.
-              </p>
-              <div class="border-t border-onsen-surface/40 pt-4 text-center">
-                <button
-                  class="text-kelp/50 text-xs hover:text-kelp/80 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-kelp/40"
-                  (click)="goToStaffLogin()"
-                  data-testid="shop-staff-login"
-                >
-                  🔒 Staff login
-                </button>
-              </div>
-            </div>
-          </div>
+          <app-shop-account-modal (closed)="closeAuthModal()" />
         }
       </div>
     }
@@ -884,12 +806,12 @@ export class ShopComponent implements OnInit, OnDestroy {
   private readonly productService = inject(ProductService);
   readonly kioskSettings = inject(KioskSettingsService);
   private readonly geofencing = inject(GeofencingService);
-  readonly kioskCustomer = inject(KioskCustomerService);
   private readonly posFacade = inject(PosFacade);
   private readonly camera = inject(CameraService);
   private readonly scanner = inject(BarcodeScannerService);
   private readonly injector = inject(Injector);
-  private readonly customerRepo = inject(CUSTOMER_REPOSITORY);
+  /** Route-scoped (app.routes.ts) — the /shop customer identity, never the staff one. */
+  private readonly currentCustomer = inject(CurrentCustomerService);
   private readonly authGateway = inject(AUTH_GATEWAY);
   private readonly syncService = inject(SyncService);
   private readonly shopSession = inject(ShopSessionService);
@@ -926,9 +848,8 @@ export class ShopComponent implements OnInit, OnDestroy {
     this.mobileCartExpanded.set(false);
     this.confirmClear.set(false);
   }
-  readonly authError = signal<string | null>(null);
-  readonly authBusy = signal(false);
-  authEmail = '';
+  /** The signed-in customer's verified email, or null — labels the account button. */
+  readonly customerEmail = computed(() => this.currentCustomer.email() || null);
 
   // ── Product data ──────────────────────────────────────────────────────────────
   private readonly _products = signal<Product[]>([]);
@@ -962,6 +883,7 @@ export class ShopComponent implements OnInit, OnDestroy {
   private receiptCountdownTimer: ReturnType<typeof setInterval> | null = null;
 
   @ViewChild('shopCartItems') private shopCartItemsRef?: ElementRef<HTMLElement>;
+  @ViewChild('accountBtn') private accountBtnRef?: ElementRef<HTMLButtonElement>;
 
   // The video element only exists while the sheet is open; attach the camera
   // stream the moment it appears — same race-removing pattern as BarcodeScanFieldComponent.
@@ -995,6 +917,19 @@ export class ShopComponent implements OnInit, OnDestroy {
       });
     });
 
+    // Renew the customer's App ID session through the refresh_token grant when
+    // the service flags the last minute before expiry, so a shopper who is
+    // mid-basket is not silently signed out. A failed refresh is left to the
+    // expiry timer: signing out is the honest outcome of a lapsed grant.
+    effect(() => {
+      if (!this.currentCustomer.expiryWarningActive()) return;
+      untracked(() => {
+        this.currentCustomer.refresh().catch((error: unknown) => {
+          console.warn('[ShopComponent] customer session refresh failed:', error);
+        });
+      });
+    });
+
     effect(() => {
       const items = this.cartService.items();
       if (items.length > 0) {
@@ -1010,6 +945,9 @@ export class ShopComponent implements OnInit, OnDestroy {
   }
 
   async ngOnInit(): Promise<void> {
+    // Not awaited: verifying a persisted token fetches App ID's JWKS, and the
+    // shop must not wait on the network for an optional account.
+    void this.hydrateCustomer();
     await this.kioskSettings.load();
     const storeId = await this.resolveStore();
     this.resolvedStoreId.set(storeId);
@@ -1258,14 +1196,16 @@ export class ShopComponent implements OnInit, OnDestroy {
   openCheckout(): void {
     if (this.cartService.isEmpty()) return;
     if (this.cartService.total() <= 0) return;
-    const customer = this.kioskCustomer.customer();
-    if (customer) {
-      this.posFacade.attachCustomerDirectly(customer);
-    }
+    // The sale stays anonymous even when a customer is signed in. The App ID
+    // identity has no local loyalty record to award points to, and pos-api does
+    // not verify customer tokens yet — attaching an unverified id to a
+    // transaction would be a claim the server cannot check. Detaching here also
+    // makes sure nothing a till attached earlier in this tab rides along.
+    this.posFacade.detachCustomer();
     this.telemetry.trackEvent('shop.checkout.opened', {
       itemCount: this.cartService.items().length,
       cartTotal: this.cartService.total(),
-      hasCustomer: customer !== null,
+      signedIn: this.currentCustomer.isAuthenticated(),
     });
     this.showCheckout.set(true);
     // Paused, not just reset: a Mercado Pago payment happens in another tab,
@@ -1298,7 +1238,6 @@ export class ShopComponent implements OnInit, OnDestroy {
         this.clearIdleTimers();
         this.showReceipt.set(true);
         this.startReceiptTimer();
-        this.kioskCustomer.clear();
         this.posFacade.detachCustomer();
       })
       .catch((err: unknown) => {
@@ -1331,76 +1270,27 @@ export class ShopComponent implements OnInit, OnDestroy {
     globalThis.print();
   }
 
-  goToStaffLogin(): void {
-    void this.router.navigate(['/login']);
+  // ── Account modal ────────────────────────────────────────────────────────────
+
+  openAuthModal(): void {
+    this.showAuthModal.set(true);
   }
 
-  // ── Auth modal ───────────────────────────────────────────────────────────────
-
-  async handleSignIn(): Promise<void> {
-    const email = this.authEmail.trim().toLowerCase();
-    if (!email) {
-      this.authError.set('Please enter your email address.');
-      return;
-    }
-    if (!email.includes('@')) {
-      this.authError.set('Please enter a valid email address.');
-      return;
-    }
-    this.authBusy.set(true);
-    this.authError.set(null);
-    try {
-      const customer = await this.customerRepo.findByEmail(email);
-      if (customer) {
-        this.kioskCustomer.set(customer);
-        this.showAuthModal.set(false);
-        this.authEmail = '';
-      } else {
-        this.authError.set('No account found for that email. Use "Create Account" to register.');
-      }
-    } catch {
-      this.authError.set('Could not sign in. Please try again.');
-    } finally {
-      this.authBusy.set(false);
-    }
+  /** Close the dialog and hand focus back to the button that opened it. */
+  closeAuthModal(): void {
+    this.showAuthModal.set(false);
+    afterNextRender(() => this.accountBtnRef?.nativeElement.focus(), { injector: this.injector });
   }
 
-  async handleCreateAccount(): Promise<void> {
-    const email = this.authEmail.trim().toLowerCase();
-    if (!email) {
-      this.authError.set('Please enter your email address.');
-      return;
-    }
-    if (!email.includes('@')) {
-      this.authError.set('Please enter a valid email address.');
-      return;
-    }
-    this.authBusy.set(true);
-    this.authError.set(null);
+  /**
+   * Restore a customer session persisted in this tab. Optional by design: an
+   * unreadable or expired token is "signed out", never a blocked shop.
+   */
+  private async hydrateCustomer(): Promise<void> {
     try {
-      const existing = await this.customerRepo.findByEmail(email);
-      if (existing) {
-        this.kioskCustomer.set(existing);
-        this.showAuthModal.set(false);
-        this.authEmail = '';
-        return;
-      }
-      const newCustomer = new CustomerBuilder()
-        .withEmail(email)
-        .withName(email.split('@')[0])
-        // Phone is intentionally empty — /shop form is email-only.
-        .withPhone('')
-        .withStatus(CustomerStatus.ACTIVE)
-        .withTier(CustomerTier.BRONZE)
-        .build();
-      const created = await this.customerRepo.create(newCustomer);
-      this.kioskCustomer.set(created);
-      this.showAuthModal.set(false);
-      this.authEmail = '';
-    } catch {
-      this.authError.set('Could not create account. Please try again.');
-    } finally {
-      this.authBusy.set(false);
+      await this.currentCustomer.hydrate();
+    } catch (error) {
+      console.warn('[ShopComponent] customer session hydration failed:', error);
     }
   }
 
