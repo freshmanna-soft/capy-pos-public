@@ -162,9 +162,10 @@ export const environment = {
     helmetEnabled: true,
   },
 
+  // Off until the OTLP relay (#399): every unauthenticated export is answered 401.
   telemetry: {
     otlp: {
-      enabled: true,
+      enabled: false,
       endpoint: 'https://otlp-gateway-prod-us-east-3.grafana.net/otlp',
       instanceId: '',
       apiKey: '',
