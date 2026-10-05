@@ -49,36 +49,6 @@ const ROUTES: SmokeRoute[] = [
     landmark: 'main, [data-testid="transaction-history"]',
   },
   { path: '/settings', name: 'Settings', landmark: 'main, [data-testid="settings"]' },
-  // Unguarded on purpose (customer lane), but still smoked as a logged-in admin
-  // like the rest — the risk being caught here is a page that throws, not a guard.
-  {
-    path: '/self-checkout',
-    name: 'Self-checkout',
-    landmark: '[data-testid="self-checkout-shell"]',
-  },
-  // The lane's side path (epic #261 item 16) and the interstitial it lands on.
-  // Reachable without any session on purpose: registration is optional, so these
-  // are smoked in both session states like the lane itself.
-  {
-    path: '/self-checkout/sign-up',
-    name: 'Self-checkout sign-up',
-    landmark: '[data-testid="self-checkout-signup"]',
-  },
-  {
-    path: '/self-checkout/sign-in',
-    name: 'Self-checkout sign-in',
-    landmark: '[data-testid="self-checkout-signin"]',
-  },
-  {
-    path: '/self-checkout/check-email',
-    name: 'Self-checkout check email',
-    landmark: '[data-testid="self-checkout-check-email"]',
-  },
-  {
-    path: '/self-checkout/pay',
-    name: 'Self-checkout payment',
-    landmark: '[data-testid="self-checkout-payment"]',
-  },
   // Also unguarded on purpose (#219) — the customer checks themselves out here.
   { path: '/clerk', name: 'Capy Clerk', landmark: '[data-testid="clerk-stage"]' },
   { path: '/admin', name: 'Admin', landmark: 'main, [data-testid="operator-list"]' },
@@ -92,14 +62,7 @@ const ROUTES: SmokeRoute[] = [
  * state apart. Missing a path here is a hard error rather than a silently
  * skipped route.
  */
-const ANONYMOUS_ROUTES: SmokeRoute[] = [
-  '/clerk',
-  '/self-checkout',
-  '/self-checkout/sign-up',
-  '/self-checkout/sign-in',
-  '/self-checkout/check-email',
-  '/self-checkout/pay',
-].map((path) => {
+const ANONYMOUS_ROUTES: SmokeRoute[] = ['/clerk'].map((path) => {
   const route = ROUTES.find((candidate) => candidate.path === path);
   if (!route) {
     throw new Error(`${path} is smoked anonymously but is missing from ROUTES`);

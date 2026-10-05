@@ -248,6 +248,24 @@ async function installFakeMedia(page: Page): Promise<void> {
   });
 }
 
+/**
+ * Assert the anonymous clerk exit landed on /shop.
+ *
+ * Which shop screen paints depends on how the store resolves in the test
+ * environment (geofence, a saved pick, or the picker), so any of its states
+ * counts — the point is that the customer is in the shop and not on a login.
+ */
+async function expectOnShop(page: Page): Promise<void> {
+  await expect(page).toHaveURL(/\/shop$/);
+  await expect(
+    page
+      .locator(
+        '[data-testid="shop-shell"], [data-testid="shop-store-picker"], [data-testid="shop-resolving"], [data-testid="shop-session-error"]'
+      )
+      .first()
+  ).toBeVisible();
+}
+
 /** Deny the camera, to exercise the blocked path. */
 async function installDeniedCamera(page: Page): Promise<void> {
   await grantFrameConsent(page);
@@ -557,23 +575,23 @@ test.describe('Capy Clerk without a staff session', () => {
     await expect(clerk.caption).toContainText('Hold something up', { timeout: 15000 });
   });
 
-  test('leaves to the customer lane rather than the staff till', async ({ page }) => {
+  test('leaves to the shop rather than the staff till', async ({ page }) => {
     const clerk = new ClerkPage(page);
     await clerk.open();
 
     await clerk.exitButton.click();
 
-    await expect(page.getByTestId('self-checkout-shell')).toBeVisible();
+    await expectOnShop(page);
     expect(new URL(page.url()).pathname).not.toContain('/login');
   });
 
-  test('leaves to the customer lane from the keyboard too', async ({ page }) => {
+  test('leaves to the shop from the keyboard too', async ({ page }) => {
     const clerk = new ClerkPage(page);
     await clerk.open();
 
     await page.keyboard.press('Escape');
 
-    await expect(page.getByTestId('self-checkout-shell')).toBeVisible();
+    await expectOnShop(page);
     expect(new URL(page.url()).pathname).not.toContain('/login');
   });
 });

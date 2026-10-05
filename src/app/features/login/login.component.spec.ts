@@ -1,7 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, vi } from 'vitest';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
-import { SIGN_IN_ROUTE as CUSTOMER_SIGN_IN_ROUTE } from '@features/self-checkout/self-checkout-routes';
 import { RouterTestingModule } from '@angular/router/testing';
 import { LoginComponent } from './login.component';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
@@ -137,14 +136,14 @@ describe('LoginComponent', () => {
       expect(getEl(fixture, '[data-testid="password-error"]')).toBeNull();
     });
 
-    it('offers customers a link to their checkout sign-in', async () => {
+    it('offers customers a way out to the shop', async () => {
       const gateway = makeGateway({ succeeds: true });
       const fixture = await createComponent(gateway);
 
-      const link = getEl<HTMLAnchorElement>(fixture, '[data-testid="link-customer-login"]');
+      const link = getEl<HTMLAnchorElement>(fixture, '[data-testid="link-customer-shop"]');
       expect(link).toBeTruthy();
-      expect(link.textContent).toContain('Customer? Sign in to checkout');
-      expect(link.getAttribute('href')).toBe(CUSTOMER_SIGN_IN_ROUTE);
+      expect(link.textContent).toContain('Customer? Go to the shop');
+      expect(link.getAttribute('href')).toBe('/shop');
     });
   });
 
