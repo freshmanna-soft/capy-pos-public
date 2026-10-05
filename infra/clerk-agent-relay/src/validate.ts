@@ -461,7 +461,9 @@ function checkedResults(
 }
 
 function readValue(raw: unknown, key: string): unknown {
-  return typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>)[key] : undefined;
+  return typeof raw === 'object' && raw !== null
+    ? (raw as Record<string, unknown>)[key]
+    : undefined;
 }
 
 function readField(raw: unknown, key: string): string {

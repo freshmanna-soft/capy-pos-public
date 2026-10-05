@@ -67,7 +67,10 @@ export function describeDocumentStoreContract(name, createStore) {
 
       const revision = await store.read('doc-1');
       assert.equal(typeof revision?.rev, 'string');
-      assert.ok((revision?.rev ?? '').length > 0, 'a revision token must be something the caller can send back');
+      assert.ok(
+        (revision?.rev ?? '').length > 0,
+        'a revision token must be something the caller can send back'
+      );
     });
 
     it('refuses a duplicate id as a conflict, and leaves the stored document alone', async () => {
@@ -87,7 +90,11 @@ export function describeDocumentStoreContract(name, createStore) {
 
       const after = await store.read('doc-1');
       assert.deepEqual(after?.document, { ...FIRST, count: 4 });
-      assert.notEqual(after?.rev, before.rev, 'the token that was just spent must not still be valid');
+      assert.notEqual(
+        after?.rev,
+        before.rev,
+        'the token that was just spent must not still be valid'
+      );
     });
 
     it('refuses a stale revision as a conflict, and changes nothing', async () => {

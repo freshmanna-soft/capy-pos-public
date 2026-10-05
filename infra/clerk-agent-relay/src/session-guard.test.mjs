@@ -102,7 +102,9 @@ function mintAppId(payload, { kid, keyPair, config = APPID_CONFIG, header = {} }
   };
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
   const signingInput = `${encode({ alg: 'RS256', typ: 'JWT', kid, ...header })}.${encode(claims)}`;
-  const signature = signRsa('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey).toString('base64url');
+  const signature = signRsa('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey).toString(
+    'base64url'
+  );
   return `${signingInput}.${signature}`;
 }
 
@@ -141,7 +143,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const INFRA = resolve(HERE, '..', '..');
 
 /** The same filename in both services, located from `infra/` rather than "my sibling". */
-const copiesOf = (file) => ['vision-proxy', 'clerk-agent-relay'].map((service) => join(INFRA, service, 'src', file));
+const copiesOf = (file) =>
+  ['vision-proxy', 'clerk-agent-relay'].map((service) => join(INFRA, service, 'src', file));
 
 /**
  * Every file that exists twice.
@@ -173,7 +176,12 @@ describe('Permission', () => {
   it('is the sell permission, not an administrative one', async () => {
     assert.equal(Permission.PROCESS_SALE, 'sale:process');
     const operator = mint({ roles: ['operator'], permissions: ['sale:process'] });
-    const outcome = await authorize(bearer(operator), Permission.PROCESS_SALE, { secret: SECRET }, NOW);
+    const outcome = await authorize(
+      bearer(operator),
+      Permission.PROCESS_SALE,
+      { secret: SECRET },
+      NOW
+    );
     assert.equal(outcome.ok, true);
   });
 });
@@ -216,8 +224,18 @@ describe('the boundary is wired into the process that spends the key', () => {
       /createServer\(\s*createRequestListener\(/,
       'server.ts does not build its listener from http.ts'
     );
-    for (const field of ['route:', 'secret,', 'origins,', 'maxBodyBytes:', 'validate,', 'handle:']) {
-      assert.ok(server.includes(field), `server.ts does not pass ${field} to createRequestListener`);
+    for (const field of [
+      'route:',
+      'secret,',
+      'origins,',
+      'maxBodyBytes:',
+      'validate,',
+      'handle:',
+    ]) {
+      assert.ok(
+        server.includes(field),
+        `server.ts does not pass ${field} to createRequestListener`
+      );
     }
     // A second boundary in the entry point is one `http.test.mjs` never sees.
     assert.doesNotMatch(server, /authorize\(\s*req\.headers/, 'server.ts authorizes on its own');
@@ -257,8 +275,16 @@ describe('the boundary is wired into the process that spends the key', () => {
   });
 
   it('authorizes on headers before reading a body, and requires the sell permission', () => {
-    assert.match(boundary, /from '\.\/session-guard\.ts'/, 'http.ts does not import session-guard.ts');
-    assert.match(boundary, /Permission\.PROCESS_SALE/, 'http.ts authenticates without requiring a permission');
+    assert.match(
+      boundary,
+      /from '\.\/session-guard\.ts'/,
+      'http.ts does not import session-guard.ts'
+    );
+    assert.match(
+      boundary,
+      /Permission\.PROCESS_SALE/,
+      'http.ts authenticates without requiring a permission'
+    );
 
     // Ordering, on the source. The socket suite proves each status; this proves the
     // cheap check still comes first, so an unauthenticated caller cannot make the
@@ -356,7 +382,11 @@ describe('verifySessionToken', () => {
   it('ignores claims it does not read, so a richer token still verifies', () => {
     // `SessionIssuer` also sends `memberships`; a proxy has no use for it and must
     // not start failing when the browser adds another claim.
-    const claims = verifySessionToken(mint({ memberships: [{ tenantId: 'store-1', role: 'manager' }] }), SECRET, NOW);
+    const claims = verifySessionToken(
+      mint({ memberships: [{ tenantId: 'store-1', role: 'manager' }] }),
+      SECRET,
+      NOW
+    );
     assert.equal(claims?.operatorId, 'op-1');
   });
 
@@ -382,7 +412,12 @@ describe('verifySessionToken', () => {
     it('refuses a tampered payload', () => {
       const [header, , signature] = mint().split('.');
       const escalated = Buffer.from(
-        JSON.stringify({ sub: 'op-1', tenantId: 'store-1', permissions: ['sale:process'], exp: NOW + 3600 })
+        JSON.stringify({
+          sub: 'op-1',
+          tenantId: 'store-1',
+          permissions: ['sale:process'],
+          exp: NOW + 3600,
+        })
       ).toString('base64url');
       assert.equal(verifySessionToken(`${header}.${escalated}.${signature}`, SECRET, NOW), null);
     });
@@ -436,7 +471,13 @@ describe('verifySessionToken', () => {
 
   describe('attribution', () => {
     it('refuses a signed token with no subject or no tenant', () => {
-      for (const payload of [{ sub: undefined }, { sub: '' }, { sub: 42 }, { tenantId: undefined }, { tenantId: '' }]) {
+      for (const payload of [
+        { sub: undefined },
+        { sub: '' },
+        { sub: 42 },
+        { tenantId: undefined },
+        { tenantId: '' },
+      ]) {
         assert.equal(verifySessionToken(mint(payload), SECRET, NOW), null, JSON.stringify(payload));
       }
     });
@@ -444,7 +485,11 @@ describe('verifySessionToken', () => {
     it('reduces a malformed roles/permissions claim to an empty list rather than trusting it', () => {
       // Resilient mapping (#110): one non-string entry must not throw, and must not
       // survive into a permission check either.
-      const claims = verifySessionToken(mint({ roles: 'operator', permissions: ['sale:process', 7, null] }), SECRET, NOW);
+      const claims = verifySessionToken(
+        mint({ roles: 'operator', permissions: ['sale:process', 7, null] }),
+        SECRET,
+        NOW
+      );
       assert.deepEqual(claims?.roles, []);
       assert.deepEqual(claims?.permissions, ['sale:process']);
     });
@@ -453,14 +498,24 @@ describe('verifySessionToken', () => {
 
 describe('authorize', () => {
   it('admits a token that carries the required permission', async () => {
-    const outcome = await authorize(bearer(mint()), Permission.PROCESS_SALE, { secret: SECRET }, NOW);
+    const outcome = await authorize(
+      bearer(mint()),
+      Permission.PROCESS_SALE,
+      { secret: SECRET },
+      NOW
+    );
     assert.equal(outcome.ok, true);
     assert.equal(outcome.claims.operatorId, 'op-1');
     assert.equal(outcome.claims.tenantId, 'store-1');
   });
 
   it('admits a valid token when no specific permission is required', async () => {
-    const outcome = await authorize(bearer(mint({ permissions: [] })), null, { secret: SECRET }, NOW);
+    const outcome = await authorize(
+      bearer(mint({ permissions: [] })),
+      null,
+      { secret: SECRET },
+      NOW
+    );
     assert.equal(outcome.ok, true);
   });
 
@@ -490,7 +545,12 @@ describe('authorize', () => {
     // allowed to sell. This is the case that makes the permission check worth having
     // on top of authentication.
     const readOnly = mint({ roles: ['viewer'], permissions: ['inventory:view'] });
-    const outcome = await authorize(bearer(readOnly), Permission.PROCESS_SALE, { secret: SECRET }, NOW);
+    const outcome = await authorize(
+      bearer(readOnly),
+      Permission.PROCESS_SALE,
+      { secret: SECRET },
+      NOW
+    );
     assert.equal(outcome.ok, false);
     assert.equal(outcome.status, 403);
     assert.equal(outcome.error, 'Requires sale:process.');
@@ -514,7 +574,12 @@ describe('authorize', () => {
   it('answers 401, not 503, for an HS256 token when only App ID is configured', async () => {
     // The service IS configured (for RS256) — this is an unrecognized token, not
     // an outage. The 503 above is reserved for "neither method configured at all".
-    const outcome = await authorize(bearer(mint()), Permission.PROCESS_SALE, { secret: '', appId: APPID_CONFIG }, NOW);
+    const outcome = await authorize(
+      bearer(mint()),
+      Permission.PROCESS_SALE,
+      { secret: '', appId: APPID_CONFIG },
+      NOW
+    );
     assert.equal(outcome.ok, false);
     assert.equal(outcome.status, 401);
   });
@@ -627,10 +692,13 @@ describe('verifyAppIdAccessToken', () => {
       await withJwks(keyPair, 'kid-tamper', async () => {
         const token = mintAppId({}, { kid: 'kid-tamper', keyPair });
         const [header, , signature] = token.split('.');
-        const escalated = Buffer.from(JSON.stringify({ sub: 'op-1', scope: 'admin', exp: NOW + 3600 })).toString(
-          'base64url'
+        const escalated = Buffer.from(
+          JSON.stringify({ sub: 'op-1', scope: 'admin', exp: NOW + 3600 })
+        ).toString('base64url');
+        assert.equal(
+          await verifyAppIdAccessToken(`${header}.${escalated}.${signature}`, APPID_CONFIG, NOW),
+          null
         );
-        assert.equal(await verifyAppIdAccessToken(`${header}.${escalated}.${signature}`, APPID_CONFIG, NOW), null);
       });
     });
 
@@ -644,7 +712,11 @@ describe('verifyAppIdAccessToken', () => {
 
     it('refuses anything that is not three segments of base64url JSON', async () => {
       for (const token of ['', '.', 'a.b', 'a.b.c.d', 'a.b.c', '!!!.???.###']) {
-        assert.equal(await verifyAppIdAccessToken(token, APPID_CONFIG, NOW), null, `expected null for "${token}"`);
+        assert.equal(
+          await verifyAppIdAccessToken(token, APPID_CONFIG, NOW),
+          null,
+          `expected null for "${token}"`
+        );
       }
     });
   });
@@ -653,7 +725,10 @@ describe('verifyAppIdAccessToken', () => {
     it('refuses a token issued for a different tenant, even though the signature is real', async () => {
       const keyPair = generateRsaKeyPair();
       await withJwks(keyPair, 'kid-tenant', async () => {
-        const token = mintAppId({}, { kid: 'kid-tenant', keyPair, config: { ...APPID_CONFIG, tenantId: 'other-tenant' } });
+        const token = mintAppId(
+          {},
+          { kid: 'kid-tenant', keyPair, config: { ...APPID_CONFIG, tenantId: 'other-tenant' } }
+        );
         assert.equal(await verifyAppIdAccessToken(token, APPID_CONFIG, NOW), null);
       });
     });
@@ -678,7 +753,10 @@ describe('verifyAppIdAccessToken', () => {
       // App ID's `tenant` is the service instance id, the same for every user.
       const keyPair = generateRsaKeyPair();
       await withJwks(keyPair, 'kid-instance', async () => {
-        const token = mintAppId({ tenant: 'appid-instance-abc123' }, { kid: 'kid-instance', keyPair });
+        const token = mintAppId(
+          { tenant: 'appid-instance-abc123' },
+          { kid: 'kid-instance', keyPair }
+        );
         const claims = await verifyAppIdAccessToken(token, APPID_CONFIG, NOW);
         assert.equal(claims.tenantId, 'default-tenant');
       });
@@ -708,7 +786,10 @@ describe('verifyAppIdAccessToken', () => {
       for (const role of ['operator', 'manager', 'admin']) {
         const keyPair = generateRsaKeyPair();
         await withJwks(keyPair, `kid-${role}`, async () => {
-          const token = mintAppId({ scope: `openid appid_default ${role}` }, { kid: `kid-${role}`, keyPair });
+          const token = mintAppId(
+            { scope: `openid appid_default ${role}` },
+            { kid: `kid-${role}`, keyPair }
+          );
           const claims = await verifyAppIdAccessToken(token, APPID_CONFIG, NOW);
           assert.deepEqual(claims.roles, [role], role);
           assert.deepEqual(claims.permissions, ['sale:process'], role);
@@ -749,7 +830,10 @@ describe('shared roles document (Phase 5)', () => {
   // previous one left behind, in the order they run — not four independent tests that
   // happen to share a file. `nowSeconds` still advances between them so each is
   // unambiguous about which side of the 5-minute TTL it lands on.
-  const ROLES_CONFIG = { ...APPID_CONFIG, rolesSource: { url: 'https://pos-api.internal/internal/roles', secret: 's' } };
+  const ROLES_CONFIG = {
+    ...APPID_CONFIG,
+    rolesSource: { url: 'https://pos-api.internal/internal/roles', secret: 's' },
+  };
 
   /** Answers the JWKS endpoint for real; routes anything else to `rolesResponder`. */
   async function withRolesFetch(keyPair, kid, rolesResponder, run) {
@@ -780,7 +864,10 @@ describe('shared roles document (Phase 5)', () => {
         'kid-roles-1',
         () => ({ ok: false, status: 500, json: async () => ({}) }),
         async () => {
-          const token = mintAppId({ scope: 'openid operator', exp: NOW + 1_000_000 + 3600 }, { kid: 'kid-roles-1', keyPair });
+          const token = mintAppId(
+            { scope: 'openid operator', exp: NOW + 1_000_000 + 3600 },
+            { kid: 'kid-roles-1', keyPair }
+          );
           const claims = await verifyAppIdAccessToken(token, ROLES_CONFIG, NOW + 1_000_000);
           // The local fallback table's own value for 'operator' — proves the failed
           // fetch degraded to it rather than granting nothing.
@@ -797,9 +884,16 @@ describe('shared roles document (Phase 5)', () => {
     await withRolesFetch(
       keyPair,
       'kid-roles-2',
-      () => ({ ok: true, status: 200, json: async () => ({ roles: { operator: ['custom:permission'] } }) }),
+      () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ roles: { operator: ['custom:permission'] } }),
+      }),
       async (calls) => {
-        const token = mintAppId({ scope: 'openid operator', exp: NOW + 2_000_100 + 3600 }, { kid: 'kid-roles-2', keyPair });
+        const token = mintAppId(
+          { scope: 'openid operator', exp: NOW + 2_000_100 + 3600 },
+          { kid: 'kid-roles-2', keyPair }
+        );
         const claims = await verifyAppIdAccessToken(token, ROLES_CONFIG, NOW + 2_000_000);
         // Not the local fallback's 'sale:process' — this can only be the fetched doc.
         assert.deepEqual(claims.permissions, ['custom:permission']);
@@ -848,7 +942,11 @@ describe('shared roles document (Phase 5)', () => {
           const claims = await verifyAppIdAccessToken(token, ROLES_CONFIG, NOW + 2_000_000 + 400);
           // Test 2's cached document, not ROLE_PERMISSIONS' 'sale:process' and not empty.
           assert.deepEqual(claims.permissions, ['custom:permission']);
-          assert.equal(calls.roles, 1, 'a stale cache should still trigger exactly one refetch attempt');
+          assert.equal(
+            calls.roles,
+            1,
+            'a stale cache should still trigger exactly one refetch attempt'
+          );
         }
       );
     } finally {
@@ -918,7 +1016,12 @@ describe('authorize — App ID dispatch', () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-authz', async () => {
       const token = mintAppId({ scope: 'operator' }, { kid: 'kid-authz', keyPair });
-      const outcome = await authorize(bearer(token), Permission.PROCESS_SALE, { secret: SECRET, appId: APPID_CONFIG }, NOW);
+      const outcome = await authorize(
+        bearer(token),
+        Permission.PROCESS_SALE,
+        { secret: SECRET, appId: APPID_CONFIG },
+        NOW
+      );
       assert.equal(outcome.ok, true);
       assert.equal(outcome.claims.operatorId, 'op-1');
     });
@@ -928,7 +1031,12 @@ describe('authorize — App ID dispatch', () => {
     const keyPair = generateRsaKeyPair();
     await withJwks(keyPair, 'kid-unconfigured', async () => {
       const token = mintAppId({}, { kid: 'kid-unconfigured', keyPair });
-      const outcome = await authorize(bearer(token), Permission.PROCESS_SALE, { secret: SECRET }, NOW);
+      const outcome = await authorize(
+        bearer(token),
+        Permission.PROCESS_SALE,
+        { secret: SECRET },
+        NOW
+      );
       assert.equal(outcome.ok, false);
       assert.equal(outcome.status, 401);
     });
@@ -937,7 +1045,12 @@ describe('authorize — App ID dispatch', () => {
   it('still verifies HS256 correctly when appId is also configured', async () => {
     // The two paths are independent — configuring App ID must not break the
     // local-secret path any deployment might still carry.
-    const outcome = await authorize(bearer(mint()), Permission.PROCESS_SALE, { secret: SECRET, appId: APPID_CONFIG }, NOW);
+    const outcome = await authorize(
+      bearer(mint()),
+      Permission.PROCESS_SALE,
+      { secret: SECRET, appId: APPID_CONFIG },
+      NOW
+    );
     assert.equal(outcome.ok, true);
   });
 });
@@ -953,10 +1066,12 @@ describe('readAllowedOrigins', () => {
   it('trims whitespace, strips trailing slashes and deduplicates', () => {
     // An `Origin` header never carries a path, so a list entry with a trailing slash
     // would silently match nothing.
-    assert.deepEqual(readAllowedOrigins(' https://a.example.com/ , https://a.example.com ,https://b.example.com//'), [
-      'https://a.example.com',
-      'https://b.example.com',
-    ]);
+    assert.deepEqual(
+      readAllowedOrigins(
+        ' https://a.example.com/ , https://a.example.com ,https://b.example.com//'
+      ),
+      ['https://a.example.com', 'https://b.example.com']
+    );
   });
 
   it('returns an empty list for anything unusable, which is what makes server.ts refuse to start', () => {
@@ -980,7 +1095,11 @@ describe('originAllowed', () => {
   });
 
   it('refuses an unlisted origin', () => {
-    for (const origin of ['https://evil.example.com', 'http://till.example.com', 'https://till.example.com.evil.com']) {
+    for (const origin of [
+      'https://evil.example.com',
+      'http://till.example.com',
+      'https://till.example.com.evil.com',
+    ]) {
       assert.equal(originAllowed(origin, ORIGINS), false, origin);
     }
   });
@@ -1006,9 +1125,20 @@ describe('corsHeaders', () => {
   });
 
   it('never answers a wildcard, for any input', () => {
-    for (const origin of ['https://till.example.com', 'https://evil.example.com', undefined, '', 'null', '*']) {
+    for (const origin of [
+      'https://till.example.com',
+      'https://evil.example.com',
+      undefined,
+      '',
+      'null',
+      '*',
+    ]) {
       const headers = corsHeaders(origin, ORIGINS, 'POST, OPTIONS');
-      assert.notEqual(headers['Access-Control-Allow-Origin'], '*', `wildcard for ${JSON.stringify(origin)}`);
+      assert.notEqual(
+        headers['Access-Control-Allow-Origin'],
+        '*',
+        `wildcard for ${JSON.stringify(origin)}`
+      );
     }
   });
 

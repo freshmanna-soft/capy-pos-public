@@ -31,7 +31,10 @@ import {
 import { MAX_TRANSCRIPT_HOPS } from './validate.ts';
 
 const REPO_ROOT = new URL('../../../', import.meta.url);
-const BROWSER_DTO = readFileSync(new URL('src/app/core/application/dtos/agent.dto.ts', REPO_ROOT), 'utf8');
+const BROWSER_DTO = readFileSync(
+  new URL('src/app/core/application/dtos/agent.dto.ts', REPO_ROOT),
+  'utf8'
+);
 const BROWSER_RUNNER = readFileSync(
   new URL('src/app/core/application/services/agent-turn.runner.ts', REPO_ROOT),
   'utf8'
@@ -46,8 +49,14 @@ function stringTuple(source, name) {
 
 describe('the tool tuple', () => {
   it('is the same list, in the same order, as the browser copy', () => {
-    assert.deepEqual(CLERK_AGENT_READ_TOOLS.slice(), stringTuple(BROWSER_DTO, 'CLERK_AGENT_READ_TOOLS'));
-    assert.deepEqual(CLERK_AGENT_MUTATE_TOOLS.slice(), stringTuple(BROWSER_DTO, 'CLERK_AGENT_MUTATE_TOOLS'));
+    assert.deepEqual(
+      CLERK_AGENT_READ_TOOLS.slice(),
+      stringTuple(BROWSER_DTO, 'CLERK_AGENT_READ_TOOLS')
+    );
+    assert.deepEqual(
+      CLERK_AGENT_MUTATE_TOOLS.slice(),
+      stringTuple(BROWSER_DTO, 'CLERK_AGENT_MUTATE_TOOLS')
+    );
   });
 
   it('composes read tools before mutating ones, with nothing repeated', () => {
@@ -83,7 +92,11 @@ describe('TOOL_SCHEMAS', () => {
       // gateway this deployment routes through rejects that field on a tool
       // definition. additionalProperties:false + every key required below is
       // what's actually doing strict mode's job here.
-      assert.equal(schema.strict, undefined, `${schema.name} re-added strict — check the gateway supports it before restoring this`);
+      assert.equal(
+        schema.strict,
+        undefined,
+        `${schema.name} re-added strict — check the gateway supports it before restoring this`
+      );
       const input = schema.input_schema;
       assert.equal(input.type, 'object');
       assert.equal(input.additionalProperties, false, `${schema.name} accepts extra keys`);
@@ -147,7 +160,10 @@ describe('formatCatalog', () => {
 
   it('groups by category and sorts both levels, so confusable products sit adjacent', () => {
     const rendered = formatCatalog(catalog);
-    assert.match(rendered, /<catalog>\nDairy:\n {2}Oat Milk 1L\t🥛\n\nProduce:\n {2}Avocado\t🥑\n {2}Banana\n<\/catalog>/);
+    assert.match(
+      rendered,
+      /<catalog>\nDairy:\n {2}Oat Milk 1L\t🥛\n\nProduce:\n {2}Avocado\t🥑\n {2}Banana\n<\/catalog>/
+    );
   });
 
   it('is byte-identical for the same catalog in any order, which is what keeps the cache hitting', () => {
@@ -155,7 +171,10 @@ describe('formatCatalog', () => {
   });
 
   it('files an uncategorised product rather than dropping it', () => {
-    assert.match(formatCatalog([{ id: 'p', name: 'Thing', sku: '', category: '' }]), /Uncategorised:\n {2}Thing/);
+    assert.match(
+      formatCatalog([{ id: 'p', name: 'Thing', sku: '', category: '' }]),
+      /Uncategorised:\n {2}Thing/
+    );
   });
 });
 

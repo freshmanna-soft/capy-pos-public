@@ -152,7 +152,11 @@ describe('CORS, over a socket', () => {
         await post(port, { body: 'not json' }),
       ];
       for (const response of responses) {
-        assert.notEqual(response.headers['access-control-allow-origin'], '*', `status ${response.status} sent a wildcard`);
+        assert.notEqual(
+          response.headers['access-control-allow-origin'],
+          '*',
+          `status ${response.status} sent a wildcard`
+        );
       }
     });
   });
@@ -228,32 +232,40 @@ describe('refusing before the body is read, over a socket', () => {
   // client is certainly still writing when the reply is written.
   const OVERSIZED = JSON.stringify({ pad: 'x'.repeat(4 * 1024 * 1024) });
 
-  it('403s an unlisted origin without stalling on the body it never reads', { timeout: 15_000 }, async () => {
-    await withServer({}, async ({ port, handled, validated }) => {
-      const response = await send(port, {
-        headers: { Origin: 'https://evil.example.com', 'Content-Type': 'application/json' },
-        body: OVERSIZED,
+  it(
+    '403s an unlisted origin without stalling on the body it never reads',
+    { timeout: 15_000 },
+    async () => {
+      await withServer({}, async ({ port, handled, validated }) => {
+        const response = await send(port, {
+          headers: { Origin: 'https://evil.example.com', 'Content-Type': 'application/json' },
+          body: OVERSIZED,
+        });
+        assert.equal(response.status, 403);
+        assert.deepEqual(response.json, { error: 'Origin is not allowed.' });
+        assert.deepEqual(handled, []);
+        assert.deepEqual(validated, []);
       });
-      assert.equal(response.status, 403);
-      assert.deepEqual(response.json, { error: 'Origin is not allowed.' });
-      assert.deepEqual(handled, []);
-      assert.deepEqual(validated, []);
-    });
-  });
+    }
+  );
 
-  it('404s an unknown path without stalling on the body it never reads', { timeout: 15_000 }, async () => {
-    await withServer({}, async ({ port, handled, validated }) => {
-      const response = await send(port, {
-        path: '/nope',
-        headers: { Origin: ALLOWED, 'Content-Type': 'application/json' },
-        body: OVERSIZED,
+  it(
+    '404s an unknown path without stalling on the body it never reads',
+    { timeout: 15_000 },
+    async () => {
+      await withServer({}, async ({ port, handled, validated }) => {
+        const response = await send(port, {
+          path: '/nope',
+          headers: { Origin: ALLOWED, 'Content-Type': 'application/json' },
+          body: OVERSIZED,
+        });
+        assert.equal(response.status, 404);
+        assert.deepEqual(response.json, { error: `POST ${ROUTE}` });
+        assert.deepEqual(handled, []);
+        assert.deepEqual(validated, []);
       });
-      assert.equal(response.status, 404);
-      assert.deepEqual(response.json, { error: `POST ${ROUTE}` });
-      assert.deepEqual(handled, []);
-      assert.deepEqual(validated, []);
-    });
-  });
+    }
+  );
 });
 
 describe('the body cap, over a socket', () => {
@@ -273,7 +285,11 @@ describe('the body cap, over a socket', () => {
 
   it('serves a body that fits, so the cap is a ceiling and not a coin flip', async () => {
     await withServer({}, async ({ port, handled }) => {
-      const body = JSON.stringify({ grant_type: 'password', username: 'u'.repeat(MAX_BODY - 128), password: 'p' });
+      const body = JSON.stringify({
+        grant_type: 'password',
+        username: 'u'.repeat(MAX_BODY - 128),
+        password: 'p',
+      });
       assert.ok(body.length <= MAX_BODY, 'fixture must fit under the cap');
       const response = await send(port, {
         headers: { Origin: ALLOWED, 'Content-Type': 'application/json' },
@@ -313,7 +329,10 @@ describe('handle result pass-through, over a socket', () => {
     // boundary must not fold a well-formed OAuth error into a success shape.
     await withServer(
       {
-        handle: async () => ({ status: 400, body: { error: 'invalid_grant', error_description: 'nope' } }),
+        handle: async () => ({
+          status: 400,
+          body: { error: 'invalid_grant', error_description: 'nope' },
+        }),
       },
       async ({ port }) => {
         const response = await post(port);
@@ -338,7 +357,11 @@ describe('handle result pass-through, over a socket', () => {
           const response = await post(port);
           assert.equal(response.status, 502);
           assert.deepEqual(response.json, { error: 'The sign-in service is unavailable.' });
-          assert.doesNotMatch(response.text, /super-secret-value/, 'the 502 body leaked the client secret');
+          assert.doesNotMatch(
+            response.text,
+            /super-secret-value/,
+            'the 502 body leaked the client secret'
+          );
         }
       );
     } finally {

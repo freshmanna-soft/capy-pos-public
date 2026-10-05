@@ -18,10 +18,12 @@ describe('readAllowedOrigins', () => {
   });
 
   it('trims whitespace, strips trailing slashes and deduplicates', () => {
-    assert.deepEqual(readAllowedOrigins(' https://a.example.com/ , https://a.example.com ,https://b.example.com//'), [
-      'https://a.example.com',
-      'https://b.example.com',
-    ]);
+    assert.deepEqual(
+      readAllowedOrigins(
+        ' https://a.example.com/ , https://a.example.com ,https://b.example.com//'
+      ),
+      ['https://a.example.com', 'https://b.example.com']
+    );
   });
 
   it('returns an empty list for anything unusable, which is what makes server.ts refuse to start', () => {
@@ -43,7 +45,11 @@ describe('originAllowed', () => {
   });
 
   it('refuses an unlisted origin', () => {
-    for (const origin of ['https://evil.example.com', 'http://till.example.com', 'https://till.example.com.evil.com']) {
+    for (const origin of [
+      'https://evil.example.com',
+      'http://till.example.com',
+      'https://till.example.com.evil.com',
+    ]) {
       assert.equal(originAllowed(origin, ORIGINS), false, origin);
     }
   });
@@ -65,9 +71,20 @@ describe('corsHeaders', () => {
   });
 
   it('never answers a wildcard, for any input', () => {
-    for (const origin of ['https://till.example.com', 'https://evil.example.com', undefined, '', 'null', '*']) {
+    for (const origin of [
+      'https://till.example.com',
+      'https://evil.example.com',
+      undefined,
+      '',
+      'null',
+      '*',
+    ]) {
       const headers = corsHeaders(origin, ORIGINS, 'POST, OPTIONS');
-      assert.notEqual(headers['Access-Control-Allow-Origin'], '*', `wildcard for ${JSON.stringify(origin)}`);
+      assert.notEqual(
+        headers['Access-Control-Allow-Origin'],
+        '*',
+        `wildcard for ${JSON.stringify(origin)}`
+      );
     }
   });
 
@@ -154,7 +171,10 @@ describe('the deployed allow-list, against every route of the SPA', () => {
           true,
           `${origin} refused for a browser on ${route}`
         );
-        assert.equal(corsHeaders(origin, origins, 'POST, OPTIONS')['Access-Control-Allow-Origin'], origin);
+        assert.equal(
+          corsHeaders(origin, origins, 'POST, OPTIONS')['Access-Control-Allow-Origin'],
+          origin
+        );
       }
     }
   });

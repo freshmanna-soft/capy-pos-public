@@ -156,8 +156,7 @@ export function formatCatalog(catalog: CatalogHint[]): string {
         .slice()
         .sort((a, b) => a.name.localeCompare(b.name))
         .map(
-          (hint) =>
-            `  ${hint.id}\t${hint.name}\t${hint.sku}${hint.emoji ? `\t${hint.emoji}` : ''}`
+          (hint) => `  ${hint.id}\t${hint.name}\t${hint.sku}${hint.emoji ? `\t${hint.emoji}` : ''}`
         );
       return `${category}:\n${lines.join('\n')}`;
     });

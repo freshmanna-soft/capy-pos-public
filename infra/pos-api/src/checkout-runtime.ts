@@ -32,11 +32,22 @@ function buildDisabledCheckoutRuntime(): CheckoutRuntime {
   const disabled = () => Promise.reject(new Error('Checkout is disabled on this instance.'));
   return Object.freeze({
     checkouts: {
-      get: disabled, create: disabled, update: disabled, delete: disabled,
-      list: disabled, findByIdempotencyKey: disabled,
+      get: disabled,
+      create: disabled,
+      update: disabled,
+      delete: disabled,
+      list: disabled,
+      findByIdempotencyKey: disabled,
     } as unknown as CheckoutRepository,
-    rateLimiter: { check: () => ({ allowed: false, retryAfterMs: 0 }) } as unknown as FixedWindowCheckoutRateLimiter,
-    service: { createCheckout: disabled, captureCheckout: disabled, cancelCheckout: disabled, getCheckout: disabled } as unknown as CheckoutService,
+    rateLimiter: {
+      check: () => ({ allowed: false, retryAfterMs: 0 }),
+    } as unknown as FixedWindowCheckoutRateLimiter,
+    service: {
+      createCheckout: disabled,
+      captureCheckout: disabled,
+      cancelCheckout: disabled,
+      getCheckout: disabled,
+    } as unknown as CheckoutService,
   });
 }
 

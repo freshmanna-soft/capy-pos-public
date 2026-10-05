@@ -33,13 +33,20 @@ const FUTURE = NOW + 3600;
  */
 function staffToken(permissions = ['sale:process', 'inventory:manage'], tenantId = 'tenant-1') {
   const b64url = (value) =>
-    Buffer.from(JSON.stringify(value)).toString('base64')
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    Buffer.from(JSON.stringify(value))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
   const header = b64url({ alg: 'HS256', typ: 'JWT' });
   const body = b64url({ sub: 'op-1', tenantId, roles: ['admin'], permissions, exp: FUTURE });
   const signingInput = `${header}.${body}`;
-  const sig = createHmac('sha256', SECRET).update(signingInput).digest('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const sig = createHmac('sha256', SECRET)
+    .update(signingInput)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
   return `${signingInput}.${sig}`;
 }
 
@@ -79,9 +86,7 @@ const VALID_TX_BODY = {
   subtotal: 2.5,
   taxAmount: 0.2,
   total: 2.7,
-  items: [
-    { productId: 'p1', productName: 'Coffee', quantity: 1, unitPrice: 2.5, lineTotal: 2.5 },
-  ],
+  items: [{ productId: 'p1', productName: 'Coffee', quantity: 1, unitPrice: 2.5, lineTotal: 2.5 }],
 };
 
 // ── matchRoute ─────────────────────────────────────────────────────────────────
@@ -117,8 +122,11 @@ describe('matchRoute', () => {
 
 describe('POST /api/shop/session', () => {
   const req = (body) => ({
-    method: 'POST', path: '/api/shop/session',
-    authorization: undefined, internalSecret: undefined, body,
+    method: 'POST',
+    path: '/api/shop/session',
+    authorization: undefined,
+    internalSecret: undefined,
+    body,
   });
 
   test('valid storeId → 201 with token and expiresAt', async () => {
@@ -202,8 +210,11 @@ describe('POST /api/shop/session', () => {
 
 describe('POST /api/kiosk-device-token', () => {
   const req = (auth, body) => ({
-    method: 'POST', path: '/api/kiosk-device-token',
-    authorization: auth, internalSecret: undefined, body,
+    method: 'POST',
+    path: '/api/kiosk-device-token',
+    authorization: auth,
+    internalSecret: undefined,
+    body,
   });
 
   test('valid staff token + terminalId → 201 with token', async () => {
@@ -244,8 +255,11 @@ describe('POST /api/kiosk-device-token', () => {
 
 describe('POST /api/transactions', () => {
   const req = (auth, body) => ({
-    method: 'POST', path: '/api/transactions',
-    authorization: auth, internalSecret: undefined, body,
+    method: 'POST',
+    path: '/api/transactions',
+    authorization: auth,
+    internalSecret: undefined,
+    body,
   });
 
   test('kiosk-device token + valid body → 201 with transaction', async () => {
@@ -333,7 +347,13 @@ describe('POST /api/transactions', () => {
 describe('GET /api/health', () => {
   test('lists new endpoints in health response', async () => {
     const res = await handle(
-      { method: 'GET', path: '/api/health', authorization: undefined, internalSecret: undefined, body: undefined },
+      {
+        method: 'GET',
+        path: '/api/health',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: undefined,
+      },
       makeDeps()
     );
     assert.equal(res.status, 200);
@@ -409,10 +429,14 @@ describe('POST /api/products/:id/image', () => {
     const res = await handle(req(product.id, body, CONTENT_TYPE, `Bearer ${token}`), deps);
 
     assert.equal(res.status, 200);
-    assert.ok(typeof res.body.imageUrl === 'string' && res.body.imageUrl.length > 0,
-      `imageUrl should be a non-empty string, got: ${JSON.stringify(res.body.imageUrl)}`);
-    assert.ok(res.body.imageUrl.startsWith('data:image/jpeg;base64,'),
-      `imageUrl should start with data:image/jpeg;base64,`);
+    assert.ok(
+      typeof res.body.imageUrl === 'string' && res.body.imageUrl.length > 0,
+      `imageUrl should be a non-empty string, got: ${JSON.stringify(res.body.imageUrl)}`
+    );
+    assert.ok(
+      res.body.imageUrl.startsWith('data:image/jpeg;base64,'),
+      `imageUrl should start with data:image/jpeg;base64,`
+    );
 
     // imageUrl should be written back to the product document
     const updated = await deps.products.read(product.id);
@@ -492,8 +516,13 @@ describe('POST /api/mercadopago/preference', () => {
   test('503 when mpAccessToken is empty', async () => {
     const deps = makeDeps({ mpAccessToken: '' });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: VALID_MP_BODY },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: VALID_MP_BODY,
+      },
       deps
     );
     assert.equal(res.status, 503);
@@ -502,8 +531,13 @@ describe('POST /api/mercadopago/preference', () => {
   test('400 when body is missing', async () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: undefined },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: undefined,
+      },
       deps
     );
     assert.equal(res.status, 400);
@@ -512,8 +546,13 @@ describe('POST /api/mercadopago/preference', () => {
   test('400 when formData is absent', async () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { amount: 10 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { amount: 10 },
+      },
       deps
     );
     assert.equal(res.status, 400);
@@ -523,8 +562,13 @@ describe('POST /api/mercadopago/preference', () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
     const badBody = { ...VALID_MP_BODY, formData: { ...VALID_MP_BODY.formData, token: '' } };
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: badBody },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: badBody,
+      },
       deps
     );
     assert.equal(res.status, 400);
@@ -534,8 +578,13 @@ describe('POST /api/mercadopago/preference', () => {
     const mpResult = { id: 123456, status: 'approved' };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, mpResult) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: VALID_MP_BODY },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: VALID_MP_BODY,
+      },
       deps
     );
     assert.equal(res.status, 200);
@@ -547,8 +596,13 @@ describe('POST /api/mercadopago/preference', () => {
     const mpResult = { id: 999, status: 'pending' };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, mpResult) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: VALID_MP_BODY },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: VALID_MP_BODY,
+      },
       deps
     );
     assert.equal(res.status, 200);
@@ -556,21 +610,36 @@ describe('POST /api/mercadopago/preference', () => {
   });
 
   test('502 when MP upstream returns non-2xx', async () => {
-    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(422, { message: 'invalid token' }) });
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      fetch: fakeFetch(422, { message: 'invalid token' }),
+    });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: VALID_MP_BODY },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: VALID_MP_BODY,
+      },
       deps
     );
     assert.equal(res.status, 502);
   });
 
   test('502 when fetch throws (network error)', async () => {
-    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const throwingFetch = async () => {
+      throw new Error('ECONNREFUSED');
+    };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: VALID_MP_BODY },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: VALID_MP_BODY,
+      },
       deps
     );
     assert.equal(res.status, 502);
@@ -579,8 +648,13 @@ describe('POST /api/mercadopago/preference', () => {
   test('GET /api/mercadopago/preference → 404', async () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN' });
     const res = await handle(
-      { method: 'GET', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: undefined },
+      {
+        method: 'GET',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: undefined,
+      },
       deps
     );
     assert.equal(res.status, 404);
@@ -592,8 +666,13 @@ describe('POST /api/mercadopago/preference', () => {
     const prefResult = { id: 'pref-123', init_point: 'https://mp.com/checkout/pref-123' };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, prefResult) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 49.99 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 49.99 },
+      },
       deps
     );
     assert.equal(res.status, 200);
@@ -604,29 +683,49 @@ describe('POST /api/mercadopago/preference', () => {
   test('wallet mode: 400 when amount is missing', async () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet' } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet' },
+      },
       deps
     );
     assert.equal(res.status, 400);
   });
 
   test('wallet mode: 502 when MP preferences endpoint returns non-2xx', async () => {
-    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(400, { message: 'bad request' }) });
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      fetch: fakeFetch(400, { message: 'bad request' }),
+    });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 10 },
+      },
       deps
     );
     assert.equal(res.status, 502);
   });
 
   test('wallet mode: 502 when fetch throws', async () => {
-    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const throwingFetch = async () => {
+      throw new Error('ECONNREFUSED');
+    };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 10 },
+      },
       deps
     );
     assert.equal(res.status, 502);
@@ -636,12 +735,21 @@ describe('POST /api/mercadopago/preference', () => {
     let capturedBody = null;
     const capturingFetch = async (url, opts) => {
       capturedBody = JSON.parse(opts.body);
-      return { ok: true, json: async () => ({ id: 'p1', init_point: 'https://mp.com/p1' }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ id: 'p1', init_point: 'https://mp.com/p1' }),
+        text: async () => '',
+      };
     };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: capturingFetch });
     await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 25, title: 'Table 5 order' } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 25, title: 'Table 5 order' },
+      },
       deps
     );
     assert.ok(capturedBody.items[0].title === 'Table 5 order', 'title should be forwarded');
@@ -651,12 +759,25 @@ describe('POST /api/mercadopago/preference', () => {
     let capturedBody = null;
     const capturingFetch = async (url, opts) => {
       capturedBody = JSON.parse(opts.body);
-      return { ok: true, json: async () => ({ id: 'p2', init_point: 'https://mp.com/p2' }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ id: 'p2', init_point: 'https://mp.com/p2' }),
+        text: async () => '',
+      };
     };
-    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', mpCurrencyId: 'MXN', fetch: capturingFetch });
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      mpCurrencyId: 'MXN',
+      fetch: capturingFetch,
+    });
     await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 99 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 99 },
+      },
       deps
     );
     assert.equal(capturedBody.items[0].currency_id, 'MXN', 'currency_id should match mpCurrencyId');
@@ -666,12 +787,25 @@ describe('POST /api/mercadopago/preference', () => {
     let capturedBody = null;
     const capturingFetch = async (url, opts) => {
       capturedBody = JSON.parse(opts.body);
-      return { ok: true, json: async () => ({ id: 'p3', init_point: 'https://mp.com/p3' }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ id: 'p3', init_point: 'https://mp.com/p3' }),
+        text: async () => '',
+      };
     };
-    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', mpCurrencyId: 'ARS', fetch: capturingFetch });
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      mpCurrencyId: 'ARS',
+      fetch: capturingFetch,
+    });
     await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 50 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 50 },
+      },
       deps
     );
     assert.equal(capturedBody.items[0].currency_id, 'ARS', 'currency_id should be ARS');
@@ -681,7 +815,11 @@ describe('POST /api/mercadopago/preference', () => {
     let capturedBody = null;
     const capturingFetch = async (url, opts) => {
       capturedBody = JSON.parse(opts.body);
-      return { ok: true, json: async () => ({ id: 'p4', init_point: 'https://mp.com/p4' }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ id: 'p4', init_point: 'https://mp.com/p4' }),
+        text: async () => '',
+      };
     };
     const deps = makeDeps({
       mpAccessToken: 'TEST_TOKEN',
@@ -689,8 +827,13 @@ describe('POST /api/mercadopago/preference', () => {
       fetch: capturingFetch,
     });
     await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 10 },
+      },
       deps
     );
     assert.equal(capturedBody.back_urls.success, 'https://my-pos.example.com/payment/success');
@@ -702,12 +845,21 @@ describe('POST /api/mercadopago/preference', () => {
     let capturedBody = null;
     const capturingFetch = async (url, opts) => {
       capturedBody = JSON.parse(opts.body);
-      return { ok: true, json: async () => ({ id: 'p5', init_point: 'https://mp.com/p5' }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ id: 'p5', init_point: 'https://mp.com/p5' }),
+        text: async () => '',
+      };
     };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: capturingFetch });
     await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 10 },
+      },
       deps
     );
     assert.equal(capturedBody.expires, true);
@@ -719,13 +871,22 @@ describe('POST /api/mercadopago/preference', () => {
     const bodies = [];
     const capturingFetch = async (url, opts) => {
       bodies.push(JSON.parse(opts.body));
-      return { ok: true, json: async () => ({ id: 'p6', init_point: 'https://mp.com/p6' }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ id: 'p6', init_point: 'https://mp.com/p6' }),
+        text: async () => '',
+      };
     };
     for (const appBaseUrl of ['http://localhost:4200', 'https://pos.example.com']) {
       const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', appBaseUrl, fetch: capturingFetch });
       await handle(
-        { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-          internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+        {
+          method: 'POST',
+          path: '/api/mercadopago/preference',
+          authorization: undefined,
+          internalSecret: undefined,
+          body: { mode: 'wallet', amount: 10 },
+        },
         deps
       );
     }
@@ -734,11 +895,20 @@ describe('POST /api/mercadopago/preference', () => {
   });
 
   test('wallet mode: response carries both the preference id and the external reference', async () => {
-    const prefResult = { id: 'pref-9', init_point: 'https://mp.com/pref-9', external_reference: 'ext-9' };
+    const prefResult = {
+      id: 'pref-9',
+      init_point: 'https://mp.com/pref-9',
+      external_reference: 'ext-9',
+    };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, prefResult) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 10 },
+      },
       deps
     );
     assert.equal(res.body.id, 'pref-9');
@@ -840,7 +1010,10 @@ describe('POST /api/mercadopago/preference/:externalReference/cancel', () => {
     assert.equal(mp.calls[0].url, 'https://api.mercadopago.com/checkout/preferences/pref-1');
     const expire = writes(mp.calls).find((c) => c.url.includes('/checkout/preferences/pref-1'));
     assert.ok(expire, 'preference PUT was sent');
-    assert.deepEqual(expire.body, { expires: true, expiration_date_to: new Date(NOW * 1000).toISOString() });
+    assert.deepEqual(expire.body, {
+      expires: true,
+      expiration_date_to: new Date(NOW * 1000).toISOString(),
+    });
   });
 
   test('idempotent: a repeat call answers cancelled again', async () => {
@@ -890,13 +1063,18 @@ describe('POST /api/mercadopago/preference/:externalReference/cancel', () => {
     for (const [i, failOn] of steps.entries()) {
       const ref = `ext-502-${i}`;
       const mp = fakeMp({ owner: ref, failOn });
-      const res = await handle(cancelReq(ref), makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch }));
+      const res = await handle(
+        cancelReq(ref),
+        makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch })
+      );
       assert.equal(res.status, 502, `step ${i}`);
     }
   });
 
   test('502 when fetch throws', async () => {
-    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const throwingFetch = async () => {
+      throw new Error('ECONNREFUSED');
+    };
     const res = await handle(
       cancelReq('ext-throw'),
       makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch })
@@ -911,7 +1089,10 @@ describe('POST /api/mercadopago/preference/:externalReference/cancel', () => {
       failOn: (url, method) => url.endsWith('/v1/payments/51') && method === 'PUT',
       reread: { 51: { id: 51, status: 'approved' } },
     });
-    const res = await handle(cancelReq('ext-race'), makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch }));
+    const res = await handle(
+      cancelReq('ext-race'),
+      makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch })
+    );
     assert.deepEqual(res.body, { status: 'approved', paymentId: '51' });
     assert.equal(
       writes(mp.calls).filter((c) => c.url.includes('/checkout/preferences/')).length,
@@ -927,7 +1108,10 @@ describe('POST /api/mercadopago/preference/:externalReference/cancel', () => {
       failOn: (url, method) => url.endsWith('/v1/payments/61') && method === 'PUT',
       reread: { 61: { id: 61, status: 'pending' } },
     });
-    const res = await handle(cancelReq('ext-stuck'), makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch }));
+    const res = await handle(
+      cancelReq('ext-stuck'),
+      makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch })
+    );
     assert.equal(res.status, 502);
   });
 
@@ -990,13 +1174,18 @@ describe('GET /api/mercadopago/preference/:id', () => {
   });
 
   test('502 when MP payments search returns non-2xx', async () => {
-    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(403, { message: 'forbidden' }) });
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      fetch: fakeFetch(403, { message: 'forbidden' }),
+    });
     const res = await handle(req('pref-123'), deps);
     assert.equal(res.status, 502);
   });
 
   test('502 when fetch throws (network error)', async () => {
-    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const throwingFetch = async () => {
+      throw new Error('ECONNREFUSED');
+    };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch });
     const res = await handle(req('pref-123'), deps);
     assert.equal(res.status, 502);
@@ -1005,8 +1194,13 @@ describe('GET /api/mercadopago/preference/:id', () => {
   test('POST /api/mercadopago/preference/:id → 404 (only GET allowed on this path)', async () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN' });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference/pref-123',
-        authorization: undefined, internalSecret: undefined, body: {} },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference/pref-123',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: {},
+      },
       deps
     );
     assert.equal(res.status, 404);
@@ -1016,7 +1210,11 @@ describe('GET /api/mercadopago/preference/:id', () => {
     let capturedUrl = null;
     const capturingFetch = async (url) => {
       capturedUrl = url;
-      return { ok: true, json: async () => ({ results: [{ status: 'approved' }] }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ results: [{ status: 'approved' }] }),
+        text: async () => '',
+      };
     };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: capturingFetch });
     await handle(req('pref-abc/xyz'), deps);

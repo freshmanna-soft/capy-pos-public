@@ -11,7 +11,12 @@ import type {
   AgentToolCall,
   RelayRequest,
 } from './agent-contract.ts';
-import { CLERK_AGENT_TOOL_NAMES, SYSTEM_PROMPT, TOOL_SCHEMAS, formatCatalog } from './agent-contract.ts';
+import {
+  CLERK_AGENT_TOOL_NAMES,
+  SYSTEM_PROMPT,
+  TOOL_SCHEMAS,
+  formatCatalog,
+} from './agent-contract.ts';
 import { MAX_ASSISTANT_BLOCKS, MAX_TOOL_RESULTS } from './validate.ts';
 
 /** The tuple as a set, for the outbound name check in `toStep`. */

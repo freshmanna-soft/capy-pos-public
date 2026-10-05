@@ -223,7 +223,10 @@ function cachedRoles(nowSeconds: () => number): readonly AppIdRoleWire[] | null 
 }
 
 /** Read `/roles` for real and re-arm the cache. */
-async function fetchRoles(config: ManagementConfig, nowSeconds: () => number): Promise<readonly AppIdRoleWire[]> {
+async function fetchRoles(
+  config: ManagementConfig,
+  nowSeconds: () => number
+): Promise<readonly AppIdRoleWire[]> {
   const result = await managementFetch('/roles', config, nowSeconds);
   if (result.status !== 200) {
     throw new ManagementApiError(`Listing App ID roles returned ${result.status}.`);
@@ -233,13 +236,18 @@ async function fetchRoles(config: ManagementConfig, nowSeconds: () => number): P
   return roles;
 }
 
-async function listRoles(config: ManagementConfig, nowSeconds: () => number): Promise<readonly AppIdRoleWire[]> {
+async function listRoles(
+  config: ManagementConfig,
+  nowSeconds: () => number
+): Promise<readonly AppIdRoleWire[]> {
   return cachedRoles(nowSeconds) ?? (await fetchRoles(config, nowSeconds));
 }
 
 /** Matches by `access[].scopes`, never by the role's display `name` — see `AppIdRoleWire`. */
 function roleGranting(roles: readonly AppIdRoleWire[], scope: string): string | null {
-  return roles.find((role) => role.access?.some((entry) => entry.scopes?.includes(scope)))?.id ?? null;
+  return (
+    roles.find((role) => role.access?.some((entry) => entry.scopes?.includes(scope)))?.id ?? null
+  );
 }
 
 /**
@@ -349,7 +357,11 @@ async function getUserSub(
   config: ManagementConfig,
   nowSeconds: () => number
 ): Promise<string | null> {
-  const result = await managementFetch(`/cloud_directory/${encodeURIComponent(scimId)}/userinfo`, config, nowSeconds);
+  const result = await managementFetch(
+    `/cloud_directory/${encodeURIComponent(scimId)}/userinfo`,
+    config,
+    nowSeconds
+  );
   if (result.status !== 200) {
     return null;
   }
@@ -362,7 +374,11 @@ async function getUserRoles(
   config: ManagementConfig,
   nowSeconds: () => number
 ): Promise<readonly StaffRole[]> {
-  const result = await managementFetch(`/users/${encodeURIComponent(sub)}/roles`, config, nowSeconds);
+  const result = await managementFetch(
+    `/users/${encodeURIComponent(sub)}/roles`,
+    config,
+    nowSeconds
+  );
   if (result.status !== 200) {
     // A user with no roles assigned yet still exists — treat any failure to
     // read their roles as "none", not a reason to drop them from the list.
@@ -439,15 +455,20 @@ export async function createUser(
   if (password.length === 0) {
     throw new ManagementApiError('Creating the App ID user requires a password.');
   }
-  const result = await managementFetch('/cloud_directory/sign_up?shouldCreateProfile=true', config, nowSeconds, {
-    method: 'POST',
-    body: {
-      active: true,
-      emails: [{ value: email, primary: true }],
-      userName: email,
-      password,
-    },
-  });
+  const result = await managementFetch(
+    '/cloud_directory/sign_up?shouldCreateProfile=true',
+    config,
+    nowSeconds,
+    {
+      method: 'POST',
+      body: {
+        active: true,
+        emails: [{ value: email, primary: true }],
+        userName: email,
+        password,
+      },
+    }
+  );
   if (result.status !== 201) {
     // The status and App ID's own wording travel with the error, not just inside
     // the sentence: the customer sign-up route has to be able to tell a duplicate
@@ -514,10 +535,15 @@ export async function assignRole(
   config: ManagementConfig,
   nowSeconds: () => number = defaultNow
 ): Promise<void> {
-  const result = await managementFetch(`/users/${encodeURIComponent(userId)}/roles`, config, nowSeconds, {
-    method: 'PUT',
-    body: { roles: { ids: [roleId] } },
-  });
+  const result = await managementFetch(
+    `/users/${encodeURIComponent(userId)}/roles`,
+    config,
+    nowSeconds,
+    {
+      method: 'PUT',
+      body: { roles: { ids: [roleId] } },
+    }
+  );
   if (result.status !== 200) {
     throw new ManagementApiError(`Assigning the App ID role returned ${result.status}.`);
   }
@@ -533,10 +559,15 @@ export async function revokeRoles(
   config: ManagementConfig,
   nowSeconds: () => number = defaultNow
 ): Promise<void> {
-  const result = await managementFetch(`/users/${encodeURIComponent(userId)}/roles`, config, nowSeconds, {
-    method: 'PUT',
-    body: { roles: { ids: [] } },
-  });
+  const result = await managementFetch(
+    `/users/${encodeURIComponent(userId)}/roles`,
+    config,
+    nowSeconds,
+    {
+      method: 'PUT',
+      body: { roles: { ids: [] } },
+    }
+  );
   if (result.status !== 200) {
     throw new ManagementApiError(`Revoking the App ID role returned ${result.status}.`);
   }

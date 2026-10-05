@@ -203,7 +203,8 @@ export const TOOL_SCHEMAS: readonly Record<string, unknown>[] = [
   },
   {
     name: 'check_stock',
-    description: 'How many of a product the shop has on hand, and how many are already in the cart.',
+    description:
+      'How many of a product the shop has on hand, and how many are already in the cart.',
     input_schema: objectSchema({ name: NAME_PROPERTY }),
   },
   {
