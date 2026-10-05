@@ -1059,12 +1059,17 @@ export class KioskShopComponent implements OnInit, OnDestroy {
     }
 
     this.showCheckout.set(true);
+    // Paused while checkout is open: a Mercado Pago payment happens in another
+    // tab, and the idle reset would otherwise empty the cart mid-payment.
+    this.clearShopIdleTimers();
+    this.idleCountdown.set(0);
   }
 
   closeCheckout(): void {
     this.showCheckout.set(false);
     this.fenceBlockedAtCheckout.set(false);
     this.posFacade.detachCustomer();
+    this.resetIdleTimer();
   }
 
   handlePaymentComplete(result: PaymentResult): void {
@@ -1094,6 +1099,7 @@ export class KioskShopComponent implements OnInit, OnDestroy {
         // Detach the customer so a retry re-attaches cleanly via openCheckout().
         this.showCheckout.set(false);
         this.posFacade.detachCustomer();
+        this.resetIdleTimer(); // checkout had paused it
         this.checkoutError.set('Payment could not be saved — please try again or ask a cashier.');
       });
   }
@@ -1122,6 +1128,9 @@ export class KioskShopComponent implements OnInit, OnDestroy {
   // ── idle-reset & receipt-auto-dismiss timers ───────────────────────────────
 
   private startShopIdleTimer(): void {
+    // Taps inside the checkout overlay still reach resetIdleTimer(); keep the
+    // timer paused until closeCheckout() (see openCheckout()).
+    if (this.showCheckout()) return;
     // Visible countdown starts 15 s before the reset fires.
     const countdownStartMs = this.shopIdleTimeoutMs - 15_000;
 

@@ -757,6 +757,40 @@ describe('ShopComponent — openCheckout and closeCheckout', () => {
     expect(component.showCheckout()).toBe(false);
     expect(facade.detachCustomer).toHaveBeenCalled();
   });
+
+  // A Mercado Pago payment happens in another tab, so the shop tab sees no
+  // taps for minutes; the idle reset must not empty the cart mid-payment.
+  it('pauses the idle timer while checkout is open, even through taps', async () => {
+    const { component, cart, fixture } = setup();
+    const router = fixture.debugElement.injector.get(Router);
+    component.resetIdleTimer();
+
+    cart.isEmpty.set(false);
+    cart.total.set(10);
+    component.openCheckout();
+    component.resetIdleTimer(); // a tap inside the overlay bubbles to the shell
+
+    vi.advanceTimersByTime(10 * 60_000);
+    await flushMicrotasks();
+
+    expect(cart.clearCart).not.toHaveBeenCalled();
+    expect(router.navigate as ReturnType<typeof vi.fn>).not.toHaveBeenCalledWith(['/shop']);
+    expect(component.idleCountdown()).toBe(0);
+  });
+
+  it('restarts the idle timer when checkout closes', async () => {
+    const { component, cart } = setup();
+    cart.isEmpty.set(false);
+    cart.total.set(10);
+    component.openCheckout();
+    vi.advanceTimersByTime(5 * 60_000);
+
+    component.closeCheckout();
+    vi.advanceTimersByTime(121_000);
+    await flushMicrotasks();
+
+    expect(cart.clearCart).toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1270,6 +1270,10 @@ export class ShopComponent implements OnInit, OnDestroy {
       hasCustomer: customer !== null,
     });
     this.showCheckout.set(true);
+    // Paused, not just reset: a Mercado Pago payment happens in another tab,
+    // so this one sees no taps for minutes — and the idle reset would clear
+    // the cart while the customer is mid-payment. closeCheckout() restarts it.
+    this.clearIdleTimers();
   }
 
   closeCheckout(): void {
@@ -1305,6 +1309,9 @@ export class ShopComponent implements OnInit, OnDestroy {
           error: err instanceof Error ? err.message : String(err),
         });
         this.showCheckout.set(false);
+        // Checkout paused the idle timer; the cart is back in the customer's
+        // hands, so an abandoned failure must still time out eventually.
+        this.startShopIdleTimer();
         const detail = err instanceof Error ? ` (${err.message})` : '';
         this.checkoutError.set(
           `Payment could not be saved — please try again or ask a cashier.${detail}`
@@ -1408,6 +1415,9 @@ export class ShopComponent implements OnInit, OnDestroy {
 
   private startShopIdleTimer(): void {
     this.clearIdleTimers();
+    // Taps inside the checkout overlay bubble to the shell's resetIdleTimer();
+    // while checkout is open the timer stays paused (see openCheckout()).
+    if (this.showCheckout()) return;
     const countdownMs = this.shopIdleTimeoutMs - 15_000;
     this.shopIdleCountdownStartTimer = setTimeout(() => {
       this.shopIdleCountdownStartTimer = null;
