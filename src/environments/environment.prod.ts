@@ -219,9 +219,14 @@ export const environment = {
   // must not be baked into a client bundle regardless. Credentials are left empty;
   // when absent the OTLP exporter exports unauthenticated (dropped) instead of
   // crashing. Inject real creds via a runtime config fetch if telemetry is revived.
+  //
+  // Off until the OTLP relay (#399) exists. With no credentials the gateway answers
+  // every export 401 (checked 2026-10-05), so leaving it on only spent a request per
+  // batch from every customer's phone. #399 turns it back on, pointed at the relay,
+  // which holds the token server-side (#394).
   telemetry: {
     otlp: {
-      enabled: true,
+      enabled: false,
       endpoint: 'https://otlp-gateway-prod-us-east-3.grafana.net/otlp',
       instanceId: '',
       apiKey: '',
