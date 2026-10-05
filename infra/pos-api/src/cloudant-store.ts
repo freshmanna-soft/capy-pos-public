@@ -147,7 +147,12 @@ export class CloudantStore<T extends StoredDocument> implements DocumentStore<T>
    * Run a database-scoped Cloudant request with the same IAM token cache as document operations.
    * Specialized indexed adapters use this rather than duplicating authentication or exposing it.
    */
-  async databaseRequest(method: string, path: string, body?: unknown): Promise<Response> {
+  async databaseRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal
+  ): Promise<Response> {
     const databaseRoot = new URL(
       `${this.config.url.replace(/\/+$/, '')}/${encodeURIComponent(this.config.database)}/`
     );
@@ -159,10 +164,19 @@ export class CloudantStore<T extends StoredDocument> implements DocumentStore<T>
     ) {
       throw new Error('Cloudant database path must stay inside the configured database.');
     }
-    return this.request(method, path, body);
+    const response = await this.request(method, path, body, signal);
+    if (response.status === 401 || response.status === 403) {
+      this.token = null;
+    }
+    return response;
   }
 
-  private async request(method: string, path: string, body?: unknown): Promise<Response> {
+  private async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal
+  ): Promise<Response> {
     const token = await this.bearerToken();
     return this.fetchImpl(`${this.config.url}/${encodeURIComponent(this.config.database)}${path}`, {
       method,
@@ -172,6 +186,7 @@ export class CloudantStore<T extends StoredDocument> implements DocumentStore<T>
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(signal === undefined ? {} : { signal }),
     });
   }
 
