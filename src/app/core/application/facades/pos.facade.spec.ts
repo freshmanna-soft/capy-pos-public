@@ -252,7 +252,7 @@ describe('PosFacade', () => {
   });
 
   describe('checkout operations', () => {
-    it('should generate receipt and adjust stock on checkout', async () => {
+    it('generates the receipt and leaves stock to the SaleCompleted handler (#354)', async () => {
       const mockItems = [{ product: { id: 'p1' }, quantity: 2 }];
       mockCartService.items = signal(mockItems as unknown[]);
 
@@ -277,8 +277,45 @@ describe('PosFacade', () => {
       const receipt = await facade.checkout(paymentResult as never);
 
       expect(mockGenerateReceipt.execute).toHaveBeenCalledWith(paymentResult);
-      expect(mockAdjustStock.execute).toHaveBeenCalled();
+      // Recorded: the blocking stock handler has already run, so no inline decrement.
+      expect(mockAdjustStock.execute).not.toHaveBeenCalled();
       expect(receipt).toEqual({ items: [], total: 0 });
+    });
+
+    it('takes stock off inline when the sale record is deferred (#354)', async () => {
+      const mockItems = [{ product: { id: 'p1' }, quantity: 2 }];
+      mockPersistTransaction.execute.mockResolvedValue({ success: false, outcome: 'deferred' });
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          PosFacade,
+          { provide: CartService, useValue: { ...mockCartService, items: signal(mockItems) } },
+          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
+          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
+          { provide: DexieDatabase, useValue: mockDb },
+          { provide: CustomerService, useValue: mockCustomers },
+          { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
+          { provide: EventBusService, useValue: mockEventBus },
+          { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
+        ],
+      });
+      facade = TestBed.inject(PosFacade);
+
+      await facade.checkout({ method: 'cash', amount: 100 } as never);
+
+      expect(mockAdjustStock.execute).toHaveBeenCalledWith([{ productId: 'p1', quantity: 2 }]);
+    });
+
+    it('leaves stock alone for a retried checkout that was already recorded (#354)', async () => {
+      mockPersistTransaction.execute.mockResolvedValue({
+        success: true,
+        outcome: 'already-recorded',
+      });
+
+      await facade.checkout({ method: 'cash', amount: 100 } as never);
+
+      expect(mockAdjustStock.execute).not.toHaveBeenCalled();
     });
 
     it('should clear cart after successful checkout', async () => {
@@ -303,6 +340,9 @@ describe('PosFacade', () => {
 
     it('completes checkout even when stock adjustment throws', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      // Stock only runs inline when the record is deferred (#354).
+      mockPersistTransaction.execute.mockResolvedValue({ success: false, outcome: 'deferred' });
       mockAdjustStock.execute.mockRejectedValue(new Error('IndexedDB gone'));
 
       const paymentResult = { method: 'cash', amount: 20 };
@@ -751,7 +791,12 @@ describe('PosFacade', () => {
       expect(mockPersistTransaction.execute).toHaveBeenCalledWith({
         paymentMethod: 'card',
         transactionId: 'TXN-352',
-        sale: { correlationId: expect.stringMatching(UUID_V4), amount: 12.5, appliedInline: [] },
+        sale: {
+          correlationId: expect.stringMatching(UUID_V4),
+          amount: 12.5,
+          appliedInline: [],
+          fallbackInline: ['adjust-stock-on-sale'],
+        },
       });
     });
 

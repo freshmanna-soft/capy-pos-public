@@ -17,6 +17,12 @@ export interface SaleCompletedOutboxEvent {
    * inline and no `SaleCompleted` handler exists; #354 and #355 fill it in.
    */
   appliedInline: readonly string[];
+  /**
+   * Handlers whose side effect the caller applies inline only if this record comes
+   * back `deferred` (#354). A retry that later lands writes their receipts too, so
+   * the effect is never applied twice.
+   */
+  fallbackInline?: readonly string[];
 }
 
 /**

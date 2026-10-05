@@ -44,7 +44,7 @@ export class DexieSaleOutboxAdapter implements SaleOutboxPort, OnDestroy {
     writeTransaction: () => Promise<unknown>
   ): Promise<SaleRecordOutcome> {
     try {
-      return await this.write(event, writeTransaction);
+      return await this.write(event, writeTransaction, event.appliedInline);
     } catch (error) {
       console.error(
         `[SaleOutbox] Could not record sale ${event.transactionId}; retrying in the background:`,
@@ -60,10 +60,14 @@ export class DexieSaleOutboxAdapter implements SaleOutboxPort, OnDestroy {
     this.retries.clear();
   }
 
-  /** Both rows or neither. A duplicate transaction id means a retried checkout. */
+  /**
+   * Both rows or neither. A duplicate transaction id means a retried checkout.
+   * `inline` names the handlers already applied by the caller; they get receipts.
+   */
   private async write(
     event: SaleCompletedOutboxEvent,
-    writeTransaction: () => Promise<unknown>
+    writeTransaction: () => Promise<unknown>,
+    inline: readonly string[]
   ): Promise<'recorded' | 'already-recorded'> {
     const at = new Date(this.now());
     const row = newOutboxRow(
@@ -80,9 +84,9 @@ export class DexieSaleOutboxAdapter implements SaleOutboxPort, OnDestroy {
         async () => {
           await writeTransaction();
           await this.db.outbox.add(row);
-          if (event.appliedInline.length > 0) {
+          if (inline.length > 0) {
             await this.db.outboxReceipts.bulkPut(
-              event.appliedInline.map((handler) => ({
+              inline.map((handler) => ({
                 eventId: row.id,
                 handler,
                 status: OutboxStatus.HANDLED,
@@ -98,7 +102,8 @@ export class DexieSaleOutboxAdapter implements SaleOutboxPort, OnDestroy {
       throw error;
     }
     // Only after the commit: a dispatch inside the transaction would see no row.
-    void this.dispatcher.drain();
+    // Waits for blocking handlers (stock, #354), so the till shows updated stock.
+    await this.dispatcher.dispatch(row.id);
     return 'recorded';
   }
 
@@ -110,7 +115,11 @@ export class DexieSaleOutboxAdapter implements SaleOutboxPort, OnDestroy {
     const timer = setTimeout(async () => {
       this.retries.delete(timer);
       try {
-        await this.write(event, writeTransaction);
+        // By now the caller has applied its fallback side effects inline.
+        await this.write(event, writeTransaction, [
+          ...event.appliedInline,
+          ...(event.fallbackInline ?? []),
+        ]);
       } catch (error) {
         const attempts = failures + 1;
         if (attempts >= OUTBOX_MAX_ATTEMPTS) {

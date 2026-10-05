@@ -37,6 +37,8 @@ export interface PersistTransactionRequest {
     amount: number;
     /** Handlers whose side effect the caller applies inline; see `SaleOutboxPort`. */
     appliedInline?: readonly string[];
+    /** Handlers the caller applies inline only if the record is deferred. */
+    fallbackInline?: readonly string[];
   };
 }
 
@@ -164,6 +166,7 @@ export class PersistTransactionUseCase {
               occurredAt: now.toISOString(),
             },
             appliedInline: request.sale.appliedInline ?? [],
+            ...(request.sale.fallbackInline ? { fallbackInline: request.sale.fallbackInline } : {}),
           },
           () => this.transactionRepository.create(transaction)
         );
