@@ -30,6 +30,8 @@ import { PersistTransactionUseCase } from '@core/application/use-cases/persist-t
 import { generateUUID } from '@core/domain/utils/uuid';
 import { ADJUST_STOCK_ON_SALE_HANDLER } from '@core/application/handlers/adjust-stock-on-sale.handler';
 import { AWARD_LOYALTY_POINTS_HANDLER } from '@core/application/handlers/award-loyalty-points.handler';
+import { AUDIT_SALE_HANDLER } from '@core/application/handlers/audit-sale.handler';
+import { TELEMETRY_SALE_HANDLER } from '@core/application/handlers/telemetry-sale.handler';
 
 /**
  * The customer attached to the sale in progress.
@@ -360,28 +362,9 @@ export class PosFacade {
       )
     );
 
-    // Observability (fire-and-forget): feed the audit log + telemetry so the
-    // agent-monitor dashboard reflects real POS activity. Deliberately NOT
-    // awaited — checkout must never block or fail on logging.
-    this.auditLog
-      .log({
-        agentName: 'PaymentAgent',
-        operation: 'processPayment',
-        entityType: 'Transaction',
-        entityId: paymentResult.transactionId,
-        action: AuditAction.EXECUTE,
-        status: AuditStatus.SUCCESS,
-        metadata: { method: paymentResult.method, amount: paymentResult.amount },
-      })
-      .catch((error) => console.error('[PosFacade] Audit log failed:', error));
-    try {
-      this.telemetry.recordCounter('payments.processed', 1, { method: paymentResult.method });
-      this.telemetry.recordGauge('payment.amount', paymentResult.amount, {
-        method: paymentResult.method,
-      });
-    } catch (error) {
-      console.error('[PosFacade] Telemetry failed:', error);
-    }
+    // Audit and telemetry are SaleCompleted handlers now (#356). Only a sale with no
+    // event behind it records them inline — fire-and-forget, never blocking the sale.
+    if (!recorded) this.recordObservabilityInline(paymentResult);
 
     // Loyalty is the SaleCompleted handler's job now (#355). Only a sale with no event
     // behind it awards inline, fire-and-forget as before: the sale is paid for, so a
@@ -418,10 +401,15 @@ export class PosFacade {
         sale: {
           correlationId,
           amount: paymentResult.amount,
-          // Audit and telemetry still run inline but have no handler yet (#356).
+          // Every side effect is a handler now (#354–#356); none runs inline here.
           appliedInline: [],
-          // Stock and loyalty run inline only if this record is deferred; see checkout().
-          fallbackInline: [ADJUST_STOCK_ON_SALE_HANDLER, AWARD_LOYALTY_POINTS_HANDLER],
+          // ...unless this record is deferred: then checkout() runs them inline.
+          fallbackInline: [
+            ADJUST_STOCK_ON_SALE_HANDLER,
+            AWARD_LOYALTY_POINTS_HANDLER,
+            AUDIT_SALE_HANDLER,
+            TELEMETRY_SALE_HANDLER,
+          ],
         },
       });
       if (!result.success) {
@@ -434,6 +422,32 @@ export class PosFacade {
     } catch (error) {
       console.error('[PosFacade] Recording the sale locally failed:', error);
       return false;
+    }
+  }
+
+  /**
+   * Feeds the audit log and telemetry for a sale whose event could not be recorded.
+   * Fire-and-forget: a paid-for sale must never block or fail on logging.
+   */
+  private recordObservabilityInline(paymentResult: PaymentResult): void {
+    this.auditLog
+      .log({
+        agentName: 'PaymentAgent',
+        operation: 'processPayment',
+        entityType: 'Transaction',
+        entityId: paymentResult.transactionId,
+        action: AuditAction.EXECUTE,
+        status: AuditStatus.SUCCESS,
+        metadata: { method: paymentResult.method, amount: paymentResult.amount },
+      })
+      .catch((error) => console.error('[PosFacade] Audit log failed:', error));
+    try {
+      this.telemetry.recordCounter('payments.processed', 1, { method: paymentResult.method });
+      this.telemetry.recordGauge('payment.amount', paymentResult.amount, {
+        method: paymentResult.method,
+      });
+    } catch (error) {
+      console.error('[PosFacade] Telemetry failed:', error);
     }
   }
 

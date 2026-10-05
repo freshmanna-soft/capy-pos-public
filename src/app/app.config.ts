@@ -25,6 +25,8 @@ import { SyncKioskModeService } from '@core/infrastructure/sync/sync-kiosk-mode.
 import { ProductRemoteSyncHandler } from '@core/infrastructure/sync/product-remote-sync.handler';
 import { AdjustStockOnSaleHandler } from '@core/application/handlers/adjust-stock-on-sale.handler';
 import { AwardLoyaltyPointsHandler } from '@core/application/handlers/award-loyalty-points.handler';
+import { AuditSaleHandler } from '@core/application/handlers/audit-sale.handler';
+import { TelemetrySaleHandler } from '@core/application/handlers/telemetry-sale.handler';
 import {
   EVENT_HANDLERS,
   OutboxDispatcherService,
@@ -182,6 +184,9 @@ export const appConfig: ApplicationConfig = {
     { provide: EVENT_HANDLERS, useExisting: AdjustStockOnSaleHandler, multi: true },
     // Awards a sale's loyalty points; not blocking (#355)
     { provide: EVENT_HANDLERS, useExisting: AwardLoyaltyPointsHandler, multi: true },
+    // Audit row (idempotent by event id) and payment telemetry (at most once) (#356)
+    { provide: EVENT_HANDLERS, useExisting: AuditSaleHandler, multi: true },
+    { provide: EVENT_HANDLERS, useExisting: TelemetrySaleHandler, multi: true },
     provideAppInitializer(() => {
       inject(OutboxDispatcherService).start();
     }),

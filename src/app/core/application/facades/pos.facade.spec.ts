@@ -358,8 +358,18 @@ describe('PosFacade', () => {
     });
   });
 
-  describe('checkout observability (#92)', () => {
-    function setup(overrides: { auditReject?: boolean; telemetryThrow?: boolean } = {}) {
+  // Audit and telemetry are SaleCompleted handlers since #356; checkout() records
+  // them inline only when the sale has no event behind it. These cover that fallback.
+  describe('checkout observability (#92) when the record is deferred', () => {
+    function setup(
+      overrides: { auditReject?: boolean; telemetryThrow?: boolean; recorded?: boolean } = {}
+    ) {
+      mockPersistTransaction.execute.mockResolvedValue(
+        overrides.recorded
+          ? { success: true, outcome: 'recorded' }
+          : { success: false, outcome: 'deferred' }
+      );
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const mockAudit = {
         log: vi
           .fn()
@@ -420,6 +430,16 @@ describe('PosFacade', () => {
       // Flush the fire-and-forget rejection so its .catch runs.
       await new Promise((r) => setTimeout(r, 0));
       expect(receipt).toBeTruthy();
+    });
+
+    it('leaves audit and telemetry to their handlers once the sale is recorded (#356)', async () => {
+      const { facade, mockAudit, mockTelemetry } = setup({ recorded: true });
+
+      await facade.checkout({ method: 'cash', amount: 100, transactionId: 'TXN-4' } as never);
+
+      expect(mockAudit.log).not.toHaveBeenCalled();
+      expect(mockTelemetry.recordCounter).not.toHaveBeenCalled();
+      expect(mockTelemetry.recordGauge).not.toHaveBeenCalled();
     });
 
     it('still returns a receipt when telemetry throws', async () => {
@@ -802,7 +822,12 @@ describe('PosFacade', () => {
           correlationId: expect.stringMatching(UUID_V4),
           amount: 12.5,
           appliedInline: [],
-          fallbackInline: ['adjust-stock-on-sale', 'award-loyalty-points'],
+          fallbackInline: [
+            'adjust-stock-on-sale',
+            'award-loyalty-points',
+            'audit-sale',
+            'telemetry-sale',
+          ],
         },
       });
     });

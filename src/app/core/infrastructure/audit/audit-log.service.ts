@@ -123,13 +123,28 @@ export class AuditLogService {
 
   /**
    * Log an audit entry
+   *
+   * @param options.id A stable id, for callers that may log the same fact twice: the
+   *   row is upserted, so a retried event leaves one row, not two (#356). Such a
+   *   caller retries on failure, so with an id a failed write rejects instead of
+   *   being swallowed into the cache.
    */
-  async log(entry: Omit<AuditLogEntry, 'id' | 'timestamp'>): Promise<void> {
+  async log(
+    entry: Omit<AuditLogEntry, 'id' | 'timestamp'>,
+    options: { id?: string } = {}
+  ): Promise<void> {
     const fullEntry: AuditLogEntry = {
       ...entry,
-      id: this.generateId(),
+      id: options.id ?? this.generateId(),
       timestamp: new Date(),
     };
+
+    if (options.id !== undefined) {
+      await this.db.auditLogs.put(fullEntry);
+      this.inMemoryCache = this.inMemoryCache.filter((cached) => cached.id !== options.id);
+      this.addToCache(fullEntry);
+      return;
+    }
 
     try {
       // Store in database
