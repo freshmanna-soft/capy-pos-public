@@ -37,15 +37,23 @@ export class ManageOperatorMembershipUseCase {
    * author roles (no MANAGE_ROLES) can still populate the assign dropdown.
    * @throws AuthorizationError without MANAGE_OPERATORS.
    */
-  async listAssignableRoles(): Promise<RoleSummaryDto[]> {
-    this.authz.assert(Permission.MANAGE_OPERATORS);
-    return this.port.listAssignableRoles();
+  listAssignableRoles(): Promise<RoleSummaryDto[]> {
+    try {
+      this.authz.assert(Permission.MANAGE_OPERATORS);
+      return this.port.listAssignableRoles();
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   /** @throws AuthorizationError without MANAGE_OPERATORS; whatever the port throws otherwise (e.g. unsupported without App ID). */
-  async createOperator(email: string, roleId: string): Promise<OperatorSummaryDto> {
-    this.authz.assert(Permission.MANAGE_OPERATORS);
-    return this.port.createOperator(email, roleId);
+  createOperator(email: string, roleId: string): Promise<OperatorSummaryDto> {
+    try {
+      this.authz.assert(Permission.MANAGE_OPERATORS);
+      return this.port.createOperator(email, roleId);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   /** @throws AuthorizationError without MANAGE_OPERATORS; Error when no active tenant. */

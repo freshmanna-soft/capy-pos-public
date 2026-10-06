@@ -301,7 +301,7 @@ export class CognitoAuthAdapter implements AuthGateway {
   }
 
   private async buildSession(result: AuthenticationResult): Promise<AuthSessionDto> {
-    return this.sessionFromTokens(result.IdToken, result.AccessToken);
+    return await this.sessionFromTokens(result.IdToken, result.AccessToken);
   }
 
   private async sessionFromTokens(idToken: string, accessToken: string): Promise<AuthSessionDto> {
@@ -359,9 +359,7 @@ export class CognitoAuthAdapter implements AuthGateway {
   }
 
   private async findJwk(kid: string): Promise<Jwk | undefined> {
-    if (!this.jwksCache) {
-      this.jwksCache = await this.fetchJwks();
-    }
+    this.jwksCache ??= await this.fetchJwks();
     const hit = this.jwksCache.find((k) => k.kid === kid);
     if (hit) return hit;
 

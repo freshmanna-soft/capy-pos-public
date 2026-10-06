@@ -59,7 +59,7 @@ test environments.
 
 ### Todo List
 1. Edit [`src/app/core/infrastructure/payment/mercadopago.provider.ts`](src/app/core/infrastructure/payment/mercadopago.provider.ts): replace the conditional expression with a single `{ provide: MERCADOPAGO_PAYMENT_PORT, useClass: MercadoPagoAdapter }` provider.
-2. Verify that `environment.test.ts` has `mercadopago.enabled: false`; test cases that need `isEnabled()` to return true must do so via `TestBed` override on the `MERCADOPAGO_PAYMENT_PORT` token, not via the environment flag.
+2. Verify that `environment.unit.ts` has `mercadopago.enabled: false`; test cases that need `isEnabled()` to return true must do so via `TestBed` override on the `MERCADOPAGO_PAYMENT_PORT` token, not via the environment flag.
 3. Update `mercadopago.adapter.spec.ts`: remove any workaround that bypassed DI by providing the no-op stub.
 4. Update `checkout.component.spec.ts` accordingly.
 5. Run all payment tests — confirm green.
@@ -68,7 +68,7 @@ test environments.
 - [`src/app/core/infrastructure/payment/mercadopago.provider.ts`](src/app/core/infrastructure/payment/mercadopago.provider.ts)
 - [`src/app/core/infrastructure/payment/mercadopago.adapter.ts`](src/app/core/infrastructure/payment/mercadopago.adapter.ts)
 - [`src/app/core/application/ports/mercadopago.port.ts`](src/app/core/application/ports/mercadopago.port.ts)
-- [`src/environments/environment.test.ts`](src/environments/environment.test.ts)
+- [`src/environments/environment.unit.ts`](src/environments/environment.unit.ts)
 
 ### Status
 [x] done

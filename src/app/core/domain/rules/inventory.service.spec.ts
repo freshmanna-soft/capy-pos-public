@@ -53,7 +53,9 @@ describe('InventoryService', () => {
 
       expect(result.productId).toBe('P1');
       expect(result.quantity).toBe(5);
-      expect(result.reservationId).toMatch(/^RES-P1-\d+-[a-z0-9]+$/);
+      expect(result.reservationId).toMatch(
+        /^RES-P1-\d+-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      );
       expect(result.reservedAt).toBeInstanceOf(Date);
       expect(result.expiresAt).toBeInstanceOf(Date);
       expect(result.expiresAt.getTime() - result.reservedAt.getTime()).toBe(15 * 60000);

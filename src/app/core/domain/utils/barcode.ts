@@ -55,7 +55,7 @@ export interface BarcodeDescription {
  * which is precisely the duplicate this normalization exists to make visible.
  */
 export function normalizeBarcode(raw: string): string {
-  const digitsOrWord = raw.trim().replace(/[\s-]/g, '');
+  const digitsOrWord = raw.trim().replaceAll(/[\s-]/g, '');
   if (digitsOrWord.length === 0) {
     return '';
   }
@@ -155,7 +155,7 @@ export function barcodeKey(raw: string): string {
  * short code is better served by being told it was recognized and expanded.
  */
 function classify(raw: string, normalized: string): BarcodeKind {
-  const rawDigits = raw.trim().replace(/[\s-]/g, '');
+  const rawDigits = raw.trim().replaceAll(/[\s-]/g, '');
   if (rawDigits.length === 8 && isUpcE(rawDigits)) {
     return 'upce';
   }
@@ -190,7 +190,7 @@ function classify(raw: string, normalized: string): BarcodeKind {
  * when the compressed form's own check digit already agrees.
  */
 function isUpcE(digits: string): boolean {
-  if (digits[0] !== '0' && digits[0] !== '1') {
+  if (!digits.startsWith('0') && !digits.startsWith('1')) {
     return false;
   }
   const expanded = expandUpcE(digits);

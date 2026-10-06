@@ -29,6 +29,7 @@ import {
 } from '@app/agents/payment/domain/payment-agent.interface';
 import { Payment, PaymentMethod, PaymentStatus } from '@core/domain/entities/payment.entity';
 import { PaymentBuilder } from '@core/domain/entities/payment.builder';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 /**
  * Payment Agent
@@ -66,30 +67,33 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
   /**
    * Initialize agent
    */
-  protected async onInitialize(): Promise<void> {
+  protected onInitialize(): Promise<void> {
     console.log('Initializing PaymentAgent');
     // Load payment configuration
     // Initialize payment gateways
     // Set up payment processors
+    return Promise.resolve();
   }
 
   /**
    * Start agent
    */
-  protected async onStart(): Promise<void> {
+  protected onStart(): Promise<void> {
     console.log('Starting PaymentAgent');
     // Start payment monitoring
     // Connect to payment gateways
+    return Promise.resolve();
   }
 
   /**
    * Stop agent
    */
-  protected async onStop(): Promise<void> {
+  protected onStop(): Promise<void> {
     console.log('Stopping PaymentAgent');
     // Disconnect from payment gateways
     // Complete pending payments
     this.paymentEventsSubject.complete();
+    return Promise.resolve();
   }
 
   /**
@@ -303,7 +307,7 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
   /**
    * Validate payment information
    */
-  async validatePayment(request: ValidatePaymentRequest): Promise<ValidatePaymentResponse> {
+  validatePayment(request: ValidatePaymentRequest): Promise<ValidatePaymentResponse> {
     const errors: string[] = [];
     const warnings: string[] = [];
 
@@ -329,11 +333,11 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
         break;
     }
 
-    return {
+    return Promise.resolve({
       valid: errors.length === 0,
       errors,
       warnings: warnings.length > 0 ? warnings : undefined,
-    };
+    });
   }
 
   /**
@@ -729,12 +733,9 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
    * Private helper methods
    */
 
-  private async processCashPayment(
-    _payment: Payment,
-    _request: ProcessPaymentRequest
-  ): Promise<string> {
+  private processCashPayment(_payment: Payment, _request: ProcessPaymentRequest): Promise<string> {
     // Cash payments are immediately successful
-    return 'CASH-' + Date.now();
+    return Promise.resolve('CASH-' + Date.now());
   }
 
   private async processCardPayment(
@@ -789,10 +790,8 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
   ): void {
     if (!request.cardNumber) {
       errors.push('Card number is required');
-    } else {
-      if (!this.isValidCardNumber(request.cardNumber)) {
-        errors.push('Invalid card number');
-      }
+    } else if (!this.isValidCardNumber(request.cardNumber)) {
+      errors.push('Invalid card number');
     }
 
     if (!request.expiryMonth || !request.expiryYear) {
@@ -822,14 +821,14 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
 
   private isValidCardNumber(cardNumber: string): boolean {
     // Luhn algorithm for card validation
-    const digits = cardNumber.replace(/\D/g, '');
+    const digits = cardNumber.replaceAll(/\D/g, '');
     if (digits.length < 13 || digits.length > 19) return false;
 
     let sum = 0;
     let isEven = false;
 
     for (let i = digits.length - 1; i >= 0; i--) {
-      let digit = parseInt(digits[i]);
+      let digit = Number.parseInt(digits[i]);
 
       if (isEven) {
         digit *= 2;
@@ -844,9 +843,9 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
   }
 
   private detectCardBrand(cardNumber: string): string {
-    const digits = cardNumber.replace(/\D/g, '');
+    const digits = cardNumber.replaceAll(/\D/g, '');
 
-    if (/^4/.test(digits)) return 'Visa';
+    if (digits.startsWith('4')) return 'Visa';
     if (/^5[1-5]/.test(digits)) return 'Mastercard';
     if (/^3[47]/.test(digits)) return 'American Express';
     if (/^6(?:011|5)/.test(digits)) return 'Discover';
@@ -855,11 +854,11 @@ export class PaymentAgent extends BaseAgent implements IPaymentAgent {
   }
 
   private generatePaymentId(): string {
-    return `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `PAY-${generateUUID()}`;
   }
 
   private generateTransactionReference(): string {
-    return `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return `TXN-${generateUUID()}`;
   }
 
   private emitPaymentEvent(event: PaymentEvent): void {

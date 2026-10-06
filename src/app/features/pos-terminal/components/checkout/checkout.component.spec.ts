@@ -371,23 +371,14 @@ describe('CheckoutComponent', () => {
       expect(btn.disabled).toBe(false);
     });
 
-    it('should proceed to cash step when cash selected and Continue clicked', () => {
-      component.selectMethod('cash');
-      component.proceedToDetails();
-      expect(component.step()).toBe('cash');
-    });
-
-    it('should proceed to card step when card selected and Continue clicked', () => {
-      component.selectMethod('card');
-      component.proceedToDetails();
-      expect(component.step()).toBe('card');
-    });
-
-    it('should proceed to mobile step when mobile selected and Continue clicked', () => {
-      component.selectMethod('mobile');
-      component.proceedToDetails();
-      expect(component.step()).toBe('mobile');
-    });
+    it.each(['cash', 'card', 'mobile'] as const)(
+      'should proceed to %s step when selected and Continue clicked',
+      (method) => {
+        component.selectMethod(method);
+        component.proceedToDetails();
+        expect(component.step()).toBe(method);
+      }
+    );
   });
 
   describe('Cancellation', () => {
@@ -495,7 +486,7 @@ describe('CheckoutComponent', () => {
       fixture.detectChanges();
       const el = fixture.nativeElement;
       const quickBtns = el.querySelectorAll('.co-quick-btn');
-      expect(quickBtns.length).toBe(4);
+      expect(quickBtns).toHaveLength(4);
     });
 
     it('should set cash amount from quick buttons', () => {

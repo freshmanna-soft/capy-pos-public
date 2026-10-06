@@ -29,6 +29,16 @@ import { WebAuthnAuthAdapter } from './webauthn/webauthn-auth.adapter';
 const useAppIdGateway = environment.appId?.enabled === true;
 const useCognitoGateway = environment.cognito?.enabled === true;
 
+function authGatewayAdapter() {
+  if (useAppIdGateway) {
+    return AppIdAuthAdapter;
+  }
+  if (useCognitoGateway) {
+    return CognitoAuthAdapter;
+  }
+  return LocalCredentialAuthAdapter;
+}
+
 /**
  * AUTH_PROVIDERS
  *
@@ -44,8 +54,8 @@ const useCognitoGateway = environment.cognito?.enabled === true;
  * capability of this device — the credential lives in this machine's secure enclave
  * — and both of its ports are served by the one adapter, which implements them
  * together because enrolling and asserting share the same ceremony plumbing. When
- * verification moves server-side (see the TODO in that adapter) this binding is
- * where the swap happens.
+ * verification moves server-side (see the adapter's documented security boundary),
+ * this binding is where the swap happens.
  *
  * OperatorAdmin swaps the same way, on the same flag (Phase 3d): App ID fully
  * replaces the local adapter as `AuthGateway`, so it replaces
@@ -61,11 +71,7 @@ export const AUTH_PROVIDERS: Provider[] = [
   AppIdAuthAdapter,
   {
     provide: AUTH_GATEWAY,
-    useExisting: useAppIdGateway
-      ? AppIdAuthAdapter
-      : useCognitoGateway
-        ? CognitoAuthAdapter
-        : LocalCredentialAuthAdapter,
+    useExisting: authGatewayAdapter(),
   },
   WebAuthnAuthAdapter,
   {

@@ -34,8 +34,10 @@
 
   <!-- Search Input -->
   <div class="relative">
+    <label for="product-search" class="sr-only">Search products</label>
     <input
       #searchInput
+      id="product-search"
       data-testid="product-search"
       type="search"
       [value]="searchQuery()"

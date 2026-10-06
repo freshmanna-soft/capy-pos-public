@@ -546,7 +546,8 @@ export class TransactionHistoryComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    this.loadTransactions();
+    // The use case captures repository failures in its error signal.
+    void this.loadTransactions();
   }
 
   /**

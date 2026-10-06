@@ -55,6 +55,11 @@ describe('customerEmailValidator', () => {
     ])('refuses %s', (_label, value) => {
       expect(verdict(value)).toEqual({ email: true });
     });
+
+    it('rejects hostile long input without backtracking through it', () => {
+      expect(verdict(`${'a'.repeat(50_000)}@example`)).toEqual({ email: true });
+      expect(verdict(`a@${'b'.repeat(50_000)}.`)).toEqual({ email: true });
+    });
   });
 
   describe('the length bound is the relay’s MAX_EMAIL_LENGTH', () => {

@@ -296,13 +296,29 @@ export class KioskSettingsService {
   }
 
   async deleteOrg(orgId: string): Promise<void> {
-    // Cascade: remove all stores and terminals under this org.
-    const stores = this._stores().filter((s) => s.orgId === orgId);
-    for (const store of stores) {
-      await this.deleteStore(store.storeId);
+    // Cascade in one database operation so store count does not turn into round trips.
+    const storeIds = new Set(
+      this._stores()
+        .filter((store) => store.orgId === orgId)
+        .map((store) => store.storeId)
+    );
+    const terminalIds = this._terminals()
+      .filter((terminal) => storeIds.has(terminal.storeId))
+      .map((terminal) => terminal.terminalId);
+    const table = this.db.table('settings');
+    await Promise.all([
+      table.delete(orgKey(orgId)),
+      ...Array.from(storeIds, (storeId) => table.delete(storeKey(storeId))),
+      ...terminalIds.map((terminalId) => table.delete(terminalKey(terminalId))),
+    ]);
+    this._orgs.update((list) => list.filter((org) => org.orgId !== orgId));
+    this._stores.update((list) => list.filter((store) => !storeIds.has(store.storeId)));
+    this._terminals.update((list) =>
+      list.filter((terminal) => !terminalIds.includes(terminal.terminalId))
+    );
+    if (terminalIds.includes(this._activeTerminalId())) {
+      await this.setActiveTerminal(this._terminals()[0]?.terminalId ?? DEFAULT_TERMINAL_ID);
     }
-    await this.db.table('settings').delete(orgKey(orgId));
-    this._orgs.update((list) => list.filter((o) => o.orgId !== orgId));
   }
 
   // ── Store CRUD ────────────────────────────────────────────────────────────
@@ -313,18 +329,26 @@ export class KioskSettingsService {
   }
 
   async deleteStore(storeId: string): Promise<void> {
-    // Cascade: remove all terminals under this store.
-    const terminals = this._terminals().filter((t) => t.storeId === storeId);
-    for (const terminal of terminals) {
-      await this.deleteTerminal(terminal.terminalId);
+    const terminalIds = this._terminals()
+      .filter((terminal) => terminal.storeId === storeId)
+      .map((terminal) => terminal.terminalId);
+    const table = this.db.table('settings');
+    await Promise.all([
+      table.delete(storeKey(storeId)),
+      ...terminalIds.map((terminalId) => table.delete(terminalKey(terminalId))),
+    ]);
+    this._stores.update((list) => list.filter((store) => store.storeId !== storeId));
+    this._terminals.update((list) =>
+      list.filter((terminal) => !terminalIds.includes(terminal.terminalId))
+    );
+    if (terminalIds.includes(this._activeTerminalId())) {
+      await this.setActiveTerminal(this._terminals()[0]?.terminalId ?? DEFAULT_TERMINAL_ID);
     }
-    await this.db.table('settings').delete(storeKey(storeId));
-    this._stores.update((list) => list.filter((s) => s.storeId !== storeId));
   }
 
   /** Derive a new unique store ID from an org + a desired slug. */
   nextStoreId(orgId: string, slug: string): string {
-    const base = `${orgId}/${slug.trim().toLowerCase().replace(/\s+/g, '-')}`;
+    const base = `${orgId}/${slug.trim().toLowerCase().replaceAll(/\s+/g, '-')}`;
     const exists = this._stores().some((s) => s.storeId === base);
     return exists ? `${base}-${Date.now()}` : base;
   }
@@ -350,7 +374,7 @@ export class KioskSettingsService {
 
   /** Derive a new unique terminal ID from a store + a desired slug. */
   nextTerminalId(storeId: string, slug: string): string {
-    const base = `${storeId}/${slug.trim().toLowerCase().replace(/\s+/g, '-')}`;
+    const base = `${storeId}/${slug.trim().toLowerCase().replaceAll(/\s+/g, '-')}`;
     const exists = this._terminals().some((t) => t.terminalId === base);
     return exists ? `${base}-${Date.now()}` : base;
   }

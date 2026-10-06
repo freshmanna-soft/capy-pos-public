@@ -28,7 +28,7 @@ capy-pos/
     ├── environment.ts        # Development (default)
     ├── environment.prod.ts   # Production
     ├── environment.staging.ts # Staging
-    └── environment.test.ts   # Test
+    └── environment.unit.ts   # Unit/integration tests
 ```
 
 ## Setup Instructions

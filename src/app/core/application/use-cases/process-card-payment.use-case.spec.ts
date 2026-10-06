@@ -177,32 +177,16 @@ describe('ProcessCardPaymentUseCase', () => {
       expect(fields.expiry.error).toBeNull();
     });
 
-    it('should show error for invalid format', () => {
-      useCase.setExpiry('1225');
+    it.each([
+      ['invalid format', '1225', 'Use MM/YY format'],
+      ['invalid month (00)', '00/28', 'Invalid month'],
+      ['invalid month (13)', '13/28', 'Invalid month'],
+      ['expired card', '01/20', 'Card has expired'],
+    ])('should show error for %s', (_case, expiry, expectedError) => {
+      useCase.setExpiry(expiry);
       const fields = useCase.fieldValidation();
       expect(fields.expiry.isValid).toBe(false);
-      expect(fields.expiry.error).toBe('Use MM/YY format');
-    });
-
-    it('should show error for invalid month (00)', () => {
-      useCase.setExpiry('00/28');
-      const fields = useCase.fieldValidation();
-      expect(fields.expiry.isValid).toBe(false);
-      expect(fields.expiry.error).toBe('Invalid month');
-    });
-
-    it('should show error for invalid month (13)', () => {
-      useCase.setExpiry('13/28');
-      const fields = useCase.fieldValidation();
-      expect(fields.expiry.isValid).toBe(false);
-      expect(fields.expiry.error).toBe('Invalid month');
-    });
-
-    it('should show error for expired card', () => {
-      useCase.setExpiry('01/20');
-      const fields = useCase.fieldValidation();
-      expect(fields.expiry.isValid).toBe(false);
-      expect(fields.expiry.error).toBe('Card has expired');
+      expect(fields.expiry.error).toBe(expectedError);
     });
 
     it('should be valid for future date', () => {
@@ -221,32 +205,16 @@ describe('ProcessCardPaymentUseCase', () => {
       expect(fields.cvv.error).toBeNull();
     });
 
-    it('should show error for too short CVV', () => {
-      useCase.setCvv('12');
+    it.each([
+      ['too short', '12', false, 'CVV must be 3-4 digits'],
+      ['too long', '12345', false, 'CVV must be 3-4 digits'],
+      ['3-digit', '123', true, null],
+      ['4-digit (Amex)', '1234', true, null],
+    ] as const)('validates %s CVV', (_case, cvv, expectedValid, expectedError) => {
+      useCase.setCvv(cvv);
       const fields = useCase.fieldValidation();
-      expect(fields.cvv.isValid).toBe(false);
-      expect(fields.cvv.error).toBe('CVV must be 3-4 digits');
-    });
-
-    it('should show error for too long CVV', () => {
-      useCase.setCvv('12345');
-      const fields = useCase.fieldValidation();
-      expect(fields.cvv.isValid).toBe(false);
-      expect(fields.cvv.error).toBe('CVV must be 3-4 digits');
-    });
-
-    it('should be valid for 3-digit CVV', () => {
-      useCase.setCvv('123');
-      const fields = useCase.fieldValidation();
-      expect(fields.cvv.isValid).toBe(true);
-      expect(fields.cvv.error).toBeNull();
-    });
-
-    it('should be valid for 4-digit CVV (Amex)', () => {
-      useCase.setCvv('1234');
-      const fields = useCase.fieldValidation();
-      expect(fields.cvv.isValid).toBe(true);
-      expect(fields.cvv.error).toBeNull();
+      expect(fields.cvv.isValid).toBe(expectedValid);
+      expect(fields.cvv.error).toBe(expectedError);
     });
   });
 

@@ -32,6 +32,9 @@ describe('cameraLabel', () => {
     // "(05ac:8514)" pushes the part that distinguishes two cameras out of a
     // narrow control.
     expect(cameraLabel('FaceTime HD Camera (05ac:8514)', 0)).toBe('FaceTime HD Camera');
+    expect(cameraLabel(`Camera${' '.repeat(50_000)}(05ac:8514)${' '.repeat(50_000)}`, 0)).toBe(
+      'Camera'
+    );
   });
 
   it('keeps parentheses that are part of the name', () => {

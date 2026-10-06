@@ -48,17 +48,17 @@ describe('TraceContextInterceptor', () => {
   });
 
   it('should capture HTTP response status', async () => {
-    const settled = new Promise<void>((resolve) => {
+    const settled = new Promise<unknown>((resolve, reject) => {
       httpClient.get('/api/test').subscribe({
-        next: () => resolve(),
-        error: () => resolve(),
+        next: resolve,
+        error: reject,
       });
     });
 
     const req = httpMock.expectOne('/api/test');
     req.flush({ data: 'test' }, { status: 200, statusText: 'OK' });
 
-    await settled;
+    await expect(settled).resolves.toEqual({ data: 'test' });
   });
 
   it('should handle HTTP errors', async () => {

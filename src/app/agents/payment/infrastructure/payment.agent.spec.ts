@@ -159,7 +159,7 @@ describe('PaymentAgent', () => {
 
       const response = await agent.validatePayment(request);
       expect(response.valid).toBe(true);
-      expect(response.errors.length).toBe(0);
+      expect(response.errors).toHaveLength(0);
     });
 
     it('should reject invalid card number', async () => {

@@ -252,12 +252,13 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
     return session;
   }
 
-  async signOut(): Promise<void> {
+  signOut(): Promise<void> {
     // Local clear only, same as the staff adapter: an App ID revocation
     // endpoint isn't confirmed against real docs, and dropping the token is a
     // real logout without it. Only the customer keys are removed — a staff
     // session in the same tab must survive a customer signing out.
     this.clear();
+    return Promise.resolve();
   }
 
   getAccessToken(): string | null {
@@ -317,7 +318,7 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
     if (!result.access_token) {
       throw new AppIdAuthError('App ID customer relay returned no access token');
     }
-    return this.sessionFromToken(result.access_token);
+    return await this.sessionFromToken(result.access_token);
   }
 
   private async sessionFromToken(accessToken: string): Promise<CustomerSessionDto> {

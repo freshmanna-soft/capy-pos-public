@@ -1,4 +1,5 @@
 import { SoftDeletableEntity } from '@core/domain/entities/base.entity';
+import { hasValidEmailShape } from '@core/domain/utils/email';
 import { isLoyaltyCode, normalizeLoyaltyCode } from '@core/domain/utils/loyalty-code';
 
 /**
@@ -209,8 +210,7 @@ export abstract class AbstractCustomer extends SoftDeletableEntity implements IL
    * Validates email format
    */
   private isValidEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+    return hasValidEmailShape(email);
   }
 
   /**

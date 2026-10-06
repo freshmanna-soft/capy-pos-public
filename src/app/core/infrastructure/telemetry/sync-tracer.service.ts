@@ -11,9 +11,9 @@ import { OtlpExporterService } from './otlp-exporter.service';
   providedIn: 'root',
 })
 export class SyncTracerService {
-  private tracer = trace.getTracer('sync-service', '0.0.0');
-  private syncSpans = new Map<string, Span>(); // Key: productId or operation name
-  private otlpExporter = inject(OtlpExporterService);
+  private readonly tracer = trace.getTracer('sync-service', '0.0.0');
+  private readonly syncSpans = new Map<string, Span>(); // Key: productId or operation name
+  private readonly otlpExporter = inject(OtlpExporterService);
 
   /**
    * Start tracing a sync operation (enqueue, flush, merge, etc.)

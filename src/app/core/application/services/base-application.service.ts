@@ -22,7 +22,7 @@ export abstract class BaseApplicationService<
   /**
    * Get all entities
    */
-  async getAll(): Promise<TEntity[]> {
+  getAll(): Promise<TEntity[]> {
     return this.repository.findAll();
   }
 
@@ -36,7 +36,7 @@ export abstract class BaseApplicationService<
   /**
    * Get entity by ID
    */
-  async getById(id: string): Promise<TEntity | null> {
+  getById(id: string): Promise<TEntity | null> {
     return this.repository.findById(id);
   }
 
@@ -50,7 +50,7 @@ export abstract class BaseApplicationService<
   /**
    * Create new entity
    */
-  async create(entity: TEntity): Promise<TEntity> {
+  create(entity: TEntity): Promise<TEntity> {
     return this.repository.create(entity);
   }
 
@@ -64,7 +64,7 @@ export abstract class BaseApplicationService<
   /**
    * Update existing entity
    */
-  async update(id: string, entity: TEntity): Promise<TEntity> {
+  update(id: string, entity: TEntity): Promise<TEntity> {
     return this.repository.update(id, entity);
   }
 
@@ -78,7 +78,7 @@ export abstract class BaseApplicationService<
   /**
    * Delete entity (soft delete)
    */
-  async delete(id: string): Promise<void> {
+  delete(id: string): Promise<void> {
     return this.repository.delete(id);
   }
 
@@ -92,7 +92,7 @@ export abstract class BaseApplicationService<
   /**
    * Check if entity exists
    */
-  async exists(id: string): Promise<boolean> {
+  exists(id: string): Promise<boolean> {
     return this.repository.exists(id);
   }
 
@@ -106,7 +106,7 @@ export abstract class BaseApplicationService<
   /**
    * Get count of all entities
    */
-  async count(): Promise<number> {
+  count(): Promise<number> {
     return this.repository.count();
   }
 
@@ -120,7 +120,7 @@ export abstract class BaseApplicationService<
   /**
    * Bulk create entities
    */
-  async bulkCreate(entities: TEntity[]): Promise<TEntity[]> {
+  bulkCreate(entities: TEntity[]): Promise<TEntity[]> {
     return this.repository.bulkCreate(entities);
   }
 
@@ -134,7 +134,7 @@ export abstract class BaseApplicationService<
   /**
    * Bulk update entities
    */
-  async bulkUpdate(updates: { id: string; data: Partial<TEntity> }[]): Promise<TEntity[]> {
+  bulkUpdate(updates: { id: string; data: Partial<TEntity> }[]): Promise<TEntity[]> {
     return this.repository.bulkUpdate(updates);
   }
 
@@ -158,48 +158,54 @@ export abstract class BaseApplicationService<
    * Hook called before create
    * Override in concrete services for custom logic
    */
-  protected async beforeCreate(entity: TEntity): Promise<void> {
+  protected beforeCreate(entity: TEntity): Promise<void> {
     this.validateEntity(entity);
+    return Promise.resolve();
   }
 
   /**
    * Hook called after create
    * Override in concrete services for custom logic
    */
-  protected async afterCreate(_entity: TEntity): Promise<void> {
+  protected afterCreate(_entity: TEntity): Promise<void> {
     // Default: no action
+    return Promise.resolve();
   }
 
   /**
    * Hook called before update
    * Override in concrete services for custom logic
    */
-  protected async beforeUpdate(id: string, entity: TEntity): Promise<void> {
+  protected beforeUpdate(_id: string, entity: TEntity): Promise<void> {
     this.validateEntity(entity);
+    return Promise.resolve();
   }
 
   /**
    * Hook called after update
    * Override in concrete services for custom logic
    */
-  protected async afterUpdate(_entity: TEntity): Promise<void> {
+  protected afterUpdate(_entity: TEntity): Promise<void> {
     // Default: no action
+    return Promise.resolve();
   }
 
   /**
    * Hook called before delete
    * Override in concrete services for custom logic
    */
-  protected async beforeDelete(_id: string): Promise<void> {
+  protected beforeDelete(_id: string): Promise<void> {
     // Default: no action
+    return Promise.resolve();
   }
 
   /**
    * Hook called after delete
    * Override in concrete services for custom logic
    */
-  protected async afterDelete(_id: string): Promise<void> {
+  protected afterDelete(_id: string): Promise<void> {
     // Default: no action
+    return Promise.resolve();
   }
 }
 

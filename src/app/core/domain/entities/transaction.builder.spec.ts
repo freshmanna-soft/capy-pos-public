@@ -22,7 +22,7 @@ describe('TransactionBuilder', () => {
     expect(transaction.id).toBeDefined();
     expect(transaction.status).toBe(TransactionStatus.PENDING);
     expect(transaction.type).toBe(TransactionType.SALE);
-    expect(transaction.items.length).toBe(1);
+    expect(transaction.items).toHaveLength(1);
     expect(transaction.refundedAmount).toBe(0);
     expect(transaction.paymentIds).toEqual([]);
   });
@@ -48,7 +48,7 @@ describe('TransactionBuilder', () => {
       .build();
 
     expect(transaction.items).toEqual(sampleItems);
-    expect(transaction.items.length).toBe(2);
+    expect(transaction.items).toHaveLength(2);
   });
 
   it('should set financial fields', () => {

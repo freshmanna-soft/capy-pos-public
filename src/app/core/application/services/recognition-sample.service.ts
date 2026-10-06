@@ -5,6 +5,7 @@ import {
   IRecognitionSampleDB,
 } from '@core/infrastructure/database/dexie-database.service';
 import { RecognitionOutcome, RecognitionTier } from './recognition-log.service';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 /** How many samples one product is allowed to keep before the oldest are evicted. */
 const DEFAULT_PER_PRODUCT_CAP = 200;
@@ -47,7 +48,7 @@ export class RecognitionSampleService {
     height: number;
   }): void {
     const row: IRecognitionSampleDB = {
-      id: `smp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `smp-${generateUUID()}`,
       tenantId: DEFAULT_TENANT_ID,
       logId: entry.logId,
       productId: entry.productId,
@@ -65,7 +66,7 @@ export class RecognitionSampleService {
   }
 
   /** How many samples exist for one product, for a cap check or a status line. */
-  async countByProduct(productId: string): Promise<number> {
+  countByProduct(productId: string): Promise<number> {
     return this.db.recognitionSamples.where('productId').equals(productId).count();
   }
 
@@ -76,7 +77,7 @@ export class RecognitionSampleService {
    * makes on demand, never a background sync — see the privacy note on the
    * feature this belongs to.
    */
-  async exportAll(): Promise<IRecognitionSampleDB[]> {
+  exportAll(): Promise<IRecognitionSampleDB[]> {
     return this.db.recognitionSamples.toArray();
   }
 
@@ -111,6 +112,6 @@ export class RecognitionSampleService {
 }
 
 function base64ToBlob(base64: string, mediaType = 'image/jpeg'): Blob {
-  const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+  const bytes = Uint8Array.from(atob(base64), (char) => char.codePointAt(0) ?? 0);
   return new Blob([bytes], { type: mediaType });
 }

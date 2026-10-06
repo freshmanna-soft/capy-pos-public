@@ -14,6 +14,7 @@ import {
   UpdateCustomerRequest,
 } from '@core/application/use-cases/manage-customers.use-case';
 import { CustomerStatus } from '@core/domain/entities/customer.entity';
+import { hasValidEmailShape } from '@core/domain/utils/email';
 import { CustomerFacade } from '@core/application/facades';
 
 type FormMode = 'closed' | 'create' | 'edit';
@@ -293,8 +294,7 @@ export class CustomersComponent implements OnInit {
   }
 
   private isValidEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+    return hasValidEmailShape(email);
   }
 
   private getEmptyFormData(): CustomerFormData {

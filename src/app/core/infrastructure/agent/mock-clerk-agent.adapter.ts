@@ -15,6 +15,7 @@ import { ClerkAgent } from '@core/application/ports/clerk-agent.port';
  */
 export const MOCK_MIN_LATENCY_MS = 400;
 export const MOCK_MAX_LATENCY_MS = 900;
+export const MOCK_LATENCY_MS = 650;
 
 /**
  * How many hops one mock turn ever takes.
@@ -151,21 +152,25 @@ export class MockClerkAgent implements ClerkAgent {
    */
   private answer(request: AgentTurnRequest): AgentStep {
     const { totalItems, total } = request.context;
-    const speech =
-      totalItems === 0
-        ? 'Nothing in the cart yet, so there is nothing to total.'
-        : `That is ${totalItems} ${totalItems === 1 ? 'item' : 'items'}, ${total.toFixed(2)} in total.`;
+    let speech = 'Nothing in the cart yet, so there is nothing to total.';
+    if (totalItems > 0) {
+      let itemLabel = 'items';
+      if (totalItems === 1) {
+        itemLabel = 'item';
+      }
+      speech = `That is ${totalItems} ${itemLabel}, ${total.toFixed(2)} in total.`;
+    }
     return { kind: 'answer', assistant: [{ type: 'text', text: speech }], speech };
   }
 
   /**
-   * Simulated round-trip. Resolves early on abort and clears its timer, so a
-   * cancelled turn does not hold one open for the better part of a second.
+   * Simulated round-trip. A fixed duration keeps the demo reproducible while
+   * still exercising its loading state. Resolves early on abort and clears its
+   * timer, so a cancelled turn does not hold one open.
    */
   private pause(signal?: AbortSignal): Promise<void> {
-    const ms = MOCK_MIN_LATENCY_MS + Math.random() * (MOCK_MAX_LATENCY_MS - MOCK_MIN_LATENCY_MS);
     return new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, ms);
+      const timer = setTimeout(resolve, MOCK_LATENCY_MS);
       signal?.addEventListener(
         'abort',
         () => {

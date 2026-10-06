@@ -38,9 +38,9 @@ export interface EventBusMessage<T = unknown> {
   providedIn: 'root',
 })
 export class EventBusService {
-  private messageSubject = new Subject<EventBusMessage>();
+  private readonly messageSubject = new Subject<EventBusMessage>();
   private messageHistory: EventBusMessage[] = [];
-  private maxHistorySize = 1000;
+  private readonly maxHistorySize = 1000;
 
   /**
    * Publish a message to the event bus
