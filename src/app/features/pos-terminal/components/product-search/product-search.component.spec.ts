@@ -389,7 +389,7 @@ describe('ProductSearchComponent', () => {
       expect(component.searchQuery()).toBe('Organic');
       expect(component.hasMoreProducts()).toBe(false);
       // Should have filtered to only 'Organic Coffee'
-      expect(component.searchResults().length).toBe(1);
+      expect(component.searchResults()).toHaveLength(1);
       expect(component.searchResults()[0].name).toBe('Organic Coffee');
     });
 
@@ -401,7 +401,7 @@ describe('ProductSearchComponent', () => {
       const event = { target: { value: 'COF' } } as unknown as Event;
       component.onSearchInput(event);
 
-      expect(component.searchResults().length).toBe(1);
+      expect(component.searchResults()).toHaveLength(1);
       expect(component.searchResults()[0].sku).toBe('COF-001');
     });
 
@@ -551,7 +551,7 @@ describe('ProductSearchComponent', () => {
 
       // After loading, hasMoreProducts should be true (30 > 20 pageSize)
       expect(component.hasMoreProducts()).toBe(true);
-      expect(component.searchResults().length).toBe(20);
+      expect(component.searchResults()).toHaveLength(20);
 
       // Trigger scroll near bottom
       const event = {
@@ -560,7 +560,7 @@ describe('ProductSearchComponent', () => {
       component.onScroll(event);
 
       // Should have loaded more
-      expect(component.searchResults().length).toBe(30);
+      expect(component.searchResults()).toHaveLength(30);
       expect(component.hasMoreProducts()).toBe(false);
     });
   });

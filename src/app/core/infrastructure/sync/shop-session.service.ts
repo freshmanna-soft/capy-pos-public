@@ -146,7 +146,7 @@ export class ShopSessionService {
   private mint(reason: 'expiry' | 'rejected' = 'expiry'): Promise<string> {
     // Joined only within one generation: a mint started before a release would
     // resolve without installing its token, so a later acquire must not wait on it.
-    if (this.inflight && this.inflight.generation === this.generation) {
+    if (this.inflight?.generation === this.generation) {
       return this.inflight.promise;
     }
     const storeId = this.storeId;
@@ -299,7 +299,7 @@ function expiryOf(token: string, expiresAt: unknown): number {
   try {
     const payload = token.split('.')[1];
     if (payload) {
-      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const normalized = payload.replaceAll('-', '+').replaceAll('_', '/');
       const padded = normalized.padEnd(
         normalized.length + ((4 - (normalized.length % 4)) % 4),
         '='

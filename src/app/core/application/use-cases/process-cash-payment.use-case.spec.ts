@@ -107,30 +107,21 @@ describe('ProcessCashPaymentUseCase', () => {
       expect(validation.error).toBeNull();
     });
 
-    it('should show error for negative amount', () => {
-      useCase.setAmountTendered(-10);
+    it.each([
+      ['negative', -10, 'Amount cannot be negative'],
+      ['insufficient', 20, 'Insufficient amount. Short by $5.99'],
+    ])('should show error for %s amount', (_case, amount, expectedError) => {
+      useCase.setAmountTendered(amount);
       const validation = useCase.validation();
       expect(validation.isValid).toBe(false);
-      expect(validation.error).toBe('Amount cannot be negative');
+      expect(validation.error).toBe(expectedError);
     });
 
-    it('should show error for insufficient amount', () => {
-      useCase.setAmountTendered(20);
-      const validation = useCase.validation();
-      expect(validation.isValid).toBe(false);
-      expect(validation.error).toContain('Insufficient amount');
-      expect(validation.error).toContain('5.99');
-    });
-
-    it('should be valid when amount equals total', () => {
-      useCase.setAmountTendered(25.99);
-      const validation = useCase.validation();
-      expect(validation.isValid).toBe(true);
-      expect(validation.error).toBeNull();
-    });
-
-    it('should be valid when amount exceeds total', () => {
-      useCase.setAmountTendered(50);
+    it.each([
+      ['equals', 25.99],
+      ['exceeds', 50],
+    ])('should be valid when amount %s total', (_case, amount) => {
+      useCase.setAmountTendered(amount);
       const validation = useCase.validation();
       expect(validation.isValid).toBe(true);
       expect(validation.error).toBeNull();

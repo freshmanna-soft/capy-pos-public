@@ -258,7 +258,7 @@ describe('CircuitBreakerService', () => {
       await service.execute('service2', async () => 'success');
 
       const allStats = service.getAllStats();
-      expect(Object.keys(allStats).length).toBe(2);
+      expect(Object.keys(allStats)).toHaveLength(2);
       expect(allStats['service1']).toBeDefined();
       expect(allStats['service2']).toBeDefined();
     });
@@ -326,7 +326,7 @@ describe('CircuitBreakerService', () => {
       service.clear();
 
       const allStats = service.getAllStats();
-      expect(Object.keys(allStats).length).toBe(0);
+      expect(Object.keys(allStats)).toHaveLength(0);
     });
   });
 

@@ -66,9 +66,12 @@ const EMPHASIS = /(\*{1,3}|_{1,3}|~{2})(?=\S)([\s\S]*?\S)\1/g;
  * floored at eight so a price, a quantity and a year all read normally.
  */
 const CODE_TOKENS = [
-  /#?\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
-  /#?\b[A-Za-z]{2,}[-_][A-Za-z0-9]*\d[A-Za-z0-9-]*\b/g,
-  /#?\b\d{8,14}\b/g,
+  {
+    pattern: /#?\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+    requiresDigit: false,
+  },
+  { pattern: /#?\b[A-Za-z]{2,}[-_][A-Za-z0-9-]*\b/g, requiresDigit: true },
+  { pattern: /#?\b\d{8,14}\b/g, requiresDigit: false },
 ];
 
 /** What a code with no catalogue name behind it becomes. */
@@ -158,8 +161,11 @@ function nameCodes(text: string, namesByCode: ReadonlyMap<string, string>): stri
     names.set(code.toLowerCase(), name);
   }
   let out = text;
-  for (const pattern of CODE_TOKENS) {
+  for (const { pattern, requiresDigit } of CODE_TOKENS) {
     out = out.replace(pattern, (match) => {
+      if (requiresDigit && !/\d/.test(match)) {
+        return match;
+      }
       const key = match.replace(/^#/, '').toLowerCase();
       return names.get(key) ?? ANONYMOUS_CODE;
     });
@@ -177,10 +183,17 @@ function dropPositions(text: string): string {
 
 /** One space between words, no space before punctuation the stripping left orphaned. */
 function collapse(text: string): string {
-  return text
-    .replace(/\s+/g, ' ')
-    .replace(/\s+([,.!?;:])/g, '$1')
-    .trim();
+  const words = text.trim().split(/\s+/);
+  let collapsed = '';
+  for (const word of words) {
+    if (word.length === 0) continue;
+    if (/^[,.!?;:]/.test(word)) {
+      collapsed += word;
+    } else {
+      collapsed += `${collapsed.length > 0 ? ' ' : ''}${word}`;
+    }
+  }
+  return collapsed;
 }
 
 /**

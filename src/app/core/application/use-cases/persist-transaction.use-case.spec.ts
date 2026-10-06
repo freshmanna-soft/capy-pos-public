@@ -117,7 +117,7 @@ describe('PersistTransactionUseCase', () => {
       expect(createdTxn.id).toBe('TXN-TEST-001');
       expect(createdTxn.status).toBe(TransactionStatus.COMPLETED);
       expect(createdTxn.type).toBe(TransactionType.SALE);
-      expect(createdTxn.items.length).toBe(2);
+      expect(createdTxn.items).toHaveLength(2);
     });
 
     it('should map cart items to transaction items correctly', async () => {

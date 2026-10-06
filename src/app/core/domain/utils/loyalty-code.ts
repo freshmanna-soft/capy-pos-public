@@ -112,7 +112,7 @@ export function generateLoyaltyCode(): string {
  * treat "not a code" and "no code" identically.
  */
 export function normalizeLoyaltyCode(raw: string): string {
-  const compact = raw.trim().replace(/[\s-]/g, '').toUpperCase();
+  const compact = raw.trim().replaceAll(/[\s-]/g, '').toUpperCase();
   if (compact.length === 0) {
     return '';
   }
@@ -122,9 +122,10 @@ export function normalizeLoyaltyCode(raw: string): string {
   if (!compact.startsWith(prefix)) {
     return '';
   }
-  const body = [...compact.slice(prefix.length)]
-    .map((char) => CROCKFORD_FOLD[char] ?? char)
-    .join('');
+  const body = Array.from(
+    compact.slice(prefix.length),
+    (char) => CROCKFORD_FOLD[char] ?? char
+  ).join('');
   return BODY_PATTERN.test(body) ? LOYALTY_CODE_PREFIX + body : '';
 }
 

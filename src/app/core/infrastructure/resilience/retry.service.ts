@@ -116,12 +116,12 @@ export class RetryService {
 
     this.initStats(operationName);
 
-    for (let attempt = 1; attempt <= finalConfig.maxAttempts; attempt++) {
+    const attempt = async (attemptNumber: number): Promise<T> => {
       try {
         const result = await fn();
 
         // Update stats on success
-        this.updateStats(operationName, attempt, true);
+        this.updateStats(operationName, attemptNumber, true);
 
         return result;
       } catch (error) {
@@ -129,42 +129,43 @@ export class RetryService {
 
         // Check if we should retry this error
         if (!this.shouldRetry(error, finalConfig)) {
-          this.updateStats(operationName, attempt, false);
+          this.updateStats(operationName, attemptNumber, false);
           throw error;
         }
 
-        // Don't delay after the last attempt
-        if (attempt < finalConfig.maxAttempts) {
-          const delay = this.calculateDelay(attempt, finalConfig);
-          _totalDelay += delay;
-
-          console.log(
-            `[Retry:${operationName}] Attempt ${attempt}/${finalConfig.maxAttempts} failed. ` +
-              `Retrying in ${delay}ms...`,
-            { error: error instanceof Error ? error.message : error }
+        if (attemptNumber >= finalConfig.maxAttempts) {
+          this.updateStats(operationName, finalConfig.maxAttempts, false);
+          console.error(
+            `[Retry:${operationName}] All ${finalConfig.maxAttempts} attempts failed`,
+            lastError
           );
-
-          this.notifyRetry(finalConfig, {
-            operationName,
-            attempt,
-            nextAttempt: attempt + 1,
-            maxAttempts: finalConfig.maxAttempts,
-            delay,
-            error,
-          });
-
-          await this.delay(delay);
+          throw new RetryExhaustedError(operationName, finalConfig.maxAttempts, lastError);
         }
-      }
-    }
 
-    // All attempts failed
-    this.updateStats(operationName, finalConfig.maxAttempts, false);
-    console.error(
-      `[Retry:${operationName}] All ${finalConfig.maxAttempts} attempts failed`,
-      lastError
-    );
-    throw new RetryExhaustedError(operationName, finalConfig.maxAttempts, lastError);
+        const delay = this.calculateDelay(attemptNumber, finalConfig);
+        _totalDelay += delay;
+
+        console.log(
+          `[Retry:${operationName}] Attempt ${attemptNumber}/${finalConfig.maxAttempts} failed. ` +
+            `Retrying in ${delay}ms...`,
+          { error: error instanceof Error ? error.message : error }
+        );
+
+        this.notifyRetry(finalConfig, {
+          operationName,
+          attempt: attemptNumber,
+          nextAttempt: attemptNumber + 1,
+          maxAttempts: finalConfig.maxAttempts,
+          delay,
+          error,
+        });
+
+        await this.delay(delay);
+        return attempt(attemptNumber + 1);
+      }
+    };
+
+    return attempt(1);
   }
 
   /**
@@ -367,7 +368,11 @@ export function Retry(config?: Partial<RetryConfig>) {
       const retryService = new RetryService();
       const operationName = `${target.constructor.name}.${propertyKey}`;
 
-      return retryService.execute(operationName, () => originalMethod.apply(this, args), config);
+      return await retryService.execute(
+        operationName,
+        () => originalMethod.apply(this, args),
+        config
+      );
     };
 
     return descriptor;

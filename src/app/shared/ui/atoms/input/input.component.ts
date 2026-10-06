@@ -2,6 +2,8 @@ import { Component, computed, forwardRef, input, output, signal } from '@angular
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { generateUUID } from '@core/domain/utils/uuid';
 
+type InputType = 'text' | 'email' | 'password' | 'number' | 'tel' | 'url' | 'search';
+
 /**
  * Input Component (Atom)
  *
@@ -150,9 +152,7 @@ import { generateUUID } from '@core/domain/utils/uuid';
 export class InputComponent implements ControlValueAccessor {
   // Signal-based inputs
   readonly id = input<string>(`input-${generateUUID().slice(0, 9)}`);
-  readonly type = input<'text' | 'email' | 'password' | 'number' | 'tel' | 'url' | 'search'>(
-    'text'
-  );
+  readonly type = input<InputType>('text');
   readonly label = input('');
   readonly placeholder = input('');
   readonly hint = input('');
@@ -185,9 +185,9 @@ export class InputComponent implements ControlValueAccessor {
   readonly autocomplete = input('');
   /** id of a `<datalist>` to suggest from, e.g. existing categories. */
   readonly listId = input('');
-  readonly min = input<number | string | null>(null);
-  readonly max = input<number | string | null>(null);
-  readonly step = input<number | string | null>(null);
+  readonly min = input<string | number | null>(null);
+  readonly max = input<string | number | null>(null);
+  readonly step = input<string | number | null>(null);
   readonly maxLength = input<number | null>(null);
 
   // Signal-based outputs

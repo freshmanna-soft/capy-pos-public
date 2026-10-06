@@ -249,7 +249,7 @@ describe('CurrentUserService', () => {
       // Line 151 — the `if (active) return [active]` truthy arm.
       service.setSession(sessionWithMemberships); // has tenantId: 'store-a', memberships: [{…}]
       const roles = service.principalRoles();
-      expect(roles.length).toBe(1);
+      expect(roles).toHaveLength(1);
       expect(roles[0].name).toBe('admin');
     });
 

@@ -87,6 +87,15 @@ const BACKOFF_BASE_MS = 1_000;
 const BACKOFF_CAP_MS = 5 * 60_000;
 const LOCK_NAME = 'capy-outbox';
 
+function serialForEach<T>(
+  items: readonly T[],
+  work: (item: T) => Promise<void>,
+  index = 0
+): Promise<void> {
+  if (index >= items.length) return Promise.resolve();
+  return work(items[index]).then(() => serialForEach(items, work, index + 1));
+}
+
 /** `min(1s·2^n, 5min)` plus up to 20% jitter, so tabs that failed together don't retry together. */
 export function outboxBackoffMs(attempts: number, random: () => number = Math.random): number {
   const base = Math.min(BACKOFF_BASE_MS * 2 ** attempts, BACKOFF_CAP_MS);
@@ -220,7 +229,7 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
     // reported already and must not fail every later flush of the same aggregate.
     const ids = await this.serialize(async () => {
       const rows = await this.unfinishedFor(aggregateId);
-      for (const row of rows) await this.process(row.id);
+      await serialForEach(rows, (row) => this.process(row.id));
       return rows.map((row) => row.id);
     });
 
@@ -236,13 +245,13 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
     try {
       await this.serialize(async () => {
         const now = this.now();
-        for (const status of UNFINISHED) {
+        await serialForEach(UNFINISHED, async (status) => {
           const due = await this.db.outbox
             .where('[status+nextAttemptAt]')
             .between([status, Dexie.minKey], [status, now], true, true)
             .toArray();
-          for (const row of due) await this.process(row.id);
-        }
+          await serialForEach(due, (row) => this.process(row.id));
+        });
       });
     } catch (error) {
       console.warn('[Outbox] Drain failed:', error);
@@ -307,9 +316,9 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
     let deferral: RetryLaterError | null = null;
     let terminal: TerminalHandlerError | null = null;
 
-    for (const handler of this.handlersFor(row.type)) {
+    await serialForEach(this.handlersFor(row.type), async (handler) => {
       const receipt = await this.db.outboxReceipts.get([row.id, handler.name]);
-      if (isSettled(receipt?.status)) continue;
+      if (isSettled(receipt?.status)) return;
 
       const base = { eventId: row.id, handler: handler.name, nextAttemptAt: 0 };
       try {
@@ -331,7 +340,7 @@ export class OutboxDispatcherService implements IDomainEventOutbox, OnDestroy {
           updatedAt: new Date(this.now()),
         });
       }
-    }
+    });
 
     return { failure, deferral, terminal };
   }

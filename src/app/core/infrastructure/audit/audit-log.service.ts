@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import Dexie, { Table } from 'dexie';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 /**
  * Audit Action Types
@@ -347,7 +348,7 @@ export class AuditLogService {
 
   private generateId(): string {
     this.sequenceCounter++;
-    return `audit-${Date.now()}-${String(this.sequenceCounter).padStart(6, '0')}-${Math.random().toString(36).substr(2, 5)}`;
+    return `audit-${Date.now()}-${String(this.sequenceCounter).padStart(6, '0')}-${generateUUID()}`;
   }
 
   private convertToCSV(logs: AuditLogEntry[]): string {

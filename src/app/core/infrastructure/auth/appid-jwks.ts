@@ -87,9 +87,7 @@ export class AppIdJwksKeyResolver {
   }
 
   private async findJwk(kid: string): Promise<Jwk | undefined> {
-    if (!this.jwksCache) {
-      this.jwksCache = await this.fetchJwks();
-    }
+    this.jwksCache ??= await this.fetchJwks();
     const hit = this.jwksCache.find((k) => k.kid === kid);
     if (hit) return hit;
 
@@ -136,12 +134,12 @@ function assertRsaShape(jwk: Jwk, kid: string): void {
 // ---------------------------------------------------------------------------
 
 function base64UrlToBytes(value: string): Uint8Array {
-  const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+  const base64 = value.replaceAll('-', '+').replaceAll('_', '/');
   const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+    bytes[i] = binary.codePointAt(i) ?? 0;
   }
   return bytes;
 }
@@ -149,9 +147,14 @@ function base64UrlToBytes(value: string): Uint8Array {
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
+    binary += String.fromCodePoint(byte);
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const padded = btoa(binary).replaceAll('+', '-').replaceAll('/', '_');
+  return padded.endsWith('==')
+    ? padded.slice(0, -2)
+    : padded.endsWith('=')
+      ? padded.slice(0, -1)
+      : padded;
 }
 
 /**

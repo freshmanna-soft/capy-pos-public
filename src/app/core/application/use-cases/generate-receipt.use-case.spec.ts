@@ -217,7 +217,12 @@ describe('GenerateReceiptUseCase', () => {
         { product: mockProducts.muffin, quantity: 1 },
       ];
 
-      const receipt = useCase.fromSnapshot(mockPayment, items, 30.48, 2.59, 0.085, 33.07);
+      const receipt = useCase.fromSnapshot(mockPayment, items, {
+        subtotal: 30.48,
+        tax: 2.59,
+        taxRate: 0.085,
+        total: 33.07,
+      });
 
       expect(receipt.payment).toBe(mockPayment);
       expect(receipt.items).toHaveLength(2);
@@ -232,7 +237,12 @@ describe('GenerateReceiptUseCase', () => {
 
       const items = [{ product: mockProducts.coffee, quantity: 1 }];
 
-      const receipt = useCase.fromSnapshot(mockPayment, items, 12.99, 1.1, 0.085, 14.09);
+      const receipt = useCase.fromSnapshot(mockPayment, items, {
+        subtotal: 12.99,
+        tax: 1.1,
+        taxRate: 0.085,
+        total: 14.09,
+      });
 
       // Should use provided values, not cart state
       expect(receipt.items).toHaveLength(1);

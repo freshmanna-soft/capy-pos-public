@@ -6,7 +6,7 @@ describe('permission.constants', () => {
     it('contains every declared permission and is frozen', () => {
       expect(ALL_PERMISSIONS).toContain(Permission.PROCESS_SALE);
       expect(ALL_PERMISSIONS).toContain(Permission.MANAGE_ROLES);
-      expect(ALL_PERMISSIONS.length).toBe(Object.values(Permission).length);
+      expect(ALL_PERMISSIONS).toHaveLength(Object.values(Permission).length);
       expect(Object.isFrozen(ALL_PERMISSIONS)).toBe(true);
     });
   });

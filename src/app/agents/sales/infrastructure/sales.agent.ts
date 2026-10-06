@@ -37,6 +37,15 @@ import { TransactionBuilder } from '@core/domain/entities/transaction.builder';
 
 const UNKNOWN_ERROR = 'Unknown error';
 
+function serialForEach<T>(
+  items: readonly T[],
+  operation: (item: T) => Promise<unknown>,
+  index = 0
+): Promise<void> {
+  if (index >= items.length) return Promise.resolve();
+  return operation(items[index]).then(() => serialForEach(items, operation, index + 1));
+}
+
 /**
  * SalesAgent
  * Concrete implementation of ISalesAgent
@@ -69,7 +78,7 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
    * Start the agent
    * Begin monitoring for daily summaries
    */
-  protected async onStart(): Promise<void> {
+  protected onStart(): Promise<void> {
     console.log('SalesAgent: Starting...');
 
     // Start daily summary monitoring (every hour)
@@ -85,12 +94,13 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
     });
 
     console.log('SalesAgent: Started successfully');
+    return Promise.resolve();
   }
 
   /**
    * Stop the agent
    */
-  protected async onStop(): Promise<void> {
+  protected onStop(): Promise<void> {
     console.log('SalesAgent: Stopping...');
 
     // Stop monitoring
@@ -100,12 +110,13 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
     }
 
     console.log('SalesAgent: Stopped successfully');
+    return Promise.resolve();
   }
 
   /**
    * Handle incoming messages
    */
-  protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
+  protected handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
     const payload = message.payload as Record<string, unknown>;
     switch (message.type) {
       case SalesMessageType.RECORD_SALE:
@@ -137,10 +148,10 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
         return this.getSalesByPeriod(payload as unknown as ISalesByPeriodRequest);
 
       default:
-        return {
+        return Promise.resolve({
           success: false,
           error: `Unknown message type: ${message.type}`,
-        };
+        });
     }
   }
 
@@ -218,9 +229,9 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       );
 
       // Update product stock
-      for (const item of request.items) {
-        await this.productRepository.adjustStock(item.productId, -item.quantity);
-      }
+      await serialForEach(request.items, (item) =>
+        this.productRepository.adjustStock(item.productId, -item.quantity)
+      );
 
       // Emit sales event
       this.salesEvents$.next(completedTransaction);
@@ -329,9 +340,9 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
       await this.transactionRepository.update(originalTransaction.id, originalTransaction);
 
       // Restore product stock
-      for (const item of request.items) {
-        await this.productRepository.adjustStock(item.productId, item.quantity);
-      }
+      await serialForEach(request.items, (item) =>
+        this.productRepository.adjustStock(item.productId, item.quantity)
+      );
 
       // Emit sales event
       this.salesEvents$.next(completedReturn);
@@ -382,9 +393,9 @@ export class SalesAgent extends BaseAgent implements ISalesAgent {
 
       // Restore product stock if transaction was completed
       if (transaction.type === TransactionType.SALE) {
-        for (const item of transaction.items) {
-          await this.productRepository.adjustStock(item.productId, item.quantity);
-        }
+        await serialForEach(transaction.items, (item) =>
+          this.productRepository.adjustStock(item.productId, item.quantity)
+        );
       }
 
       return {

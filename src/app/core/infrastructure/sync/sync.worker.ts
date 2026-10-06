@@ -186,37 +186,32 @@ class WorkerRetry {
   ) {}
 
   async execute<T>(operationName: string, fn: () => Promise<T>): Promise<T> {
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= this.config.maxAttempts; attempt++) {
+    const attempt = async (attemptNumber: number): Promise<T> => {
       try {
         return await fn();
       } catch (error) {
-        lastError = error;
-
-        if (!this.isRetryable(error)) {
+        if (!this.isRetryable(error) || attemptNumber >= this.config.maxAttempts) {
           throw error;
         }
 
-        if (attempt < this.config.maxAttempts) {
-          const delay = this.calculateDelay(attempt);
-          console.log(
-            `[Worker:Retry:${operationName}] Attempt ${attempt}/${this.config.maxAttempts} failed. Retrying in ${delay}ms...`
-          );
+        const delay = this.calculateDelay(attemptNumber);
+        console.log(
+          `[Worker:Retry:${operationName}] Attempt ${attemptNumber}/${this.config.maxAttempts} failed. Retrying in ${delay}ms...`
+        );
 
-          postEvent({
-            type: 'SYNC_FAILED',
-            error: error instanceof Error ? error.message : String(error),
-            attempt,
-            maxAttempts: this.config.maxAttempts,
-          });
+        postEvent({
+          type: 'SYNC_FAILED',
+          error: error instanceof Error ? error.message : String(error),
+          attempt: attemptNumber,
+          maxAttempts: this.config.maxAttempts,
+        });
 
-          await this.delay(delay);
-        }
+        await this.delay(delay);
+        return attempt(attemptNumber + 1);
       }
-    }
+    };
 
-    throw lastError;
+    return attempt(1);
   }
 
   updateConfig(config: Partial<typeof this.config>): void {
@@ -269,6 +264,15 @@ let retry: WorkerRetry;
 
 // ─── Helper: Post event to main thread ──────────────────────────────────────
 
+function serialForEach<T>(
+  items: readonly T[],
+  work: (item: T) => Promise<void>,
+  index = 0
+): Promise<void> {
+  if (index >= items.length) return Promise.resolve();
+  return work(items[index]).then(() => serialForEach(items, work, index + 1));
+}
+
 function postEvent(event: SyncWorkerEvent): void {
   self.postMessage(event);
 }
@@ -294,7 +298,7 @@ function readTraceId(res: Response): string | undefined {
  */
 function sessionToken(): string | null {
   const token = config.sessionToken?.trim();
-  return token ? token : null;
+  return token || null;
 }
 
 /**
@@ -310,9 +314,9 @@ function sessionTokenType(): string | null {
     const payload = token.split('.')[1];
     if (!payload) return null;
 
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const normalized = payload.replaceAll('-', '+').replaceAll('_', '/');
     const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
-    const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+    const bytes = Uint8Array.from(atob(padded), (char) => char.codePointAt(0) ?? 0);
     const claims = JSON.parse(new TextDecoder().decode(bytes)) as { type?: unknown };
     return typeof claims.type === 'string' ? claims.type : null;
   } catch {
@@ -399,7 +403,7 @@ async function fetchWithTimeout(
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
-        ...((options.headers as Record<string, string>) || {}),
+        ...(options.headers as Record<string, string>),
       },
     });
 
@@ -430,7 +434,7 @@ function fetchAuthorized(
     url,
     {
       ...options,
-      headers: { ...authHeaders(), ...((options.headers as Record<string, string>) || {}) },
+      headers: { ...authHeaders(), ...(options.headers as Record<string, string>) },
     },
     timeoutMs
   );
@@ -618,7 +622,7 @@ async function pushProducts(products: PushProductPayload[]): Promise<void> {
 
   console.log(`[Worker:Push] Pushing ${products.length} product(s) to API...`);
 
-  for (const product of products) {
+  await serialForEach(products, async (product) => {
     try {
       const response = await circuitBreaker.execute(() =>
         retry.execute(`push-product-${product.id}`, async () => {
@@ -670,7 +674,7 @@ async function pushProducts(products: PushProductPayload[]): Promise<void> {
 
       console.warn(`[Worker:Push] ✗ Product ${product.id} failed: ${errorMsg}`);
     }
-  }
+  });
 
   postEvent({ type: 'PUSH_COMPLETED', pushed, failed, results });
 
@@ -689,7 +693,7 @@ async function pushUpdates(products: PushProductPayload[]): Promise<void> {
 
   console.log(`[Worker:Push] Updating ${products.length} product(s) on API...`);
 
-  for (const product of products) {
+  await serialForEach(products, async (product) => {
     const { id, ...changes } = product;
     delete changes.stock;
     // Physical stock is now server-authoritative because checkout reservations are
@@ -739,7 +743,7 @@ async function pushUpdates(products: PushProductPayload[]): Promise<void> {
         `[Worker:Push] ✗ Product ${id} update failed: ${errorMsg} [trace: ${traceId ?? 'none'}]`
       );
     }
-  }
+  });
 
   postEvent({ type: 'PUSH_COMPLETED', pushed, failed, results });
   console.log(`[Worker:Push] Update done. Updated: ${pushed}, Failed: ${failed}`);
@@ -765,7 +769,7 @@ async function pushUpserts(products: PushProductPayload[]): Promise<void> {
   let pushed = 0;
   let failed = 0;
 
-  for (const product of products) {
+  await serialForEach(products, async (product) => {
     const { id, ...changes } = product;
     delete changes.stock;
     // PATCH refuses an empty string for any text field (400), and most products have
@@ -823,7 +827,7 @@ async function pushUpserts(products: PushProductPayload[]): Promise<void> {
         `[Worker:Push] ✗ Product ${id} upsert failed: ${errorMsg} [trace: ${traceId ?? 'none'}]`
       );
     }
-  }
+  });
 
   postEvent({ type: 'PUSH_COMPLETED', pushed, failed, results });
 }
@@ -911,7 +915,7 @@ async function pushDeletes(productIds: string[]): Promise<void> {
 
   console.log(`[Worker:Push] Deleting ${productIds.length} product(s) on API...`);
 
-  for (const id of productIds) {
+  await serialForEach(productIds, async (id) => {
     // Captured as soon as a response lands so the trace ID survives even when
     // a non-2xx status makes us throw past the response below.
     let traceId: string | undefined;
@@ -954,7 +958,7 @@ async function pushDeletes(productIds: string[]): Promise<void> {
         `[Worker:Push] ✗ Product ${id} delete failed: ${errorMsg} [trace: ${traceId ?? 'none'}]`
       );
     }
-  }
+  });
 
   postEvent({ type: 'PUSH_COMPLETED', pushed, failed, results });
   console.log(`[Worker:Push] Delete done. Deleted: ${pushed}, Failed: ${failed}`);
@@ -970,18 +974,18 @@ function startSync(cfg: SyncWorkerConfig): void {
   retry = new WorkerRetry(config.retry);
 
   // Initial health check
-  checkHealth().then((healthy) => {
+  void checkHealth().then((healthy) => {
     postEvent({ type: 'HEALTH_CHECK', healthy, apiUrl: config.apiBaseUrl });
   });
 
-  // Perform initial sync immediately
-  performSync();
+  // Perform initial sync immediately. performSync owns its failure reporting.
+  void performSync();
 
   // Set up periodic sync
   if (syncInterval) {
     clearInterval(syncInterval);
   }
-  syncInterval = setInterval(() => performSync(), config.syncIntervalMs);
+  syncInterval = setInterval(() => void performSync(), config.syncIntervalMs);
 
   console.log(
     `[Worker:Sync] Started. Interval: ${config.syncIntervalMs}ms, API: ${config.apiBaseUrl}`
@@ -1027,7 +1031,7 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
       break;
 
     case 'FORCE_SYNC':
-      performSync();
+      void performSync();
       break;
 
     case 'GET_STATUS':
@@ -1050,7 +1054,7 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
       // Restart interval if syncIntervalMs changed
       if (command.config.syncIntervalMs && syncInterval) {
         clearInterval(syncInterval);
-        syncInterval = setInterval(() => performSync(), config.syncIntervalMs);
+        syncInterval = setInterval(() => void performSync(), config.syncIntervalMs);
       }
       if (command.config.sessionToken !== undefined) {
         syncForNewCredential(previousToken);
@@ -1059,23 +1063,23 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
     }
 
     case 'PUSH_PRODUCTS':
-      pushProducts(command.products);
+      void pushProducts(command.products);
       break;
 
     case 'PUSH_UPDATE_PRODUCTS':
-      pushUpdates(command.products);
+      void pushUpdates(command.products);
       break;
 
     case 'PUSH_UPSERT_PRODUCTS':
-      pushUpserts(command.products);
+      void pushUpserts(command.products);
       break;
 
     case 'PUSH_DELETE_PRODUCTS':
-      pushDeletes(command.productIds);
+      void pushDeletes(command.productIds);
       break;
 
     case 'PUSH_EVENTS':
-      pushEvents(command.requestId, command.events);
+      void pushEvents(command.requestId, command.events);
       break;
   }
 });

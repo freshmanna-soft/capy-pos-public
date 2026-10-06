@@ -1,5 +1,4 @@
 import {
-  AgentBlock,
   AgentExchange,
   AgentStep,
   AgentToolCall,
@@ -529,7 +528,7 @@ function argumentsOf(call: AgentToolCall): Readonly<Record<string, unknown>> | n
  */
 function dedupKey(name: string, input: Readonly<Record<string, unknown>>): string {
   const canonical = Object.keys(input)
-    .sort()
+    .sort((left, right) => left.localeCompare(right))
     .map((key) => {
       const value = input[key];
       return `${key}=${typeof value === 'string' ? value.trim().toLowerCase() : JSON.stringify(value)}`;
@@ -562,4 +561,4 @@ export function truncateUtterance(utterance: string): string {
 }
 
 /** Assistant blocks, for a caller that wants to hand a transcript on unchanged. */
-export type { AgentBlock };
+export type { AgentBlock } from '@core/application/dtos/agent.dto';

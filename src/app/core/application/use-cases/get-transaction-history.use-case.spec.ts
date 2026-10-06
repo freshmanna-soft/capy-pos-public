@@ -249,40 +249,20 @@ describe('GetTransactionHistoryUseCase', () => {
       expect(result.transactions[0].id).toBe('TXN-1');
     });
 
-    it('should infer cash payment method from paymentIds', async () => {
+    it.each([
+      ['PAY-CASH-abc123', 'cash'],
+      ['PAY-CARD-abc123', 'card'],
+      ['PAY-MOBILE-abc123', 'mobile'],
+    ] as const)('should infer %s payment method from paymentIds', async (paymentId, expected) => {
       const transaction = createMockTransaction({
         id: 'TXN-1',
-        paymentIds: ['PAY-CASH-abc123'],
+        paymentIds: [paymentId],
       });
       mockRepository['findCompleted'].mockResolvedValue([transaction]);
 
       const result = await useCase.execute({ page: 1, pageSize: 20 });
 
-      expect(result.transactions[0].paymentMethod).toBe('cash');
-    });
-
-    it('should infer card payment method from paymentIds', async () => {
-      const transaction = createMockTransaction({
-        id: 'TXN-1',
-        paymentIds: ['PAY-CARD-abc123'],
-      });
-      mockRepository['findCompleted'].mockResolvedValue([transaction]);
-
-      const result = await useCase.execute({ page: 1, pageSize: 20 });
-
-      expect(result.transactions[0].paymentMethod).toBe('card');
-    });
-
-    it('should infer mobile payment method from paymentIds', async () => {
-      const transaction = createMockTransaction({
-        id: 'TXN-1',
-        paymentIds: ['PAY-MOBILE-abc123'],
-      });
-      mockRepository['findCompleted'].mockResolvedValue([transaction]);
-
-      const result = await useCase.execute({ page: 1, pageSize: 20 });
-
-      expect(result.transactions[0].paymentMethod).toBe('mobile');
+      expect(result.transactions[0].paymentMethod).toBe(expected);
     });
 
     it('should return unknown payment method when no paymentIds', async () => {

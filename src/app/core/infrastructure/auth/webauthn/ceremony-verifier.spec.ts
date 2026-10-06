@@ -42,7 +42,7 @@ beforeEach(() => {
 
 describe('createChallenge', () => {
   it('produces 32 bytes of base64url', () => {
-    expect(base64UrlToBytes(createChallenge()).length).toBe(32);
+    expect(base64UrlToBytes(createChallenge())).toHaveLength(32);
   });
 
   it('never produces the same challenge twice', () => {

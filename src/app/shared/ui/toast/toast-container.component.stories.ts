@@ -52,7 +52,7 @@ export const Success: Story = {
 /**
  * Error - role="alert", announced assertively
  */
-export const Error: Story = {
+export const ErrorToast: Story = {
   decorators: [withToasts([toast(1, 'Payment declined — try another card', 'error')])],
   render: () => ({ template: TOAST_CONTAINER_TEMPLATE }),
 };

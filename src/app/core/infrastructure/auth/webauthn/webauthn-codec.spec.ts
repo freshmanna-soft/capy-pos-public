@@ -471,7 +471,7 @@ describe('derToRawEcdsaSignature', () => {
 
   it('produces 64 bytes from two full-width components', () => {
     const raw = derToRawEcdsaSignature(der(filled(32, 0x11), filled(32, 0x22)));
-    expect(raw.length).toBe(64);
+    expect(raw).toHaveLength(64);
     expect(raw.subarray(0, 32)).toEqual(filled(32, 0x11));
     expect(raw.subarray(32)).toEqual(filled(32, 0x22));
   });
@@ -480,7 +480,7 @@ describe('derToRawEcdsaSignature', () => {
     // 0x00 prefix keeps the integer positive; it is not part of the scalar.
     const r = concat(bytes(0x00), filled(32, 0xff));
     const raw = derToRawEcdsaSignature(der(r, filled(32, 0x01)));
-    expect(raw.length).toBe(64);
+    expect(raw).toHaveLength(64);
     expect(raw.subarray(0, 32)).toEqual(filled(32, 0xff));
   });
 
