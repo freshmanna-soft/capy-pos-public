@@ -44,9 +44,10 @@ export async function handler(event: ProxyEvent): Promise<ProxyResult> {
 
   let parsed: unknown;
   try {
-    const raw = event.isBase64Encoded && event.body
-      ? Buffer.from(event.body, 'base64').toString('utf8')
-      : (event.body ?? '');
+    const raw =
+      event.isBase64Encoded && event.body
+        ? Buffer.from(event.body, 'base64').toString('utf8')
+        : (event.body ?? '');
     parsed = JSON.parse(raw);
   } catch {
     return reply(400, { error: 'Body must be JSON.' });

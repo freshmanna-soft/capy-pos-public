@@ -14,9 +14,10 @@ import { Permission } from '@core/domain/auth';
  * signed into.
  *
  * Deliberately NOT `providedIn: 'root'`. It is provided together with the
- * `CUSTOMER_AUTH_GATEWAY` binding on the self-checkout lazy route (epic item
- * 13), so a customer identity cannot be resolved — or accidentally consulted
- * for authorization — anywhere else in the app. A route-scoped provider also
+ * `CUSTOMER_AUTH_GATEWAY` binding on the one customer route that uses it — /shop,
+ * for its account modal (the /self-checkout lane it was built for is retired) — so a customer identity cannot be
+ * resolved — or accidentally consulted for authorization — anywhere else in
+ * the app. A route-scoped provider also
  * means the session dies with the route, which is the behaviour a shared
  * in-store device wants.
  *

@@ -19,7 +19,10 @@ describe('MemoryStore seeding', () => {
 
     const revision = await store.read('doc-1');
     assert.deepEqual(revision?.document, { id: 'doc-1', label: 'Espresso', count: 5 });
-    assert.equal(await store.write({ id: 'doc-1', label: 'Espresso', count: 4 }, revision.rev), 'written');
+    assert.equal(
+      await store.write({ id: 'doc-1', label: 'Espresso', count: 4 }, revision.rev),
+      'written'
+    );
   });
 
   it('clones the seed, so the caller cannot edit the store through the array it passed', async () => {
@@ -28,6 +31,10 @@ describe('MemoryStore seeding', () => {
 
     seed[0].count = 999;
 
-    assert.deepEqual((await store.read('doc-1'))?.document, { id: 'doc-1', label: 'Espresso', count: 5 });
+    assert.deepEqual((await store.read('doc-1'))?.document, {
+      id: 'doc-1',
+      label: 'Espresso',
+      count: 5,
+    });
   });
 });

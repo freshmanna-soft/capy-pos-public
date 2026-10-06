@@ -40,6 +40,8 @@ import {
 } from './session-auth.ts';
 import type { DocumentStore, StoredDocument } from '../../shared/src/document-store.ts';
 import type { CheckoutInventoryMarkers } from './checkout-inventory.ts';
+import type { SaleEventMarkers } from './sale-events.ts';
+import { ingestEvents } from './events-ingest.ts';
 import {
   productAvailableStock,
   productHasActiveReservations,
@@ -58,6 +60,14 @@ export interface ProductDocument extends StoredDocument {
   readonly stock: number;
   /** Server-owned. Missing on pre-checkout catalogue documents and interpreted as an empty map. */
   readonly checkoutMarkers?: CheckoutInventoryMarkers;
+  /** Server-owned: one entry per sale event applied to this product, its replay guard (#357). */
+  readonly eventMarkers?: SaleEventMarkers;
+  /**
+   * A sale event took more than was in stock. Stock floored at 0; `oversoldQuantity`
+   * counts the units sold beyond it. A staff restock clears both (#357).
+   */
+  readonly oversold?: boolean;
+  readonly oversoldQuantity?: number;
   readonly description: string;
   readonly isActive?: boolean;
   readonly imageUrl?: string;
@@ -65,8 +75,8 @@ export interface ProductDocument extends StoredDocument {
   readonly updatedAt: string;
 }
 
-/** Reservation markers are persistence metadata and never cross the HTTP boundary. */
-export type PublicProductDocument = Omit<ProductDocument, 'checkoutMarkers'>;
+/** Reservation and sale-event markers are persistence metadata and never cross the HTTP boundary. */
+export type PublicProductDocument = Omit<ProductDocument, 'checkoutMarkers' | 'eventMarkers'>;
 
 /** The legacy one-product sale record, kept compatible with the existing till. */
 export interface LegacyTransactionDocument extends StoredDocument {
@@ -129,6 +139,11 @@ export interface KioskTransactionDocument extends StoredDocument {
   /** `sub` claim of the kiosk-device or shop-session token. */
   readonly operatorId: string;
   readonly tenantId: string;
+  /**
+   * The till's own id for this sale. A kiosk or shop `SaleCompleted` event is accepted
+   * only when it matches a recorded sale by this id (#358). Absent on older records.
+   */
+  readonly clientTransactionId?: string;
 }
 
 /**
@@ -166,6 +181,14 @@ export interface ApiRequest {
   readonly rawBody?: Uint8Array;
   /** Value of the `Content-Type` request header (lower-cased). */
   readonly contentType?: string;
+  /**
+   * The caller's rate-limit identity (`server.ts`'s `clientRateLimitKey`, the
+   * same key checkout limits by). Only the open `POST /api/shop/session` route
+   * reads it: an anonymous customer has no Authorization header to tell one
+   * phone from another, so keying on that header put every customer in one
+   * shared bucket and the 21st shopper of the hour got a 429.
+   */
+  readonly clientKey?: string;
 }
 
 export interface ApiResponse {
@@ -203,6 +226,8 @@ export interface ApiDeps {
    * In production this is the public HTTPS origin (e.g. https://capy-pos.example.com).
    */
   readonly appBaseUrl: string;
+  /** `POST /api/events` answers 404 unless this is set (EVENTS_INGEST_ENABLED, #358). */
+  readonly eventsIngestEnabled?: boolean;
   /** Injected so tests can stub fetch without patching globals. */
   readonly fetch?: typeof globalThis.fetch;
   readonly nowSeconds: () => number;
@@ -264,10 +289,24 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
     return getMercadoPagoPreferenceStatus(route.preferenceId, deps);
   }
 
+  // Open for the same reason as the two routes above: the shop/kiosk checkout
+  // that created the preference holds no staff JWT. What gates it instead is
+  // knowing both the server-minted external_reference (a UUID) and the
+  // preference id that belongs to it — see `cancelMercadoPagoPreference`.
+  if (route.kind === 'cancelMercadoPagoPreference') {
+    return cancelMercadoPagoPreference(route.externalReference, request, deps);
+  }
+
   // Kiosk transaction — has its own token verification (kiosk-device or shop-session),
   // not a staff JWT, so it bypasses the staff `authorize()` boundary entirely.
   if (route.kind === 'createKioskTransaction') {
     return createKioskTransaction(request, deps);
+  }
+
+  // Accepts staff (PROCESS_SALE) and kiosk/shop device tokens under a guardrail, so
+  // it does its own authorization rather than the staff-only boundary below.
+  if (route.kind === 'ingestEvents') {
+    return ingestEvents(request, deps);
   }
 
   // `rolesSource: deps.roles` merged in here, not stored on `deps.appId`
@@ -325,11 +364,13 @@ type Route =
   | { readonly kind: 'createShopSession' }
   | { readonly kind: 'createMercadoPagoPreference' }
   | { readonly kind: 'getMercadoPagoPreferenceStatus'; readonly preferenceId: string }
+  | { readonly kind: 'cancelMercadoPagoPreference'; readonly externalReference: string }
   | { readonly kind: 'listProducts'; readonly permission: Permission }
   | { readonly kind: 'createProduct'; readonly permission: Permission }
   | { readonly kind: 'listTransactions'; readonly permission: Permission }
   | { readonly kind: 'createKioskDeviceToken'; readonly permission: Permission }
   | { readonly kind: 'createKioskTransaction' }
+  | { readonly kind: 'ingestEvents' }
   | { readonly kind: 'replaceProduct'; readonly permission: Permission; readonly id: string }
   | { readonly kind: 'patchProduct'; readonly permission: Permission; readonly id: string }
   | { readonly kind: 'deleteProduct'; readonly permission: Permission; readonly id: string }
@@ -361,8 +402,13 @@ export function matchRoute(method: string, path: string): Route | null {
     return upper === 'GET' ? { kind: 'health' } : null;
   }
 
+  if (segments.length === 2 && segments[1] === 'events') {
+    return upper === 'POST' ? { kind: 'ingestEvents' } : null;
+  }
+
   if (segments.length === 2 && segments[1] === 'transactions') {
-    if (upper === 'GET') return { kind: 'listTransactions', permission: Permission.VIEW_TRANSACTIONS };
+    if (upper === 'GET')
+      return { kind: 'listTransactions', permission: Permission.VIEW_TRANSACTIONS };
     if (upper === 'POST') return { kind: 'createKioskTransaction' };
     return null;
   }
@@ -382,6 +428,19 @@ export function matchRoute(method: string, path: string): Route | null {
     const preferenceId = safeDecode(rawId);
     if (preferenceId === null || preferenceId.length === 0) return null;
     return upper === 'GET' ? { kind: 'getMercadoPagoPreferenceStatus', preferenceId } : null;
+  }
+
+  if (
+    segments.length === 5 &&
+    segments[1] === 'mercadopago' &&
+    segments[2] === 'preference' &&
+    segments[4] === 'cancel'
+  ) {
+    const rawId = segments[3];
+    if (rawId === undefined || rawId.length === 0) return null;
+    const externalReference = safeDecode(rawId);
+    if (externalReference === null || externalReference.length === 0) return null;
+    return upper === 'POST' ? { kind: 'cancelMercadoPagoPreference', externalReference } : null;
   }
 
   if (segments.length === 2 && segments[1] === 'kiosk-device-token') {
@@ -478,6 +537,8 @@ function health(deps: ApiDeps): ApiResponse {
         sellProduct: 'POST /api/products/{id}/sell',
         getTransactions: 'GET /api/transactions',
         createTransaction: 'POST /api/transactions (kiosk-device or shop-session token)',
+        ingestEvents:
+          'POST /api/events (staff PROCESS_SALE, or a device token for a recorded sale)',
         createShopSession: 'POST /api/shop/session (open, rate-limited)',
         createKioskDeviceToken: 'POST /api/kiosk-device-token (MANAGE_INVENTORY)',
         health: 'GET /api/health',
@@ -501,13 +562,16 @@ function health(deps: ApiDeps): ApiResponse {
 const SHOP_SESSION_MAX_PER_HOUR = 20;
 const SHOP_SESSION_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
-interface RateBucket { count: number; windowStart: number }
+interface RateBucket {
+  count: number;
+  windowStart: number;
+}
 const shopSessionBuckets = new Map<string, RateBucket>();
 
-function shopSessionAllowed(ip: string, nowMs: number): boolean {
-  const bucket = shopSessionBuckets.get(ip);
+function shopSessionAllowed(clientKey: string, nowMs: number): boolean {
+  const bucket = shopSessionBuckets.get(clientKey);
   if (bucket === undefined || nowMs - bucket.windowStart >= SHOP_SESSION_WINDOW_MS) {
-    shopSessionBuckets.set(ip, { count: 1, windowStart: nowMs });
+    shopSessionBuckets.set(clientKey, { count: 1, windowStart: nowMs });
     return true;
   }
   if (bucket.count >= SHOP_SESSION_MAX_PER_HOUR) {
@@ -649,8 +713,14 @@ async function listProducts(
 
 /** Strips server-owned reservation markers from every product response. */
 function publicProduct(product: ProductDocument): PublicProductDocument {
-  const { checkoutMarkers: _checkoutMarkers, ...projection } = product;
+  const { checkoutMarkers: _checkoutMarkers, eventMarkers: _eventMarkers, ...projection } = product;
   return projection;
+}
+
+/** Staff setting stock is a restock: whatever a sale event oversold is settled. */
+function withoutOversell(product: ProductDocument): ProductDocument {
+  const { oversold: _oversold, oversoldQuantity: _oversoldQuantity, ...settled } = product;
+  return settled;
 }
 
 /** Strips internal V2 checkout ownership fields before staff history leaves the API. */
@@ -673,6 +743,8 @@ async function listTransactions(
   deps: ApiDeps
 ): Promise<{ transactions: readonly PublicTransactionDocument[]; count: number }> {
   const transactions = [...(await deps.transactions.list())]
+    // `sale-event:*` claims (#357/#358) live in this store too; they are not sales.
+    .filter((document) => (document as { kind?: unknown }).kind !== 'sale-event')
     .sort((left, right) => {
       const leftMs = Date.parse(right.timestamp);
       const rightMs = Date.parse(left.timestamp);
@@ -697,13 +769,11 @@ async function listTransactions(
  */
 function createShopSession(request: ApiRequest, deps: ApiDeps): ApiResponse {
   const nowMs = deps.nowSeconds() * 1000;
-  // Use the Authorization header as a proxy for the client IP when the real
-  // IP isn't available (e.g. test harness). In production the request arrives
-  // via Code Engine's ingress which forwards the real IP in X-Forwarded-For;
-  // for the in-process test the authorization string is undefined, so we fall
-  // back to 'test' — a value that only appears in tests.
-  const ip = (request.authorization ?? 'test').slice(0, 64);
-  if (!shopSessionAllowed(ip, nowMs)) {
+  // Keyed on the client address `server.ts` resolved from X-Forwarded-For.
+  // An in-process caller that supplies none (tests, a future internal caller)
+  // shares one 'unknown' bucket — the conservative direction for an open route.
+  const clientKey = (request.clientKey ?? 'unknown').slice(0, 500);
+  if (!shopSessionAllowed(clientKey, nowMs)) {
     return { status: 429, body: { error: 'Too many session requests. Try again later.' } };
   }
 
@@ -741,10 +811,7 @@ function createKioskDeviceToken(rawBody: unknown, tenantId: string, deps: ApiDep
   }
 
   const exp = deps.nowSeconds() + 365 * 24 * 3600; // 1 year
-  const token = signToken(
-    { sub: terminalId, type: 'kiosk-device', tenantId, exp },
-    deps.secret
-  );
+  const token = signToken({ sub: terminalId, type: 'kiosk-device', tenantId, exp }, deps.secret);
   return { status: 201, body: { token, expiresAt: new Date(exp * 1000).toISOString() } };
 }
 
@@ -820,13 +887,17 @@ async function createKioskTransaction(request: ApiRequest, deps: ApiDeps): Promi
     timestamp: deps.nowIso(),
     operatorId: claims.operatorId,
     tenantId: claims.tenantId,
+    ...(asNonEmptyString(body['transactionId']) === null
+      ? {}
+      : { clientTransactionId: asNonEmptyString(body['transactionId']) as string }),
   };
 
   // deps.transactions is DocumentStore<TransactionDocument>; KioskTransactionDocument
   // is a different shape. Both extend StoredDocument and the runtime store accepts
   // either — cast through unknown to silence the structural mismatch without
   // widening the ApiDeps interface.
-  const txStore = deps.transactions as unknown as import('../../shared/src/document-store.ts').DocumentStore<KioskTransactionDocument>;
+  const txStore =
+    deps.transactions as unknown as import('../../shared/src/document-store.ts').DocumentStore<KioskTransactionDocument>;
   const outcome = await txStore.create(transaction);
   if (outcome === 'conflict') {
     // UUID collision — extremely rare but log loudly rather than 500.
@@ -903,6 +974,10 @@ async function replaceProduct(id: string, rawBody: unknown, deps: ApiDeps): Prom
     ...(existing.document.checkoutMarkers === undefined
       ? {}
       : { checkoutMarkers: existing.document.checkoutMarkers }),
+    // Kept across a replace: dropping them would let a replayed sale event apply twice.
+    ...(existing.document.eventMarkers === undefined
+      ? {}
+      : { eventMarkers: existing.document.eventMarkers }),
     description: asString(body['description']) ?? '',
     ...(requestedIsActive === undefined
       ? existing.document.isActive === undefined
@@ -978,7 +1053,8 @@ async function patchProduct(id: string, rawBody: unknown, deps: ApiDeps): Promis
   });
   if (reservationConflict !== null) return reservationConflict;
 
-  const updated = { ...existing.document, ...patch, updatedAt: deps.nowIso() } as ProductDocument;
+  const merged = { ...existing.document, ...patch, updatedAt: deps.nowIso() } as ProductDocument;
+  const updated = typeof patch['stock'] === 'number' ? withoutOversell(merged) : merged;
   const outcome = await deps.products.write(updated, existing.rev);
   if (outcome === 'conflict') {
     return { status: 409, body: { error: 'Product was modified concurrently. Retry.' } };
@@ -1141,6 +1217,65 @@ interface MpPreferenceResponse {
 }
 
 /**
+ * How long a wallet preference stays payable. Thirty minutes covers a buyer
+ * who has to log in to MP, top up, or retry a card inside MP's checkout; past
+ * that the till has long since moved on and a late payment would be a charge
+ * with no sale behind it.
+ */
+const MP_PREFERENCE_TTL_SECONDS = 30 * 60;
+
+/**
+ * Payment statuses MercadoPago lets a merchant move to `cancelled`. Anything
+ * else is either final (approved, rejected, refunded, cancelled) or not ours
+ * to touch (`authorized` is a card hold that only capture/void resolves).
+ */
+const MP_CANCELLABLE_STATUSES = new Set(['pending', 'in_process']);
+
+/**
+ * Upper bound on how many payments one cancel will look at. A single
+ * preference realistically has one or two attempts (a rejected card, then a
+ * retry); the cap keeps an adversarial external_reference from turning one
+ * request into an unbounded fan-out of PUTs.
+ */
+const MP_CANCEL_SEARCH_LIMIT = 20;
+
+/**
+ * Ids we mint (`randomUUID`) and ids MP mints (`<collector>-<uuid>`) are both
+ * short and alphanumeric-with-dashes. Rejecting anything else before it is
+ * interpolated into an upstream URL keeps the open cancel route from being a
+ * way to send arbitrary paths to api.mercadopago.com with our access token.
+ */
+const MP_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;
+
+/**
+ * Per-external_reference cap on cancel calls, in memory, same shape as the
+ * shop-session limiter. The route is idempotent, so an honest client calls it
+ * once or twice (button + MP's return redirect); anything beyond this is a
+ * loop or abuse burning our MP API quota.
+ */
+const MP_CANCEL_MAX_PER_REFERENCE = 10;
+const MP_CANCEL_WINDOW_MS = 60 * 60 * 1000;
+const mpCancelBuckets = new Map<string, RateBucket>();
+
+function mpCancelAllowed(externalReference: string, nowMs: number): boolean {
+  // Drop expired windows opportunistically so the map cannot grow without bound
+  // on a long-lived pod — every reference is single-use, unlike an IP.
+  if (mpCancelBuckets.size > 1000) {
+    for (const [key, bucket] of mpCancelBuckets) {
+      if (nowMs - bucket.windowStart >= MP_CANCEL_WINDOW_MS) mpCancelBuckets.delete(key);
+    }
+  }
+  const bucket = mpCancelBuckets.get(externalReference);
+  if (bucket === undefined || nowMs - bucket.windowStart >= MP_CANCEL_WINDOW_MS) {
+    mpCancelBuckets.set(externalReference, { count: 1, windowStart: nowMs });
+    return true;
+  }
+  if (bucket.count >= MP_CANCEL_MAX_PER_REFERENCE) return false;
+  bucket.count += 1;
+  return true;
+}
+
+/**
  * POST /api/mercadopago/preference — open endpoint (no staff JWT).
  *
  * Handles two modes selected by the optional `mode` field in the request body:
@@ -1196,6 +1331,20 @@ async function createMercadoPagoPreference(
           // (preference_id is not a valid search param in the MP API).
           // We use a fresh UUID so it is stable and unique per checkout.
           external_reference: deps.newId(),
+          // A preference without an expiry stays payable forever: a customer who
+          // walked away from the till could still complete it from their MP
+          // history hours later, charging them for a sale nobody rang up. The
+          // window is generous for a real checkout and is also what the cancel
+          // route shortens to "now" when the buyer gives up early.
+          expires: true,
+          expiration_date_from: new Date(deps.nowSeconds() * 1000).toISOString(),
+          expiration_date_to: new Date(
+            (deps.nowSeconds() + MP_PREFERENCE_TTL_SECONDS) * 1000
+          ).toISOString(),
+          // All three land on PaymentCallbackComponent, which tells the waiting
+          // checkout tab what happened. MP's "Return to site" link uses these
+          // too, so a buyer who abandons inside MP's own checkout still reaches
+          // a page that can trigger the gateway cancel.
           back_urls: {
             success: `${deps.appBaseUrl}/payment/success`,
             failure: `${deps.appBaseUrl}/payment/failure`,
@@ -1306,8 +1455,7 @@ async function getMercadoPagoPreferenceStatus(
   // The MP Payments Search API does not accept `preference_id` as a filter —
   // the correct param is `external_reference`, which we set to our own UUID
   // when creating the preference so we can correlate it here.
-  const url =
-    `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(preferenceId)}&sort=date_created&criteria=desc&limit=1`;
+  const url = `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(preferenceId)}&sort=date_created&criteria=desc&limit=1`;
 
   let mpResponse: Response;
   try {
@@ -1329,6 +1477,155 @@ async function getMercadoPagoPreferenceStatus(
   const payment = data.results?.[0];
   const status = payment?.status ?? 'not_found';
   return { status: 200, body: { status } };
+}
+
+/**
+ * POST /api/mercadopago/preference/:externalReference/cancel — open endpoint.
+ *
+ * Body: `{ preferenceId }` — the `id` the create call returned.
+ *
+ * Makes "the customer cancelled" true at the gateway rather than only in the
+ * till's UI: afterwards the checkout link cannot be paid and no half-finished
+ * payment can settle later. Nothing is persisted — the preference itself
+ * carries the external_reference, so ownership is checked against MP.
+ *
+ * Order matters:
+ *  1. Validate ids, then confirm the preference really belongs to this
+ *     external_reference *before* any write, so a mismatched pair can never
+ *     cancel somebody else's payments.
+ *  2. Search the payments. If one is already approved the buyer has paid:
+ *     answer `approved` and change nothing — the till must finalize the sale,
+ *     not strand a charge.
+ *  3. Cancel every pending / in_process payment.
+ *  4. Expire the preference (expiration_date_to = now).
+ *
+ * Idempotent: a repeat call finds nothing cancellable and re-expires an
+ * already-expired preference, answering `cancelled` again.
+ *
+ * Returns:
+ *   200 { status: 'cancelled' } | { status: 'approved', paymentId }
+ *   400 malformed ids, or the preference does not belong to the reference
+ *   429 too many cancel calls for one reference
+ *   503 mpAccessToken not configured
+ *   502 MP unreachable or returned non-2xx
+ */
+async function cancelMercadoPagoPreference(
+  externalReference: string,
+  request: ApiRequest,
+  deps: ApiDeps
+): Promise<ApiResponse> {
+  if (!deps.mpAccessToken) {
+    return { status: 503, body: { error: 'MercadoPago is not configured on this server.' } };
+  }
+
+  const body = asObject(request.body);
+  const preferenceId = body !== null ? asNonEmptyString(body['preferenceId']) : null;
+  if (
+    !MP_ID_PATTERN.test(externalReference) ||
+    preferenceId === null ||
+    !MP_ID_PATTERN.test(preferenceId)
+  ) {
+    return {
+      status: 400,
+      body: { error: 'A valid external reference and preferenceId are required.' },
+    };
+  }
+
+  if (!mpCancelAllowed(externalReference, deps.nowSeconds() * 1000)) {
+    return { status: 429, body: { error: 'Too many cancel requests. Try again later.' } };
+  }
+
+  const doFetch = deps.fetch ?? globalThis.fetch;
+  const auth = { Authorization: `Bearer ${deps.mpAccessToken}` };
+  const preferenceUrl = `https://api.mercadopago.com/checkout/preferences/${encodeURIComponent(preferenceId)}`;
+
+  /** One MP round-trip; `null` means unreachable or non-2xx (already logged). */
+  const call: MpCall = async (label, url, init) => {
+    try {
+      const response = await doFetch(url, init);
+      if (response.ok) return response;
+      const errBody = await response.text().catch(() => '');
+      console.error(`[pos-api] MercadoPago cancel: ${label} ${response.status}`, errBody);
+      return null;
+    } catch (err) {
+      console.error(`[pos-api] MercadoPago cancel: ${label} unreachable`, err);
+      return null;
+    }
+  };
+  const upstreamFailed: ApiResponse = {
+    status: 502,
+    body: { error: 'Could not cancel the payment with MercadoPago.' },
+  };
+
+  // 1 — ownership.
+  const prefResponse = await call('read preference', preferenceUrl, { headers: auth });
+  if (prefResponse === null) return upstreamFailed;
+  const pref = (await prefResponse.json()) as MpPreferenceResponse;
+  if (pref.external_reference !== externalReference) {
+    return { status: 400, body: { error: 'preferenceId does not belong to this checkout.' } };
+  }
+
+  // 2 — has the buyer already paid?
+  const searchResponse = await call(
+    'search payments',
+    `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(externalReference)}&sort=date_created&criteria=desc&limit=${MP_CANCEL_SEARCH_LIMIT}`,
+    { headers: auth }
+  );
+  if (searchResponse === null) return upstreamFailed;
+  const search = (await searchResponse.json()) as { results?: MpPaymentResponse[] };
+  const payments = search.results ?? [];
+  const approved = payments.find((payment) => payment.status === 'approved');
+  if (approved !== undefined) {
+    return { status: 200, body: { status: 'approved', paymentId: String(approved.id) } };
+  }
+
+  // 3 — cancel whatever could still settle.
+  for (const payment of payments) {
+    if (!MP_CANCELLABLE_STATUSES.has(payment.status)) continue;
+    const verdict = await cancelOnePayment(payment, call, auth);
+    if (verdict === 'approved') {
+      return { status: 200, body: { status: 'approved', paymentId: String(payment.id) } };
+    }
+    if (verdict === 'failed') return upstreamFailed;
+  }
+
+  // 4 — nobody can start a new payment on this link.
+  const expired = await call('expire preference', preferenceUrl, {
+    method: 'PUT',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expires: true, expiration_date_to: deps.nowIso() }),
+  });
+  if (expired === null) return upstreamFailed;
+
+  return { status: 200, body: { status: 'cancelled' } };
+}
+
+type MpCall = (label: string, url: string, init?: RequestInit) => Promise<Response | null>;
+
+/**
+ * Cancel one pending / in_process payment. The PUT is refused once a payment
+ * leaves pending — most often because it was approved in the instant between
+ * the search and now — so a refusal re-reads it: a just-paid buyer gets their
+ * sale instead of a "cancelled" screen, and a payment that is somehow still
+ * open is a failure rather than a false "cancelled".
+ */
+async function cancelOnePayment(
+  payment: MpPaymentResponse,
+  call: MpCall,
+  auth: Record<string, string>
+): Promise<'cancelled' | 'approved' | 'failed'> {
+  const paymentUrl = `https://api.mercadopago.com/v1/payments/${encodeURIComponent(String(payment.id))}`;
+  const cancelled = await call('cancel payment', paymentUrl, {
+    method: 'PUT',
+    headers: { ...auth, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'cancelled' }),
+  });
+  if (cancelled !== null) return 'cancelled';
+  const reread = await call('re-read payment', paymentUrl, { headers: auth });
+  if (reread === null) return 'failed';
+  const current = (await reread.json()) as MpPaymentResponse;
+  if (current.status === 'approved') return 'approved';
+  return MP_CANCELLABLE_STATUSES.has(current.status) ? 'failed' : 'cancelled';
 }
 
 // ─── Image upload ─────────────────────────────────────────────────────────────
@@ -1411,7 +1708,9 @@ export function parseMultipartImage(
     if (blankLineMatch === null) {
       continue;
     }
-    const bodyOffset = new TextEncoder().encode(partText.slice(0, blankLineMatch.index! + blankLineMatch[0].length)).length;
+    const bodyOffset = new TextEncoder().encode(
+      partText.slice(0, blankLineMatch.index! + blankLineMatch[0].length)
+    ).length;
     const data = partBytes.subarray(bodyOffset);
 
     return { mimeType, data };

@@ -531,7 +531,7 @@ export class InventoryManagementComponent implements OnInit {
             EventType.PRODUCT_CREATED,
             EventSource.INVENTORY,
             { id: result.id, name: result.name },
-            'normal'
+            { priority: 'normal' }
           )
         );
         this.closeForm();
@@ -565,7 +565,7 @@ export class InventoryManagementComponent implements OnInit {
             EventType.PRODUCT_UPDATED,
             EventSource.INVENTORY,
             { id: productId, name: request.name },
-            'normal'
+            { priority: 'normal' }
           )
         );
         this.closeForm();
@@ -632,7 +632,7 @@ export class InventoryManagementComponent implements OnInit {
         EventType.PRODUCT_DELETED,
         EventSource.INVENTORY,
         { id, name: product.name },
-        'normal'
+        { priority: 'normal' }
       )
     );
 
@@ -683,8 +683,7 @@ export class InventoryManagementComponent implements OnInit {
           EventType.SYNC_PUSH_FAILED,
           EventSource.INVENTORY,
           { productId: id, operation: 'soft-delete' },
-          'critical',
-          { traceId }
+          { priority: 'critical', metadata: { traceId } }
         )
       );
     }

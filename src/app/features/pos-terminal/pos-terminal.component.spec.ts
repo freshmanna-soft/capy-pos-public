@@ -158,7 +158,13 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
         { provide: 'ITransactionRepository', useValue: mockTransactionRepository },
         {
           provide: MERCADOPAGO_PAYMENT_PORT,
-          useValue: { isEnabled: () => false, createAndRender: vi.fn(), destroy: vi.fn() },
+          useValue: {
+            isEnabled: () => false,
+            createAndRender: vi.fn(),
+            createWalletBrick: vi.fn(),
+            cancelPayment: vi.fn(),
+            destroy: vi.fn(),
+          },
         },
         {
           provide: PAYPAL_PAYMENT_PORT,

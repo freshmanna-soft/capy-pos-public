@@ -1,11 +1,15 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  ElementRef,
+  Injector,
+  afterNextRender,
   inject,
   input,
   signal,
   computed,
   output,
+  viewChild,
   OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -13,7 +17,6 @@ import { FormsModule } from '@angular/forms';
 import { CartService } from '@core/application/services/cart.service';
 import { ProcessCashPaymentUseCase } from '@core/application/use-cases/process-cash-payment.use-case';
 import { ProcessCardPaymentUseCase } from '@core/application/use-cases/process-card-payment.use-case';
-import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
 import { CircuitBreakerService } from '@core/infrastructure/resilience/circuit-breaker.service';
 import { RetryService } from '@core/infrastructure/resilience/retry.service';
 import {
@@ -21,7 +24,10 @@ import {
   PaymentResult,
   StaffPaymentMethod,
 } from '@core/application/dtos/payment.dto';
-import { MERCADOPAGO_PAYMENT_PORT } from '@core/application/ports/mercadopago.port';
+import {
+  MERCADOPAGO_PAYMENT_PORT,
+  type MercadoPagoPaymentResult,
+} from '@core/application/ports/mercadopago.port';
 import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
 
 /**
@@ -445,16 +451,94 @@ const DECLINED_TEST_CARD = '4000000000000002';
               >
                 Pay with a card instead
               </button>
-              <div class="co-actions co-actions--single">
+              <div class="co-actions">
                 <button class="co-btn-back" (click)="goBack()">Back</button>
+                <button
+                  class="co-btn-back"
+                  (click)="cancelMercadopagoPayment()"
+                  data-testid="btn-mp-cancel"
+                >
+                  Cancel payment
+                </button>
               </div>
             } @else {
-              <div class="co-waiting" data-testid="mp-wallet-waiting">
-                <div class="co-spinner"></div>
+              <div
+                class="co-waiting"
+                data-testid="mp-wallet-waiting"
+                role="status"
+                aria-live="polite"
+              >
+                <div class="co-spinner" aria-hidden="true"></div>
                 <p class="co-waiting-title">Waiting for confirmation…</p>
-                <p class="co-waiting-hint">Complete payment in the MercadoPago tab that opened.</p>
+                <p class="co-waiting-hint">
+                  Complete payment in the Mercado Pago tab that opened, or cancel here.
+                </p>
+              </div>
+              <div class="co-actions co-actions--single">
+                <button
+                  class="co-btn-back"
+                  (click)="cancelMercadopagoPayment()"
+                  data-testid="btn-mp-cancel"
+                >
+                  Cancel payment
+                </button>
               </div>
             }
+          </div>
+        }
+
+        <!-- ── MP — cancelling at the gateway ─────────────────────────── -->
+        @if (step() === 'mercadopago-cancelling') {
+          <div
+            class="co-body co-body--centered"
+            data-testid="mp-cancelling"
+            role="status"
+            aria-live="polite"
+          >
+            <div class="co-spinner co-spinner--lg" aria-hidden="true"></div>
+            <p class="co-state-text">Cancelling payment…</p>
+            <div class="co-actions">
+              <button class="co-btn-back" disabled>Try again</button>
+              <button class="co-btn-back" disabled>Back to cart</button>
+            </div>
+          </div>
+        }
+
+        <!-- ── MP — payment cancelled ─────────────────────────────────── -->
+        @if (step() === 'mercadopago-cancelled') {
+          <div class="co-body co-body--centered" data-testid="mp-cancelled">
+            <div class="co-cancelled-icon" aria-hidden="true">
+              <svg width="40" height="40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" stroke-width="1.8" />
+                <path d="M15 9l-6 6M9 9l6 6" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </div>
+            <h3 #mpCancelledHeading class="co-cancelled-title" tabindex="-1">Payment cancelled</h3>
+            <p class="co-cancelled-body" role="status">
+              You weren't charged. Your cart is still here.
+            </p>
+            @if (mpCancelUnconfirmed()) {
+              <p class="co-notice" role="alert" data-testid="mp-cancel-unconfirmed">
+                We couldn't confirm the cancellation with Mercado Pago. If you were charged, ask a
+                cashier.
+              </p>
+            }
+            <div class="co-actions">
+              <button
+                class="co-btn-back"
+                (click)="backToCartAfterCancel()"
+                data-testid="btn-mp-back-to-cart"
+              >
+                Back to cart
+              </button>
+              <button
+                class="co-btn-confirm"
+                (click)="tryAgainAfterCancel()"
+                data-testid="btn-mp-try-again"
+              >
+                Try again
+              </button>
+            </div>
           </div>
         }
 
@@ -483,8 +567,15 @@ const DECLINED_TEST_CARD = '4000000000000002';
             >
               Pay with MercadoPago account instead
             </button>
-            <div class="co-actions co-actions--single">
+            <div class="co-actions">
               <button class="co-btn-back" (click)="goBack()">Back</button>
+              <button
+                class="co-btn-back"
+                (click)="cancelMercadopagoPayment()"
+                data-testid="btn-mp-cancel"
+              >
+                Cancel payment
+              </button>
             </div>
           </div>
         }
@@ -1101,6 +1192,40 @@ const DECLINED_TEST_CARD = '4000000000000002';
         margin: 0;
       }
 
+      /* ── MP payment cancelled ─────────────────────────────────────── */
+      .co-cancelled-icon {
+        color: rgba(232, 220, 203, 0.55);
+      }
+      .co-cancelled-title {
+        font-size: 1.125rem;
+        font-weight: 700;
+        color: #e8dccb;
+        margin: 0;
+        outline: none;
+      }
+      .co-cancelled-body {
+        font-size: 0.9375rem;
+        color: rgba(232, 220, 203, 0.7);
+        margin: 0;
+        max-width: 30ch;
+        line-height: 1.5;
+      }
+      .co-notice {
+        font-size: 0.8125rem;
+        color: #f0b429;
+        background: rgba(240, 180, 41, 0.1);
+        border: 1px solid rgba(240, 180, 41, 0.3);
+        border-radius: 10px;
+        padding: 0.625rem 0.875rem;
+        margin: 0;
+        max-width: 34ch;
+        line-height: 1.45;
+      }
+      .co-btn-back:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+
       /* ── Error state ──────────────────────────────────────────────── */
       .co-error-icon {
         color: #c4553c;
@@ -1211,9 +1336,9 @@ export class CheckoutComponent implements OnDestroy {
   readonly cardPayment = inject(ProcessCardPaymentUseCase);
   readonly mercadopago = inject(MERCADOPAGO_PAYMENT_PORT);
   readonly paypal = inject(PAYPAL_PAYMENT_PORT);
-  private readonly persistTransaction = inject(PersistTransactionUseCase);
   private readonly circuitBreaker = inject(CircuitBreakerService);
   private readonly retry = inject(RetryService);
+  private readonly injector = inject(Injector);
 
   /**
    * When true the checkout is running in kiosk (self-checkout) mode.
@@ -1253,6 +1378,8 @@ export class CheckoutComponent implements OnDestroy {
     | 'mobile'
     | 'mercadopago'
     | 'mercadopago-wallet'
+    | 'mercadopago-cancelling'
+    | 'mercadopago-cancelled'
     | 'paypal'
     | 'processing'
     | 'retrying'
@@ -1267,6 +1394,26 @@ export class CheckoutComponent implements OnDestroy {
    * mercadopago-wallet step so the Brick container isn't destroyed mid-poll.
    */
   readonly mpWalletPolling = signal<boolean>(false);
+
+  /**
+   * True on the "Payment cancelled" screen when the gateway could not confirm
+   * the cancel. The sale is still not finalized; the notice just tells the
+   * customer who to ask if money did leave their account.
+   */
+  readonly mpCancelUnconfirmed = signal<boolean>(false);
+
+  private readonly mpCancelledHeading = viewChild<ElementRef<HTMLElement>>('mpCancelledHeading');
+
+  /**
+   * Generation of the current MercadoPago attempt. Every async MP result
+   * carries the generation it started under and is dropped unless it still
+   * matches; settling, Back, closing and destroy all move it on. That is what
+   * stops a late `approved` — after the customer cancelled, went back, or
+   * closed checkout — from finalizing a sale nobody is looking at.
+   */
+  private mpGeneration = 0;
+  /** Transaction id of the in-flight MP attempt, for a cancel that turns out approved. */
+  private mpTransactionId = '';
 
   /** User-facing message shown in the 'error' step after a failed payment. */
   readonly errorMessage = signal<string>('');
@@ -1325,6 +1472,7 @@ export class CheckoutComponent implements OnDestroy {
   }
 
   goBack(): void {
+    this.mpGeneration++;
     this.mercadopago.destroy();
     this.paypal.destroy();
     this.mpWalletPolling.set(false);
@@ -1334,11 +1482,22 @@ export class CheckoutComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.mpGeneration++;
     this.mercadopago.destroy();
     this.paypal.destroy();
   }
 
   cancel(): void {
+    // Closing checkout (header close, Escape, backdrop) while Mercado Pago
+    // holds an open payment goes through the same gateway cancel as the
+    // button: the customer may already be paying in the MP tab, so the sale
+    // either lands (approved) or is cancelled on screen — never silently dropped.
+    if (this.isMercadopagoInFlight()) {
+      void this.cancelMercadopagoPayment();
+      return;
+    }
+    if (this.step() === 'mercadopago-cancelling') return;
+    this.mpGeneration++;
     this.mercadopago.destroy();
     this.paypal.destroy();
     this.cashPayment.reset();
@@ -1539,32 +1698,32 @@ export class CheckoutComponent implements OnDestroy {
    * existing MercadoPago account (QR / link). This is the primary mode.
    */
   private async processMercadopagoWalletPayment(transactionId: string): Promise<void> {
+    const generation = this.beginMercadopagoAttempt(transactionId);
     this.step.set('mercadopago-wallet');
     this.mpWalletPolling.set(false);
     this.isSubmitting = false;
 
     try {
-      // Pass a callback so the adapter can tell us the moment the buyer clicks Pay
-      // and polling starts — we flip to the "waiting" overlay immediately.
+      // Callbacks let the adapter flip the UI the moment the buyer clicks Pay
+      // (waiting) or the moment it starts a cancel on its own — the buyer came
+      // back from MP without paying, or the wait timed out (cancelling).
       const result = await this.mercadopago.createWalletBrick(
         this.cartService.total(),
         'mp-wallet-brick-container',
         () => {
-          this.mpWalletPolling.set(true);
+          if (generation === this.mpGeneration) this.mpWalletPolling.set(true);
+        },
+        () => {
+          if (generation === this.mpGeneration) this.step.set('mercadopago-cancelling');
         }
       );
-
-      this.mpWalletPolling.set(false);
-      if (result.status === 'approved' || result.status === 'pending') {
-        this.isSubmitting = true;
-        this.step.set('processing');
-        this.finalizePayment('mercadopago', transactionId);
-      } else {
-        this.step.set('error');
-        this.errorMessage.set('MercadoPago payment was not completed. Please try again.');
-        this.isSubmitting = false;
-      }
+      this.settleMercadopago(
+        generation,
+        result,
+        'MercadoPago payment was not completed. Please try again.'
+      );
     } catch (err) {
+      if (!this.consumeMercadopagoGeneration(generation)) return;
       this.mpWalletPolling.set(false);
       this.mercadopago.destroy();
       this.step.set('error');
@@ -1575,11 +1734,93 @@ export class CheckoutComponent implements OnDestroy {
   }
 
   /**
+   * "Cancel payment" — from the wallet step (before or while waiting), the
+   * card Brick step, or by closing checkout mid-payment. Shows "Cancelling…"
+   * while the adapter makes the cancel real at the gateway, then lands on
+   * "Payment cancelled" — or on the receipt, if the gateway says the
+   * customer had already paid.
+   */
+  async cancelMercadopagoPayment(): Promise<void> {
+    if (!this.isMercadopagoInFlight()) return;
+    const generation = this.mpGeneration;
+    this.mpWalletPolling.set(false);
+    this.step.set('mercadopago-cancelling');
+    const result = await this.mercadopago.cancelPayment();
+    // The attempt's own promise settles with this same result; whichever
+    // arrives first wins and the other is dropped by the generation check.
+    this.settleMercadopago(generation, result, 'MercadoPago payment was not completed.');
+  }
+
+  /** "Try again" on the cancelled screen: pick a method again; MP gets a fresh preference. */
+  tryAgainAfterCancel(): void {
+    this.mpCancelUnconfirmed.set(false);
+    this.goBack();
+  }
+
+  /** "Back to cart" on the cancelled screen: close checkout, cart intact. */
+  backToCartAfterCancel(): void {
+    this.mpCancelUnconfirmed.set(false);
+    this.cancel();
+  }
+
+  private isMercadopagoInFlight(): boolean {
+    const step = this.step();
+    return step === 'mercadopago-wallet' || step === 'mercadopago';
+  }
+
+  private beginMercadopagoAttempt(transactionId: string): number {
+    this.mpTransactionId = transactionId;
+    this.mpCancelUnconfirmed.set(false);
+    return ++this.mpGeneration;
+  }
+
+  /** True (and the generation moves on) only for the first result of the current attempt. */
+  private consumeMercadopagoGeneration(generation: number): boolean {
+    if (generation !== this.mpGeneration) return false;
+    this.mpGeneration++;
+    return true;
+  }
+
+  /** One place every MP outcome lands, so wallet, card and cancel agree. */
+  private settleMercadopago(
+    generation: number,
+    result: MercadoPagoPaymentResult,
+    notCompletedMessage: string
+  ): void {
+    if (!this.consumeMercadopagoGeneration(generation)) return;
+    this.mpWalletPolling.set(false);
+
+    if (result.status === 'approved' || result.status === 'pending') {
+      // Pending is acceptable — treat as complete and let the backend confirm.
+      this.isSubmitting = true;
+      this.step.set('processing');
+      this.finalizePayment('mercadopago', this.mpTransactionId);
+      return;
+    }
+
+    this.isSubmitting = false;
+    if (result.status === 'cancelled') {
+      this.mpCancelUnconfirmed.set(result.cancellationConfirmed === false);
+      this.step.set('mercadopago-cancelled');
+      // Move focus to the heading so screen readers announce the new state
+      // and keyboard users are not left on a button that no longer exists.
+      afterNextRender(() => this.mpCancelledHeading()?.nativeElement.focus(), {
+        injector: this.injector,
+      });
+      return;
+    }
+
+    this.step.set('error');
+    this.errorMessage.set(notCompletedMessage);
+  }
+
+  /**
    * Mounts the MercadoPago **Card Payment Brick** — the buyer types card
    * details into the MP iframe. Optional fallback when the buyer does not
    * have a MercadoPago account.
    */
   private async processMercadopagoPayment(transactionId: string): Promise<void> {
+    const generation = this.beginMercadopagoAttempt(transactionId);
     // Render the brick — the container div must be in the DOM, so we go back
     // to the mercadopago step first (processing hides it).
     this.step.set('mercadopago');
@@ -1590,22 +1831,13 @@ export class CheckoutComponent implements OnDestroy {
         this.cartService.total(),
         'mp-card-brick-container'
       );
-
-      if (result.status === 'approved') {
-        this.isSubmitting = true;
-        this.step.set('processing');
-        this.finalizePayment('mercadopago', transactionId);
-      } else if (result.status === 'pending') {
-        // Pending is acceptable — treat as complete and let the backend confirm.
-        this.isSubmitting = true;
-        this.step.set('processing');
-        this.finalizePayment('mercadopago', transactionId);
-      } else {
-        this.step.set('error');
-        this.errorMessage.set('MercadoPago payment was not approved. Please try again.');
-        this.isSubmitting = false;
-      }
+      this.settleMercadopago(
+        generation,
+        result,
+        'MercadoPago payment was not approved. Please try again.'
+      );
     } catch {
+      if (!this.consumeMercadopagoGeneration(generation)) return;
       this.mercadopago.destroy();
       this.step.set('error');
       this.errorMessage.set('MercadoPago payment failed. Please try again.');
@@ -1673,8 +1905,8 @@ export class CheckoutComponent implements OnDestroy {
   }
 
   /**
-   * Completes a payment: persists the transaction, releases the use-cases, and
-   * emits the result. Shared by the cash/mobile timeout path and the card
+   * Completes a payment: releases the use-cases and emits the result. The sale is
+   * recorded by `PosFacade.checkout()`, once any remote write has succeeded (#352). Shared by the cash/mobile timeout path and the card
    * gateway path so completion behaviour stays identical across methods.
    */
   private finalizePayment(method: PaymentMethod, transactionId: string): void {
@@ -1685,18 +1917,6 @@ export class CheckoutComponent implements OnDestroy {
       transactionId,
       timestamp: new Date(),
     };
-
-    // Persist transaction to IndexedDB (fire-and-forget for offline-first)
-    this.persistTransaction
-      .execute({
-        paymentMethod: method,
-        transactionId,
-        amountTendered: method === 'cash' ? this.cashTendered : undefined,
-        changeGiven: method === 'cash' ? this.cashPayment.changeAmount() : undefined,
-      })
-      .catch(() => {
-        // Persistence failure is non-blocking; transaction completes regardless
-      });
 
     this.cashPayment.completeProcessing();
     this.cardPayment.completeProcessing();

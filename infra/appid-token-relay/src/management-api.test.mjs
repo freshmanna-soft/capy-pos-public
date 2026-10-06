@@ -44,7 +44,11 @@ function stubFetch(handlers) {
   globalThis.fetch = async (url, init) => {
     calls.push({ url: String(url), init });
     if (String(url) === 'https://iam.cloud.ibm.com/identity/token') {
-      return { ok: true, status: 200, json: async () => ({ access_token: 'iam-token-1', expires_in: 3600 }) };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ access_token: 'iam-token-1', expires_in: 3600 }),
+      };
     }
     const handler = handlers.find((h) => h.match(String(url), init));
     if (!handler) {
@@ -72,7 +76,8 @@ describe('IAM token exchange', () => {
         // *hit*: a cached miss deliberately re-reads `/roles` (see
         // `resolveRoleId`'s own suite), which would spend a second call here
         // and stop isolating the IAM token's cache from the roles cache.
-        respond: () => json(200, { roles: [{ id: 'r1', name: 'Admin', access: [{ scopes: ['admin'] }] }] }),
+        respond: () =>
+          json(200, { roles: [{ id: 'r1', name: 'Admin', access: [{ scopes: ['admin'] }] }] }),
       },
     ]);
 
@@ -80,7 +85,11 @@ describe('IAM token exchange', () => {
     await resolveRoleId('admin', CONFIG, nowSeconds); // roles cache hit — no second /roles call
 
     const iamCalls = calls.filter((c) => c.url.includes('iam.cloud.ibm.com'));
-    assert.equal(iamCalls.length, 1, 'the cached IAM token should not be re-fetched inside its TTL');
+    assert.equal(
+      iamCalls.length,
+      1,
+      'the cached IAM token should not be re-fetched inside its TTL'
+    );
   });
 
   it('refetches the IAM token once the cached one is past its margin', async () => {
@@ -123,7 +132,9 @@ describe('resolveRoleId / listAssignableStaffRoles', () => {
   const adminRole = { id: 'role-admin', name: 'Admin', access: [{ scopes: ['admin'] }] };
 
   it('resolves a configured scope to its role id, matching access[].scopes, never the display name', async () => {
-    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) }]);
+    stubFetch([
+      { match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) },
+    ]);
     assert.equal(await resolveRoleId('admin', CONFIG, nowSeconds), 'role-admin');
   });
 
@@ -131,14 +142,19 @@ describe('resolveRoleId / listAssignableStaffRoles', () => {
     stubFetch([
       {
         match: (url) => url.endsWith('/roles'),
-        respond: () => json(200, { roles: [{ id: 'role-x', name: 'admin', access: [{ scopes: ['something-else'] }] }] }),
+        respond: () =>
+          json(200, {
+            roles: [{ id: 'role-x', name: 'admin', access: [{ scopes: ['something-else'] }] }],
+          }),
       },
     ]);
     assert.equal(await resolveRoleId('admin', CONFIG, nowSeconds), null);
   });
 
   it('returns null for a scope with no matching App ID role — a 400 upstream, not a crash', async () => {
-    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [] }) }]);
+    stubFetch([
+      { match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [] }) },
+    ]);
     assert.equal(await resolveRoleId('operator', CONFIG, nowSeconds), null);
   });
 
@@ -155,14 +171,18 @@ describe('resolveRoleId / listAssignableStaffRoles', () => {
   });
 
   it('caches a resolved role — one /roles call across repeated lookups', async () => {
-    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) }]);
+    stubFetch([
+      { match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) },
+    ]);
     await resolveRoleId('admin', CONFIG, nowSeconds);
     await resolveRoleId('admin', CONFIG, nowSeconds);
     assert.equal(rolesCalls(), 1);
   });
 
   it('spends exactly one /roles call answering that nothing grants a scope, on a cold cache', async () => {
-    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [] }) }]);
+    stubFetch([
+      { match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [] }) },
+    ]);
     assert.equal(await resolveRoleId('customer', CONFIG, nowSeconds), null);
     assert.equal(rolesCalls(), 1, 'a cold miss is already a fresh list — nothing to re-read');
   });
@@ -174,7 +194,9 @@ describe('resolveRoleId / listAssignableStaffRoles', () => {
   // configured tenant until the process restarted.
   it('re-reads /roles before answering null, so a role configured since the list was cached is found', async () => {
     let configured = [];
-    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: configured }) }]);
+    stubFetch([
+      { match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: configured }) },
+    ]);
 
     assert.equal(await resolveRoleId('customer', CONFIG, nowSeconds), null);
     configured = [{ id: 'role-customer', name: 'Customer', access: [{ scopes: ['customer'] }] }];
@@ -184,21 +206,29 @@ describe('resolveRoleId / listAssignableStaffRoles', () => {
       'role-customer',
       'a cached miss must not outlive the tenant fix'
     );
-    assert.equal(rolesCalls(), 2, 'exactly one re-read — a fresh list with no match really is null');
+    assert.equal(
+      rolesCalls(),
+      2,
+      'exactly one re-read — a fresh list with no match really is null'
+    );
   });
 
   // `listAssignableStaffRoles` omits an unconfigured scope by design, so it
   // cannot tell a stale list from a correct one and never forces a re-read.
   // The TTL is what keeps its answer from being permanently stale instead.
   it('tolerates a missing scope in a cached list rather than re-reading on every staff-roles lookup', async () => {
-    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) }]);
+    stubFetch([
+      { match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) },
+    ]);
     await listAssignableStaffRoles(CONFIG, nowSeconds);
     await listAssignableStaffRoles(CONFIG, nowSeconds);
     assert.equal(rolesCalls(), 1);
   });
 
   it('expires the cached list, so a role added in the console lands without a restart', async () => {
-    stubFetch([{ match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) }]);
+    stubFetch([
+      { match: (url) => url.endsWith('/roles'), respond: () => json(200, { roles: [adminRole] }) },
+    ]);
     await listAssignableStaffRoles(CONFIG, nowSeconds);
     NOW += 301;
     await listAssignableStaffRoles(CONFIG, nowSeconds);
@@ -220,8 +250,16 @@ describe('listStaffUsers', () => {
         respond: () =>
           json(200, {
             Resources: [
-              { id: 'scim-u1', displayName: 'Ada', emails: [{ value: 'ada@capy.test', primary: true }] },
-              { id: 'scim-u2', displayName: 'Bea', emails: [{ value: 'bea@capy.test', primary: true }] },
+              {
+                id: 'scim-u1',
+                displayName: 'Ada',
+                emails: [{ value: 'ada@capy.test', primary: true }],
+              },
+              {
+                id: 'scim-u2',
+                displayName: 'Bea',
+                emails: [{ value: 'bea@capy.test', primary: true }],
+              },
             ],
           }),
       },
@@ -237,12 +275,20 @@ describe('listStaffUsers', () => {
         match: (url) => url.endsWith('/users/sub-u1/roles'),
         respond: () => json(200, { roles: [{ id: 'role-admin', name: 'Admin' }] }),
       },
-      { match: (url) => url.endsWith('/users/sub-u2/roles'), respond: () => json(200, { roles: [] }) },
+      {
+        match: (url) => url.endsWith('/users/sub-u2/roles'),
+        respond: () => json(200, { roles: [] }),
+      },
     ]);
 
     const users = await listStaffUsers(CONFIG, nowSeconds);
     assert.deepEqual(users, [
-      { id: 'sub-u1', email: 'ada@capy.test', displayName: 'Ada', roles: [{ id: 'role-admin', name: 'Admin' }] },
+      {
+        id: 'sub-u1',
+        email: 'ada@capy.test',
+        displayName: 'Ada',
+        roles: [{ id: 'role-admin', name: 'Admin' }],
+      },
       { id: 'sub-u2', email: 'bea@capy.test', displayName: 'Bea', roles: [] },
     ]);
   });
@@ -251,9 +297,13 @@ describe('listStaffUsers', () => {
     stubFetch([
       {
         match: (url) => url.endsWith('/cloud_directory/Users'),
-        respond: () => json(200, { Resources: [{ id: 'scim-u1', displayName: 'Ada', emails: [] }] }),
+        respond: () =>
+          json(200, { Resources: [{ id: 'scim-u1', displayName: 'Ada', emails: [] }] }),
       },
-      { match: (url) => url.endsWith('/cloud_directory/scim-u1/userinfo'), respond: () => json(404, {}) },
+      {
+        match: (url) => url.endsWith('/cloud_directory/scim-u1/userinfo'),
+        respond: () => json(404, {}),
+      },
     ]);
     const users = await listStaffUsers(CONFIG, nowSeconds);
     assert.deepEqual(users, [{ id: 'scim-u1', email: '', displayName: 'Ada', roles: [] }]);
@@ -263,7 +313,8 @@ describe('listStaffUsers', () => {
     stubFetch([
       {
         match: (url) => url.endsWith('/cloud_directory/Users'),
-        respond: () => json(200, { Resources: [{ id: 'scim-u1', displayName: 'Ada', emails: [] }] }),
+        respond: () =>
+          json(200, { Resources: [{ id: 'scim-u1', displayName: 'Ada', emails: [] }] }),
       },
       {
         match: (url) => url.endsWith('/cloud_directory/scim-u1/userinfo'),
@@ -345,7 +396,8 @@ describe('createUser', () => {
     stubFetch([
       {
         match: () => true,
-        respond: () => json(201, { id: 'scim-1', profileId: 'sub-1', displayName: 'c', emails: [] }),
+        respond: () =>
+          json(201, { id: 'scim-1', profileId: 'sub-1', displayName: 'c', emails: [] }),
       },
     ]);
 
@@ -353,7 +405,11 @@ describe('createUser', () => {
       () => createUser('new@capy.test', '', CONFIG, nowSeconds),
       (error) => error instanceof ManagementApiError && error.message.includes('password')
     );
-    assert.equal(calls.length, 0, 'an empty password must fail before any call reaches IAM or App ID');
+    assert.equal(
+      calls.length,
+      0,
+      'an empty password must fail before any call reaches IAM or App ID'
+    );
   });
 
   // The same guarantee from the other side. `email` is this account's only
@@ -364,7 +420,8 @@ describe('createUser', () => {
     stubFetch([
       {
         match: () => true,
-        respond: () => json(201, { id: 'scim-1', profileId: 'sub-1', displayName: 'c', emails: [] }),
+        respond: () =>
+          json(201, { id: 'scim-1', profileId: 'sub-1', displayName: 'c', emails: [] }),
       },
     ]);
 
@@ -383,7 +440,8 @@ describe('createUser', () => {
     stubFetch([
       {
         match: () => true,
-        respond: () => json(201, { id: 'scim-1', profileId: 'sub-1', displayName: 'c', emails: [] }),
+        respond: () =>
+          json(201, { id: 'scim-1', profileId: 'sub-1', displayName: 'c', emails: [] }),
       },
     ]);
 
@@ -391,7 +449,11 @@ describe('createUser', () => {
       () => createUser('   ', 'caller-chosen-pw', CONFIG, nowSeconds),
       (error) => error instanceof ManagementApiError && error.message.includes('email')
     );
-    assert.equal(calls.length, 0, 'a whitespace-only email must fail before any call reaches IAM or App ID');
+    assert.equal(
+      calls.length,
+      0,
+      'a whitespace-only email must fail before any call reaches IAM or App ID'
+    );
   });
 
   it('throws ManagementApiError when sign_up succeeds but returns no profileId, rather than silently using the SCIM id', async () => {
@@ -411,7 +473,7 @@ describe('createUser', () => {
   // refused sign-up from `error.status`/`error.detail`, never from the sentence —
   // so asserting only the message would leave both fields free to disappear while
   // the suite stayed green and every duplicate silently became a 502.
-  it('carries the upstream status and App ID\'s own wording on the error, not just inside the sentence', async () => {
+  it("carries the upstream status and App ID's own wording on the error, not just inside the sentence", async () => {
     stubFetch([
       {
         match: (url) => url.includes('/cloud_directory/sign_up'),
@@ -458,7 +520,11 @@ describe('createUser', () => {
   it('leaves both fields unset when the call never got far enough to have a status', async () => {
     globalThis.fetch = async (url) => {
       if (String(url) === 'https://iam.cloud.ibm.com/identity/token') {
-        return { ok: true, status: 200, json: async () => ({ access_token: 'iam-token-1', expires_in: 3600 }) };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ access_token: 'iam-token-1', expires_in: 3600 }),
+        };
       }
       throw new Error('socket hang up');
     };
@@ -466,14 +532,18 @@ describe('createUser', () => {
       () => createUser('new@capy.test', 'pw', CONFIG, nowSeconds),
       (error) => {
         assert.ok(error instanceof ManagementApiError);
-        assert.equal(error.status, undefined, 'a transport failure has no upstream status to classify from');
+        assert.equal(
+          error.status,
+          undefined,
+          'a transport failure has no upstream status to classify from'
+        );
         assert.equal(error.detail, undefined);
         return true;
       }
     );
   });
 
-  it('does not put the request body — the caller\'s password above all — into the error', async () => {
+  it("does not put the request body — the caller's password above all — into the error", async () => {
     stubFetch([
       {
         match: (url) => url.includes('/cloud_directory/sign_up'),
@@ -482,7 +552,9 @@ describe('createUser', () => {
     ]);
     await assert.rejects(
       () => createUser('dup@capy.test', 'caller-chosen-pw', CONFIG, nowSeconds),
-      (error) => !error.message.includes('caller-chosen-pw') && !(error.detail ?? '').includes('caller-chosen-pw')
+      (error) =>
+        !error.message.includes('caller-chosen-pw') &&
+        !(error.detail ?? '').includes('caller-chosen-pw')
     );
   });
 });
@@ -500,11 +572,17 @@ describe('upstreamDetail', () => {
   });
 
   it("reads a SCIM-shaped error's `detail`", () => {
-    assert.equal(upstreamDetail({ scimType: 'invalidValue', detail: 'password too weak' }), 'password too weak');
+    assert.equal(
+      upstreamDetail({ scimType: 'invalidValue', detail: 'password too weak' }),
+      'password too weak'
+    );
   });
 
   it('prefers `message` when App ID sends both, so one body never yields two answers', () => {
-    assert.equal(upstreamDetail({ message: 'from message', detail: 'from detail' }), 'from message');
+    assert.equal(
+      upstreamDetail({ message: 'from message', detail: 'from detail' }),
+      'from message'
+    );
   });
 
   it('trims, so a padded string is not treated as a different sentence', () => {
@@ -610,7 +688,10 @@ describe('deleteUserAndProfile', () => {
 
     assert.equal(sentMethod, 'DELETE');
     assert.match(sentUrl, /\/cloud_directory\/remove\/scim-new-1$/);
-    assert.ok(!sentUrl.includes('/cloud_directory/Users/'), 'Users/{id} would leave the profile behind');
+    assert.ok(
+      !sentUrl.includes('/cloud_directory/Users/'),
+      'Users/{id} would leave the profile behind'
+    );
   });
 
   it('escapes the id rather than pasting it into the path', async () => {
@@ -629,7 +710,9 @@ describe('deleteUserAndProfile', () => {
   });
 
   it('throws ManagementApiError when App ID refuses the delete, so the caller can report the account it left behind', async () => {
-    stubFetch([{ match: (url) => url.includes('/cloud_directory/remove/'), respond: () => json(403, {}) }]);
+    stubFetch([
+      { match: (url) => url.includes('/cloud_directory/remove/'), respond: () => json(403, {}) },
+    ]);
     await assert.rejects(
       () => deleteUserAndProfile('scim-new-1', CONFIG, nowSeconds),
       (error) => error instanceof ManagementApiError && error.message.includes('403')
@@ -654,12 +737,25 @@ describe('triggerForgotPassword', () => {
   });
 
   it('resolves (does not throw) for an email with no account — App ID answering "no such user" is not this relay failing', async () => {
-    stubFetch([{ match: (url) => url.endsWith('/cloud_directory/forgot_password'), respond: () => json(404, {}) }]);
+    stubFetch([
+      {
+        match: (url) => url.endsWith('/cloud_directory/forgot_password'),
+        respond: () => json(404, {}),
+      },
+    ]);
     await assert.doesNotReject(() => triggerForgotPassword('nobody@capy.test', CONFIG, nowSeconds));
   });
 
   it('throws ManagementApiError on a genuine failure (not 200, not the "no such user" 404)', async () => {
-    stubFetch([{ match: (url) => url.endsWith('/cloud_directory/forgot_password'), respond: () => json(500, {}) }]);
-    await assert.rejects(() => triggerForgotPassword('ada@capy.test', CONFIG, nowSeconds), ManagementApiError);
+    stubFetch([
+      {
+        match: (url) => url.endsWith('/cloud_directory/forgot_password'),
+        respond: () => json(500, {}),
+      },
+    ]);
+    await assert.rejects(
+      () => triggerForgotPassword('ada@capy.test', CONFIG, nowSeconds),
+      ManagementApiError
+    );
   });
 });

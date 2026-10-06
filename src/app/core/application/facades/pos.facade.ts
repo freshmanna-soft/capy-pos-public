@@ -25,9 +25,13 @@ import {
 import { Product } from '@core/domain/entities/product.entity';
 import { Customer, CustomerTier } from '@core/domain/entities/customer.entity';
 import { PaymentResult } from '@core/application/dtos/payment.dto';
-import { ReceiptLine } from '@core/application/dtos/receipt.dto';
-import { SelfCheckoutReceipt } from '@core/application/ports/self-checkout-gateway.port';
 import { TransactionRemoteService } from '@core/application/services/transaction-remote.service';
+import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
+import { generateUUID } from '@core/domain/utils/uuid';
+import { ADJUST_STOCK_ON_SALE_HANDLER } from '@core/application/handlers/adjust-stock-on-sale.handler';
+import { AWARD_LOYALTY_POINTS_HANDLER } from '@core/application/handlers/award-loyalty-points.handler';
+import { AUDIT_SALE_HANDLER } from '@core/application/handlers/audit-sale.handler';
+import { TELEMETRY_SALE_HANDLER } from '@core/application/handlers/telemetry-sale.handler';
 
 /**
  * The customer attached to the sale in progress.
@@ -48,13 +52,6 @@ export type AddToCartRejection = 'out-of-stock' | 'max-stock-reached';
 
 /** Outcome of an attempt to add a product to the cart. */
 export type AddToCartResult = { added: true } | { added: false; reason: AddToCartRejection };
-
-export class CartChangedDuringCheckoutError extends Error {
-  constructor() {
-    super('The cart changed while payment was in progress.');
-    this.name = 'CartChangedDuringCheckoutError';
-  }
-}
 
 /**
  * PosFacade - Single point of access for POS Terminal operations.
@@ -83,6 +80,7 @@ export class PosFacade {
   private readonly customers = inject(CustomerService);
   private readonly awardLoyaltyPoints = inject(AwardLoyaltyPointsUseCase);
   private readonly transactionRemote = inject(TransactionRemoteService);
+  private readonly persistTransaction = inject(PersistTransactionUseCase);
 
   /** The customer attached to the sale in progress, if any. */
   private readonly _attachedCustomer = signal<AttachedCustomer | null>(null);
@@ -153,7 +151,7 @@ export class PosFacade {
         EventType.CART_ITEM_ADDED,
         EventSource.POS_FACADE,
         { productId: product.id, name: product.name, price: product.price },
-        'normal'
+        { priority: 'normal' }
       )
     );
     return { added: true };
@@ -181,7 +179,12 @@ export class PosFacade {
   removeFromCart(productId: string): void {
     this.cartService.removeItem(productId);
     this.eventBus.publish(
-      busEvent(EventType.CART_ITEM_REMOVED, EventSource.POS_FACADE, { productId }, 'normal')
+      busEvent(
+        EventType.CART_ITEM_REMOVED,
+        EventSource.POS_FACADE,
+        { productId },
+        { priority: 'normal' }
+      )
     );
   }
 
@@ -239,7 +242,7 @@ export class PosFacade {
         EventType.CUSTOMER_ATTACHED,
         EventSource.POS_FACADE,
         { customerId: attached.id, tier: attached.tier },
-        'normal'
+        { priority: 'normal' }
       )
     );
 
@@ -268,7 +271,7 @@ export class PosFacade {
         EventType.CUSTOMER_ATTACHED,
         EventSource.POS_FACADE,
         { customerId: attached.id, tier: attached.tier },
-        'normal'
+        { priority: 'normal' }
       )
     );
   }
@@ -320,14 +323,27 @@ export class PosFacade {
     // Generate receipt from current cart state BEFORE clearing
     const receipt = this.generateReceipt.execute(paymentResult);
 
-    // Adjust stock levels (fire-and-forget, best-effort)
-    try {
-      const result: StockAdjustmentResult = await this.adjustStock.execute(stockAdjustmentItems);
-      if (!result.success) {
-        console.error('[PosFacade] Stock adjustment partially failed:', result.failedAdjustments);
+    // One id for everything this sale causes: its outbox event and its bus events.
+    const correlationId = generateUUID();
+
+    // The local record and its SaleCompleted event, written together (#352). After
+    // the remote write, so a sale the server refused is never recorded here, and
+    // before the cart is cleared, because the record is built from it.
+    const recorded = await this.recordSale(paymentResult, attachedCustomer, correlationId);
+
+    // Stock is the SaleCompleted handler's job now (#354), and it has run once by the
+    // time `recordSale` resolves. Only a sale with no event behind it — the local
+    // write deferred or refused — still takes stock off inline, so the till never
+    // shows sold items as available.
+    if (!recorded) {
+      try {
+        const result: StockAdjustmentResult = await this.adjustStock.execute(stockAdjustmentItems);
+        if (!result.success) {
+          console.error('[PosFacade] Stock adjustment partially failed:', result.failedAdjustments);
+        }
+      } catch (error) {
+        console.error('[PosFacade] Stock adjustment failed entirely:', error);
       }
-    } catch (error) {
-      console.error('[PosFacade] Stock adjustment failed entirely:', error);
     }
 
     // Clear cart after checkout
@@ -342,13 +358,78 @@ export class PosFacade {
           amount: paymentResult.amount,
           method: paymentResult.method,
         },
-        'high'
+        { priority: 'high', correlationId }
       )
     );
 
-    // Observability (fire-and-forget): feed the audit log + telemetry so the
-    // agent-monitor dashboard reflects real POS activity. Deliberately NOT
-    // awaited — checkout must never block or fail on logging.
+    // Audit and telemetry are SaleCompleted handlers now (#356). Only a sale with no
+    // event behind it records them inline — fire-and-forget, never blocking the sale.
+    if (!recorded) this.recordObservabilityInline(paymentResult);
+
+    // Loyalty is the SaleCompleted handler's job now (#355). Only a sale with no event
+    // behind it awards inline, fire-and-forget as before: the sale is paid for, so a
+    // points write may neither fail it nor hold it up.
+    if (attachedCustomer && !recorded) {
+      this.awardPointsForSale(attachedCustomer, paymentResult.amount);
+    }
+
+    // The sale ends the customer's session. Without this the next shopper inherits
+    // the last one's card and silently earns their points.
+    this.detachCustomer();
+
+    return receipt;
+  }
+
+  /**
+   * Records the sale locally with its `SaleCompleted` event. Never throws: the sale
+   * has been paid for, so a failed local write is logged, retried in the background
+   * by the sale outbox, and kept out of what the cashier sees.
+   *
+   * @returns whether an event now stands behind this sale, i.e. its handlers own the
+   *   side effects. False means the caller must apply them inline.
+   */
+  private async recordSale(
+    paymentResult: PaymentResult,
+    customer: AttachedCustomer | null,
+    correlationId: string
+  ): Promise<boolean> {
+    try {
+      const result = await this.persistTransaction.execute({
+        paymentMethod: paymentResult.method,
+        transactionId: paymentResult.transactionId,
+        ...(customer ? { customerId: customer.id, customerTier: customer.tier } : {}),
+        sale: {
+          correlationId,
+          amount: paymentResult.amount,
+          // Every side effect is a handler now (#354–#356); none runs inline here.
+          appliedInline: [],
+          // ...unless this record is deferred: then checkout() runs them inline.
+          fallbackInline: [
+            ADJUST_STOCK_ON_SALE_HANDLER,
+            AWARD_LOYALTY_POINTS_HANDLER,
+            AUDIT_SALE_HANDLER,
+            TELEMETRY_SALE_HANDLER,
+          ],
+        },
+      });
+      if (!result.success) {
+        console.warn(
+          `[PosFacade] Sale ${paymentResult.transactionId} not recorded locally yet:`,
+          result.error ?? result.outcome
+        );
+      }
+      return result.outcome === 'recorded' || result.outcome === 'already-recorded';
+    } catch (error) {
+      console.error('[PosFacade] Recording the sale locally failed:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Feeds the audit log and telemetry for a sale whose event could not be recorded.
+   * Fire-and-forget: a paid-for sale must never block or fail on logging.
+   */
+  private recordObservabilityInline(paymentResult: PaymentResult): void {
     this.auditLog
       .log({
         agentName: 'PaymentAgent',
@@ -368,91 +449,6 @@ export class PosFacade {
     } catch (error) {
       console.error('[PosFacade] Telemetry failed:', error);
     }
-
-    // Loyalty (fire-and-forget): the sale is already paid for, so a points write is
-    // not allowed to fail it or to hold the queue up behind an IndexedDB round trip.
-    if (attachedCustomer) {
-      this.awardPointsForSale(attachedCustomer, paymentResult.amount);
-    }
-
-    // The sale ends the customer's session. Without this the next shopper inherits
-    // the last one's card and silently earns their points.
-    this.detachCustomer();
-
-    return receipt;
-  }
-
-  /**
-   * Finalizes a sale that the checkout server has already captured and committed.
-   *
-   * This path deliberately does not reuse `checkout()`: stock, transaction persistence,
-   * and customer rewards are server-owned for self-checkout. Repeating any of them here
-   * would turn a successful provider retry into a second local sale.
-   */
-  finalizeServerCheckout(receipt: SelfCheckoutReceipt, expectedCartRevision: number): ReceiptData {
-    if (this.cartService.revision() !== expectedCartRevision) {
-      throw new CartChangedDuringCheckoutError();
-    }
-
-    const result = this.serverCheckoutReceiptData(receipt);
-    const payment = result.payment;
-    const quote = receipt.quote;
-
-    this.cartService.clearCart();
-    this.detachCustomer();
-    this.eventBus.publish(
-      busEvent(
-        EventType.TRANSACTION_COMPLETED,
-        EventSource.POS_FACADE,
-        { itemCount: quote.lines.length, amount: payment.amount, method: payment.method },
-        'high'
-      )
-    );
-    this.auditLog
-      .log({
-        agentName: 'SelfCheckoutPaymentAgent',
-        operation: 'finalizeServerCheckout',
-        entityType: 'Transaction',
-        entityId: receipt.transactionId,
-        action: AuditAction.EXECUTE,
-        status: AuditStatus.SUCCESS,
-        metadata: { method: payment.method, amount: payment.amount },
-      })
-      .catch((error) => console.error('[PosFacade] Self-checkout audit log failed:', error));
-    try {
-      this.telemetry.recordCounter('payments.processed', 1, { method: payment.method });
-      this.telemetry.recordGauge('payment.amount', payment.amount, { method: payment.method });
-    } catch (error) {
-      console.error('[PosFacade] Self-checkout telemetry failed:', error);
-    }
-
-    return result;
-  }
-
-  /** Maps a completed server sale to display data without mutating local sale state. */
-  serverCheckoutReceiptData(receipt: SelfCheckoutReceipt): ReceiptData {
-    const completedAt = new Date(receipt.completedAt);
-    if (Number.isNaN(completedAt.getTime())) {
-      throw new Error('The checkout server returned an invalid completion time.');
-    }
-
-    const quote = receipt.quote;
-    return {
-      payment: {
-        method: 'paypal',
-        amount: minorUnitsToAmount(quote.totalMinorUnits),
-        transactionId: receipt.transactionId,
-        timestamp: completedAt,
-      },
-      items: quote.lines.map(serverReceiptLine),
-      currency: quote.currency,
-      subtotal: minorUnitsToAmount(quote.subtotalMinorUnits),
-      tax: minorUnitsToAmount(quote.taxMinorUnits),
-      taxRate: quote.taxRateBasisPoints / 10_000,
-      total: minorUnitsToAmount(quote.totalMinorUnits),
-      storeName: '',
-      storeAddress: '',
-    };
   }
 
   /**
@@ -489,7 +485,7 @@ export class PosFacade {
           tier: result.tier,
           promoted: result.previousTier !== result.tier,
         },
-        'normal'
+        { priority: 'normal' }
       )
     );
   }
@@ -500,18 +496,4 @@ export class PosFacade {
   async initializeDatabase(): Promise<void> {
     await this.db.initializeWithSeedData();
   }
-}
-
-function minorUnitsToAmount(value: number): number {
-  return value / 100;
-}
-
-function serverReceiptLine(line: SelfCheckoutReceipt['quote']['lines'][number]): ReceiptLine {
-  return {
-    productId: line.productId,
-    productName: line.productName,
-    quantity: line.quantity,
-    unitPrice: minorUnitsToAmount(line.unitPriceMinorUnits),
-    subtotal: minorUnitsToAmount(line.subtotalMinorUnits),
-  };
 }

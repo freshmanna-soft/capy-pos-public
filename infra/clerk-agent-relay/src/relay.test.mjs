@@ -39,7 +39,11 @@ const REQUEST = {
 
 describe('toStep — answering', () => {
   it('reads speech out of the text blocks, in order', () => {
-    const blocks = [THINKING, { type: 'text', text: 'Two oat milks in. ' }, { type: 'text', text: 'Anything else?' }];
+    const blocks = [
+      THINKING,
+      { type: 'text', text: 'Two oat milks in. ' },
+      { type: 'text', text: 'Anything else?' },
+    ];
     assert.deepEqual(toStep(blocks), {
       kind: 'answer',
       assistant: blocks,
@@ -66,7 +70,9 @@ describe('toStep — tool calls', () => {
     // Byte-identical replay: the browser resends these on the next hop, and a
     // normalized or re-serialized thinking block loses the model its reasoning.
     assert.equal(step.assistant, blocks);
-    assert.deepEqual(step.calls, [{ id: 'call-1', name: 'look_up_product', input: { name: 'oat milk' } }]);
+    assert.deepEqual(step.calls, [
+      { id: 'call-1', name: 'look_up_product', input: { name: 'oat milk' } },
+    ]);
   });
 
   it('keeps every parallel call the model asked for', () => {
@@ -80,7 +86,10 @@ describe('toStep — tool calls', () => {
   it('defaults a missing or non-object input to an empty one', () => {
     // Written without the helper: passing `undefined` through it would only hit
     // the helper's own default, not the branch under test.
-    assert.deepEqual(toStep([{ type: 'tool_use', id: 'call-1', name: 'read_cart' }]).calls[0].input, {});
+    assert.deepEqual(
+      toStep([{ type: 'tool_use', id: 'call-1', name: 'read_cart' }]).calls[0].input,
+      {}
+    );
     assert.deepEqual(toStep([call('call-1', 'read_cart', 'now')]).calls[0].input, {});
     assert.deepEqual(toStep([call('call-1', 'read_cart', null)]).calls[0].input, {});
   });
@@ -96,12 +105,17 @@ describe('toStep — refusing a hop the next one could not replay', () => {
   // validator would refuse costs two turns instead of one if it leaves here.
 
   it('refuses more assistant blocks than the validator accepts', () => {
-    const blocks = Array.from({ length: MAX_ASSISTANT_BLOCKS + 1 }, () => ({ type: 'text', text: 'x' }));
+    const blocks = Array.from({ length: MAX_ASSISTANT_BLOCKS + 1 }, () => ({
+      type: 'text',
+      text: 'x',
+    }));
     assert.deepEqual(toStep(blocks), { kind: 'unavailable' });
   });
 
   it('refuses more tool calls than the validator accepts', () => {
-    const blocks = Array.from({ length: MAX_TOOL_RESULTS + 1 }, (_, at) => call(`call-${at}`, 'read_cart', {}));
+    const blocks = Array.from({ length: MAX_TOOL_RESULTS + 1 }, (_, at) =>
+      call(`call-${at}`, 'read_cart', {})
+    );
     assert.deepEqual(toStep(blocks), { kind: 'unavailable' });
   });
 
@@ -142,7 +156,10 @@ describe('buildMessages', () => {
   });
 
   it('says plainly when the cart has already been changed this turn', () => {
-    const changed = buildMessages({ ...REQUEST, context: { ...REQUEST.context, cartChangedThisTurn: true } });
+    const changed = buildMessages({
+      ...REQUEST,
+      context: { ...REQUEST.context, cartChangedThisTurn: true },
+    });
     assert.match(changed[0].content[0].text, /ALREADY been changed this turn/);
     assert.match(buildMessages(REQUEST)[0].content[0].text, /has not been changed this turn/);
   });
@@ -173,7 +190,11 @@ describe('buildMessages', () => {
   });
 
   it('replays each hop as its assistant turn plus one user turn of results', () => {
-    const assistant = [THINKING, call('call-1'), call('call-2', 'check_stock', { name: 'oat milk' })];
+    const assistant = [
+      THINKING,
+      call('call-1'),
+      call('call-2', 'check_stock', { name: 'oat milk' }),
+    ];
     const messages = buildMessages({
       ...REQUEST,
       transcript: [

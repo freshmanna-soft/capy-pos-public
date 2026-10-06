@@ -6,7 +6,7 @@
  * mode and belongs at the till. A customer has no till and no login — sending
  * them to `/pos` would bounce them off `authGuard` and dump them on the staff
  * login page, which is the least useful screen in the app for someone holding a
- * basket. They go to the customer lane instead.
+ * basket. They go to the shop instead.
  *
  * A pure function rather than a method on the component so the decision is
  * testable without standing up a canvas, a camera and the agent tier.
@@ -15,19 +15,23 @@
 /** The staff terminal — the till, and where the checkout overlay lives. */
 export const STAFF_EXIT_PATH = '/pos';
 
-/** The customer lane. Unguarded, so an anonymous visitor actually arrives. */
-export const CUSTOMER_EXIT_PATH = '/self-checkout';
+/**
+ * The customer-facing shop. Unguarded, so an anonymous visitor actually arrives,
+ * and it is where a customer pays (CheckoutComponent), which is why it replaced
+ * the retired `/self-checkout` lane as this destination.
+ */
+export const CUSTOMER_EXIT_PATH = '/shop';
 
 /** What the way out is called when it leads to the till. */
 export const STAFF_EXIT_LABEL = 'Back to POS';
 
 /**
- * What the way out is called when it leads to the customer lane.
+ * What the way out is called when it leads to the shop.
  *
- * Named after the destination screen's own heading ("Self-checkout") rather than
- * the route, so the button and the page a customer lands on agree.
+ * Named after the destination rather than the route path, so the button and the
+ * page a customer lands on agree.
  */
-export const CUSTOMER_EXIT_LABEL = 'Back to self-checkout';
+export const CUSTOMER_EXIT_LABEL = 'Back to shop';
 
 /**
  * Resolve the route to leave `/clerk` for.
@@ -58,11 +62,9 @@ export function clerkExitLabel(isStaffAuthenticated: boolean): string {
  * Resolve the route the "pay now" hand-off targets, plus its query params.
  *
  * Checkout lives in `/pos` as an overlay rather than a route, so the staff path
- * asks for it with `?checkout=1`. There is no customer-side payment step yet —
- * it arrives with the later #218 stories — so an anonymous customer is handed to
- * the customer lane without the flag rather than being bounced into a staff
- * login they cannot complete. Deliberately graceful-but-incomplete, not a
- * silently broken redirect.
+ * asks for it with `?checkout=1`. An anonymous customer cannot use that overlay,
+ * so they are handed to the shop — which has its own checkout — without the flag,
+ * rather than being bounced into a staff login they cannot complete.
  */
 export function clerkCheckoutTarget(isStaffAuthenticated: boolean): {
   path: string;

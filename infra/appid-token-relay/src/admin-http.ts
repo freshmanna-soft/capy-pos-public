@@ -92,7 +92,9 @@ export function createAdminRequestListener(
     const isRolesRoute = path === ROLES_ROUTE;
 
     if (!isStaffRoute && !isRolesRoute && userId === null) {
-      send(404, { error: `${STAFF_ROUTE}, ${ROLES_ROUTE}, or ${STAFF_ROUTE}/{id}${ROLE_ROUTE_SUFFIX}` });
+      send(404, {
+        error: `${STAFF_ROUTE}, ${ROLES_ROUTE}, or ${STAFF_ROUTE}/{id}${ROLE_ROUTE_SUFFIX}`,
+      });
       return;
     }
 
@@ -121,7 +123,9 @@ export function createAdminRequestListener(
       const wantsBody =
         (isStaffRoute && req.method === 'POST') || (userId !== null && req.method === 'PUT');
       if (!wantsBody) {
-        send(404, { error: `${STAFF_ROUTE}, ${ROLES_ROUTE}, or ${STAFF_ROUTE}/{id}${ROLE_ROUTE_SUFFIX}` });
+        send(404, {
+          error: `${STAFF_ROUTE}, ${ROLES_ROUTE}, or ${STAFF_ROUTE}/{id}${ROLE_ROUTE_SUFFIX}`,
+        });
         return;
       }
 
@@ -142,7 +146,9 @@ export function createAdminRequestListener(
           send(400, { error: request.error });
           return;
         }
-        await respond(send, config, outcome.claims.operatorId, () => config.reassignRole(userId as string, request));
+        await respond(send, config, outcome.claims.operatorId, () =>
+          config.reassignRole(userId as string, request)
+        );
       });
     })();
   };

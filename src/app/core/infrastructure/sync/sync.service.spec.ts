@@ -1,7 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SyncService, PushFailedError } from './sync.service';
-import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
+import {
+  DexieDatabase,
+  IOutboxEventDB,
+} from '@core/infrastructure/database/dexie-database.service';
+import { DomainEventType, OutboxStatus } from '@core/domain/events/domain-event';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventType } from '@core/infrastructure/messaging/event-bus.events';
 import {
@@ -58,7 +62,12 @@ class FakeWorker {
 
 describe('SyncService', () => {
   let service: SyncService;
-  let mockDb: { products: { get: ReturnType<typeof vi.fn>; bulkPut: ReturnType<typeof vi.fn> } };
+  let mockDb: {
+    products: { get: ReturnType<typeof vi.fn>; bulkPut: ReturnType<typeof vi.fn> };
+    outbox: { where: ReturnType<typeof vi.fn> };
+  };
+  /** Outbox rows the pull guard sees, whatever ids it asks about. */
+  let outboxRows: Partial<IOutboxEventDB>[];
   let mockEventBus: { publish: ReturnType<typeof vi.fn> };
   let originalWorker: typeof globalThis.Worker;
 
@@ -87,10 +96,16 @@ describe('SyncService', () => {
     originalWorker = globalThis.Worker;
     globalThis.Worker = FakeWorker as unknown as typeof globalThis.Worker;
 
+    outboxRows = [];
     mockDb = {
       products: {
         get: vi.fn().mockResolvedValue(undefined),
         bulkPut: vi.fn().mockResolvedValue(undefined),
+      },
+      outbox: {
+        where: vi.fn(() => ({
+          anyOf: vi.fn(() => ({ toArray: vi.fn(async () => outboxRows) })),
+        })),
       },
     };
 
@@ -289,6 +304,107 @@ describe('SyncService', () => {
 
   // ─── Push (awaited) ───────────────────────────────────────────────────────
 
+  describe('pushUpsertAsync', () => {
+    it('rejects immediately when worker is not running', async () => {
+      await expect(service.pushUpsertAsync(product)).rejects.toThrow('Sync worker not running');
+    });
+
+    it('posts PUSH_UPSERT_PRODUCTS and resolves on the matching result', async () => {
+      const worker = start();
+      const promise = service.pushUpsertAsync(product);
+
+      expect(worker.commandsOfType('PUSH_UPSERT_PRODUCTS')).toEqual([
+        { type: 'PUSH_UPSERT_PRODUCTS', products: [product] },
+      ]);
+      worker.emit({
+        type: 'PUSH_COMPLETED',
+        pushed: 1,
+        failed: 0,
+        results: [{ productId: 'p1', success: true, status: 201 }],
+      });
+      await expect(promise).resolves.toMatchObject({ productId: 'p1', status: 201 });
+    });
+
+    it('rejects with PushFailedError when the upsert fails', async () => {
+      const worker = start();
+      const promise = service.pushUpsertAsync(product);
+      worker.emit({
+        type: 'PUSH_COMPLETED',
+        pushed: 0,
+        failed: 1,
+        results: [{ productId: 'p1', success: false, error: 'HTTP 400', traceId: 't-1' }],
+      });
+      await expect(promise).rejects.toBeInstanceOf(PushFailedError);
+    });
+  });
+
+  describe('pushEventsAsync (#359)', () => {
+    const events = [{ eventId: 'evt-1', type: 'sale.completed', payload: {} }];
+
+    it('says to retry later, without posting, when the worker is not running', async () => {
+      await expect(service.pushEventsAsync(events)).resolves.toMatchObject({
+        ok: false,
+        retryLater: true,
+      });
+    });
+
+    it('posts PUSH_EVENTS and resolves with the verdicts for its own request', async () => {
+      const worker = start();
+      const promise = service.pushEventsAsync(events);
+      const [command] = worker.commandsOfType('PUSH_EVENTS');
+      expect(command.events).toEqual(events);
+
+      // Another request's answer must not settle this one.
+      worker.emit({ type: 'EVENTS_ACKED', requestId: 'someone-else', results: [] });
+      worker.emit({
+        type: 'EVENTS_ACKED',
+        requestId: command.requestId,
+        results: [{ eventId: 'evt-1', status: 'applied' }],
+      });
+
+      await expect(promise).resolves.toEqual({
+        ok: true,
+        results: [{ eventId: 'evt-1', status: 'applied' }],
+      });
+    });
+
+    it("resolves a failure with the worker's retryLater verdict", async () => {
+      const worker = start();
+      const promise = service.pushEventsAsync(events);
+      const [command] = worker.commandsOfType('PUSH_EVENTS');
+
+      worker.emit({
+        type: 'EVENTS_FAILED',
+        requestId: command.requestId,
+        error: 'HTTP 400',
+        retryLater: false,
+      });
+
+      await expect(promise).resolves.toEqual({ ok: false, retryLater: false, error: 'HTTP 400' });
+    });
+
+    it('treats a timeout as retry-later, since a resend is safe', async () => {
+      start();
+      vi.useFakeTimers();
+      try {
+        const promise = service.pushEventsAsync(events, 50);
+        vi.advanceTimersByTime(60);
+        await expect(promise).resolves.toMatchObject({ ok: false, retryLater: true });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('settles in-flight requests as retry-later when the worker stops', async () => {
+      start();
+      const promise = service.pushEventsAsync(events);
+
+      service.stop();
+
+      await expect(promise).resolves.toMatchObject({ ok: false, retryLater: true });
+    });
+  });
+
   describe('pushUpdateAsync', () => {
     it('rejects immediately when worker is not running', async () => {
       await expect(service.pushUpdateAsync(product)).rejects.toThrow('Sync worker not running');
@@ -402,6 +518,18 @@ describe('SyncService', () => {
 
     beforeEach(() => {
       worker = start();
+    });
+
+    it('AUTH_REJECTED → bumps authRejections without failing the status', () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      expect(service.authRejections()).toBe(0);
+
+      worker.emit({ type: 'AUTH_REJECTED', status: 401, endpoint: '/api/products' });
+      worker.emit({ type: 'AUTH_REJECTED', status: 401, endpoint: '/api/products' });
+
+      // A counter, so two refusals in a row are two notifications.
+      expect(service.authRejections()).toBe(2);
+      expect(service.status()).not.toBe(SyncStatus.FAILED);
     });
 
     it('SYNC_STARTED → syncing', () => {
@@ -627,6 +755,19 @@ describe('SyncService', () => {
       expect(service.productsSynced()).toBe(1);
     });
 
+    it('bumps productsRevision on every write, even of the same count', async () => {
+      mockDb.products.get.mockResolvedValue(undefined);
+      const worker = emitProducts([{ id: 'a', name: 'One', category: 'c', price: 1 }]);
+      await vi.waitFor(() => expect(service.productsRevision()).toBe(1));
+
+      worker.emit({
+        type: 'PRODUCTS_SYNCED',
+        products: [{ id: 'a', name: 'One', category: 'c', price: 1 }],
+      });
+      await vi.waitFor(() => expect(service.productsRevision()).toBe(2));
+      expect(service.productsSynced()).toBe(1);
+    });
+
     it('merges over an existing local record and honors provided fields', async () => {
       mockDb.products.get.mockResolvedValue({
         id: 'b',
@@ -667,6 +808,87 @@ describe('SyncService', () => {
       });
       expect(records[0].createdAt).toBeInstanceOf(Date);
       expect(records[0].updatedAt).toBeInstanceOf(Date);
+    });
+
+    it('keeps the local copy of a product whose edit has not reached the server', async () => {
+      outboxRows = [
+        {
+          aggregateId: 'edited',
+          type: DomainEventType.PRODUCT_UPSERTED,
+          status: OutboxStatus.FAILED,
+        },
+        {
+          aggregateId: 'synced',
+          type: DomainEventType.PRODUCT_UPSERTED,
+          status: OutboxStatus.HANDLED,
+        },
+        {
+          aggregateId: 'gave-up',
+          type: DomainEventType.PRODUCT_UPSERTED,
+          status: OutboxStatus.DEAD,
+        },
+      ];
+      emitProducts([
+        { id: 'edited', name: 'Server stale', category: 'c', price: 1 },
+        { id: 'synced', name: 'Server fresh', category: 'c', price: 1 },
+        { id: 'gave-up', name: 'Server wins', category: 'c', price: 1 },
+      ]);
+      await vi.waitFor(() => expect(mockDb.products.bulkPut).toHaveBeenCalled());
+
+      const [records] = mockDb.products.bulkPut.mock.calls[0];
+      expect(records.map((r: { id: string }) => r.id)).toEqual(['synced', 'gave-up']);
+    });
+
+    it('keeps the local stock of a product whose sale has not reached the server (#359)', async () => {
+      const sale = (productIds: string[]) =>
+        JSON.stringify({ items: productIds.map((productId) => ({ productId, quantity: 1 })) });
+      outboxRows = [
+        {
+          aggregateId: 'TXN-1',
+          type: DomainEventType.SALE_COMPLETED,
+          status: OutboxStatus.PENDING,
+          payload: sale(['sold-pending']),
+        },
+        {
+          aggregateId: 'TXN-2',
+          type: DomainEventType.SALE_COMPLETED,
+          status: OutboxStatus.FAILED,
+          payload: sale(['sold-retrying']),
+        },
+        {
+          aggregateId: 'TXN-3',
+          type: DomainEventType.SALE_COMPLETED,
+          status: OutboxStatus.HANDLED,
+          payload: sale(['sold-delivered']),
+        },
+        {
+          aggregateId: 'TXN-4',
+          type: DomainEventType.SALE_COMPLETED,
+          status: OutboxStatus.PENDING,
+          payload: '{not json',
+        },
+      ];
+      emitProducts([
+        { id: 'sold-pending', name: 'A', category: 'c', price: 1 },
+        { id: 'sold-retrying', name: 'B', category: 'c', price: 1 },
+        { id: 'sold-delivered', name: 'C', category: 'c', price: 1 },
+        { id: 'untouched', name: 'D', category: 'c', price: 1 },
+      ]);
+      await vi.waitFor(() => expect(mockDb.products.bulkPut).toHaveBeenCalled());
+
+      const [records] = mockDb.products.bulkPut.mock.calls[0];
+      expect(records.map((r: { id: string }) => r.id)).toEqual(['sold-delivered', 'untouched']);
+    });
+
+    it('writes nothing when every pulled product has a pending edit', async () => {
+      outboxRows = [
+        { aggregateId: 'a', type: DomainEventType.PRODUCT_UPSERTED, status: OutboxStatus.PENDING },
+      ];
+      emitProducts([{ id: 'a', name: 'X', category: 'c', price: 1 }]);
+      await vi.waitFor(() => expect(mockDb.outbox.where).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(mockDb.products.bulkPut).not.toHaveBeenCalled();
     });
 
     it('swallows Dexie write errors', async () => {

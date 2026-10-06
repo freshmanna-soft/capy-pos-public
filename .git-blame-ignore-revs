@@ -1,0 +1,9 @@
+# Commits that only reformat code. Have git blame skip them:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub applies this file automatically.)
+#
+# A squash merge rewrites these hashes, so after one, replace the entry with the
+# commit that landed on the target branch.
+
+# style(infra): format infra/ with prettier (#393)
+213c30f9c9a0c00ff6180cc221e2cacb521f75e5

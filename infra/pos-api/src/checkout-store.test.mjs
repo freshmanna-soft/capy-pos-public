@@ -804,3 +804,227 @@ describe('due checkout contract', () => {
     });
   });
 });
+
+describe('checkout transition log (reader only, #360)', () => {
+  const ORDER_REQUESTED = Object.freeze({
+    seq: 1,
+    type: 'CheckoutCreateOrderRequested',
+    from: CheckoutState.CREATING,
+    to: CheckoutState.CREATE_ORDER_REQUESTED,
+    at: T0,
+  });
+
+  function entry(seq, overrides = {}) {
+    return { ...ORDER_REQUESTED, seq, ...overrides };
+  }
+
+  /** `count` contiguous legal records ending at `lastSeq`, all at T0. */
+  function log(count, lastSeq = count) {
+    return Array.from({ length: count }, (_, i) => entry(lastSeq - count + 1 + i));
+  }
+
+  function withoutTransitions(document) {
+    const { transitions: _dropped, ...rest } = document;
+    return rest;
+  }
+
+  it('reads V1 and V2 checkouts with or without a transitions log', async () => {
+    const { store } = context();
+    assert.equal(await store.create(checkout({ id: 'checkout-v1-bare' })), 'created');
+    assert.equal(await store.create(checkoutV2({ id: 'checkout-v2-bare' })), 'created');
+    assert.equal(
+      await store.create(checkout({ id: 'checkout-v1-log', transitions: [ORDER_REQUESTED] })),
+      'created'
+    );
+    assert.equal(
+      await store.create(
+        checkoutV2({
+          id: 'checkout-v2-log',
+          transitions: [entry(1, { loyaltyStatus: 'not-applicable' })],
+        })
+      ),
+      'created'
+    );
+    assert.equal(
+      await store.create(checkout({ id: 'checkout-v1-empty', transitions: [] })),
+      'created'
+    );
+    assert.equal('transitions' in (await store.read('checkout-v1-bare')).document, false);
+    assert.deepEqual((await store.read('checkout-v1-log')).document.transitions, [ORDER_REQUESTED]);
+  });
+
+  it('rejects unknown, missing, or malformed fields inside a record', async () => {
+    const { store } = context();
+    const bad = {
+      unknownKey: { ...ORDER_REQUESTED, actor: 'someone' },
+      missingTo: {
+        seq: 1,
+        type: 'CheckoutCreateOrderRequested',
+        from: CheckoutState.CREATING,
+        at: T0,
+      },
+      emptyType: entry(1, { type: '' }),
+      spacedType: entry(1, { type: 'not pascal case' }),
+      unknownState: entry(1, { from: 'nowhere' }),
+      nonCanonicalAt: entry(1, { at: '2026-09-18 12:00' }),
+      zeroSeq: entry(0),
+      fractionalSeq: entry(1.5),
+      loyaltyOnV1: entry(1, { loyaltyStatus: 'pending' }),
+    };
+    for (const [name, record] of Object.entries(bad)) {
+      await assert.rejects(
+        () => store.create(checkout({ id: `checkout-${name}`, transitions: [record] })),
+        /Corrupt checkout data/,
+        `${name} should be rejected`
+      );
+    }
+    await assert.rejects(
+      () => store.create(checkout({ id: 'checkout-not-array', transitions: ORDER_REQUESTED })),
+      /Corrupt checkout data/
+    );
+    await assert.rejects(
+      () =>
+        store.create(
+          checkoutV2({
+            id: 'checkout-v2-bad-loyalty',
+            transitions: [entry(1, { loyaltyStatus: 'gold' })],
+          })
+        ),
+      /Corrupt checkout data/
+    );
+  });
+
+  it('requires contiguous seq, legal edges, ordered timestamps, and the cap', async () => {
+    const { store } = context();
+    const rejected = {
+      gap: [entry(1), entry(3)],
+      repeat: [entry(1), entry(1)],
+      descending: [entry(2), entry(1)],
+      illegalEdge: [entry(1, { from: CheckoutState.CREATING, to: CheckoutState.COMPLETED })],
+      stateOnlySelfLoop: [entry(1, { from: CheckoutState.CREATING, to: CheckoutState.CREATING })],
+      beforeCreated: [entry(1, { at: '2026-09-18T11:59:59.000Z' })],
+      afterUpdated: [entry(1, { at: T1 })],
+      timeGoesBack: [entry(1, { at: '2026-09-18T12:00:00.500Z' }), entry(2, { at: T0 })],
+      overCap: log(33),
+    };
+    for (const [name, transitions] of Object.entries(rejected)) {
+      const overrides = name === 'timeGoesBack' ? { transitions, updatedAt: T1 } : { transitions };
+      await assert.rejects(
+        () => store.create(checkout({ id: `checkout-${name}`, ...overrides })),
+        /Corrupt checkout data/,
+        `${name} should be rejected`
+      );
+    }
+
+    // A trimmed log need not start at 1, and exactly the cap is fine.
+    assert.equal(
+      await store.create(checkout({ id: 'checkout-at-cap', transitions: log(32, 40) })),
+      'created'
+    );
+    // A loyalty-only event keeps the state and must say what loyalty became.
+    assert.equal(
+      await store.create(
+        checkoutV2({
+          id: 'checkout-loyalty-event',
+          transitions: [
+            entry(1, {
+              type: 'LoyaltyAwarded',
+              from: CheckoutState.CREATING,
+              to: CheckoutState.CREATING,
+              loyaltyStatus: 'not-applicable',
+            }),
+          ],
+        })
+      ),
+      'created'
+    );
+  });
+
+  it('lets compare-and-swap only append to the log', async () => {
+    const { store } = context();
+    await store.create(checkout({ id: 'checkout-log', transitions: log(2) }));
+    const current = await store.read('checkout-log');
+    const next = (transitions) => ({ ...current.document, updatedAt: T1, transitions });
+
+    const rejected = {
+      dropped: { ...withoutTransitions(current.document), updatedAt: T1 },
+      emptied: next([]),
+      rewritten: next([entry(1, { type: 'CheckoutRewritten' }), entry(2)]),
+      truncated: next([entry(1)]),
+      // Contiguous on its own, so only the append-only rule can catch the gap.
+      skipped: next(log(2, 5)),
+    };
+    for (const [name, document] of Object.entries(rejected)) {
+      await assert.rejects(
+        () => store.compareAndSwap('checkout-log', document, current.revision),
+        /transition log/,
+        `${name} should be rejected`
+      );
+    }
+
+    // Unchanged (a lease-only write) and a one-entry append are both fine.
+    assert.equal(
+      await store.compareAndSwap('checkout-log', next(log(2)), current.revision),
+      'written'
+    );
+    const unchanged = await store.read('checkout-log');
+    assert.equal(
+      await store.compareAndSwap(
+        'checkout-log',
+        { ...unchanged.document, updatedAt: T2, transitions: log(3) },
+        unchanged.revision
+      ),
+      'written'
+    );
+    assert.deepEqual((await store.read('checkout-log')).document.transitions, log(3));
+  });
+
+  it('lets the first append start a log on a checkout that had none', async () => {
+    const { store } = context();
+    await store.create(checkout({ id: 'checkout-fresh' }));
+    const current = await store.read('checkout-fresh');
+    const next = (transitions) => ({ ...current.document, updatedAt: T1, transitions });
+    await assert.rejects(
+      () => store.compareAndSwap('checkout-fresh', next([entry(2)]), current.revision),
+      /transition log/
+    );
+    assert.equal(
+      await store.compareAndSwap('checkout-fresh', next([entry(1)]), current.revision),
+      'written'
+    );
+  });
+
+  it('trims exactly the oldest overflow at the cap, never more, and never resurrects', async () => {
+    const { store } = context();
+    await store.create(checkout({ id: 'checkout-full', transitions: log(32) }));
+    const current = await store.read('checkout-full');
+    const next = (transitions) => ({ ...current.document, updatedAt: T1, transitions });
+
+    await assert.rejects(
+      () => store.compareAndSwap('checkout-full', next(log(31, 32)), current.revision),
+      /transition log/,
+      'trimming without an append loses an event'
+    );
+    await assert.rejects(
+      () => store.compareAndSwap('checkout-full', next(log(31, 33)), current.revision),
+      /transition log/,
+      'trimming more than the overflow loses an event'
+    );
+    assert.equal(
+      await store.compareAndSwap('checkout-full', next(log(32, 33)), current.revision),
+      'written'
+    );
+
+    const trimmed = await store.read('checkout-full');
+    await assert.rejects(
+      () =>
+        store.compareAndSwap(
+          'checkout-full',
+          { ...trimmed.document, updatedAt: T2, transitions: log(32, 32) },
+          trimmed.revision
+        ),
+      /transition log/,
+      'a trimmed entry cannot come back'
+    );
+  });
+});

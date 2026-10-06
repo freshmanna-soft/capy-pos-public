@@ -12,6 +12,7 @@ import {
 import { CartService } from '@core/application/services/cart.service';
 import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
 import { ProductBuilder } from '@core/domain/entities/product.builder';
+import { SALE_OUTBOX } from '@core/application/ports/sale-outbox.port';
 
 /**
  * PersistTransactionUseCase Unit Tests
@@ -346,5 +347,97 @@ describe('PersistTransactionUseCase', () => {
       const createdTxn = mockRepository['create'].mock.calls[0][0] as Transaction;
       expect(createdTxn.customerId).toBeUndefined();
     });
+  });
+});
+
+describe('PersistTransactionUseCase with a sale event (#352)', () => {
+  let useCase: PersistTransactionUseCase;
+  let cartService: CartService;
+  let create: Mock;
+  let record: Mock;
+
+  const oats = new ProductBuilder()
+    .withId('oats')
+    .withName('Oats')
+    .withPrice(2.5)
+    .withSku('SKU-OATS')
+    .withCategory('Feed')
+    .withStock(10)
+    .build();
+
+  beforeEach(() => {
+    create = vi.fn().mockResolvedValue(undefined);
+    record = vi.fn(async (_event: unknown, write: () => Promise<unknown>) => {
+      await write();
+      return 'recorded';
+    });
+    TestBed.configureTestingModule({
+      providers: [
+        PersistTransactionUseCase,
+        CartService,
+        CalculateCartTotalsUseCase,
+        { provide: 'ITransactionRepository', useValue: { create } },
+        { provide: SALE_OUTBOX, useValue: { record } },
+      ],
+    });
+    useCase = TestBed.inject(PersistTransactionUseCase);
+    cartService = TestBed.inject(CartService);
+    cartService.clearCart();
+    cartService.addProduct(oats);
+    cartService.addProduct(oats);
+  });
+
+  it('writes the transaction through the sale outbox with a SaleCompleted payload', async () => {
+    const result = await useCase.execute({
+      paymentMethod: 'card',
+      transactionId: 'TXN-9',
+      customerId: 'cust-1',
+      sale: { correlationId: 'corr-9', amount: 5.43 },
+    });
+
+    expect(result).toMatchObject({ success: true, outcome: 'recorded' });
+    expect(record).toHaveBeenCalledTimes(1);
+    const [event] = record.mock.calls[0];
+    expect(event).toEqual({
+      transactionId: 'TXN-9',
+      correlationId: 'corr-9',
+      payload: {
+        transactionId: 'TXN-9',
+        items: [{ productId: 'oats', quantity: 2, unitPrice: 2.5 }],
+        amount: 5.43,
+        method: 'card',
+        customerId: 'cust-1',
+        occurredAt: expect.any(String),
+      },
+      appliedInline: [],
+    });
+    // The repository write happens inside the outbox's transaction, not beside it.
+    expect(create).toHaveBeenCalledTimes(1);
+    expect((create.mock.calls[0][0] as Transaction).id).toBe('TXN-9');
+  });
+
+  it('reports a deferred record as unsuccessful without throwing', async () => {
+    record.mockResolvedValueOnce('deferred');
+
+    const result = await useCase.execute({
+      paymentMethod: 'cash',
+      transactionId: 'TXN-10',
+      sale: { correlationId: 'corr-10', amount: 5.43 },
+    });
+
+    expect(result).toMatchObject({ success: false, outcome: 'deferred' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('passes through an already-recorded retry as a success', async () => {
+    record.mockResolvedValueOnce('already-recorded');
+
+    const result = await useCase.execute({
+      paymentMethod: 'cash',
+      transactionId: 'TXN-11',
+      sale: { correlationId: 'corr-11', amount: 5.43 },
+    });
+
+    expect(result).toMatchObject({ success: true, outcome: 'already-recorded' });
   });
 });

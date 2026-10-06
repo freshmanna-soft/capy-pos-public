@@ -6,6 +6,8 @@ import { generateUUID } from '@core/domain/utils/uuid';
 import { EntityNotFoundException } from '@core/domain/exceptions';
 import { AngularAuthorizationService } from '@core/application/auth/angular-authorization.service';
 import { Permission } from '@core/domain/auth';
+import { DomainEventType } from '@core/domain/events/domain-event';
+import { DOMAIN_EVENT_OUTBOX } from '@core/infrastructure/messaging/outbox-dispatcher.service';
 
 /**
  * DTO for creating a new product
@@ -108,6 +110,7 @@ export class ManageInventoryUseCase {
   private readonly productRepository: IProductRepository =
     inject<IProductRepository>(PRODUCT_REPOSITORY);
   private readonly authz = inject(AngularAuthorizationService);
+  private readonly outbox = inject(DOMAIN_EVENT_OUTBOX);
 
   /** Loading state signal */
   private readonly _loading = signal<boolean>(false);
@@ -181,6 +184,7 @@ export class ManageInventoryUseCase {
       );
 
       const created = await this.productRepository.create(product);
+      await this.recordUpsert(created.id);
       const summary = this.mapToSummary(created);
 
       this._products.update((current) => [...current, summary]);
@@ -220,6 +224,7 @@ export class ManageInventoryUseCase {
       existing.updatedAt = new Date();
 
       const updated = await this.productRepository.update(request.id, existing);
+      await this.recordUpsert(updated.id);
       const summary = this.mapToSummary(updated);
 
       this._products.update((current) => current.map((p) => (p.id === summary.id ? summary : p)));
@@ -288,6 +293,22 @@ export class ManageInventoryUseCase {
       const message = error instanceof Error ? error.message : 'Failed to adjust stock';
       this._error.set(message);
       return null;
+    }
+  }
+
+  /**
+   * Queue the server copy of a product to catch up with the save that just happened.
+   *
+   * Never fails the save. The product is already in IndexedDB, and anything that later
+   * needs it on the server (the image upload) calls `ProductServerCopyService`, which
+   * records a fresh event itself — so a lost event here delays the sync, it does not
+   * lose it (Epic #349, open question 2's "the local action never fails").
+   */
+  private async recordUpsert(productId: string): Promise<void> {
+    try {
+      await this.outbox.record(DomainEventType.PRODUCT_UPSERTED, productId, { productId });
+    } catch (error) {
+      console.warn(`[Inventory] Could not queue server sync for product ${productId}:`, error);
     }
   }
 

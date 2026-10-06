@@ -33,6 +33,9 @@ export function createCloudantFake({
   let tokenExchanges = 0;
   let issuedToken = '';
   let revSerial = 0;
+  let sequenceSerial = 0;
+  const changes = [];
+  const changeWaiters = new Set();
   /** Status to answer the next document request with, for the failure branches. */
   let failNextWith = 0;
 
@@ -41,6 +44,19 @@ export function createCloudantFake({
     // Shaped like Cloudant's `2-9f2a…` rather than a bare counter, so nothing that
     // reads this token can quietly come to depend on it being a number.
     return `${revSerial}-${revSerial.toString(16).padStart(4, '0')}`;
+  };
+
+  const nextSequence = () => `seq-${++sequenceSerial}-opaque`;
+
+  const recordChange = (id, entry, deleted = false) => {
+    changes.push({
+      id,
+      seq: nextSequence(),
+      kind: entry?.body ? JSON.parse(entry.body).kind : undefined,
+      deleted,
+    });
+    for (const wake of changeWaiters) wake();
+    changeWaiters.clear();
   };
 
   const json = (status, body) =>
@@ -84,6 +100,59 @@ export function createCloudantFake({
       });
     }
 
+    if (method === 'POST' && target0 === '_changes') {
+      const selector = JSON.parse(String(init.body ?? '{}')).selector ?? {};
+      const wantedKind = selector.kind?.$eq;
+      const sinceParam = requested.searchParams.get('since') ?? '0';
+      let sinceValue = sinceParam;
+      try {
+        sinceValue = JSON.parse(sinceParam);
+      } catch {
+        // String sequence tokens are sent verbatim by Cloudant clients.
+      }
+      const start =
+        sinceValue === '0'
+          ? 0
+          : Math.max(0, changes.findIndex((row) => row.seq === sinceValue) + 1);
+      const limit = Number(requested.searchParams.get('limit') ?? 100);
+      const page = () => {
+        const candidates = changes.slice(start);
+        const consumed = [];
+        const selected = [];
+        for (const row of candidates) {
+          consumed.push(row);
+          if (wantedKind === undefined || row.kind === wantedKind) selected.push(row);
+          if (selected.length === limit) break;
+        }
+        const results = selected.map(({ kind, ...row }) => row);
+        const remaining = candidates.slice(consumed.length);
+        return {
+          results,
+          last_seq: consumed.length > 0 ? consumed.at(-1).seq : sinceValue,
+          pending: remaining.filter((row) => wantedKind === undefined || row.kind === wantedKind)
+            .length,
+        };
+      };
+      let body = page();
+      if (body.results.length === 0 && requested.searchParams.get('feed') === 'longpoll') {
+        await new Promise((resolve, reject) => {
+          const wake = () => {
+            init.signal?.removeEventListener('abort', abort);
+            resolve();
+          };
+          const abort = () => {
+            changeWaiters.delete(wake);
+            reject(init.signal.reason ?? new DOMException('Aborted', 'AbortError'));
+          };
+          if (init.signal?.aborted) return abort();
+          changeWaiters.add(wake);
+          init.signal?.addEventListener('abort', abort, { once: true });
+        });
+        body = page();
+      }
+      return json(200, body);
+    }
+
     const entry = documents.get(target0);
 
     if (method === 'GET') {
@@ -98,7 +167,9 @@ export function createCloudantFake({
         return json(409, { error: 'conflict', reason: 'Document update conflict.' });
       }
       const rev = nextRev();
-      documents.set(target0, { body: JSON.stringify(document), rev });
+      const nextEntry = { body: JSON.stringify(document), rev };
+      documents.set(target0, nextEntry);
+      recordChange(target0, nextEntry);
       return json(entry === undefined ? 201 : 200, { ok: true, id: target0, rev });
     }
 
@@ -110,6 +181,7 @@ export function createCloudantFake({
         return json(409, { error: 'conflict', reason: 'Document update conflict.' });
       }
       documents.delete(target0);
+      recordChange(target0, entry, true);
       return json(200, { ok: true, id: target0, rev: nextRev() });
     }
 
@@ -128,8 +200,10 @@ export function createCloudantFake({
     /** Put a document in place without going through the store. */
     seed(document) {
       const { id, ...rest } = document;
-      documents.set(id, { body: JSON.stringify(rest), rev: nextRev() });
-      return documents.get(id).rev;
+      const entry = { body: JSON.stringify(rest), rev: nextRev() };
+      documents.set(id, entry);
+      recordChange(id, entry);
+      return entry.rev;
     },
     /** Design documents come back from `_all_docs` and are not products. */
     seedDesignDocument(name) {

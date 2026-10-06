@@ -4,7 +4,7 @@ import {
   TransactionRemoteService,
 } from './transaction-remote.service';
 import { CartService } from '@core/application/services/cart.service';
-import { PaymentResult } from '@features/pos-terminal/components/checkout/checkout.component';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,19 +56,6 @@ describe('TransactionRemoteService', () => {
     vi.unstubAllGlobals();
   });
 
-  // ── getShopSessionToken ───────────────────────────────────────────────────
-
-  it('returns the session token from sessionStorage', () => {
-    sessionStorage.setItem('shop-session-token', 'jwt-abc');
-    expect(service.getShopSessionToken()).toBe('jwt-abc');
-    sessionStorage.removeItem('shop-session-token');
-  });
-
-  it('returns null when there is no session token', () => {
-    sessionStorage.removeItem('shop-session-token');
-    expect(service.getShopSessionToken()).toBeNull();
-  });
-
   // ── persistTransaction — happy path ──────────────────────────────────────
 
   it('POSTs to /api/transactions with the correct body and resolves on 2xx', async () => {
@@ -88,9 +75,11 @@ describe('TransactionRemoteService', () => {
     expect(init.headers).toMatchObject({ Authorization: 'Bearer bearer-token' });
 
     const parsed = JSON.parse(init.body as string) as Record<string, unknown>;
-    expect(parsed.paymentMethod).toBe('cash');
-    expect(parsed.total).toBe(27.5);
-    expect(Array.isArray(parsed.items)).toBe(true);
+    expect(parsed['paymentMethod']).toBe('cash');
+    // pos-api keeps the till's id so the sale's event can be matched to it (#358).
+    expect(parsed['transactionId']).toBe('txn-001');
+    expect(parsed['total']).toBe(27.5);
+    expect(Array.isArray(parsed['items'])).toBe(true);
   });
 
   it('includes customerId and customerEmail when provided', async () => {
@@ -103,8 +92,8 @@ describe('TransactionRemoteService', () => {
       RequestInit,
     ];
     const parsed = JSON.parse(init.body as string) as Record<string, unknown>;
-    expect(parsed.customerId).toBe('cust-1');
-    expect(parsed.customerEmail).toBe('alice@example.com');
+    expect(parsed['customerId']).toBe('cust-1');
+    expect(parsed['customerEmail']).toBe('alice@example.com');
   });
 
   it('omits customerId and customerEmail when not provided', async () => {

@@ -24,7 +24,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { AuthSessionDto } from '@core/application/auth/dtos/auth-session.dto';
 import { SyncService } from './sync.service';
-import { SyncSessionCredentialService } from './sync-session-credential.service';
+import {
+  SyncSessionCredentialService,
+  WorkerCredentialKind,
+} from './sync-session-credential.service';
 
 /** A session whose only interesting claim here is the token it carries. */
 function session(accessToken: string): AuthSessionDto {
@@ -132,5 +135,68 @@ describe('SyncSessionCredentialService (#224)', () => {
     TestBed.tick();
 
     expect(updateConfig).not.toHaveBeenCalled();
+  });
+  describe('arbitration with a capability (shop) session', () => {
+    it('gives the worker the capability token over a signed-in staff session', () => {
+      active.set(session('jwt-staff'));
+      const service = bind();
+
+      service.holdCapability('shop-token');
+
+      // Pushed synchronously, not on the next effect pass: the caller's next
+      // message to the worker must already go out under this token.
+      expect(updateConfig).toHaveBeenLastCalledWith({ sessionToken: 'shop-token' });
+      expect(service.workerCredential()).toEqual({
+        kind: WorkerCredentialKind.CAPABILITY,
+        token: 'shop-token',
+      });
+      expect(service.carriesStaffCredential()).toBe(false);
+    });
+
+    it('does not let staff sign-out, sign-in or refresh overwrite a held capability', () => {
+      active.set(session('jwt-staff'));
+      const service = bind();
+      service.holdCapability('shop-token');
+      updateConfig.mockClear();
+
+      active.set(null);
+      TestBed.tick();
+      active.set(session('jwt-staff-2'));
+      TestBed.tick();
+
+      expect(updateConfig).not.toHaveBeenCalled();
+    });
+
+    it('restores the current staff token when the capability is released', () => {
+      active.set(session('jwt-staff'));
+      const service = bind();
+      service.holdCapability('shop-token');
+      active.set(session('jwt-staff-refreshed'));
+      TestBed.tick();
+
+      service.releaseCapability();
+
+      expect(updateConfig).toHaveBeenLastCalledWith({ sessionToken: 'jwt-staff-refreshed' });
+      expect(service.workerCredential().kind).toBe(WorkerCredentialKind.STAFF);
+      expect(service.carriesStaffCredential()).toBe(true);
+    });
+
+    it('restores no credential on release when nobody is signed in', () => {
+      const service = bind();
+      service.holdCapability('shop-token');
+
+      service.releaseCapability();
+
+      expect(updateConfig).toHaveBeenLastCalledWith({ sessionToken: '' });
+      expect(service.workerCredential()).toEqual({ kind: WorkerCredentialKind.NONE, token: '' });
+    });
+
+    it('does not re-post a capability token the worker already carries', () => {
+      const service = bind();
+      service.holdCapability('shop-token');
+      service.holdCapability('shop-token');
+
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+    });
   });
 });

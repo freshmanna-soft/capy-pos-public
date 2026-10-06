@@ -19,8 +19,38 @@ import {
   SyncedProduct,
   PushProductPayload,
   PushResult,
+  PushEventPayload,
+  EventAck,
   DEFAULT_SYNC_CONFIG,
 } from './sync.types';
+
+// ─── HTTP status errors ─────────────────────────────────────────────────────
+
+/**
+ * A non-2xx answer from the API, keeping the status as a number.
+ *
+ * The message stays `HTTP <status>: <text>` because `WorkerRetry.isRetryable`
+ * classifies on it; the numeric status is what lets the breaker and the pull tell
+ * a refused credential apart from an outage without parsing that string.
+ */
+class HttpStatusError extends Error {
+  constructor(
+    readonly status: number,
+    statusText: string
+  ) {
+    super(`HTTP ${status}: ${statusText}`);
+    this.name = 'HttpStatusError';
+  }
+}
+
+/**
+ * A 401 means the API is up and answering — it just refused this token. Counting
+ * that toward the breaker would open the circuit on a credential problem and then
+ * stall the first pull after a fresh token arrives for the breaker timeout.
+ */
+function isCredentialRejection(error: unknown): error is HttpStatusError {
+  return error instanceof HttpStatusError && error.status === 401;
+}
 
 // ─── Worker Circuit Breaker ─────────────────────────────────────────────────
 
@@ -59,7 +89,8 @@ class WorkerCircuitBreaker {
       this.onSuccess();
       return result;
     } catch (error) {
-      this.onFailure();
+      // Neither a success nor a failure of the service — see isCredentialRejection.
+      if (!isCredentialRejection(error)) this.onFailure();
       throw error;
     }
   }
@@ -222,6 +253,12 @@ class WorkerRetry {
 let config: SyncWorkerConfig = DEFAULT_SYNC_CONFIG;
 let syncInterval: ReturnType<typeof setInterval> | null = null;
 let isSyncing = false;
+/**
+ * Set when a new credential arrives while a cycle is already running. That cycle
+ * went out with the old token, so its result says nothing about the new one; one
+ * follow-up cycle runs as soon as it finishes instead of waiting for the interval.
+ */
+let resyncRequested = false;
 let totalSyncs = 0;
 let totalFailures = 0;
 let lastSyncTime: string | undefined;
@@ -367,7 +404,7 @@ async function fetchWithTimeout(
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      throw new HttpStatusError(response.status, response.statusText);
     }
 
     return response;
@@ -506,6 +543,17 @@ async function performSync(): Promise<void> {
     totalFailures++;
     lastError = error instanceof Error ? error.message : String(error);
 
+    // Told apart from the generic ERROR below so the main thread can fix the cause
+    // (mint a fresh token) instead of only reporting it. ERROR still follows, so the
+    // sync status and its listeners see the failure exactly as before.
+    if (isCredentialRejection(error)) {
+      postEvent({
+        type: 'AUTH_REJECTED',
+        status: error.status,
+        endpoint: config.endpoints.products,
+      });
+    }
+
     const circuitState = circuitBreaker.getState();
     if (circuitState === WorkerCircuitState.OPEN) {
       postEvent({
@@ -531,7 +579,29 @@ async function performSync(): Promise<void> {
     console.error('[Worker:Sync] Failed:', lastError);
   } finally {
     isSyncing = false;
+    if (resyncRequested) {
+      resyncRequested = false;
+      void performSync();
+    }
   }
+}
+
+/**
+ * A new non-empty credential means the next pull can succeed where the last one
+ * could not (first shop token, a re-minted one after a 401, a sign-in). Waiting
+ * for the interval left a first-time shop visitor on "No products found" for up
+ * to 30s, so pull now — or right after the cycle already in flight.
+ */
+function syncForNewCredential(previous: string | undefined): void {
+  const token = sessionToken();
+  if (token === null || token === previous?.trim()) return;
+  // Not started, or stopped: the worker owns no schedule to run this on.
+  if (syncInterval === null) return;
+  if (isSyncing) {
+    resyncRequested = true;
+    return;
+  }
+  void performSync();
 }
 
 // ─── PUSH Operations (Local → API) ─────────────────────────────────────────
@@ -675,6 +745,161 @@ async function pushUpdates(products: PushProductPayload[]): Promise<void> {
   console.log(`[Worker:Push] Update done. Updated: ${pushed}, Failed: ${failed}`);
 }
 
+/**
+ * Make the server's copy of each product match the local one: POST it, and when the
+ * server already has it (409) PATCH the mutable fields instead.
+ *
+ * This is what the outbox's product handler drives. Create-then-patch rather than
+ * patch-then-create because the products that most need this are the ones the server
+ * has never seen — every product saved in Inventory before the outbox existed.
+ * The PATCH leaves stock out for the same reason `pushUpdates` does; the POST sends
+ * it, because a product the server is meeting for the first time has no other stock.
+ */
+async function pushUpserts(products: PushProductPayload[]): Promise<void> {
+  if (!products.length) return;
+  const ids = products.map((p) => p.id);
+  if (refuseUnauthorizedPush(ids, 'upsert')) return;
+
+  const base = `${config.apiBaseUrl}${config.endpoints.products}`;
+  const results: PushResult[] = [];
+  let pushed = 0;
+  let failed = 0;
+
+  for (const product of products) {
+    const { id, ...changes } = product;
+    delete changes.stock;
+    // PATCH refuses an empty string for any text field (400), and most products have
+    // no description; POST accepts one, so only the PATCH body drops it.
+    if (!changes.description?.trim()) delete changes.description;
+    let traceId: string | undefined;
+
+    const send = (key: string, url: string, init: RequestInit, ok: number[]) =>
+      circuitBreaker.execute(() =>
+        retry.execute(key, async () => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000);
+          try {
+            const res = await fetch(url, {
+              ...init,
+              signal: controller.signal,
+              headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            });
+            traceId = readTraceId(res);
+            if (ok.includes(res.status)) return res;
+            if (res.status >= 400 && res.status < 500) {
+              throw new Error(`HTTP ${res.status}: ${res.statusText} (non-retryable)`);
+            }
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        })
+      );
+
+    try {
+      let response = await send(
+        `upsert-create-product-${id}`,
+        base,
+        { method: 'POST', body: JSON.stringify(product) },
+        [201, 409]
+      );
+      if (response.status === 409) {
+        response = await send(
+          `upsert-update-product-${id}`,
+          `${base}/${id}`,
+          { method: 'PATCH', body: JSON.stringify(changes) },
+          [200]
+        );
+      }
+
+      pushed++;
+      results.push({ productId: id, success: true, status: response.status, traceId });
+      console.log(`[Worker:Push] ✓ Product ${id} upserted (${response.status})`);
+    } catch (error) {
+      failed++;
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      results.push({ productId: id, success: false, error: errorMsg, traceId });
+      console.warn(
+        `[Worker:Push] ✗ Product ${id} upsert failed: ${errorMsg} [trace: ${traceId ?? 'none'}]`
+      );
+    }
+  }
+
+  postEvent({ type: 'PUSH_COMPLETED', pushed, failed, results });
+}
+
+/**
+ * Send a batch of outbox events to `POST /api/events` and report pos-api's verdict on
+ * each (#359). The outbox's sale handler drives this, one event at a time.
+ *
+ * Answers it can't act on are not failures of the server, and stay outside the circuit
+ * breaker: a 401 or 403 (session expired or wrong token) or a 404 (EVENTS_INGEST_ENABLED
+ * still off) comes back as `retryLater`, so the outbox parks the event and tries again,
+ * and the breaker that guards the product sync is never tripped by it. Only network
+ * faults and 5xx count against the breaker, as for every other push.
+ */
+async function pushEvents(requestId: string, events: PushEventPayload[]): Promise<void> {
+  if (sessionToken() === null) {
+    postEvent({
+      type: 'EVENTS_FAILED',
+      requestId,
+      error: 'No session; events sync after sign-in.',
+      retryLater: true,
+    });
+    return;
+  }
+
+  const url = `${config.apiBaseUrl}${config.endpoints.events ?? '/api/events'}`;
+  try {
+    const response = await circuitBreaker.execute(() =>
+      retry.execute(`push-events-${requestId}`, async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ events }),
+          });
+          if (res.status >= 500) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          return res;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      })
+    );
+
+    if (response.status === 401 || response.status === 403 || response.status === 404) {
+      postEvent({
+        type: 'EVENTS_FAILED',
+        requestId,
+        error: `pos-api answered ${response.status}; events wait and retry.`,
+        retryLater: true,
+      });
+      return;
+    }
+    if (!response.ok) {
+      postEvent({
+        type: 'EVENTS_FAILED',
+        requestId,
+        error: `HTTP ${response.status}: ${response.statusText}`,
+        retryLater: false,
+      });
+      return;
+    }
+    const body = (await response.json()) as { results?: EventAck[] };
+    postEvent({ type: 'EVENTS_ACKED', requestId, results: body.results ?? [] });
+  } catch (error) {
+    postEvent({
+      type: 'EVENTS_FAILED',
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+      retryLater: false,
+    });
+  }
+}
+
 async function pushDeletes(productIds: string[]): Promise<void> {
   if (!productIds.length) return;
   if (refuseUnauthorizedPush(productIds, 'delete')) return;
@@ -813,7 +1038,8 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
       circuitBreaker?.reset();
       break;
 
-    case 'UPDATE_CONFIG':
+    case 'UPDATE_CONFIG': {
+      const previousToken = config.sessionToken;
       config = { ...config, ...command.config };
       if (command.config.circuitBreaker) {
         circuitBreaker?.updateConfig(command.config.circuitBreaker);
@@ -826,7 +1052,11 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
         clearInterval(syncInterval);
         syncInterval = setInterval(() => performSync(), config.syncIntervalMs);
       }
+      if (command.config.sessionToken !== undefined) {
+        syncForNewCredential(previousToken);
+      }
       break;
+    }
 
     case 'PUSH_PRODUCTS':
       pushProducts(command.products);
@@ -836,8 +1066,16 @@ addEventListener('message', (event: MessageEvent<SyncWorkerCommand>) => {
       pushUpdates(command.products);
       break;
 
+    case 'PUSH_UPSERT_PRODUCTS':
+      pushUpserts(command.products);
+      break;
+
     case 'PUSH_DELETE_PRODUCTS':
       pushDeletes(command.productIds);
+      break;
+
+    case 'PUSH_EVENTS':
+      pushEvents(command.requestId, command.events);
       break;
   }
 });

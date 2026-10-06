@@ -58,6 +58,12 @@ jobs:
         run: npm run lint
       - name: Prettier
         run: npm run format:check
+      # Vitest strips types without checking them, so a spec can call an API that
+      # no longer exists, and an `@ts-expect-error` type test can go vacuous, while
+      # every test stays green. tsconfig.spec.json covers all of src/, app code
+      # included; the worker has its own lib set and gets its own pass.
+      - name: Type check (app + specs + worker)
+        run: npm run typecheck
 
   test:
     name: 🧪 Unit & Tooling Tests
@@ -93,21 +99,28 @@ jobs:
       - name: POS API service tests
         run: |
           npm ci --ignore-scripts --prefix infra/pos-api
+          npm run typecheck --prefix infra/pos-api
           npm test --prefix infra/pos-api
       - name: Vision proxy service tests
         run: |
           npm ci --ignore-scripts --prefix infra/vision-proxy
+          npm run typecheck --prefix infra/vision-proxy
           npm test --prefix infra/vision-proxy
       - name: Clerk agent relay service tests
         run: |
           npm ci --ignore-scripts --prefix infra/clerk-agent-relay
+          npm run typecheck --prefix infra/clerk-agent-relay
           npm test --prefix infra/clerk-agent-relay
-      # No `npm ci`: this service has no runtime dependency at all, and its suite
-      # needs nothing but Node. It had no step here, so its 100-plus tests — the
-      # only thing standing behind the sign-in boundary, its CORS pinning and now
-      # its route table — never ran on a pull request.
+      # This service has no runtime dependency, so its suite needs nothing but Node;
+      # the install is for `tsc`, its only devDependency, so the type-check can run.
+      # It had no step here at all, so its 100-plus tests — the only thing standing
+      # behind the sign-in boundary, its CORS pinning and its route table — never
+      # ran on a pull request.
       - name: App ID token relay service tests
-        run: npm test --prefix infra/appid-token-relay
+        run: |
+          npm ci --ignore-scripts --prefix infra/appid-token-relay
+          npm run typecheck --prefix infra/appid-token-relay
+          npm test --prefix infra/appid-token-relay
       - name: Upload coverage artifact
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

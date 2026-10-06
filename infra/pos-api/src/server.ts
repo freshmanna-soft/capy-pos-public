@@ -247,8 +247,14 @@ function readMpCurrencyId(): string {
   // inside them (not as a cryptographic claim — just a readable prefix segment).
   const token = process.env['MP_ACCESS_TOKEN'] ?? '';
   const SITE_CURRENCY: Record<string, string> = {
-    MLA: 'ARS', MLB: 'BRL', MLC: 'CLP', MLM: 'MXN',
-    MCO: 'COP', MPE: 'PEN', MLU: 'UYU', MRD: 'DOP',
+    MLA: 'ARS',
+    MLB: 'BRL',
+    MLC: 'CLP',
+    MLM: 'MXN',
+    MCO: 'COP',
+    MPE: 'PEN',
+    MLU: 'UYU',
+    MRD: 'DOP',
   };
 
   for (const [site, currency] of Object.entries(SITE_CURRENCY)) {
@@ -261,7 +267,7 @@ function readMpCurrencyId(): string {
 
   console.warn(
     '[pos-api] MP_CURRENCY_ID not set and could not be inferred from MP_ACCESS_TOKEN. ' +
-    'Defaulting to MXN. Set MP_CURRENCY_ID=<your currency> to override.'
+      'Defaulting to MXN. Set MP_CURRENCY_ID=<your currency> to override.'
   );
   return 'MXN';
 }
@@ -285,7 +291,9 @@ function buildImageStore(): ImageStore {
     return new CosImageStore({ endpoint, apiKey, bucket, publicUrlBase });
   }
 
-  console.warn('[pos-api] image store: in-memory — images are lost on restart. Set COS_ENDPOINT, COS_APIKEY, COS_BUCKET, COS_PUBLIC_URL_BASE to use IBM COS.');
+  console.warn(
+    '[pos-api] image store: in-memory — images are lost on restart. Set COS_ENDPOINT, COS_APIKEY, COS_BUCKET, COS_PUBLIC_URL_BASE to use IBM COS.'
+  );
   return new MemoryImageStore();
 }
 
@@ -309,6 +317,8 @@ function buildRuntimeDeps(): {
         mpAccessToken: readMpAccessToken(),
         mpCurrencyId: readMpCurrencyId(),
         appBaseUrl: readAppBaseUrl(),
+        // Off unless explicitly 'true': POST /api/events then answers 404 (#358).
+        eventsIngestEnabled: process.env['EVENTS_INGEST_ENABLED'] === 'true',
         nowSeconds: () => Math.floor(Date.now() / 1000),
         nowIso: () => new Date().toISOString(),
         newId: () => randomUUID(),
@@ -526,6 +536,7 @@ export function createPosRequestHandler(input: {
               body,
               rawBody,
               contentType: reqContentType,
+              clientKey: clientRateLimitKey(req),
             },
             input.api
           );

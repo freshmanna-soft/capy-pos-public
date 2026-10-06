@@ -17,7 +17,13 @@ const SECRET = 'capy-pos-local-jwt-secret-change-in-production';
 const NOW = 1_800_000_000;
 
 function mint(payload = {}) {
-  const claims = { sub: 'op-1', permissions: ['admin:manage_operators'], iat: NOW - 60, exp: NOW + 3600, ...payload };
+  const claims = {
+    sub: 'op-1',
+    permissions: ['admin:manage_operators'],
+    iat: NOW - 60,
+    exp: NOW + 3600,
+    ...payload,
+  };
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
   const signingInput = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
   const signature = createHmac('sha256', SECRET).update(signingInput).digest('base64url');
@@ -55,7 +61,15 @@ async function withServer(overrides, run) {
     },
     list: async () => {
       calls.list.push(true);
-      return [{ id: 'u1', email: 'a@capy.test', displayName: 'A', roleId: 'role-admin', roleName: 'admin' }];
+      return [
+        {
+          id: 'u1',
+          email: 'a@capy.test',
+          displayName: 'A',
+          roleId: 'role-admin',
+          roleName: 'admin',
+        },
+      ];
     },
     create: async (request) => {
       calls.create.push(request);
@@ -82,7 +96,10 @@ async function withServer(overrides, run) {
   }
 }
 
-function send(port, { method = 'GET', path = '/appid/admin/staff', headers = {}, body, chunks } = {}) {
+function send(
+  port,
+  { method = 'GET', path = '/appid/admin/staff', headers = {}, body, chunks } = {}
+) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const req = httpRequest({ host: '127.0.0.1', port, method, path, headers }, (res) => {
@@ -112,7 +129,11 @@ function send(port, { method = 'GET', path = '/appid/admin/staff', headers = {},
   });
 }
 
-const authed = (extra = {}) => ({ Origin: ALLOWED, Authorization: bearer(ADMIN_TOKEN()), ...extra });
+const authed = (extra = {}) => ({
+  Origin: ALLOWED,
+  Authorization: bearer(ADMIN_TOKEN()),
+  ...extra,
+});
 
 describe('CORS and routing, over a socket', () => {
   it('answers a preflight, echoing Authorization as an allowed header', async () => {
@@ -150,10 +171,12 @@ describe('auth, over a socket', () => {
     });
   });
 
-  it("403s a valid token that lacks MANAGE_OPERATORS, naming what it lacks", async () => {
+  it('403s a valid token that lacks MANAGE_OPERATORS, naming what it lacks', async () => {
     await withServer({}, async ({ port, calls }) => {
       const token = mint({ permissions: ['sale:process'] });
-      const response = await send(port, { headers: { Origin: ALLOWED, Authorization: bearer(token) } });
+      const response = await send(port, {
+        headers: { Origin: ALLOWED, Authorization: bearer(token) },
+      });
       assert.equal(response.status, 403);
       assert.match(response.json.error, /admin:manage_operators/);
       assert.deepEqual(calls.list, []);
@@ -163,7 +186,9 @@ describe('auth, over a socket', () => {
   it('401s an expired token', async () => {
     await withServer({}, async ({ port }) => {
       const token = mint({ exp: NOW - 1 });
-      const response = await send(port, { headers: { Origin: ALLOWED, Authorization: bearer(token) } });
+      const response = await send(port, {
+        headers: { Origin: ALLOWED, Authorization: bearer(token) },
+      });
       assert.equal(response.status, 401);
     });
   });
@@ -205,7 +230,7 @@ describe('POST /appid/admin/staff', () => {
     });
   });
 
-  it("400s a body the validator rejects, and never reaches create", async () => {
+  it('400s a body the validator rejects, and never reaches create', async () => {
     await withServer({}, async ({ port, calls }) => {
       const response = await send(port, {
         method: 'POST',
@@ -232,7 +257,11 @@ describe('POST /appid/admin/staff', () => {
 
   it('502s when create throws, without leaking the reason', async () => {
     await withServer(
-      { create: async () => { throw new Error('APPID_MANAGEMENT_APIKEY=super-secret rejected upstream'); } },
+      {
+        create: async () => {
+          throw new Error('APPID_MANAGEMENT_APIKEY=super-secret rejected upstream');
+        },
+      },
       async ({ port }) => {
         const response = await send(port, {
           method: 'POST',
@@ -240,7 +269,11 @@ describe('POST /appid/admin/staff', () => {
           body: JSON.stringify({ email: 'new@capy.test', roleId: 'role-admin' }),
         });
         assert.equal(response.status, 502);
-        assert.doesNotMatch(response.text, /super-secret/, 'the 502 body leaked the management key');
+        assert.doesNotMatch(
+          response.text,
+          /super-secret/,
+          'the 502 body leaked the management key'
+        );
       }
     );
   });
@@ -277,7 +310,11 @@ describe('PUT /appid/admin/staff/{id}/role', () => {
 describe('DELETE /appid/admin/staff/{id}/role', () => {
   it('revokes with no body, and answers 204', async () => {
     await withServer({}, async ({ port, calls }) => {
-      const response = await send(port, { method: 'DELETE', path: '/appid/admin/staff/u1/role', headers: authed() });
+      const response = await send(port, {
+        method: 'DELETE',
+        path: '/appid/admin/staff/u1/role',
+        headers: authed(),
+      });
       assert.equal(response.status, 204);
       assert.deepEqual(calls.revoke, ['u1']);
     });

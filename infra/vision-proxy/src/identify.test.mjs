@@ -39,7 +39,13 @@ import { MAX_CATALOG_FIELD_CHARS, formatCatalog } from './recognition-contract.t
  * One catalog entry the way `claude-vision.adapter.ts` sends one: every field of
  * `CatalogHint` present, because that adapter builds it from a `Product`.
  */
-const HINT = { id: 'p-1', name: 'Tin of beans', sku: 'DRY-BEANS-1', category: 'Ambient', emoji: '🥫' };
+const HINT = {
+  id: 'p-1',
+  name: 'Tin of beans',
+  sku: 'DRY-BEANS-1',
+  category: 'Ambient',
+  emoji: '🥫',
+};
 
 /** A frame the way `claude-vision.adapter.ts` sends one. */
 const body = (overrides = {}) => ({
@@ -86,11 +92,17 @@ describe('validate — the image', () => {
 
   it('refuses a frame over the byte ceiling, before a single token is spent on it', () => {
     // The cap is on the encoded length, which is what arrives and what is billed.
-    assert.match(rejection(validate(body({ image: 'x'.repeat(MAX_IMAGE_BYTES + 1) }))), /too large/);
+    assert.match(
+      rejection(validate(body({ image: 'x'.repeat(MAX_IMAGE_BYTES + 1) }))),
+      /too large/
+    );
   });
 
   it('accepts a frame exactly at the ceiling, so the cap is a ceiling and not a coin flip', () => {
-    assert.equal(accepted(validate(body({ image: 'x'.repeat(MAX_IMAGE_BYTES) }))).image.length, MAX_IMAGE_BYTES);
+    assert.equal(
+      accepted(validate(body({ image: 'x'.repeat(MAX_IMAGE_BYTES) }))).image.length,
+      MAX_IMAGE_BYTES
+    );
   });
 
   it('counts the ceiling in bytes, not UTF-16 units, so a multi-byte frame cannot exceed it', () => {
@@ -116,7 +128,15 @@ describe('validate — the media type', () => {
   it('refuses anything else, including a type the model would reject downstream', () => {
     // A media type the API refuses is a request that is paid for and then thrown
     // away, so it is cheaper to refuse it here than to discover it in a 400 upstream.
-    for (const mediaType of [undefined, '', 'image/gif', 'image/svg+xml', 'application/pdf', 'IMAGE/JPEG', 42]) {
+    for (const mediaType of [
+      undefined,
+      '',
+      'image/gif',
+      'image/svg+xml',
+      'application/pdf',
+      'IMAGE/JPEG',
+      42,
+    ]) {
       assert.match(rejection(validate(body({ mediaType }))), /mediaType must be/);
     }
   });
@@ -137,7 +157,10 @@ describe('validate — the catalog', () => {
   });
 
   it('trims to the entry cap here, the one place the cap is applied', () => {
-    const many = Array.from({ length: MAX_CATALOG_ENTRIES + 50 }, (_, at) => ({ id: `p-${at}`, name: `Item ${at}` }));
+    const many = Array.from({ length: MAX_CATALOG_ENTRIES + 50 }, (_, at) => ({
+      id: `p-${at}`,
+      name: `Item ${at}`,
+    }));
     assert.equal(accepted(validate(body({ catalog: many }))).catalog.length, MAX_CATALOG_ENTRIES);
   });
 
@@ -167,7 +190,14 @@ describe('validate — the catalog', () => {
   it('drops what cannot be named, spoken or added instead of carrying it into the prompt', () => {
     // An entry with no name cannot be read aloud and one with no id cannot be put in
     // a cart, so both are weight in a cached prompt and nothing else.
-    const catalog = [HINT, { id: 'p-2', name: '   ' }, { id: '', name: 'Nameless' }, 'nope', null, 42];
+    const catalog = [
+      HINT,
+      { id: 'p-2', name: '   ' },
+      { id: '', name: 'Nameless' },
+      'nope',
+      null,
+      42,
+    ];
     assert.deepEqual(accepted(validate(body({ catalog }))).catalog, [HINT]);
   });
 
@@ -200,7 +230,13 @@ describe('sanitizeText', () => {
 describe('sanitizeCatalog', () => {
   it('strips every field that is rendered, not just the name', () => {
     const [hint] = sanitizeCatalog([
-      { id: 'p\t1', name: 'Tin of\nbeans', sku: 'DRY\tBEANS', category: 'Ambient\nGoods', emoji: '🥫' },
+      {
+        id: 'p\t1',
+        name: 'Tin of\nbeans',
+        sku: 'DRY\tBEANS',
+        category: 'Ambient\nGoods',
+        emoji: '🥫',
+      },
     ]);
     assert.deepEqual(hint, {
       id: 'p 1',
@@ -214,7 +250,9 @@ describe('sanitizeCatalog', () => {
   it('coerces a non-string field rather than trusting or throwing on it', () => {
     // `{ category: 42 }` is the case that used to reach `formatCatalog` and throw:
     // the type says string, the caller is not bound by the type.
-    const [hint] = sanitizeCatalog([{ id: 'p-1', name: 'Beans', sku: 42, category: { nested: true } }]);
+    const [hint] = sanitizeCatalog([
+      { id: 'p-1', name: 'Beans', sku: 42, category: { nested: true } },
+    ]);
     assert.deepEqual(hint, { id: 'p-1', name: 'Beans', sku: '', category: '' });
   });
 
@@ -225,7 +263,12 @@ describe('sanitizeCatalog', () => {
 
   it('caps every field, including the id the model has to echo back', () => {
     const [hint] = sanitizeCatalog([
-      { id: 'i'.repeat(500), name: 'n'.repeat(500), sku: 's'.repeat(500), category: 'c'.repeat(500) },
+      {
+        id: 'i'.repeat(500),
+        name: 'n'.repeat(500),
+        sku: 's'.repeat(500),
+        category: 'c'.repeat(500),
+      },
     ]);
     for (const value of Object.values(hint)) {
       assert.equal(value.length, MAX_CATALOG_FIELD_CHARS);
@@ -237,7 +280,11 @@ describe('sanitizeCatalog', () => {
     // above rather than over the happy path: nothing that survives sanitizing can
     // make the render throw.
     const rendered = formatCatalog(
-      sanitizeCatalog([HINT, { id: 'p-2', name: 'Rice' }, { id: 'p-3', name: 'Oats', category: 42 }])
+      sanitizeCatalog([
+        HINT,
+        { id: 'p-2', name: 'Rice' },
+        { id: 'p-3', name: 'Oats', category: 42 },
+      ])
     );
     assert.match(rendered, /Ambient:/);
     assert.match(rendered, /Uncategorised:/);

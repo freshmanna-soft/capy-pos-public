@@ -1,6 +1,7 @@
 import Dexie, { Table } from 'dexie';
 import { Injectable } from '@angular/core';
 import { Role, Permission } from '@core/domain/auth';
+import type { OutboxStatus } from '@core/domain/events/domain-event';
 import { environment } from '../../../../environments/environment';
 
 /**
@@ -247,19 +248,50 @@ export interface IRewardRedemptionDB {
   usedAt?: Date;
 }
 
-export interface ISyncQueueDB {
+/**
+ * One domain event waiting for (or done with) its handlers — Epic #349, #351.
+ *
+ * `nextAttemptAt` is epoch milliseconds rather than a Date so the
+ * `[status+nextAttemptAt]` index can answer "what is due now" as a single range.
+ */
+export interface IOutboxEventDB {
   id: string;
   tenantId?: string;
-  entityType: string;
-  entityId: string;
-  operation: string;
-  data: string;
-  status: string;
-  retryCount: number;
+  type: string;
+  aggregateId: string;
+  /** JSON-encoded payload, parsed by the dispatcher before a handler sees it. */
+  payload: string;
+  /**
+   * Ties the event to the business action that caused it (#352). Not indexed, so
+   * adding it needed no schema version.
+   */
+  correlationId?: string;
+  status: OutboxStatus;
+  attempts: number;
+  nextAttemptAt: number;
   lastError?: string;
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * One handler's outcome for one event. Keyed `[eventId+handler]` so a handler that
+ * has succeeded is never run again for that event, even while a sibling retries.
+ */
+export interface IOutboxReceiptDB {
+  eventId: string;
+  handler: string;
+  status: OutboxStatus;
+  nextAttemptAt: number;
+  lastError?: string;
+  updatedAt: Date;
+}
+
+/**
+ * Tables left out of exports. A restored pending event would re-push a stale product
+ * edit from whichever device the snapshot came from (Epic #349, open question 5).
+ */
+const NON_EXPORTED_TABLES: ReadonlySet<string> = new Set(['outbox', 'outboxReceipts']);
 
 /**
  * One recognition attempt and what the cashier did about it.
@@ -480,7 +512,8 @@ export class DexieDatabase extends Dexie {
   loyaltyTransactions!: Table<ILoyaltyTransactionDB, string>;
   rewards!: Table<IRewardDB, string>;
   rewardRedemptions!: Table<IRewardRedemptionDB, string>;
-  syncQueue!: Table<ISyncQueueDB, string>;
+  outbox!: Table<IOutboxEventDB, string>;
+  outboxReceipts!: Table<IOutboxReceiptDB, [string, string]>;
   settings!: Table<ISettingsDB, string>;
   operators!: Table<IOperatorDB, string>;
   roles!: Table<IRoleDB, string>;
@@ -757,6 +790,18 @@ export class DexieDatabase extends Dexie {
       // recency reasons recognitionLog is.
       recognitionSamples:
         'id, tenantId, productId, tier, outcome, createdAt, [productId+createdAt]',
+    });
+
+    // Version 9: the domain-event outbox (Epic #349, #351). Do NOT edit v1..v8 above.
+    //
+    // Additive apart from one drop, so there is no `.upgrade()` hook. `syncQueue` was
+    // declared in v1 and nothing ever wrote to it; the outbox is the queue it was meant
+    // to be, with the handler receipts and due-time index it never had, so it goes
+    // rather than leaving two queues to wonder about (open question 8).
+    this.version(9).stores({
+      outbox: 'id, type, aggregateId, status, tenantId, createdAt, [status+nextAttemptAt]',
+      outboxReceipts: '[eventId+handler], eventId, handler, status, nextAttemptAt',
+      syncQueue: null,
     });
 
     // Map tables to classes (optional, for better type safety)
@@ -1138,6 +1183,7 @@ export class DexieDatabase extends Dexie {
     const data: Record<string, unknown[]> = {};
 
     for (const table of this.tables) {
+      if (NON_EXPORTED_TABLES.has(table.name)) continue;
       data[table.name] = await table.toArray();
     }
 
@@ -1204,12 +1250,13 @@ export class DexieDatabase extends Dexie {
       'loyaltyTransactions',
       'rewards',
       'rewardRedemptions',
-      'syncQueue',
       'settings',
     ]);
 
     await this.transaction('rw', this.tables, async () => {
       for (const tableName in tableData) {
+        // Unknown names (a pre-v9 snapshot's `syncQueue`) find no table and are skipped.
+        if (NON_EXPORTED_TABLES.has(tableName)) continue;
         const table = (this as unknown as Record<string, Table>)[tableName];
         if (!table) continue;
 

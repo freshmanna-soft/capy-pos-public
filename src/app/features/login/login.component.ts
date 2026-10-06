@@ -24,7 +24,6 @@ import {
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { InvalidCredentialsError } from '@core/infrastructure/auth/local-credential-auth.adapter';
 import { MAX_PIN_LENGTH, MIN_PIN_LENGTH } from '@core/infrastructure/auth/webauthn/pin-policy';
-import { SIGN_IN_ROUTE as CUSTOMER_SIGN_IN_ROUTE } from '@features/self-checkout/self-checkout-routes';
 
 /**
  * LoginComponent
@@ -245,11 +244,11 @@ import { SIGN_IN_ROUTE as CUSTOMER_SIGN_IN_ROUTE } from '@features/self-checkout
             }
 
             <a
-              [routerLink]="customerSignInRoute"
+              [routerLink]="customerShopRoute"
               class="btn-quiet customer-login-link"
-              data-testid="link-customer-login"
+              data-testid="link-customer-shop"
             >
-              Customer? Sign in to checkout
+              Customer? Go to the shop
             </a>
           </form>
         } @else {
@@ -586,7 +585,11 @@ export class LoginComponent implements OnInit {
 
   readonly loading = signal(false);
   readonly authError = signal<string | null>(null);
-  readonly customerSignInRoute = CUSTOMER_SIGN_IN_ROUTE;
+  /**
+   * Where a customer who lands on the staff sign-in belongs. It used to be the
+   * self-checkout sign-in; that lane is gone and /shop is the customer path now.
+   */
+  readonly customerShopRoute = '/shop';
 
   readonly forgotPasswordMode = signal(false);
   readonly forgotPasswordBusy = signal(false);

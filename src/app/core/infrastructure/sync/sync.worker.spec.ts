@@ -305,7 +305,7 @@ describe('sync worker request authorization (#206, #224)', () => {
     // pull is before sign-in, and each 401 would count against the same breaker
     // (threshold 5) — so a couple of unauthenticated pushes would leave the circuit
     // open and stall the till's first real sync after sign-in.
-    it.each([
+    it.each<[string, SyncWorkerCommand, string]>([
       [
         'create',
         {
@@ -323,11 +323,11 @@ describe('sync worker request authorization (#206, #224)', () => {
         'PATCH',
       ],
       ['delete', { type: 'PUSH_DELETE_PRODUCTS', productIds: ['p1'] }, 'DELETE'],
-    ] as const)('sends no %s request without a session', async (_verb, command, method) => {
+    ])('sends no %s request without a session', async (_verb, command, method) => {
       const worker = await loadWorker();
       worker.send({ type: 'START_SYNC', config: config('') });
       await worker.settle();
-      worker.send(command as SyncWorkerCommand);
+      worker.send(command);
       await worker.settle();
       worker.send({ type: 'STOP_SYNC' });
 
@@ -401,5 +401,114 @@ describe('sync worker request authorization (#206, #224)', () => {
 
       expect(worker.authFor('/api/products')).toBe(`Bearer ${TOKEN}`);
     });
+  });
+});
+
+describe('sync worker PUSH_UPSERT_PRODUCTS (Epic #349)', () => {
+  const product = {
+    id: 'prod-1',
+    name: 'Hay',
+    price: 3,
+    category: 'feed',
+    stock: 9,
+    description: '',
+    isActive: true,
+  };
+
+  /** Answer the product POST with `createStatus`; everything else succeeds. */
+  function answerCreateWith(worker: Awaited<ReturnType<typeof loadWorker>>, createStatus: number) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        worker.calls.push([String(url), init]);
+        const status = init?.method === 'POST' ? createStatus : 200;
+        return new Response(JSON.stringify({ products: [] }), { status });
+      })
+    );
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('creates a product the server has never seen, stock included', async () => {
+    const worker = await loadWorker();
+    worker.send({ type: 'START_SYNC', config: config(TOKEN) });
+    await worker.settle();
+    answerCreateWith(worker, 201);
+    worker.calls.length = 0;
+
+    worker.send({ type: 'PUSH_UPSERT_PRODUCTS', products: [product] });
+    await worker.settle();
+    worker.send({ type: 'STOP_SYNC' });
+
+    // Worker modules loaded by earlier tests stay subscribed to `self`, so assertions
+    // look for the calls this command causes rather than counting every call.
+    const post = worker.calls.find(([, init]) => init?.method === 'POST');
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ id: 'prod-1', stock: 9 });
+    expect(worker.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+    expect(worker.pushResults().at(-1)?.results).toEqual([
+      expect.objectContaining({ productId: 'prod-1', success: true, status: 201 }),
+    ]);
+  });
+
+  it('patches a product the server already has, without stock or a blank description', async () => {
+    const worker = await loadWorker();
+    worker.send({ type: 'START_SYNC', config: config(TOKEN) });
+    await worker.settle();
+    answerCreateWith(worker, 409);
+    worker.calls.length = 0;
+
+    worker.send({ type: 'PUSH_UPSERT_PRODUCTS', products: [product] });
+    await worker.settle();
+    worker.send({ type: 'STOP_SYNC' });
+
+    const patch = worker.calls.find(([, init]) => init?.method === 'PATCH');
+    expect(patch?.[0]).toMatch(/\/api\/products\/prod-1$/);
+    // Stock is server-authoritative once the product exists; PATCH rejects '' fields.
+    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({
+      name: 'Hay',
+      price: 3,
+      category: 'feed',
+      isActive: true,
+    });
+    expect(worker.pushResults().at(-1)?.results[0]).toMatchObject({ success: true, status: 200 });
+  });
+
+  it('reports a rejected create as a failure the caller can see', async () => {
+    const worker = await loadWorker();
+    worker.send({ type: 'START_SYNC', config: config(TOKEN) });
+    await worker.settle();
+    answerCreateWith(worker, 400);
+
+    worker.send({ type: 'PUSH_UPSERT_PRODUCTS', products: [product] });
+    await worker.settle();
+    worker.send({ type: 'STOP_SYNC' });
+
+    expect(worker.pushResults().at(-1)?.results[0]).toMatchObject({
+      productId: 'prod-1',
+      success: false,
+    });
+  });
+
+  it('refuses without a session, settling the caller at once', async () => {
+    const worker = await loadWorker();
+    worker.send({ type: 'START_SYNC', config: config(undefined) });
+    await worker.settle();
+    worker.calls.length = 0;
+
+    worker.send({ type: 'PUSH_UPSERT_PRODUCTS', products: [product] });
+    await worker.settle();
+    worker.send({ type: 'STOP_SYNC' });
+
+    expect(worker.calls.some(([url]) => url.includes('/api/products'))).toBe(false);
+    expect(worker.pushResults().at(-1)?.results[0]).toMatchObject({ success: false });
   });
 });

@@ -33,13 +33,20 @@ const FUTURE = NOW + 3600;
  */
 function staffToken(permissions = ['sale:process', 'inventory:manage'], tenantId = 'tenant-1') {
   const b64url = (value) =>
-    Buffer.from(JSON.stringify(value)).toString('base64')
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    Buffer.from(JSON.stringify(value))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
   const header = b64url({ alg: 'HS256', typ: 'JWT' });
   const body = b64url({ sub: 'op-1', tenantId, roles: ['admin'], permissions, exp: FUTURE });
   const signingInput = `${header}.${body}`;
-  const sig = createHmac('sha256', SECRET).update(signingInput).digest('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const sig = createHmac('sha256', SECRET)
+    .update(signingInput)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
   return `${signingInput}.${sig}`;
 }
 
@@ -79,9 +86,7 @@ const VALID_TX_BODY = {
   subtotal: 2.5,
   taxAmount: 0.2,
   total: 2.7,
-  items: [
-    { productId: 'p1', productName: 'Coffee', quantity: 1, unitPrice: 2.5, lineTotal: 2.5 },
-  ],
+  items: [{ productId: 'p1', productName: 'Coffee', quantity: 1, unitPrice: 2.5, lineTotal: 2.5 }],
 };
 
 // ── matchRoute ─────────────────────────────────────────────────────────────────
@@ -117,8 +122,11 @@ describe('matchRoute', () => {
 
 describe('POST /api/shop/session', () => {
   const req = (body) => ({
-    method: 'POST', path: '/api/shop/session',
-    authorization: undefined, internalSecret: undefined, body,
+    method: 'POST',
+    path: '/api/shop/session',
+    authorization: undefined,
+    internalSecret: undefined,
+    body,
   });
 
   test('valid storeId → 201 with token and expiresAt', async () => {
@@ -174,14 +182,39 @@ describe('POST /api/shop/session', () => {
     assert.equal(res.body.count, 1);
     assert.equal(res.body.products[0].id, 'p1');
   });
+
+  test('expiresAt is the ISO form of the token exp claim', async () => {
+    const res = await handle(req({ storeId: 'org/store-1' }), makeDeps());
+    const claims = verifySessionToken(res.body.token, SECRET, NOW);
+    assert.ok(claims !== null);
+    assert.equal(res.body.expiresAt, new Date((NOW + 3600) * 1000).toISOString());
+  });
+
+  // The limiter's buckets are module-level, so these keys are unique to this
+  // test — every other test here shares the 'unknown' bucket.
+  test('rate limit is per client key: one client is capped, another is not', async () => {
+    const deps = makeDeps();
+    const from = (clientKey) => ({ ...req({ storeId: 'org/store-1' }), clientKey });
+    for (let i = 0; i < 20; i += 1) {
+      const ok = await handle(from('203.0.113.10-rate-limit-test'), deps);
+      assert.equal(ok.status, 201, `request ${i + 1} should be allowed`);
+    }
+    const limited = await handle(from('203.0.113.10-rate-limit-test'), deps);
+    assert.equal(limited.status, 429);
+    const other = await handle(from('203.0.113.11-rate-limit-test'), deps);
+    assert.equal(other.status, 201);
+  });
 });
 
 // ── POST /api/kiosk-device-token ───────────────────────────────────────────────
 
 describe('POST /api/kiosk-device-token', () => {
   const req = (auth, body) => ({
-    method: 'POST', path: '/api/kiosk-device-token',
-    authorization: auth, internalSecret: undefined, body,
+    method: 'POST',
+    path: '/api/kiosk-device-token',
+    authorization: auth,
+    internalSecret: undefined,
+    body,
   });
 
   test('valid staff token + terminalId → 201 with token', async () => {
@@ -222,8 +255,11 @@ describe('POST /api/kiosk-device-token', () => {
 
 describe('POST /api/transactions', () => {
   const req = (auth, body) => ({
-    method: 'POST', path: '/api/transactions',
-    authorization: auth, internalSecret: undefined, body,
+    method: 'POST',
+    path: '/api/transactions',
+    authorization: auth,
+    internalSecret: undefined,
+    body,
   });
 
   test('kiosk-device token + valid body → 201 with transaction', async () => {
@@ -311,7 +347,13 @@ describe('POST /api/transactions', () => {
 describe('GET /api/health', () => {
   test('lists new endpoints in health response', async () => {
     const res = await handle(
-      { method: 'GET', path: '/api/health', authorization: undefined, internalSecret: undefined, body: undefined },
+      {
+        method: 'GET',
+        path: '/api/health',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: undefined,
+      },
       makeDeps()
     );
     assert.equal(res.status, 200);
@@ -387,10 +429,14 @@ describe('POST /api/products/:id/image', () => {
     const res = await handle(req(product.id, body, CONTENT_TYPE, `Bearer ${token}`), deps);
 
     assert.equal(res.status, 200);
-    assert.ok(typeof res.body.imageUrl === 'string' && res.body.imageUrl.length > 0,
-      `imageUrl should be a non-empty string, got: ${JSON.stringify(res.body.imageUrl)}`);
-    assert.ok(res.body.imageUrl.startsWith('data:image/jpeg;base64,'),
-      `imageUrl should start with data:image/jpeg;base64,`);
+    assert.ok(
+      typeof res.body.imageUrl === 'string' && res.body.imageUrl.length > 0,
+      `imageUrl should be a non-empty string, got: ${JSON.stringify(res.body.imageUrl)}`
+    );
+    assert.ok(
+      res.body.imageUrl.startsWith('data:image/jpeg;base64,'),
+      `imageUrl should start with data:image/jpeg;base64,`
+    );
 
     // imageUrl should be written back to the product document
     const updated = await deps.products.read(product.id);
@@ -470,8 +516,13 @@ describe('POST /api/mercadopago/preference', () => {
   test('503 when mpAccessToken is empty', async () => {
     const deps = makeDeps({ mpAccessToken: '' });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: VALID_MP_BODY },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: VALID_MP_BODY,
+      },
       deps
     );
     assert.equal(res.status, 503);
@@ -480,8 +531,13 @@ describe('POST /api/mercadopago/preference', () => {
   test('400 when body is missing', async () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: undefined },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: undefined,
+      },
       deps
     );
     assert.equal(res.status, 400);
@@ -490,8 +546,13 @@ describe('POST /api/mercadopago/preference', () => {
   test('400 when formData is absent', async () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { amount: 10 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { amount: 10 },
+      },
       deps
     );
     assert.equal(res.status, 400);
@@ -501,8 +562,13 @@ describe('POST /api/mercadopago/preference', () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
     const badBody = { ...VALID_MP_BODY, formData: { ...VALID_MP_BODY.formData, token: '' } };
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: badBody },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: badBody,
+      },
       deps
     );
     assert.equal(res.status, 400);
@@ -512,8 +578,13 @@ describe('POST /api/mercadopago/preference', () => {
     const mpResult = { id: 123456, status: 'approved' };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, mpResult) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: VALID_MP_BODY },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: VALID_MP_BODY,
+      },
       deps
     );
     assert.equal(res.status, 200);
@@ -525,8 +596,13 @@ describe('POST /api/mercadopago/preference', () => {
     const mpResult = { id: 999, status: 'pending' };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, mpResult) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: VALID_MP_BODY },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: VALID_MP_BODY,
+      },
       deps
     );
     assert.equal(res.status, 200);
@@ -534,21 +610,36 @@ describe('POST /api/mercadopago/preference', () => {
   });
 
   test('502 when MP upstream returns non-2xx', async () => {
-    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(422, { message: 'invalid token' }) });
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      fetch: fakeFetch(422, { message: 'invalid token' }),
+    });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: VALID_MP_BODY },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: VALID_MP_BODY,
+      },
       deps
     );
     assert.equal(res.status, 502);
   });
 
   test('502 when fetch throws (network error)', async () => {
-    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const throwingFetch = async () => {
+      throw new Error('ECONNREFUSED');
+    };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: VALID_MP_BODY },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: VALID_MP_BODY,
+      },
       deps
     );
     assert.equal(res.status, 502);
@@ -557,8 +648,13 @@ describe('POST /api/mercadopago/preference', () => {
   test('GET /api/mercadopago/preference → 404', async () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN' });
     const res = await handle(
-      { method: 'GET', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: undefined },
+      {
+        method: 'GET',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: undefined,
+      },
       deps
     );
     assert.equal(res.status, 404);
@@ -570,8 +666,13 @@ describe('POST /api/mercadopago/preference', () => {
     const prefResult = { id: 'pref-123', init_point: 'https://mp.com/checkout/pref-123' };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, prefResult) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 49.99 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 49.99 },
+      },
       deps
     );
     assert.equal(res.status, 200);
@@ -582,29 +683,49 @@ describe('POST /api/mercadopago/preference', () => {
   test('wallet mode: 400 when amount is missing', async () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, {}) });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet' } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet' },
+      },
       deps
     );
     assert.equal(res.status, 400);
   });
 
   test('wallet mode: 502 when MP preferences endpoint returns non-2xx', async () => {
-    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(400, { message: 'bad request' }) });
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      fetch: fakeFetch(400, { message: 'bad request' }),
+    });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 10 },
+      },
       deps
     );
     assert.equal(res.status, 502);
   });
 
   test('wallet mode: 502 when fetch throws', async () => {
-    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const throwingFetch = async () => {
+      throw new Error('ECONNREFUSED');
+    };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 10 },
+      },
       deps
     );
     assert.equal(res.status, 502);
@@ -614,12 +735,21 @@ describe('POST /api/mercadopago/preference', () => {
     let capturedBody = null;
     const capturingFetch = async (url, opts) => {
       capturedBody = JSON.parse(opts.body);
-      return { ok: true, json: async () => ({ id: 'p1', init_point: 'https://mp.com/p1' }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ id: 'p1', init_point: 'https://mp.com/p1' }),
+        text: async () => '',
+      };
     };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: capturingFetch });
     await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 25, title: 'Table 5 order' } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 25, title: 'Table 5 order' },
+      },
       deps
     );
     assert.ok(capturedBody.items[0].title === 'Table 5 order', 'title should be forwarded');
@@ -629,12 +759,25 @@ describe('POST /api/mercadopago/preference', () => {
     let capturedBody = null;
     const capturingFetch = async (url, opts) => {
       capturedBody = JSON.parse(opts.body);
-      return { ok: true, json: async () => ({ id: 'p2', init_point: 'https://mp.com/p2' }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ id: 'p2', init_point: 'https://mp.com/p2' }),
+        text: async () => '',
+      };
     };
-    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', mpCurrencyId: 'MXN', fetch: capturingFetch });
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      mpCurrencyId: 'MXN',
+      fetch: capturingFetch,
+    });
     await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 99 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 99 },
+      },
       deps
     );
     assert.equal(capturedBody.items[0].currency_id, 'MXN', 'currency_id should match mpCurrencyId');
@@ -644,12 +787,25 @@ describe('POST /api/mercadopago/preference', () => {
     let capturedBody = null;
     const capturingFetch = async (url, opts) => {
       capturedBody = JSON.parse(opts.body);
-      return { ok: true, json: async () => ({ id: 'p3', init_point: 'https://mp.com/p3' }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ id: 'p3', init_point: 'https://mp.com/p3' }),
+        text: async () => '',
+      };
     };
-    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', mpCurrencyId: 'ARS', fetch: capturingFetch });
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      mpCurrencyId: 'ARS',
+      fetch: capturingFetch,
+    });
     await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 50 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 50 },
+      },
       deps
     );
     assert.equal(capturedBody.items[0].currency_id, 'ARS', 'currency_id should be ARS');
@@ -659,7 +815,11 @@ describe('POST /api/mercadopago/preference', () => {
     let capturedBody = null;
     const capturingFetch = async (url, opts) => {
       capturedBody = JSON.parse(opts.body);
-      return { ok: true, json: async () => ({ id: 'p4', init_point: 'https://mp.com/p4' }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ id: 'p4', init_point: 'https://mp.com/p4' }),
+        text: async () => '',
+      };
     };
     const deps = makeDeps({
       mpAccessToken: 'TEST_TOKEN',
@@ -667,13 +827,308 @@ describe('POST /api/mercadopago/preference', () => {
       fetch: capturingFetch,
     });
     await handle(
-      { method: 'POST', path: '/api/mercadopago/preference', authorization: undefined,
-        internalSecret: undefined, body: { mode: 'wallet', amount: 10 } },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 10 },
+      },
       deps
     );
     assert.equal(capturedBody.back_urls.success, 'https://my-pos.example.com/payment/success');
     assert.equal(capturedBody.back_urls.failure, 'https://my-pos.example.com/payment/failure');
     assert.equal(capturedBody.back_urls.pending, 'https://my-pos.example.com/payment/pending');
+  });
+
+  test('wallet mode: preference expires 30 minutes after creation', async () => {
+    let capturedBody = null;
+    const capturingFetch = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return {
+        ok: true,
+        json: async () => ({ id: 'p5', init_point: 'https://mp.com/p5' }),
+        text: async () => '',
+      };
+    };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: capturingFetch });
+    await handle(
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 10 },
+      },
+      deps
+    );
+    assert.equal(capturedBody.expires, true);
+    assert.equal(capturedBody.expiration_date_from, new Date(NOW * 1000).toISOString());
+    assert.equal(capturedBody.expiration_date_to, new Date((NOW + 30 * 60) * 1000).toISOString());
+  });
+
+  test('wallet mode: auto_return only over HTTPS', async () => {
+    const bodies = [];
+    const capturingFetch = async (url, opts) => {
+      bodies.push(JSON.parse(opts.body));
+      return {
+        ok: true,
+        json: async () => ({ id: 'p6', init_point: 'https://mp.com/p6' }),
+        text: async () => '',
+      };
+    };
+    for (const appBaseUrl of ['http://localhost:4200', 'https://pos.example.com']) {
+      const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', appBaseUrl, fetch: capturingFetch });
+      await handle(
+        {
+          method: 'POST',
+          path: '/api/mercadopago/preference',
+          authorization: undefined,
+          internalSecret: undefined,
+          body: { mode: 'wallet', amount: 10 },
+        },
+        deps
+      );
+    }
+    assert.equal(bodies[0].auto_return, undefined);
+    assert.equal(bodies[1].auto_return, 'approved');
+  });
+
+  test('wallet mode: response carries both the preference id and the external reference', async () => {
+    const prefResult = {
+      id: 'pref-9',
+      init_point: 'https://mp.com/pref-9',
+      external_reference: 'ext-9',
+    };
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(200, prefResult) });
+    const res = await handle(
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: { mode: 'wallet', amount: 10 },
+      },
+      deps
+    );
+    assert.equal(res.body.id, 'pref-9');
+    assert.equal(res.body.externalReference, 'ext-9');
+  });
+});
+
+// ── POST /api/mercadopago/preference/:externalReference/cancel ───────────────
+
+describe('POST /api/mercadopago/preference/:externalReference/cancel', () => {
+  /**
+   * A fake MP that answers by URL + method, records every call, and lets each
+   * test pick the preference owner, the payments found, and which calls fail.
+   * Every test uses its own external reference: the route's per-reference rate
+   * limiter is module state and would otherwise leak between tests.
+   */
+  function fakeMp({ owner, payments = [], failOn = () => false, reread = {} }) {
+    const calls = [];
+    const fetch = async (url, init = {}) => {
+      const method = init.method ?? 'GET';
+      calls.push({ url, method, body: init.body ? JSON.parse(init.body) : undefined });
+      const reply = (status, body) => ({
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      });
+      if (failOn(url, method)) return reply(500, { message: 'upstream exploded' });
+      if (url.includes('/checkout/preferences/')) {
+        return method === 'GET'
+          ? reply(200, { id: 'pref-1', init_point: 'x', external_reference: owner })
+          : reply(200, { id: 'pref-1' });
+      }
+      if (url.includes('/v1/payments/search')) return reply(200, { results: payments });
+      const paymentId = url.split('/').pop();
+      if (method === 'PUT') return reply(200, { id: Number(paymentId), status: 'cancelled' });
+      return reply(200, reread[paymentId] ?? { id: Number(paymentId), status: 'cancelled' });
+    };
+    return { fetch, calls };
+  }
+
+  const cancelReq = (ref, body = { preferenceId: 'pref-1' }) => ({
+    method: 'POST',
+    path: `/api/mercadopago/preference/${encodeURIComponent(ref)}/cancel`,
+    authorization: undefined,
+    internalSecret: undefined,
+    body,
+  });
+
+  const writes = (calls) => calls.filter((c) => c.method === 'PUT');
+
+  test('503 when mpAccessToken is empty', async () => {
+    const res = await handle(cancelReq('ext-503'), makeDeps({ mpAccessToken: '' }));
+    assert.equal(res.status, 503);
+  });
+
+  test('approved payment short-circuits: answers approved and writes nothing', async () => {
+    const mp = fakeMp({
+      owner: 'ext-approved',
+      payments: [
+        { id: 11, status: 'pending' },
+        { id: 12, status: 'approved' },
+      ],
+    });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    const res = await handle(cancelReq('ext-approved'), deps);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { status: 'approved', paymentId: '12' });
+    assert.equal(writes(mp.calls).length, 0, 'no payment cancelled, preference not expired');
+  });
+
+  test('pending and in_process payments are cancelled; final ones are left alone', async () => {
+    const mp = fakeMp({
+      owner: 'ext-pending',
+      payments: [
+        { id: 21, status: 'pending' },
+        { id: 22, status: 'in_process' },
+        { id: 23, status: 'rejected' },
+      ],
+    });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    const res = await handle(cancelReq('ext-pending'), deps);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { status: 'cancelled' });
+    const paymentPuts = writes(mp.calls).filter((c) => c.url.includes('/v1/payments/'));
+    assert.deepEqual(
+      paymentPuts.map((c) => c.url),
+      ['https://api.mercadopago.com/v1/payments/21', 'https://api.mercadopago.com/v1/payments/22']
+    );
+    assert.ok(paymentPuts.every((c) => c.body.status === 'cancelled'));
+  });
+
+  test('the preference is expired as of now, after ownership is checked', async () => {
+    const mp = fakeMp({ owner: 'ext-expire' });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    const res = await handle(cancelReq('ext-expire'), deps);
+    assert.equal(res.status, 200);
+    assert.equal(mp.calls[0].method, 'GET');
+    assert.equal(mp.calls[0].url, 'https://api.mercadopago.com/checkout/preferences/pref-1');
+    const expire = writes(mp.calls).find((c) => c.url.includes('/checkout/preferences/pref-1'));
+    assert.ok(expire, 'preference PUT was sent');
+    assert.deepEqual(expire.body, {
+      expires: true,
+      expiration_date_to: new Date(NOW * 1000).toISOString(),
+    });
+  });
+
+  test('idempotent: a repeat call answers cancelled again', async () => {
+    const mp = fakeMp({ owner: 'ext-repeat', payments: [{ id: 31, status: 'cancelled' }] });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    const first = await handle(cancelReq('ext-repeat'), deps);
+    const second = await handle(cancelReq('ext-repeat'), deps);
+    assert.deepEqual(first.body, { status: 'cancelled' });
+    assert.deepEqual(second.body, { status: 'cancelled' });
+    assert.equal(
+      writes(mp.calls).filter((c) => c.url.includes('/v1/payments/')).length,
+      0,
+      'an already-cancelled payment is not PUT again'
+    );
+  });
+
+  test('400 and no writes when the preference belongs to another reference', async () => {
+    const mp = fakeMp({ owner: 'someone-else', payments: [{ id: 41, status: 'pending' }] });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    const res = await handle(cancelReq('ext-mismatch'), deps);
+    assert.equal(res.status, 400);
+    assert.equal(writes(mp.calls).length, 0);
+    assert.equal(mp.calls.length, 1, 'stops after the ownership read');
+  });
+
+  test('400 on a missing or malformed preferenceId / reference, before any MP call', async () => {
+    const mp = fakeMp({ owner: 'ext-bad' });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    for (const request of [
+      cancelReq('ext-bad', {}),
+      cancelReq('ext-bad', { preferenceId: 42 }),
+      cancelReq('ext-bad', { preferenceId: '../../v1/payments' }),
+      cancelReq('ext bad'),
+    ]) {
+      const res = await handle(request, deps);
+      assert.equal(res.status, 400);
+    }
+    assert.equal(mp.calls.length, 0);
+  });
+
+  test('502 when MP fails at any step', async () => {
+    const steps = [
+      (url, method) => url.includes('/checkout/preferences/') && method === 'GET',
+      (url) => url.includes('/v1/payments/search'),
+      (url, method) => url.includes('/checkout/preferences/') && method === 'PUT',
+    ];
+    for (const [i, failOn] of steps.entries()) {
+      const ref = `ext-502-${i}`;
+      const mp = fakeMp({ owner: ref, failOn });
+      const res = await handle(
+        cancelReq(ref),
+        makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch })
+      );
+      assert.equal(res.status, 502, `step ${i}`);
+    }
+  });
+
+  test('502 when fetch throws', async () => {
+    const throwingFetch = async () => {
+      throw new Error('ECONNREFUSED');
+    };
+    const res = await handle(
+      cancelReq('ext-throw'),
+      makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch })
+    );
+    assert.equal(res.status, 502);
+  });
+
+  test('a payment approved between search and cancel is reported approved', async () => {
+    const mp = fakeMp({
+      owner: 'ext-race',
+      payments: [{ id: 51, status: 'pending' }],
+      failOn: (url, method) => url.endsWith('/v1/payments/51') && method === 'PUT',
+      reread: { 51: { id: 51, status: 'approved' } },
+    });
+    const res = await handle(
+      cancelReq('ext-race'),
+      makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch })
+    );
+    assert.deepEqual(res.body, { status: 'approved', paymentId: '51' });
+    assert.equal(
+      writes(mp.calls).filter((c) => c.url.includes('/checkout/preferences/')).length,
+      0,
+      'a paid preference is not expired'
+    );
+  });
+
+  test('502 when a payment cannot be cancelled and is still pending', async () => {
+    const mp = fakeMp({
+      owner: 'ext-stuck',
+      payments: [{ id: 61, status: 'pending' }],
+      failOn: (url, method) => url.endsWith('/v1/payments/61') && method === 'PUT',
+      reread: { 61: { id: 61, status: 'pending' } },
+    });
+    const res = await handle(
+      cancelReq('ext-stuck'),
+      makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch })
+    );
+    assert.equal(res.status, 502);
+  });
+
+  test('429 after too many cancels for one reference', async () => {
+    const mp = fakeMp({ owner: 'ext-flood' });
+    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: mp.fetch });
+    let last;
+    for (let i = 0; i < 11; i++) last = await handle(cancelReq('ext-flood'), deps);
+    assert.equal(last.status, 429);
+  });
+
+  test('only POST is routed', async () => {
+    const res = await handle(
+      { ...cancelReq('ext-get'), method: 'GET' },
+      makeDeps({ mpAccessToken: 'TEST_TOKEN' })
+    );
+    assert.equal(res.status, 404);
   });
 });
 
@@ -719,13 +1174,18 @@ describe('GET /api/mercadopago/preference/:id', () => {
   });
 
   test('502 when MP payments search returns non-2xx', async () => {
-    const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: fakeFetch(403, { message: 'forbidden' }) });
+    const deps = makeDeps({
+      mpAccessToken: 'TEST_TOKEN',
+      fetch: fakeFetch(403, { message: 'forbidden' }),
+    });
     const res = await handle(req('pref-123'), deps);
     assert.equal(res.status, 502);
   });
 
   test('502 when fetch throws (network error)', async () => {
-    const throwingFetch = async () => { throw new Error('ECONNREFUSED'); };
+    const throwingFetch = async () => {
+      throw new Error('ECONNREFUSED');
+    };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: throwingFetch });
     const res = await handle(req('pref-123'), deps);
     assert.equal(res.status, 502);
@@ -734,8 +1194,13 @@ describe('GET /api/mercadopago/preference/:id', () => {
   test('POST /api/mercadopago/preference/:id → 404 (only GET allowed on this path)', async () => {
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN' });
     const res = await handle(
-      { method: 'POST', path: '/api/mercadopago/preference/pref-123',
-        authorization: undefined, internalSecret: undefined, body: {} },
+      {
+        method: 'POST',
+        path: '/api/mercadopago/preference/pref-123',
+        authorization: undefined,
+        internalSecret: undefined,
+        body: {},
+      },
       deps
     );
     assert.equal(res.status, 404);
@@ -745,11 +1210,96 @@ describe('GET /api/mercadopago/preference/:id', () => {
     let capturedUrl = null;
     const capturingFetch = async (url) => {
       capturedUrl = url;
-      return { ok: true, json: async () => ({ results: [{ status: 'approved' }] }), text: async () => '' };
+      return {
+        ok: true,
+        json: async () => ({ results: [{ status: 'approved' }] }),
+        text: async () => '',
+      };
     };
     const deps = makeDeps({ mpAccessToken: 'TEST_TOKEN', fetch: capturingFetch });
     await handle(req('pref-abc/xyz'), deps);
     // The preference id should be in the MP search URL
     assert.ok(capturedUrl.includes('pref-abc'), 'preference id should be in the search URL');
+  });
+});
+
+// ── Sale-event markers and oversell on the catalogue (#357) ─────────────────────
+
+describe('product documents carrying sale-event state (#357)', () => {
+  const OVERSOLD = {
+    id: 'oats',
+    name: 'Oats',
+    price: 2,
+    category: 'feed',
+    stock: 0,
+    description: '',
+    createdAt: '2026-10-05T12:00:00.000Z',
+    updatedAt: '2026-10-05T12:00:00.000Z',
+    eventMarkers: { 'evt-1': { quantity: 3, appliedAt: '2026-10-05T12:00:00.000Z' } },
+    oversold: true,
+    oversoldQuantity: 2,
+  };
+  const call = (method, path, body) => ({
+    method,
+    path,
+    authorization: `Bearer ${staffToken(['inventory:manage', 'inventory:view'])}`,
+    internalSecret: undefined,
+    body,
+  });
+
+  test('never exposes eventMarkers, but does show the oversell to staff', async () => {
+    const deps = makeDeps({ products: new MemoryStore([OVERSOLD]) });
+
+    const res = await handle(call('GET', '/api/products'), deps);
+
+    const list = Array.isArray(res.body) ? res.body : res.body.products;
+    const [oats] = list;
+    assert.equal('eventMarkers' in oats, false);
+    assert.equal(oats.oversold, true);
+    assert.equal(oats.oversoldQuantity, 2);
+  });
+
+  test('a PUT keeps eventMarkers, so a replayed sale event cannot apply twice', async () => {
+    const products = new MemoryStore([OVERSOLD]);
+
+    const res = await handle(
+      call('PUT', '/api/products/oats', { name: 'Oats', price: 2, category: 'feed', stock: 10 }),
+      makeDeps({ products })
+    );
+
+    assert.equal(res.status, 200);
+    assert.deepEqual((await products.read('oats')).document.eventMarkers, OVERSOLD.eventMarkers);
+  });
+
+  test('a PUT restock clears the oversell', async () => {
+    const products = new MemoryStore([OVERSOLD]);
+
+    await handle(
+      call('PUT', '/api/products/oats', { name: 'Oats', price: 2, category: 'feed', stock: 10 }),
+      makeDeps({ products })
+    );
+
+    const stored = (await products.read('oats')).document;
+    assert.equal(stored.oversold, undefined);
+    assert.equal(stored.oversoldQuantity, undefined);
+  });
+
+  test('a PATCH of stock clears the oversell and keeps the markers', async () => {
+    const products = new MemoryStore([OVERSOLD]);
+
+    await handle(call('PATCH', '/api/products/oats', { stock: 6 }), makeDeps({ products }));
+
+    const stored = (await products.read('oats')).document;
+    assert.equal(stored.stock, 6);
+    assert.equal(stored.oversold, undefined);
+    assert.deepEqual(stored.eventMarkers, OVERSOLD.eventMarkers);
+  });
+
+  test('a PATCH that leaves stock alone keeps the oversell flag', async () => {
+    const products = new MemoryStore([OVERSOLD]);
+
+    await handle(call('PATCH', '/api/products/oats', { price: 3 }), makeDeps({ products }));
+
+    assert.equal((await products.read('oats')).document.oversold, true);
   });
 });

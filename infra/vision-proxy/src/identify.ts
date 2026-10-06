@@ -123,7 +123,11 @@ export async function identify(request: IdentifyRequest): Promise<RecognitionRes
   // dormant `lambda.ts` — run it before reaching this line.
   const { catalog } = request;
   if (catalog.length === 0) {
-    return { candidates: [], utterance: 'There is nothing in the catalog to match against.', empty: true };
+    return {
+      candidates: [],
+      utterance: 'There is nothing in the catalog to match against.',
+      empty: true,
+    };
   }
 
   const message = await client.messages.create({

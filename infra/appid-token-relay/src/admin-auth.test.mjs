@@ -15,7 +15,13 @@ const APPID_CONFIG = { region: 'us-south', tenantId: 'tenant-1', audience: 'clie
 const APPID_ISSUER = `https://${APPID_CONFIG.region}.appid.cloud.ibm.com/oauth/v4/${APPID_CONFIG.tenantId}`;
 
 function mintHs256(payload = {}) {
-  const claims = { sub: 'op-1', permissions: [Permission.MANAGE_OPERATORS], iat: NOW - 60, exp: NOW + 3600, ...payload };
+  const claims = {
+    sub: 'op-1',
+    permissions: [Permission.MANAGE_OPERATORS],
+    iat: NOW - 60,
+    exp: NOW + 3600,
+    ...payload,
+  };
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
   const signingInput = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
   const signature = createHmac('sha256', SECRET).update(signingInput).digest('base64url');
@@ -38,7 +44,9 @@ function mintAppId(payload, { kid, keyPair, header = {} }) {
   };
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
   const signingInput = `${encode({ alg: 'RS256', typ: 'JWT', kid, ...header })}.${encode(claims)}`;
-  const signature = signRsa('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey).toString('base64url');
+  const signature = signRsa('RSA-SHA256', Buffer.from(signingInput), keyPair.privateKey).toString(
+    'base64url'
+  );
   return `${signingInput}.${signature}`;
 }
 
@@ -77,7 +85,11 @@ describe('authorize — HS256', () => {
   });
 
   it('403s a valid token that lacks MANAGE_OPERATORS — authenticated, just not an admin', async () => {
-    const outcome = await authorize(bearer(mintHs256({ permissions: ['sale:process'] })), { secret: SECRET }, NOW);
+    const outcome = await authorize(
+      bearer(mintHs256({ permissions: ['sale:process'] })),
+      { secret: SECRET },
+      NOW
+    );
     assert.equal(outcome.ok, false);
     assert.equal(outcome.status, 403);
   });
@@ -89,11 +101,20 @@ describe('authorize — HS256', () => {
 
   it('401s a token signed with the wrong secret', async () => {
     const wrongSecret = 'a-completely-different-secret';
-    const claims = { sub: 'op-1', permissions: [Permission.MANAGE_OPERATORS], iat: NOW - 60, exp: NOW + 3600 };
+    const claims = {
+      sub: 'op-1',
+      permissions: [Permission.MANAGE_OPERATORS],
+      iat: NOW - 60,
+      exp: NOW + 3600,
+    };
     const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
     const signingInput = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}`;
     const signature = createHmac('sha256', wrongSecret).update(signingInput).digest('base64url');
-    const outcome = await authorize(bearer(`${signingInput}.${signature}`), { secret: SECRET }, NOW);
+    const outcome = await authorize(
+      bearer(`${signingInput}.${signature}`),
+      { secret: SECRET },
+      NOW
+    );
     assert.equal(outcome.ok, false);
     assert.equal(outcome.status, 401);
   });
@@ -136,7 +157,10 @@ describe('authorize — App ID (RS256)', () => {
     const keyPair = generateRsaKeyPair();
     const kid = 'kid-wrong-iss';
     await withJwks(keyPair, kid, async () => {
-      const token = mintAppId({ iss: 'https://us-south.appid.cloud.ibm.com/oauth/v4/other-tenant' }, { kid, keyPair });
+      const token = mintAppId(
+        { iss: 'https://us-south.appid.cloud.ibm.com/oauth/v4/other-tenant' },
+        { kid, keyPair }
+      );
       const outcome = await authorize(bearer(token), { secret: '', appId: APPID_CONFIG }, NOW);
       assert.equal(outcome.ok, false);
       assert.equal(outcome.status, 401);

@@ -12,9 +12,9 @@ import { TelemetryService } from '@core/infrastructure/telemetry/telemetry.servi
 import { CustomerService } from '@core/application/services/customer.service';
 import { AwardLoyaltyPointsUseCase } from '@core/application/use-cases/award-loyalty-points.use-case';
 import { TransactionRemoteService } from '@core/application/services/transaction-remote.service';
+import { PersistTransactionUseCase } from '@core/application/use-cases/persist-transaction.use-case';
 import { Product } from '@core/domain/entities/product.entity';
 import { Customer, CustomerStatus, CustomerTier } from '@core/domain/entities/customer.entity';
-import { SelfCheckoutReceipt } from '@core/application/ports/self-checkout-gateway.port';
 
 describe('PosFacade', () => {
   let facade: PosFacade;
@@ -43,8 +43,12 @@ describe('PosFacade', () => {
   let mockEventBus: { publish: ReturnType<typeof vi.fn> };
   let mockCustomers: { getCustomerByLoyaltyCode: ReturnType<typeof vi.fn> };
   let mockAwardLoyalty: { execute: ReturnType<typeof vi.fn> };
+  let mockPersistTransaction: { execute: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
+    mockPersistTransaction = {
+      execute: vi.fn().mockResolvedValue({ success: true, outcome: 'recorded' }),
+    };
     mockCartService = {
       items: signal([]),
       revision: signal(0),
@@ -100,6 +104,7 @@ describe('PosFacade', () => {
         { provide: CustomerService, useValue: mockCustomers },
         { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
         { provide: EventBusService, useValue: mockEventBus },
+        { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
         {
           provide: TransactionRemoteService,
           useValue: { persistTransaction: vi.fn().mockResolvedValue(undefined) },
@@ -247,7 +252,7 @@ describe('PosFacade', () => {
   });
 
   describe('checkout operations', () => {
-    it('should generate receipt and adjust stock on checkout', async () => {
+    it('generates the receipt and leaves stock to the SaleCompleted handler (#354)', async () => {
       const mockItems = [{ product: { id: 'p1' }, quantity: 2 }];
       mockCartService.items = signal(mockItems as unknown[]);
 
@@ -263,6 +268,7 @@ describe('PosFacade', () => {
           { provide: CustomerService, useValue: mockCustomers },
           { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
           { provide: EventBusService, useValue: mockEventBus },
+          { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
         ],
       });
       facade = TestBed.inject(PosFacade);
@@ -271,8 +277,45 @@ describe('PosFacade', () => {
       const receipt = await facade.checkout(paymentResult as never);
 
       expect(mockGenerateReceipt.execute).toHaveBeenCalledWith(paymentResult);
-      expect(mockAdjustStock.execute).toHaveBeenCalled();
+      // Recorded: the blocking stock handler has already run, so no inline decrement.
+      expect(mockAdjustStock.execute).not.toHaveBeenCalled();
       expect(receipt).toEqual({ items: [], total: 0 });
+    });
+
+    it('takes stock off inline when the sale record is deferred (#354)', async () => {
+      const mockItems = [{ product: { id: 'p1' }, quantity: 2 }];
+      mockPersistTransaction.execute.mockResolvedValue({ success: false, outcome: 'deferred' });
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          PosFacade,
+          { provide: CartService, useValue: { ...mockCartService, items: signal(mockItems) } },
+          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
+          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
+          { provide: DexieDatabase, useValue: mockDb },
+          { provide: CustomerService, useValue: mockCustomers },
+          { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
+          { provide: EventBusService, useValue: mockEventBus },
+          { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
+        ],
+      });
+      facade = TestBed.inject(PosFacade);
+
+      await facade.checkout({ method: 'cash', amount: 100 } as never);
+
+      expect(mockAdjustStock.execute).toHaveBeenCalledWith([{ productId: 'p1', quantity: 2 }]);
+    });
+
+    it('leaves stock alone for a retried checkout that was already recorded (#354)', async () => {
+      mockPersistTransaction.execute.mockResolvedValue({
+        success: true,
+        outcome: 'already-recorded',
+      });
+
+      await facade.checkout({ method: 'cash', amount: 100 } as never);
+
+      expect(mockAdjustStock.execute).not.toHaveBeenCalled();
     });
 
     it('should clear cart after successful checkout', async () => {
@@ -297,6 +340,9 @@ describe('PosFacade', () => {
 
     it('completes checkout even when stock adjustment throws', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      // Stock only runs inline when the record is deferred (#354).
+      mockPersistTransaction.execute.mockResolvedValue({ success: false, outcome: 'deferred' });
       mockAdjustStock.execute.mockRejectedValue(new Error('IndexedDB gone'));
 
       const paymentResult = { method: 'cash', amount: 20 };
@@ -312,201 +358,18 @@ describe('PosFacade', () => {
     });
   });
 
-  describe('server-completed self-checkout', () => {
-    const serverReceipt: SelfCheckoutReceipt = {
-      transactionId: 'transaction-1',
-      checkoutId: 'checkout-1',
-      paypalCaptureId: 'capture-1',
-      completedAt: '2026-09-02T12:00:00.000Z',
-      quote: {
-        currency: 'USD',
-        taxRateBasisPoints: 850,
-        lines: [
-          {
-            productId: 'product-1',
-            productName: 'Coffee',
-            quantity: 2,
-            unitPriceMinorUnits: 450,
-            subtotalMinorUnits: 900,
-          },
-        ],
-        subtotalMinorUnits: 900,
-        taxMinorUnits: 77,
-        totalMinorUnits: 977,
-      },
-    };
-
-    it('builds a receipt from server-owned minor-unit facts', () => {
-      const receipt = facade.finalizeServerCheckout(serverReceipt, 0);
-
-      expect(receipt).toEqual({
-        payment: {
-          method: 'paypal',
-          amount: 9.77,
-          transactionId: 'transaction-1',
-          timestamp: new Date('2026-09-02T12:00:00.000Z'),
-        },
-        items: [
-          {
-            productId: 'product-1',
-            productName: 'Coffee',
-            quantity: 2,
-            unitPrice: 4.5,
-            subtotal: 9,
-          },
-        ],
-        currency: 'USD',
-        subtotal: 9,
-        tax: 0.77,
-        taxRate: 0.085,
-        total: 9.77,
-        storeName: '',
-        storeAddress: '',
-      });
-      expect(mockCartService.clearCart).toHaveBeenCalledOnce();
-    });
-
-    it('refuses to clear a cart that changed after checkout creation', () => {
-      mockCartService.revision.set(3);
-
-      expect(() => facade.finalizeServerCheckout(serverReceipt, 2)).toThrow(
-        'The cart changed while payment was in progress.'
+  // Audit and telemetry are SaleCompleted handlers since #356; checkout() records
+  // them inline only when the sale has no event behind it. These cover that fallback.
+  describe('checkout observability (#92) when the record is deferred', () => {
+    function setup(
+      overrides: { auditReject?: boolean; telemetryThrow?: boolean; recorded?: boolean } = {}
+    ) {
+      mockPersistTransaction.execute.mockResolvedValue(
+        overrides.recorded
+          ? { success: true, outcome: 'recorded' }
+          : { success: false, outcome: 'deferred' }
       );
-      expect(mockCartService.clearCart).not.toHaveBeenCalled();
-    });
-
-    it('maps a recovered receipt without clearing or publishing a second local sale', () => {
-      mockCartService.revision.set(3);
-
-      const receipt = facade.serverCheckoutReceiptData(serverReceipt);
-
-      expect(receipt.payment.transactionId).toBe('transaction-1');
-      expect(receipt.total).toBe(9.77);
-      expect(mockCartService.clearCart).not.toHaveBeenCalled();
-      expect(mockEventBus.publish).not.toHaveBeenCalled();
-    });
-
-    it('does not repeat server-owned stock or loyalty side effects', () => {
-      facade.finalizeServerCheckout(serverReceipt, 0);
-
-      expect(mockAdjustStock.execute).not.toHaveBeenCalled();
-      expect(mockAwardLoyalty.execute).not.toHaveBeenCalled();
-      expect(mockGenerateReceipt.execute).not.toHaveBeenCalled();
-      expect(mockGenerateReceipt.fromSnapshot).not.toHaveBeenCalled();
-    });
-
-    it('publishes only the local completion observability facts', async () => {
-      const mockAudit = { log: vi.fn().mockResolvedValue(undefined) };
-      const mockTelemetry = { recordCounter: vi.fn(), recordGauge: vi.fn() };
-      TestBed.resetTestingModule();
-      TestBed.configureTestingModule({
-        providers: [
-          PosFacade,
-          { provide: CartService, useValue: mockCartService },
-          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
-          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
-          { provide: DexieDatabase, useValue: mockDb },
-          { provide: CustomerService, useValue: mockCustomers },
-          { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
-          { provide: EventBusService, useValue: mockEventBus },
-          { provide: AuditLogService, useValue: mockAudit },
-          { provide: TelemetryService, useValue: mockTelemetry },
-        ],
-      });
-      const scopedFacade = TestBed.inject(PosFacade);
-
-      scopedFacade.finalizeServerCheckout(serverReceipt, 0);
-      await Promise.resolve();
-
-      expect(mockEventBus.publish).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: EventType.TRANSACTION_COMPLETED,
-          payload: expect.objectContaining({ method: 'paypal', amount: 9.77 }),
-        })
-      );
-      expect(mockAudit.log).toHaveBeenCalledWith(
-        expect.objectContaining({
-          operation: 'finalizeServerCheckout',
-          entityId: 'transaction-1',
-        })
-      );
-      expect(mockTelemetry.recordCounter).toHaveBeenCalledWith('payments.processed', 1, {
-        method: 'paypal',
-      });
-    });
-
-    it('still returns a receipt when finalizeServerCheckout audit log rejects', async () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-      const mockAudit = { log: vi.fn().mockReturnValue(Promise.reject(new Error('audit down'))) };
-      const mockTelemetry = { recordCounter: vi.fn(), recordGauge: vi.fn() };
-      TestBed.resetTestingModule();
-      TestBed.configureTestingModule({
-        providers: [
-          PosFacade,
-          { provide: CartService, useValue: mockCartService },
-          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
-          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
-          { provide: DexieDatabase, useValue: mockDb },
-          { provide: CustomerService, useValue: mockCustomers },
-          { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
-          { provide: EventBusService, useValue: mockEventBus },
-          { provide: AuditLogService, useValue: mockAudit },
-          { provide: TelemetryService, useValue: mockTelemetry },
-        ],
-      });
-      const scopedFacade = TestBed.inject(PosFacade);
-
-      const receipt = scopedFacade.finalizeServerCheckout(serverReceipt, 0);
-      // Flush the fire-and-forget rejection so its .catch runs.
-      await new Promise((r) => setTimeout(r, 0));
-
-      expect(receipt).toBeTruthy();
-      expect(errorSpy).toHaveBeenCalledWith(
-        '[PosFacade] Self-checkout audit log failed:',
-        expect.any(Error)
-      );
-      errorSpy.mockRestore();
-    });
-
-    it('still returns a receipt when finalizeServerCheckout telemetry throws', () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-      const mockAudit = { log: vi.fn().mockResolvedValue(undefined) };
-      const mockTelemetry = {
-        recordCounter: vi.fn(() => {
-          throw new Error('telemetry down');
-        }),
-        recordGauge: vi.fn(),
-      };
-      TestBed.resetTestingModule();
-      TestBed.configureTestingModule({
-        providers: [
-          PosFacade,
-          { provide: CartService, useValue: mockCartService },
-          { provide: GenerateReceiptUseCase, useValue: mockGenerateReceipt },
-          { provide: AdjustStockOnSaleUseCase, useValue: mockAdjustStock },
-          { provide: DexieDatabase, useValue: mockDb },
-          { provide: CustomerService, useValue: mockCustomers },
-          { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
-          { provide: EventBusService, useValue: mockEventBus },
-          { provide: AuditLogService, useValue: mockAudit },
-          { provide: TelemetryService, useValue: mockTelemetry },
-        ],
-      });
-      const scopedFacade = TestBed.inject(PosFacade);
-
-      const receipt = scopedFacade.finalizeServerCheckout(serverReceipt, 0);
-
-      expect(receipt).toBeTruthy();
-      expect(errorSpy).toHaveBeenCalledWith(
-        '[PosFacade] Self-checkout telemetry failed:',
-        expect.any(Error)
-      );
-      errorSpy.mockRestore();
-    });
-  });
-
-  describe('checkout observability (#92)', () => {
-    function setup(overrides: { auditReject?: boolean; telemetryThrow?: boolean } = {}) {
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       const mockAudit = {
         log: vi
           .fn()
@@ -537,6 +400,7 @@ describe('PosFacade', () => {
           { provide: CustomerService, useValue: mockCustomers },
           { provide: AwardLoyaltyPointsUseCase, useValue: mockAwardLoyalty },
           { provide: EventBusService, useValue: mockEventBus },
+          { provide: PersistTransactionUseCase, useValue: mockPersistTransaction },
           { provide: AuditLogService, useValue: mockAudit },
           { provide: TelemetryService, useValue: mockTelemetry },
         ],
@@ -566,6 +430,16 @@ describe('PosFacade', () => {
       // Flush the fire-and-forget rejection so its .catch runs.
       await new Promise((r) => setTimeout(r, 0));
       expect(receipt).toBeTruthy();
+    });
+
+    it('leaves audit and telemetry to their handlers once the sale is recorded (#356)', async () => {
+      const { facade, mockAudit, mockTelemetry } = setup({ recorded: true });
+
+      await facade.checkout({ method: 'cash', amount: 100, transactionId: 'TXN-4' } as never);
+
+      expect(mockAudit.log).not.toHaveBeenCalled();
+      expect(mockTelemetry.recordCounter).not.toHaveBeenCalled();
+      expect(mockTelemetry.recordGauge).not.toHaveBeenCalled();
     });
 
     it('still returns a receipt when telemetry throws', async () => {
@@ -682,8 +556,15 @@ describe('PosFacade', () => {
     });
   });
 
-  describe('earning loyalty points at checkout', () => {
+  // Loyalty is the SaleCompleted handler's job since #355; checkout() awards inline
+  // only when the sale has no event behind it. These cover that inline fallback.
+  describe('earning loyalty points at checkout when the record is deferred', () => {
     const payment = { method: 'cash', amount: 42.75, transactionId: 'TXN-9' };
+
+    beforeEach(() => {
+      mockPersistTransaction.execute.mockResolvedValue({ success: false, outcome: 'deferred' });
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
 
     async function attach(): Promise<void> {
       mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(
@@ -906,24 +787,146 @@ describe('PosFacade', () => {
     });
   });
 
-  describe('serverCheckoutReceiptData — invalid date', () => {
-    it('throws when completedAt is not a valid ISO timestamp', () => {
-      const badReceipt: SelfCheckoutReceipt = {
-        transactionId: 'bad-tx',
-        checkoutId: 'bad-checkout',
-        paypalCaptureId: 'bad-capture',
-        completedAt: 'not-a-date',
-        quote: {
-          currency: 'USD',
-          taxRateBasisPoints: 0,
-          lines: [],
-          subtotalMinorUnits: 0,
-          taxMinorUnits: 0,
-          totalMinorUnits: 0,
-        },
-      };
+  describe('recording the sale with its SaleCompleted event (#352)', () => {
+    const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    const payment = { method: 'card', amount: 12.5, transactionId: 'TXN-352' };
 
-      expect(() => facade.serverCheckoutReceiptData(badReceipt)).toThrow('invalid completion time');
+    function regular(): Customer {
+      return new Customer({
+        id: 'customer-352',
+        name: 'Dr. Lena',
+        email: 'lena@example.com',
+        phone: '+1234567890',
+        status: CustomerStatus.ACTIVE,
+        loyaltyPoints: 0,
+        tier: CustomerTier.BRONZE,
+        loyaltyCode: 'CAPY-B3KMNPQR',
+      });
+    }
+
+    it('records the sale with a fresh correlation id before the cart is cleared', async () => {
+      const order: string[] = [];
+      mockPersistTransaction.execute.mockImplementation(async () => {
+        order.push('record');
+        return { success: true, outcome: 'recorded' };
+      });
+      mockCartService.clearCart.mockImplementation(() => order.push('clear'));
+
+      await facade.checkout(payment as never);
+
+      expect(order).toEqual(['record', 'clear']);
+      expect(mockPersistTransaction.execute).toHaveBeenCalledWith({
+        paymentMethod: 'card',
+        transactionId: 'TXN-352',
+        sale: {
+          correlationId: expect.stringMatching(UUID_V4),
+          amount: 12.5,
+          appliedInline: [],
+          fallbackInline: [
+            'adjust-stock-on-sale',
+            'award-loyalty-points',
+            'audit-sale',
+            'telemetry-sale',
+          ],
+        },
+      });
+    });
+
+    it('stamps the same correlation id on the transaction.completed bus event', async () => {
+      await facade.checkout(payment as never);
+
+      const { correlationId } = mockPersistTransaction.execute.mock.calls[0][0].sale;
+      const completed = mockEventBus.publish.mock.calls
+        .map(([message]) => message)
+        .find((message) => message.type === EventType.TRANSACTION_COMPLETED);
+      expect(completed.correlationId).toBe(correlationId);
+    });
+
+    it('gives each sale its own correlation id', async () => {
+      await facade.checkout(payment as never);
+      await facade.checkout({ ...payment, transactionId: 'TXN-353' } as never);
+
+      const [first, second] = mockPersistTransaction.execute.mock.calls.map(
+        ([request]) => request.sale.correlationId
+      );
+      expect(first).not.toBe(second);
+    });
+
+    it('records the attached customer and their tier at the time of sale', async () => {
+      mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(regular());
+      await facade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+
+      await facade.checkout(payment as never);
+
+      expect(mockPersistTransaction.execute.mock.calls[0][0]).toMatchObject({
+        customerId: 'customer-352',
+        customerTier: CustomerTier.BRONZE,
+      });
+    });
+
+    it('leaves loyalty to the SaleCompleted handler once the sale is recorded (#355)', async () => {
+      mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(regular());
+      await facade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+
+      await facade.checkout(payment as never);
+      await Promise.resolve();
+
+      expect(mockAwardLoyalty.execute).not.toHaveBeenCalled();
+    });
+
+    it('records locally only after the remote write succeeds (kiosk and shop)', async () => {
+      const remote = TestBed.inject(TransactionRemoteService);
+      const order: string[] = [];
+      vi.mocked(remote.persistTransaction).mockImplementation(async () => {
+        order.push('remote');
+      });
+      mockPersistTransaction.execute.mockImplementation(async () => {
+        order.push('local');
+        return { success: true, outcome: 'recorded' };
+      });
+
+      await facade.checkout(payment as never, 'device-token');
+
+      expect(order).toEqual(['remote', 'local']);
+      expect(mockPersistTransaction.execute.mock.calls[0][0].transactionId).toBe('TXN-352');
+    });
+
+    it('records nothing locally when the remote write is refused', async () => {
+      const remote = TestBed.inject(TransactionRemoteService);
+      vi.mocked(remote.persistTransaction).mockRejectedValueOnce(new Error('403'));
+
+      await expect(facade.checkout(payment as never, 'device-token')).rejects.toThrow('403');
+
+      expect(mockPersistTransaction.execute).not.toHaveBeenCalled();
+      expect(mockCartService.clearCart).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        'a deferred record',
+        () =>
+          mockPersistTransaction.execute.mockResolvedValue({ success: false, outcome: 'deferred' }),
+      ],
+      [
+        'a throwing record',
+        () => mockPersistTransaction.execute.mockRejectedValue(new Error('IndexedDB unavailable')),
+      ],
+    ])('keeps what the cashier sees unchanged after %s', async (_label, fail) => {
+      fail();
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      mockGenerateReceipt.execute.mockReturnValue({ items: [], total: 12.5 });
+      mockCustomers.getCustomerByLoyaltyCode.mockResolvedValue(regular());
+      await facade.attachCustomerByLoyaltyCode('CAPY-B3KMNPQR');
+
+      const receipt = await facade.checkout(payment as never);
+
+      expect(receipt).toEqual({ items: [], total: 12.5 });
+      expect(mockCartService.clearCart).toHaveBeenCalled();
+      expect(facade.attachedCustomer()).toBeNull();
+      // Side effects still run inline, so nothing is lost while the record retries.
+      expect(mockAdjustStock.execute).toHaveBeenCalled();
+      expect(mockAwardLoyalty.execute).toHaveBeenCalled();
     });
   });
 
@@ -966,6 +969,7 @@ describe('PosFacade cartRevision over the real CartService', () => {
         { provide: AuditLogService, useValue: { log: vi.fn() } },
         { provide: TelemetryService, useValue: { recordCounter: vi.fn() } },
         { provide: TransactionRemoteService, useValue: { persistTransaction: vi.fn() } },
+        { provide: PersistTransactionUseCase, useValue: { execute: vi.fn() } },
       ],
     });
     facade = TestBed.inject(PosFacade);

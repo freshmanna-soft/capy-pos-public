@@ -22,6 +22,16 @@ import { PAYMENT_AGENT_PROVIDER } from '@app/agents/payment/infrastructure/payme
 import { AgentRegistry } from '@app/agents/agent.registry';
 import { SyncService, SyncSessionCredentialService } from '@core/infrastructure/sync';
 import { SyncKioskModeService } from '@core/infrastructure/sync/sync-kiosk-mode.service';
+import { ProductRemoteSyncHandler } from '@core/infrastructure/sync/product-remote-sync.handler';
+import { SaleRemoteSyncHandler } from '@core/infrastructure/sync/sale-remote-sync.handler';
+import { AdjustStockOnSaleHandler } from '@core/application/handlers/adjust-stock-on-sale.handler';
+import { AwardLoyaltyPointsHandler } from '@core/application/handlers/award-loyalty-points.handler';
+import { AuditSaleHandler } from '@core/application/handlers/audit-sale.handler';
+import { TelemetrySaleHandler } from '@core/application/handlers/telemetry-sale.handler';
+import {
+  EVENT_HANDLERS,
+  OutboxDispatcherService,
+} from '@core/infrastructure/messaging/outbox-dispatcher.service';
 import { AUTH_PROVIDERS } from '@core/infrastructure/auth/auth.providers';
 import { SessionExpiryNavigatorService } from '@core/infrastructure/auth/session-expiry-navigator.service';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
@@ -31,6 +41,8 @@ import { TraceContextInterceptor } from '@core/infrastructure/telemetry/trace-co
 import { environment } from '../environments/environment';
 import { MERCADOPAGO_PROVIDER } from '@core/infrastructure/payment/mercadopago.provider';
 import { PAYPAL_PROVIDER } from '@core/infrastructure/payment/paypal.provider';
+import { SALE_OUTBOX } from '@core/application/ports/sale-outbox.port';
+import { DexieSaleOutboxAdapter } from '@core/infrastructure/messaging/dexie-sale-outbox.adapter';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -123,6 +135,8 @@ export const appConfig: ApplicationConfig = {
       provide: 'ITransactionRepository',
       useExisting: TRANSACTION_REPOSITORY,
     },
+    // A sale and its SaleCompleted event, written in one Dexie transaction (#352)
+    { provide: SALE_OUTBOX, useExisting: DexieSaleOutboxAdapter },
     // AI clerk recognizer — mock or Claude, chosen by environment.features.aiVision
     ...VISION_PROVIDERS,
     // AI clerk agent — the mock today; environment.features.clerkAgent selects the relay
@@ -162,6 +176,24 @@ export const appConfig: ApplicationConfig = {
         circuitBreaker: environment.circuitBreaker,
         retry: environment.retry,
       });
+    }),
+    // Domain-event outbox (Epic #349). Handlers are registered here; the dispatcher
+    // starts after the sync worker so the first drain finds a worker to push through,
+    // and drains whatever a previous session left behind.
+    { provide: EVENT_HANDLERS, useExisting: ProductRemoteSyncHandler, multi: true },
+    // Takes a sale's items off stock; blocking, so checkout() waits for it (#354)
+    { provide: EVENT_HANDLERS, useExisting: AdjustStockOnSaleHandler, multi: true },
+    // Awards a sale's loyalty points; not blocking (#355)
+    { provide: EVENT_HANDLERS, useExisting: AwardLoyaltyPointsHandler, multi: true },
+    // Audit row (idempotent by event id) and payment telemetry (at most once) (#356)
+    { provide: EVENT_HANDLERS, useExisting: AuditSaleHandler, multi: true },
+    { provide: EVENT_HANDLERS, useExisting: TelemetrySaleHandler, multi: true },
+    // Delivers each sale to POST /api/events; only with features.eventSync on (#359)
+    ...(environment.features.eventSync
+      ? [{ provide: EVENT_HANDLERS, useExisting: SaleRemoteSyncHandler, multi: true }]
+      : []),
+    provideAppInitializer(() => {
+      inject(OutboxDispatcherService).start();
     }),
   ],
 };

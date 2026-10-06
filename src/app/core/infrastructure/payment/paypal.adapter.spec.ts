@@ -8,8 +8,8 @@ import { environment } from '../../../../environments/environment';
 
 /** Minimal PayPal Buttons widget stub */
 const mockWidget = {
-  render: vi.fn<[], Promise<void>>(),
-  close: vi.fn<[], Promise<void>>(),
+  render: vi.fn<() => Promise<void>>(),
+  close: vi.fn<() => Promise<void>>(),
 };
 
 /** Capture the config passed to paypal.Buttons() so tests can invoke callbacks */

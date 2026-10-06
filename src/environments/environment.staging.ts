@@ -96,6 +96,9 @@ export const environment = {
 
   // Feature Flags
   features: {
+    // Drain SaleCompleted events from the outbox to POST /api/events (#359).
+    // Off until pos-api has EVENTS_INGEST_ENABLED set (#358).
+    eventSync: false,
     analytics: true,
     telemetry: true,
     auditLogging: true,
@@ -187,9 +190,10 @@ export const environment = {
   // `process.env` does not exist in the browser (client bundle) — referencing it
   // crashed the app at bootstrap. Leave creds empty; the exporter degrades to
   // unauthenticated export rather than throwing. See environment.prod.ts.
+  // Off until the OTLP relay (#399): every unauthenticated export is answered 401.
   telemetry: {
     otlp: {
-      enabled: true,
+      enabled: false,
       endpoint: 'https://otlp-gateway-prod-us-east-3.grafana.net/otlp',
       instanceId: '',
       apiKey: '',

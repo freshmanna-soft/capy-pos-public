@@ -2,6 +2,7 @@ import { Injectable, inject, signal, computed, OnDestroy } from '@angular/core';
 import { DexieDatabase } from '@core/infrastructure/database/dexie-database.service';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
+import { DomainEventType, OutboxStatus } from '@core/domain/events/domain-event';
 import {
   SyncWorkerCommand,
   SyncWorkerEvent,
@@ -12,8 +13,31 @@ import {
   SyncedProduct,
   PushProductPayload,
   PushResult,
+  PushEventPayload,
+  EventAck,
   DEFAULT_SYNC_CONFIG,
 } from './sync.types';
+import { generateUUID } from '@core/domain/utils/uuid';
+
+/**
+ * What became of one `pushEventsAsync` request. Never a rejection: the outbox handler
+ * needs to tell "the server judged these events" from "try again later" from "failed".
+ */
+/** The products a stored SaleCompleted payload names; none if it cannot be read. */
+function saleProductIds(payload: string): string[] {
+  try {
+    const items = (JSON.parse(payload) as { items?: { productId?: unknown }[] }).items;
+    return Array.isArray(items)
+      ? items.map((item) => item?.productId).filter((id): id is string => typeof id === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export type EventPushOutcome =
+  | { readonly ok: true; readonly results: readonly EventAck[] }
+  | { readonly ok: false; readonly retryLater: boolean; readonly error: string };
 
 /**
  * Error raised when an awaited push (pushUpdateAsync) fails on the server.
@@ -57,6 +81,9 @@ export class SyncService implements OnDestroy {
     { resolve: (result: PushResult) => void; reject: (error: Error) => void }
   >();
 
+  // `pushEventsAsync` requests awaiting EVENTS_ACKED / EVENTS_FAILED, keyed by request id.
+  private readonly pendingEventPushes = new Map<string, (outcome: EventPushOutcome) => void>();
+
   // ─── Reactive State (Signals) ───────────────────────────────────────────
 
   private readonly _status = signal<SyncStatus>(SyncStatus.IDLE);
@@ -67,6 +94,8 @@ export class SyncService implements OnDestroy {
   private readonly _totalFailures = signal<number>(0);
   private readonly _isHealthy = signal<boolean>(false);
   private readonly _productsSynced = signal<number>(0);
+  private readonly _productsRevision = signal<number>(0);
+  private readonly _authRejections = signal<number>(0);
 
   // ─── Public Computed Signals ────────────────────────────────────────────
 
@@ -78,6 +107,19 @@ export class SyncService implements OnDestroy {
   readonly totalFailures = this._totalFailures.asReadonly();
   readonly isHealthy = this._isHealthy.asReadonly();
   readonly productsSynced = this._productsSynced.asReadonly();
+  /**
+   * Bumps every time pulled products land in Dexie. A counter rather than
+   * `productsSynced`, which holds a count and so does not change — or notify —
+   * when two pulls write the same number of rows. Screens that read the catalog
+   * once (the customer shop) watch this to re-read it.
+   */
+  readonly productsRevision = this._productsRevision.asReadonly();
+  /**
+   * Bumps every time the API refuses the worker's credential on a pull (401). The
+   * owner of that credential decides what a refusal means — the shop re-mints its
+   * capability session; a staff session is left to its own expiry handling.
+   */
+  readonly authRejections = this._authRejections.asReadonly();
 
   readonly isSyncing = computed(() => this._status() === SyncStatus.SYNCING);
   readonly isCircuitOpen = computed(() => this._circuitState() === WorkerCircuitState.OPEN);
@@ -138,6 +180,10 @@ export class SyncService implements OnDestroy {
         pending.reject(new Error('Sync worker stopped before push confirmed'));
       }
       this.pendingPushes.clear();
+      for (const settle of this.pendingEventPushes.values()) {
+        settle({ ok: false, retryLater: true, error: 'Sync worker stopped.' });
+      }
+      this.pendingEventPushes.clear();
 
       console.log('[SyncService] Worker stopped.');
     }
@@ -259,6 +305,65 @@ export class SyncService implements OnDestroy {
    * isn't running or the push doesn't confirm within timeoutMs.
    */
   pushUpdateAsync(product: PushProductPayload, timeoutMs = 20000): Promise<PushResult> {
+    return this.awaitPush(product, 'PUSH_UPDATE_PRODUCTS', timeoutMs);
+  }
+
+  /**
+   * Create-or-update a product on the API and resolve when the push confirms.
+   *
+   * The outbox's product handler drives this. The longer default timeout covers the
+   * worst case of a POST and then a PATCH, each with its own retries.
+   */
+  pushUpsertAsync(product: PushProductPayload, timeoutMs = 60000): Promise<PushResult> {
+    return this.awaitPush(product, 'PUSH_UPSERT_PRODUCTS', timeoutMs);
+  }
+
+  /**
+   * Send outbox events to `POST /api/events` through the worker (#359) and resolve with
+   * pos-api's verdict on each. Resolves rather than rejects; see `EventPushOutcome`.
+   */
+  pushEventsAsync(events: PushEventPayload[], timeoutMs = 60000): Promise<EventPushOutcome> {
+    if (!this.worker) {
+      return Promise.resolve({ ok: false, retryLater: true, error: 'Sync worker not running.' });
+    }
+    const requestId = generateUUID();
+    return new Promise<EventPushOutcome>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingEventPushes.delete(requestId);
+        // Unknown outcome: the server may have applied them. A resend is safe, since
+        // it answers `duplicate`, so this is "try again", not a failure.
+        resolve({
+          ok: false,
+          retryLater: true,
+          error: `Event push timed out after ${timeoutMs}ms.`,
+        });
+      }, timeoutMs);
+      this.pendingEventPushes.set(requestId, (outcome) => {
+        clearTimeout(timer);
+        resolve(outcome);
+      });
+      this.postCommand({ type: 'PUSH_EVENTS', requestId, events });
+    });
+  }
+
+  /**
+   * Check if worker is running
+   */
+  isRunning(): boolean {
+    return this.worker !== null;
+  }
+
+  ngOnDestroy(): void {
+    this.stop();
+  }
+
+  // ─── Private Methods ────────────────────────────────────────────────────
+
+  private awaitPush(
+    product: PushProductPayload,
+    type: 'PUSH_UPDATE_PRODUCTS' | 'PUSH_UPSERT_PRODUCTS',
+    timeoutMs: number
+  ): Promise<PushResult> {
     if (!this.worker) {
       return Promise.reject(new Error('Sync worker not running. Call start() first.'));
     }
@@ -280,22 +385,9 @@ export class SyncService implements OnDestroy {
         },
       });
 
-      this.postCommand({ type: 'PUSH_UPDATE_PRODUCTS', products: [product] });
+      this.postCommand({ type, products: [product] });
     });
   }
-
-  /**
-   * Check if worker is running
-   */
-  isRunning(): boolean {
-    return this.worker !== null;
-  }
-
-  ngOnDestroy(): void {
-    this.stop();
-  }
-
-  // ─── Private Methods ────────────────────────────────────────────────────
 
   private postCommand(command: SyncWorkerCommand): void {
     if (this.worker) {
@@ -304,7 +396,7 @@ export class SyncService implements OnDestroy {
   }
 
   /**
-   * Resolve any pushUpdateAsync() promises whose product appears in a
+   * Resolve any pushUpdateAsync()/pushUpsertAsync() promises whose product appears in a
    * PUSH_COMPLETED result. Failed results reject; successful ones resolve.
    */
   private settlePendingPushes(results: PushResult[]): void {
@@ -340,7 +432,9 @@ export class SyncService implements OnDestroy {
         this._lastError.set(null);
         console.log('[SyncService] Sync completed:', event.data);
         this.eventBus.publish(
-          busEvent(EventType.SYNC_COMPLETED, EventSource.SYNC_SERVICE, event.data, 'normal')
+          busEvent(EventType.SYNC_COMPLETED, EventSource.SYNC_SERVICE, event.data, {
+            priority: 'normal',
+          })
         );
         break;
 
@@ -375,7 +469,7 @@ export class SyncService implements OnDestroy {
             EventType.CIRCUIT_STATE_CHANGED,
             EventSource.SYNC_SERVICE,
             { circuit: event.circuit, state: event.state },
-            'high'
+            { priority: 'high' }
           )
         );
         break;
@@ -386,6 +480,19 @@ export class SyncService implements OnDestroy {
           `[SyncService] Health check: ${event.healthy ? 'OK' : 'FAILED'} (${event.apiUrl})`
         );
         break;
+
+      case 'EVENTS_ACKED':
+      case 'EVENTS_FAILED': {
+        const settle = this.pendingEventPushes.get(event.requestId);
+        if (!settle) break;
+        this.pendingEventPushes.delete(event.requestId);
+        settle(
+          event.type === 'EVENTS_ACKED'
+            ? { ok: true, results: event.results }
+            : { ok: false, retryLater: event.retryLater, error: event.error }
+        );
+        break;
+      }
 
       case 'PUSH_COMPLETED':
         console.log(
@@ -400,8 +507,10 @@ export class SyncService implements OnDestroy {
               EventType.SYNC_PUSH_FAILED,
               EventSource.SYNC_SERVICE,
               { pushed: event.pushed, failed: event.failed, failedIds },
-              'high',
-              { traceIds: failed.map((r: PushResult) => r.traceId).filter(Boolean) }
+              {
+                priority: 'high',
+                metadata: { traceIds: failed.map((r: PushResult) => r.traceId).filter(Boolean) },
+              }
             )
           );
         } else {
@@ -410,11 +519,16 @@ export class SyncService implements OnDestroy {
               EventType.SYNC_PUSH_COMPLETED,
               EventSource.SYNC_SERVICE,
               { pushed: event.pushed },
-              'normal'
+              { priority: 'normal' }
             )
           );
         }
         this.settlePendingPushes(event.results);
+        break;
+
+      case 'AUTH_REJECTED':
+        console.warn(`[SyncService] Credential rejected (${event.status}) on ${event.endpoint}.`);
+        this._authRejections.update((n) => n + 1);
         break;
 
       case 'ERROR':
@@ -427,7 +541,7 @@ export class SyncService implements OnDestroy {
             EventType.SYNC_ERROR,
             EventSource.SYNC_SERVICE,
             { error: event.error, details: event.details },
-            'critical'
+            { priority: 'critical' }
           )
         );
         break;
@@ -452,10 +566,18 @@ export class SyncService implements OnDestroy {
    * We map this to the full IProductDB schema, filling defaults for missing fields.
    * Existing local records are merged (not overwritten) to preserve local-only data.
    */
-  private async writeProductsToDexie(products: SyncedProduct[]): Promise<void> {
-    if (!products.length) return;
+  private async writeProductsToDexie(pulled: SyncedProduct[]): Promise<void> {
+    if (!pulled.length) return;
 
     try {
+      // A product with a local edit still on its way up keeps the local copy. The
+      // server's row is older than that edit, and writing it here would undo the
+      // edit on screen and then — because the handler reads the row when it runs —
+      // push the server's own stale values back to it (Epic #349 cross-phase risk).
+      const awaitingPush = await this.productsAwaitingPush(pulled.map((p) => p.id));
+      const products = pulled.filter((p) => !awaitingPush.has(p.id));
+      if (!products.length) return;
+
       const now = new Date();
       const dbRecords = await Promise.all(
         products.map(async (p) => {
@@ -487,10 +609,40 @@ export class SyncService implements OnDestroy {
 
       await this.db.products.bulkPut(dbRecords);
       this._productsSynced.set(products.length);
+      this._productsRevision.update((n) => n + 1);
 
       console.log(`[SyncService] Wrote ${products.length} products to Dexie.`);
     } catch (error) {
       console.error('[SyncService] Failed to write products to Dexie:', error);
     }
+  }
+
+  private async productsAwaitingPush(ids: string[]): Promise<Set<string>> {
+    const unfinished = (status: OutboxStatus) =>
+      status === OutboxStatus.PENDING || status === OutboxStatus.FAILED;
+    const rows = await this.db.outbox.where('aggregateId').anyOf(ids).toArray();
+    const awaiting = new Set(
+      rows
+        .filter((row) => row.type === DomainEventType.PRODUCT_UPSERTED && unfinished(row.status))
+        .map((row) => row.aggregateId)
+    );
+
+    // A sale still on its way to pos-api (#359) has taken stock off locally that the
+    // server has not taken off yet; writing the server's figure would undo the sale on
+    // screen until the event lands. A sale event's aggregate is its transaction, so the
+    // products are read from its payload. With features.eventSync off, sale events are
+    // handled locally at once and never wait here, so nothing changes.
+    const wanted = new Set(ids);
+    const sales = await this.db.outbox
+      .where('status')
+      .anyOf([OutboxStatus.PENDING, OutboxStatus.FAILED])
+      .toArray();
+    for (const row of sales) {
+      if (row.type !== DomainEventType.SALE_COMPLETED || !unfinished(row.status)) continue;
+      for (const productId of saleProductIds(row.payload)) {
+        if (wanted.has(productId)) awaiting.add(productId);
+      }
+    }
+    return awaiting;
   }
 }

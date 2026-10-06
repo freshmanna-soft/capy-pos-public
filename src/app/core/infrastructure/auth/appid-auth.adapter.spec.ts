@@ -400,7 +400,9 @@ describe('AppIdAuthAdapter', () => {
      * eventually runs it.
      */
     it('verifies against a JWKS whose modulus carries a non-minimal leading zero byte', async () => {
-      const paddedJwk: JWK = { ...publicJwk, n: prependZeroByte(publicJwk.n) };
+      const modulus = publicJwk.n;
+      if (!modulus) throw new Error('the test key pair exported no RSA modulus');
+      const paddedJwk: JWK = { ...publicJwk, n: prependZeroByte(modulus) };
       const accessToken = await mintAccessToken();
       sessionStorage.setItem('capy_pos_access_token', accessToken);
       installFetch({ jwksKeys: [paddedJwk] });

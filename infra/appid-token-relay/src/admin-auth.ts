@@ -17,7 +17,12 @@
  * this codebase is: the bearer token `AppIdAuthAdapter`/`LocalCredentialAuthAdapter`
  * already issued them, not a new credential invented for this file.
  */
-import { createHmac, createPublicKey, timingSafeEqual, verify as verifyRsaSignature } from 'node:crypto';
+import {
+  createHmac,
+  createPublicKey,
+  timingSafeEqual,
+  verify as verifyRsaSignature,
+} from 'node:crypto';
 
 /** The one permission these routes ever check. */
 export const Permission = {
@@ -108,7 +113,11 @@ export function readBearer(authorization: string | undefined): string | null {
 }
 
 /** Verifies against `SessionIssuer`'s own local HS256 tokens — same shape as `session-auth.ts`'s copy. */
-export function verifySessionToken(token: string, secret: string, nowSeconds: number): SessionClaims | null {
+export function verifySessionToken(
+  token: string,
+  secret: string,
+  nowSeconds: number
+): SessionClaims | null {
   const parts = token.split('.');
   if (parts.length !== 3) {
     return null;
@@ -328,5 +337,7 @@ function base64UrlToBase64(value: string): string {
 }
 
 function stringArray(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : [];
 }

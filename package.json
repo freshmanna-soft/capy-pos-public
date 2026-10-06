@@ -20,11 +20,13 @@
     "test:cucumber:ci": "start-server-and-test start http://localhost:4200 test:cucumber",
     "test:all": "npm run test:unit && npm run test:e2e",
     "lint": "ng lint",
+    "typecheck": "tsc -p tsconfig.spec.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "typecheck:infra": "npm run typecheck --prefix infra/pos-api && npm run typecheck --prefix infra/vision-proxy && npm run typecheck --prefix infra/clerk-agent-relay && npm run typecheck --prefix infra/appid-token-relay",
     "lint:fix": "ng lint --fix",
     "lint:sonar": "eslint --no-error-on-unmatched-pattern --config eslint.sonar.config.js --max-warnings 0",
     "sonar:local": "source .env && sonar-scanner",
-    "format": "prettier --write \"src/**/*.{ts,html,scss}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,html,scss}\"",
+    "format": "prettier --write \"src/**/*.{ts,html,scss}\" \"infra/**/*.{ts,mjs,js}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,html,scss}\" \"infra/**/*.{ts,mjs,js}\"",
     "storybook": "ng run capy-pos:storybook",
     "build-storybook": "ng run capy-pos:build-storybook",
     "prepare": "husky",
@@ -130,6 +132,9 @@
     ],
     "terraform/*.tf": [
       "terraform fmt"
+    ],
+    "infra/**/*.{ts,mjs,js}": [
+      "prettier --write"
     ]
   },
   "allowScripts": {

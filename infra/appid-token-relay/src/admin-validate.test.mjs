@@ -11,13 +11,21 @@ describe('validateCreate', () => {
   });
 
   it('refuses a missing or malformed email', () => {
-    for (const body of [{ roleId: 'role-1' }, { email: 'not-an-email', roleId: 'role-1' }, { email: 42, roleId: 'role-1' }]) {
+    for (const body of [
+      { roleId: 'role-1' },
+      { email: 'not-an-email', roleId: 'role-1' },
+      { email: 42, roleId: 'role-1' },
+    ]) {
       assert.match(validateCreate(body).error, /email/);
     }
   });
 
   it('refuses a missing or blank roleId', () => {
-    for (const body of [{ email: 'a@b.com' }, { email: 'a@b.com', roleId: '' }, { email: 'a@b.com', roleId: '   ' }]) {
+    for (const body of [
+      { email: 'a@b.com' },
+      { email: 'a@b.com', roleId: '' },
+      { email: 'a@b.com', roleId: '   ' },
+    ]) {
       assert.match(validateCreate(body).error, /roleId/);
     }
   });

@@ -17,7 +17,11 @@
  */
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { CUSTOMER_TOKEN_ROUTE, createCustomerTokenHandler, customerClientConfigured } from './customer-token.ts';
+import {
+  CUSTOMER_TOKEN_ROUTE,
+  createCustomerTokenHandler,
+  customerClientConfigured,
+} from './customer-token.ts';
 
 const CONFIG = {
   region: 'us-south',
@@ -54,7 +58,10 @@ describe('customerClientConfigured', () => {
   it('is false when either half is missing — a secret without an id is not usable', () => {
     assert.equal(customerClientConfigured({ ...CONFIG, customerClientId: '' }), false);
     assert.equal(customerClientConfigured({ ...CONFIG, customerClientSecret: '' }), false);
-    assert.equal(customerClientConfigured({ ...CONFIG, customerClientId: '', customerClientSecret: '' }), false);
+    assert.equal(
+      customerClientConfigured({ ...CONFIG, customerClientId: '', customerClientSecret: '' }),
+      false
+    );
   });
 });
 
@@ -107,7 +114,7 @@ describe("createCustomerTokenHandler — App ID's own answer", () => {
     });
   });
 
-  it("resolves with a real OAuth error verbatim — a wrong password is App ID answering, not this relay failing", async () => {
+  it('resolves with a real OAuth error verbatim — a wrong password is App ID answering, not this relay failing', async () => {
     const body = { error: 'invalid_grant', error_description: 'wrong password' };
     const handle = createCustomerTokenHandler(CONFIG, exchange({ status: 400, body }));
     assert.deepEqual(await handle({ grantType: 'password', username: 'u', password: 'bad' }), {
@@ -120,7 +127,10 @@ describe("createCustomerTokenHandler — App ID's own answer", () => {
     const handle = createCustomerTokenHandler(CONFIG, async () => {
       throw new Error('App ID request failed: socket hang up');
     });
-    await assert.rejects(() => handle({ grantType: 'password', username: 'u', password: 'p' }), /socket hang up/);
+    await assert.rejects(
+      () => handle({ grantType: 'password', username: 'u', password: 'p' }),
+      /socket hang up/
+    );
   });
 });
 
@@ -142,7 +152,13 @@ describe('createCustomerTokenHandler — the customer client not configured', ()
 
   it('does not fall back to the staff client when the customer one is missing', async () => {
     const handle = createCustomerTokenHandler(
-      { ...CONFIG, customerClientId: '', customerClientSecret: '', clientId: 'staff-client-1', clientSecret: 'staff-shh' },
+      {
+        ...CONFIG,
+        customerClientId: '',
+        customerClientSecret: '',
+        clientId: 'staff-client-1',
+        clientSecret: 'staff-shh',
+      },
       exchange()
     );
     await assert.rejects(() => handle({ grantType: 'password', username: 'u', password: 'p' }));

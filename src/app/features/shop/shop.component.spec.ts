@@ -1,20 +1,34 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { signal } from '@angular/core';
+import { signal, type WritableSignal } from '@angular/core';
 import { Router } from '@angular/router';
 import { ShopComponent } from './shop.component';
 import { CartService } from '@core/application/services/cart.service';
 import { ProductService } from '@core/application/services/product.service';
 import { KioskSettingsService } from '@core/application/services/kiosk-settings.service';
 import { GeofencingService } from '@core/application/services/geofencing.service';
-import { KioskCustomerService } from '@features/kiosk/kiosk-customer.service';
 import { PosFacade } from '@core/application/facades';
 import { CameraService } from '@core/infrastructure/media/camera.service';
 import { BarcodeScannerService } from '@core/infrastructure/media/barcode-scanner.service';
-import { CUSTOMER_REPOSITORY } from '@core/infrastructure/factories/repository.factory';
+import { CUSTOMER_AUTH_GATEWAY } from '@core/application/auth/ports/customer-auth-gateway.port';
+import { CurrentCustomerService } from '@core/application/auth/current-customer.service';
+import { InMemoryCustomerAuthAdapter } from '@core/infrastructure/auth/in-memory-customer-auth.adapter';
 import { AUTH_GATEWAY } from '@core/application/auth/ports/auth-gateway.port';
 import type { ScannedCode } from '@core/infrastructure/media/barcode-gate';
 import { Product } from '@core/domain/entities/product.entity';
+import { ShopSessionService } from '@core/infrastructure/sync/shop-session.service';
+import { SyncService } from '@core/infrastructure/sync/sync.service';
+import { PaymentResult } from '@core/application/dtos/payment.dto';
+
+/**
+ * The /shop route's customer identity, as the route provides it but with the
+ * in-memory gateway — these suites are about the shop, not App ID. The account
+ * modal's own behaviour is in customer-account/shop-account-modal.component.spec.ts.
+ */
+const CUSTOMER_IDENTITY_TEST_PROVIDERS = [
+  { provide: CUSTOMER_AUTH_GATEWAY, useClass: InMemoryCustomerAuthAdapter },
+  CurrentCustomerService,
+];
 
 // ---------------------------------------------------------------------------
 // Minimal product factory
@@ -92,6 +106,13 @@ function setup(
   const camera = { ...makeCamera(), ...cameraOverrides };
   const scanner = { ...makeScanner(), ...scannerOverrides };
   const cart = makeCartStub();
+  // These suites exercise the shopping UI, not token lifetimes — the real service
+  // is covered in shop-session.service.spec.ts and by the session suites below.
+  const shopSession = {
+    acquire: vi.fn().mockResolvedValue('test-token'),
+    ensureValid: vi.fn().mockResolvedValue('test-token'),
+    release: vi.fn(),
+  };
 
   vi.stubGlobal(
     'fetch',
@@ -134,16 +155,13 @@ function setup(
         useValue: { checkFence: vi.fn().mockResolvedValue('inside'), reset: vi.fn() },
       },
       {
-        provide: KioskCustomerService,
-        useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
-      },
-      {
         provide: PosFacade,
         useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
       },
       { provide: BarcodeScannerService, useValue: scanner },
-      { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+      ...CUSTOMER_IDENTITY_TEST_PROVIDERS,
       { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
+      { provide: ShopSessionService, useValue: shopSession },
     ],
   });
 
@@ -157,7 +175,7 @@ function setup(
   const fixture = TestBed.createComponent(ShopComponent);
   const component = fixture.componentInstance;
 
-  return { fixture, component, camera, scanner, cart };
+  return { fixture, component, camera, scanner, cart, shopSession };
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +286,7 @@ describe('ShopComponent — barcode scan', () => {
     });
 
     // No products → every barcode is unknown.
-    (component as unknown as Record<string, unknown>)['_products'].set([]);
+    (component as unknown as { _products: WritableSignal<Product[]> })._products.set([]);
 
     await flushMicrotasks();
     component.toggleScan();
@@ -470,61 +488,9 @@ describe('ShopComponent — cart and category actions', () => {
     cart.isEmpty.set(false);
     cart.total.set(10);
 
-    // kioskCustomer.customer() is null, so attachCustomerDirectly should NOT be called
     component.openCheckout();
 
     expect(component.showCheckout()).toBe(true);
-  });
-
-  it('handleSignIn sets authError when email is empty', async () => {
-    const { component } = setup();
-    component.authEmail = '';
-
-    await component.handleSignIn();
-
-    expect(component.authError()).toContain('email');
-  });
-
-  it('handleSignIn sets authError when email has no @', async () => {
-    const { component } = setup();
-    component.authEmail = 'notanemail';
-
-    await component.handleSignIn();
-
-    expect(component.authError()).toContain('valid email');
-  });
-
-  it('handleSignIn signs in when customer is found', async () => {
-    const fakeCustomer = { id: 'cust-1', email: 'a@b.com' };
-    const { component } = setup();
-    TestBed.inject(CUSTOMER_REPOSITORY).findByEmail = vi.fn().mockResolvedValue(fakeCustomer);
-    const kioskCustomer = TestBed.inject(KioskCustomerService);
-    component.authEmail = 'a@b.com';
-
-    await component.handleSignIn();
-
-    expect(kioskCustomer.set).toHaveBeenCalledWith(fakeCustomer);
-    expect(component.authError()).toBeNull();
-  });
-
-  it('handleSignIn sets authError when customer is not found', async () => {
-    const { component } = setup();
-    TestBed.inject(CUSTOMER_REPOSITORY).findByEmail = vi.fn().mockResolvedValue(null);
-    component.authEmail = 'unknown@b.com';
-
-    await component.handleSignIn();
-
-    expect(component.authError()).toContain('No account found');
-  });
-
-  it('handleSignIn sets authError on repository exception', async () => {
-    const { component } = setup();
-    TestBed.inject(CUSTOMER_REPOSITORY).findByEmail = vi.fn().mockRejectedValue(new Error('db'));
-    component.authEmail = 'err@b.com';
-
-    await component.handleSignIn();
-
-    expect(component.authError()).toContain('Could not sign in');
   });
 
   it('productGradient returns a CSS gradient string', () => {
@@ -590,13 +556,18 @@ describe('ShopComponent — receipt and navigation', () => {
     await component.retrySession();
   });
 
-  it('goToStaffLogin navigates to /login', () => {
+  it('the account modal offers no staff login (customers were stranded on /login)', async () => {
     const { component, fixture } = setup();
-    const router = fixture.debugElement.injector.get(Router);
+    component.view.set('shopping');
+    component.openAuthModal();
+    fixture.detectChanges();
+    await fixture.whenStable();
 
-    component.goToStaffLogin();
-
-    expect(router.navigate as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(['/login']);
+    const host: HTMLElement = fixture.nativeElement;
+    expect(host.querySelector('[data-testid="shop-account-modal"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="shop-staff-login"]')).toBeNull();
+    expect(host.textContent).not.toContain('Staff login');
+    expect('goToStaffLogin' in component).toBe(false);
   });
 
   it('receipt countdown auto-dismisses and calls handleNewTransaction after 30 s', async () => {
@@ -648,73 +619,6 @@ describe('ShopComponent — receipt and navigation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// handleCreateAccount — uncovered branches
-// ---------------------------------------------------------------------------
-
-describe('ShopComponent — handleCreateAccount', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    TestBed.resetTestingModule();
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-  });
-
-  it('sets authError when email is empty', async () => {
-    const { component } = setup();
-    component.authEmail = '';
-    await component.handleCreateAccount();
-    expect(component.authError()).toBe('Please enter your email address.');
-  });
-
-  it('sets authError when email has no @', async () => {
-    const { component } = setup();
-    component.authEmail = 'notanemail';
-    await component.handleCreateAccount();
-    expect(component.authError()).toBe('Please enter a valid email address.');
-  });
-
-  it('signs in existing customer without creating a new one', async () => {
-    const { component, fixture } = setup();
-    const repo = fixture.debugElement.injector.get(CUSTOMER_REPOSITORY);
-    const existing = { id: 'c1', email: 'a@b.com' } as never;
-    (repo.findByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(existing);
-
-    component.authEmail = 'a@b.com';
-    await component.handleCreateAccount();
-
-    expect(repo.create).not.toHaveBeenCalled();
-    expect(component.showAuthModal()).toBe(false);
-  });
-
-  it('creates a new customer when none exists', async () => {
-    const { component, fixture } = setup();
-    const repo = fixture.debugElement.injector.get(CUSTOMER_REPOSITORY);
-    const created = { id: 'c2', email: 'new@b.com' } as never;
-    (repo.findByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-    (repo.create as ReturnType<typeof vi.fn>).mockResolvedValue(created);
-
-    component.authEmail = 'new@b.com';
-    await component.handleCreateAccount();
-
-    expect(repo.create).toHaveBeenCalled();
-    expect(component.showAuthModal()).toBe(false);
-  });
-
-  it('sets authError on repository exception', async () => {
-    const { component, fixture } = setup();
-    const repo = fixture.debugElement.injector.get(CUSTOMER_REPOSITORY);
-    (repo.findByEmail as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('db down'));
-
-    component.authEmail = 'x@y.com';
-    await component.handleCreateAccount();
-
-    expect(component.authError()).toContain('Could not create account');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // handlePaymentComplete — checkout error path (line 1013)
 // ---------------------------------------------------------------------------
 
@@ -732,18 +636,22 @@ describe('ShopComponent — openCheckout and closeCheckout', () => {
     vi.useRealTimers();
   });
 
-  it('openCheckout attaches customer when kioskCustomer is set', () => {
-    const fakeCustomer = { id: 'cust-42', email: 'k@shop.com' } as never;
+  it('openCheckout keeps the sale anonymous even when a customer is signed in', async () => {
     const { component, cart, fixture } = setup();
-    const kioskCustomer = fixture.debugElement.injector.get(KioskCustomerService);
-    (kioskCustomer.customer as ReturnType<typeof signal>).set(fakeCustomer);
+    const gateway = fixture.debugElement.injector.get(CUSTOMER_AUTH_GATEWAY);
+    await gateway.signUp({ email: 'k@shop.com', password: 'correct-horse' });
+    const session = await gateway.authenticate({ email: 'k@shop.com', password: 'correct-horse' });
+    fixture.debugElement.injector.get(CurrentCustomerService).setSession(session);
     const facade = fixture.debugElement.injector.get(PosFacade);
 
     cart.isEmpty.set(false);
     cart.total.set(10);
     component.openCheckout();
 
-    expect(facade.attachCustomerDirectly).toHaveBeenCalledWith(fakeCustomer);
+    // No customer reference is attached: pos-api cannot verify a customer
+    // token yet, so the transaction must not carry an unverifiable identity.
+    expect(facade.attachCustomerDirectly).not.toHaveBeenCalled();
+    expect(facade.detachCustomer).toHaveBeenCalled();
     expect(component.showCheckout()).toBe(true);
   });
 
@@ -756,6 +664,40 @@ describe('ShopComponent — openCheckout and closeCheckout', () => {
 
     expect(component.showCheckout()).toBe(false);
     expect(facade.detachCustomer).toHaveBeenCalled();
+  });
+
+  // A Mercado Pago payment happens in another tab, so the shop tab sees no
+  // taps for minutes; the idle reset must not empty the cart mid-payment.
+  it('pauses the idle timer while checkout is open, even through taps', async () => {
+    const { component, cart, fixture } = setup();
+    const router = fixture.debugElement.injector.get(Router);
+    component.resetIdleTimer();
+
+    cart.isEmpty.set(false);
+    cart.total.set(10);
+    component.openCheckout();
+    component.resetIdleTimer(); // a tap inside the overlay bubbles to the shell
+
+    vi.advanceTimersByTime(10 * 60_000);
+    await flushMicrotasks();
+
+    expect(cart.clearCart).not.toHaveBeenCalled();
+    expect(router.navigate as ReturnType<typeof vi.fn>).not.toHaveBeenCalledWith(['/shop']);
+    expect(component.idleCountdown()).toBe(0);
+  });
+
+  it('restarts the idle timer when checkout closes', async () => {
+    const { component, cart } = setup();
+    cart.isEmpty.set(false);
+    cart.total.set(10);
+    component.openCheckout();
+    vi.advanceTimersByTime(5 * 60_000);
+
+    component.closeCheckout();
+    vi.advanceTimersByTime(121_000);
+    await flushMicrotasks();
+
+    expect(cart.clearCart).toHaveBeenCalled();
   });
 });
 
@@ -914,15 +856,11 @@ describe('ShopComponent — acquireSession and retrySession', () => {
           useValue: { checkFence: vi.fn().mockResolvedValue('inside'), reset: vi.fn() },
         },
         {
-          provide: KioskCustomerService,
-          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
-        },
-        {
           provide: PosFacade,
           useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
         },
         { provide: BarcodeScannerService, useValue: scanner },
-        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        ...CUSTOMER_IDENTITY_TEST_PROVIDERS,
         { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
       ],
     });
@@ -1012,15 +950,11 @@ describe('ShopComponent — acquireSession and retrySession', () => {
           useValue: { checkFence: vi.fn().mockResolvedValue('inside'), reset: vi.fn() },
         },
         {
-          provide: KioskCustomerService,
-          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
-        },
-        {
           provide: PosFacade,
           useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
         },
         { provide: BarcodeScannerService, useValue: scanner },
-        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        ...CUSTOMER_IDENTITY_TEST_PROVIDERS,
         { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
       ],
     });
@@ -1102,15 +1036,11 @@ describe('ShopComponent — resolveStore and pickStore branches', () => {
           useValue: { checkFence: vi.fn().mockImplementation(geofence), reset: vi.fn() },
         },
         {
-          provide: KioskCustomerService,
-          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
-        },
-        {
           provide: PosFacade,
           useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
         },
         { provide: BarcodeScannerService, useValue: scanner },
-        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        ...CUSTOMER_IDENTITY_TEST_PROVIDERS,
         { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
       ],
     });
@@ -1320,15 +1250,11 @@ describe('ShopComponent — resolveStore geofence inside multi-store', () => {
           useValue: { checkFence: vi.fn().mockResolvedValue('inside'), reset: vi.fn() },
         },
         {
-          provide: KioskCustomerService,
-          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
-        },
-        {
           provide: PosFacade,
           useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
         },
         { provide: BarcodeScannerService, useValue: scanner },
-        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        ...CUSTOMER_IDENTITY_TEST_PROVIDERS,
         { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
       ],
     });
@@ -1395,15 +1321,11 @@ describe('ShopComponent — resolveStore geofence inside multi-store', () => {
           useValue: { checkFence: vi.fn().mockResolvedValue('outside'), reset: vi.fn() },
         },
         {
-          provide: KioskCustomerService,
-          useValue: { customer: signal(null), set: vi.fn(), clear: vi.fn() },
-        },
-        {
           provide: PosFacade,
           useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout: vi.fn() },
         },
         { provide: BarcodeScannerService, useValue: scanner },
-        { provide: CUSTOMER_REPOSITORY, useValue: { findByEmail: vi.fn(), create: vi.fn() } },
+        ...CUSTOMER_IDENTITY_TEST_PROVIDERS,
         { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
       ],
     });
@@ -1419,5 +1341,279 @@ describe('ShopComponent — resolveStore geofence inside multi-store', () => {
     await flushMicrotasks();
 
     expect(component.view()).toBe('store-picker');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Shop session lifetime — the /shop 401 regression
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — shop session lifetime', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    TestBed.resetTestingModule();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * The real ShopSessionService over a stubbed SyncService, so what reaches the
+   * worker (`updateConfig`) and what the shop re-reads after a pull are observable.
+   */
+  function setupSessionFlow(options: { stored?: string; products?: () => Promise<Product[]> }) {
+    const storage = new Map<string, string>();
+    if (options.stored !== undefined) storage.set('shop-session', options.stored);
+    vi.stubGlobal('sessionStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
+    const fetchStub = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          token: 'minted-token',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+    });
+    vi.stubGlobal('fetch', fetchStub);
+
+    const sync = {
+      productsRevision: signal(0),
+      authRejections: signal(0),
+      updateConfig: vi.fn(),
+    };
+    const getActiveProducts = vi.fn(options.products ?? (() => Promise.resolve([])));
+    const checkout = vi.fn().mockResolvedValue({ total: 1, items: [] });
+
+    TestBed.configureTestingModule({
+      imports: [ShopComponent],
+      providers: [
+        { provide: Router, useValue: { navigate: vi.fn() } },
+        { provide: CartService, useValue: makeCartStub() },
+        { provide: ProductService, useValue: { getActiveProducts } },
+        {
+          provide: KioskSettingsService,
+          useValue: {
+            load: vi.fn().mockResolvedValue(undefined),
+            stores: signal([{ storeId: 'store-1', name: 'Test Store' }]),
+            storeId: signal('store-1'),
+            storeName: signal('Test Store'),
+            storeAddress: signal(''),
+            terminals: signal([]),
+            hasFencePolygon: vi.fn().mockReturnValue(false),
+            setActiveTerminal: vi.fn(),
+            mercadopagoActive: signal(false),
+          },
+        },
+        {
+          provide: GeofencingService,
+          useValue: { checkFence: vi.fn().mockResolvedValue('inside'), reset: vi.fn() },
+        },
+        {
+          provide: PosFacade,
+          useValue: { attachCustomerDirectly: vi.fn(), detachCustomer: vi.fn(), checkout },
+        },
+        { provide: BarcodeScannerService, useValue: makeScanner() },
+        ...CUSTOMER_IDENTITY_TEST_PROVIDERS,
+        { provide: AUTH_GATEWAY, useValue: { getActiveSession: vi.fn().mockResolvedValue(null) } },
+        { provide: SyncService, useValue: sync },
+      ],
+    });
+    TestBed.overrideComponent(ShopComponent, {
+      remove: { providers: [CameraService] },
+      add: { providers: [{ provide: CameraService, useValue: makeCamera() }] },
+    });
+
+    const fixture = TestBed.createComponent(ShopComponent);
+    return {
+      fixture,
+      component: fixture.componentInstance,
+      fetchStub,
+      sync,
+      storage,
+      getActiveProducts,
+      checkout,
+    };
+  }
+
+  const mintCalls = (fetchStub: ReturnType<typeof vi.fn>) =>
+    fetchStub.mock.calls.filter(([url]) => String(url).endsWith('/shop/session'));
+
+  it('does not reuse a stored token that has expired — it mints a new one', async () => {
+    const { component, fetchStub, sync } = setupSessionFlow({
+      stored: JSON.stringify({
+        storeId: 'store-1',
+        token: 'expired-token',
+        expiresAt: Date.now() - 1_000,
+      }),
+    });
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    expect(component.view()).toBe('shopping');
+    expect(mintCalls(fetchStub)).toHaveLength(1);
+    expect(sync.updateConfig).toHaveBeenCalledWith({ sessionToken: 'minted-token' });
+    expect(sync.updateConfig).not.toHaveBeenCalledWith({ sessionToken: 'expired-token' });
+  });
+
+  it('reuses a stored token that still has time left', async () => {
+    const { fetchStub, sync } = setupSessionFlow({
+      stored: JSON.stringify({
+        storeId: 'store-1',
+        token: 'stored-token',
+        expiresAt: Date.now() + 40 * 60_000,
+      }),
+    });
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    expect(mintCalls(fetchStub)).toHaveLength(0);
+    expect(sync.updateConfig).toHaveBeenCalledWith({ sessionToken: 'stored-token' });
+  });
+
+  it('checks out with a freshly minted token once the reused one has gone stale', async () => {
+    const { component, fetchStub, checkout } = setupSessionFlow({
+      stored: JSON.stringify({
+        storeId: 'store-1',
+        token: 'stored-token',
+        expiresAt: Date.now() + 40 * 60_000,
+      }),
+    });
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+    // The shopper lingers until the reused token has under five minutes left. Moving
+    // the clock (not running timers) stands in for a proactive refresh that failed.
+    vi.setSystemTime(Date.now() + 36 * 60_000);
+
+    const result = {
+      method: 'cash',
+      amount: 1,
+      transactionId: 'tx',
+      timestamp: new Date(),
+    } as PaymentResult;
+    component.handlePaymentComplete(result);
+    await flushMicrotasks();
+
+    expect(mintCalls(fetchStub)).toHaveLength(1);
+    expect(checkout).toHaveBeenCalledWith(result, 'minted-token');
+  });
+
+  it('re-reads the catalog after a pull lands products in Dexie', async () => {
+    const coffee = makeProduct();
+    let catalog: Product[] = [];
+    const { component, sync, getActiveProducts } = setupSessionFlow({
+      products: () => Promise.resolve(catalog),
+    });
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+    expect(component.view()).toBe('shopping');
+    const readsBefore = getActiveProducts.mock.calls.length;
+
+    catalog = [coffee];
+    sync.productsRevision.set(1);
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+
+    expect(getActiveProducts.mock.calls.length).toBe(readsBefore + 1);
+    expect(component.isLoading()).toBe(false);
+  });
+
+  it('hands the worker credential back when the shop is left', async () => {
+    const { fixture, sync } = setupSessionFlow({});
+    await TestBed.flushEffects();
+    await flushMicrotasks();
+    sync.updateConfig.mockClear();
+
+    fixture.destroy();
+
+    // No staff session in this test, so the worker goes back to no credential.
+    expect(sync.updateConfig).toHaveBeenCalledWith({ sessionToken: '' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Customer identity (App ID, route-scoped) — hydration, label, refresh
+// ---------------------------------------------------------------------------
+
+describe('ShopComponent — customer account', () => {
+  beforeEach(() => {
+    TestBed.resetTestingModule();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  async function signInThroughGateway(fixture: ReturnType<typeof setup>['fixture']) {
+    const gateway = fixture.debugElement.injector.get(CUSTOMER_AUTH_GATEWAY);
+    await gateway.signUp({ email: 'back@shop.com', password: 'correct-horse' });
+    return gateway.authenticate({ email: 'back@shop.com', password: 'correct-horse' });
+  }
+
+  it('restores a persisted customer session on entry and labels the account button', async () => {
+    const { component, fixture } = setup();
+    // A session the gateway already holds, as a reload of this tab would find it.
+    await signInThroughGateway(fixture);
+    expect(component.customerEmail()).toBeNull();
+
+    await component.ngOnInit();
+    await vi.waitFor(() => expect(component.customerEmail()).toBe('back@shop.com'));
+
+    component.view.set('shopping');
+    fixture.detectChanges();
+    const button: HTMLButtonElement = fixture.nativeElement.querySelector(
+      '[data-testid="shop-account-btn"]'
+    );
+    expect(button.textContent).toContain('back@shop.com');
+    expect(button.getAttribute('aria-label')).toBe('Your account, signed in as back@shop.com');
+  });
+
+  it('keeps shopping anonymous when hydration fails', async () => {
+    const { component, fixture } = setup();
+    const customer = fixture.debugElement.injector.get(CurrentCustomerService);
+    vi.spyOn(customer, 'hydrate').mockRejectedValue(new Error('jwks unreachable'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await component.ngOnInit();
+    await flushMicrotasks();
+
+    expect(component.customerEmail()).toBeNull();
+    expect(component.view()).toBe('shopping');
+  });
+
+  it('refreshes the session through the gateway when the expiry warning starts', async () => {
+    const { fixture } = setup();
+    const customer = fixture.debugElement.injector.get(CurrentCustomerService);
+    const refresh = vi.spyOn(customer, 'refresh').mockResolvedValue(undefined);
+    const session = await signInThroughGateway(fixture);
+
+    // Inside the one-minute warning window from the start.
+    customer.setSession({ ...session, expiresAt: new Date(Date.now() + 30_000).toISOString() });
+    TestBed.tick();
+
+    expect(customer.expiryWarningActive()).toBe(true);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    customer.ngOnDestroy();
+  });
+
+  it('closing the modal returns focus to the account button', async () => {
+    const { component, fixture } = setup();
+    component.view.set('shopping');
+    component.openAuthModal();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    component.closeAuthModal();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.showAuthModal()).toBe(false);
+    expect(document.activeElement).toBe(
+      fixture.nativeElement.querySelector('[data-testid="shop-account-btn"]')
+    );
   });
 });

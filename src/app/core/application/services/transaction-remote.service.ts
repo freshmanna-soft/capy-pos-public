@@ -3,9 +3,6 @@ import { CartService } from '@core/application/services/cart.service';
 import { PaymentResult } from '@core/application/dtos/payment.dto';
 import { environment } from '../../../../environments/environment';
 
-/** sessionStorage key used by ShopComponent (ST-2). */
-const SESSION_TOKEN_KEY = 'shop-session-token';
-
 /**
  * Thrown when POST /api/transactions returns a non-2xx response or fails
  * with a network error. The calling component catches this to preserve the
@@ -25,7 +22,8 @@ export class RemoteTransactionFailedError extends Error {
  *
  * Token resolution:
  *  - Physical kiosk terminal: caller passes `deviceToken` from Dexie settings.
- *  - Customer phone (/shop):  caller passes `sessionStorage['shop-session-token']`.
+ *  - Customer phone (/shop):  caller passes the token `ShopSessionService.ensureValid()`
+ *    returned just before checkout.
  *  - POS terminal (no kiosk): no token → service is a no-op, returns silently.
  *
  * Called from PosFacade.checkout() BEFORE the cart is cleared.
@@ -35,14 +33,6 @@ export class RemoteTransactionFailedError extends Error {
 @Injectable({ providedIn: 'root' })
 export class TransactionRemoteService {
   private readonly cart = inject(CartService);
-
-  /**
-   * Returns the shop-session token from sessionStorage, if present.
-   * Used by ShopComponent path; returns null on a physical kiosk or POS.
-   */
-  getShopSessionToken(): string | null {
-    return sessionStorage.getItem(SESSION_TOKEN_KEY);
-  }
 
   /**
    * POST the full basket to /api/transactions.
@@ -66,6 +56,9 @@ export class TransactionRemoteService {
     const total = this.cart.total();
 
     const body = {
+      // The till's own id for this sale. pos-api keeps it, so this sale's
+      // SaleCompleted event can later be matched to it (#358).
+      transactionId: paymentResult.transactionId,
       paymentMethod: paymentResult.method,
       subtotal,
       taxAmount: tax,

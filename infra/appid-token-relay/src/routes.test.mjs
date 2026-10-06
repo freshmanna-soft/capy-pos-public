@@ -17,7 +17,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
-import { allowedMethods, createRouter, describeRoutes, matchRoute, requestPath, routeLabel } from './routes.ts';
+import {
+  allowedMethods,
+  createRouter,
+  describeRoutes,
+  matchRoute,
+  requestPath,
+  routeLabel,
+} from './routes.ts';
 
 const ALLOWED = 'https://till.example.com';
 const ORIGINS = [ALLOWED, 'http://localhost:4200'];
@@ -44,7 +51,9 @@ function table(reached) {
       methods: 'POST, OPTIONS',
       listener: (req, res) => {
         reached.push(['forgot-password', req.method, req.url]);
-        res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"reached":"forgot-password"}');
+        res
+          .writeHead(200, { 'Content-Type': 'application/json' })
+          .end('{"reached":"forgot-password"}');
       },
     },
     {
@@ -80,7 +89,11 @@ describe('matchRoute', () => {
   });
 
   it('matches a prefix route on any path under it', () => {
-    for (const path of ['/appid/admin/staff', '/appid/admin/roles', '/appid/admin/staff/abc-123/role']) {
+    for (const path of [
+      '/appid/admin/staff',
+      '/appid/admin/roles',
+      '/appid/admin/staff/abc-123/role',
+    ]) {
       assert.equal(matchRoute(routes, path)?.path, ADMIN_ROUTE_PREFIX, path);
     }
   });
@@ -119,7 +132,10 @@ describe('allowedMethods', () => {
   });
 
   it('always advertises OPTIONS, even for a table that forgot to', () => {
-    assert.equal(allowedMethods([{ match: 'exact', path: '/x', methods: 'POST', listener: () => {} }]), 'POST, OPTIONS');
+    assert.equal(
+      allowedMethods([{ match: 'exact', path: '/x', methods: 'POST', listener: () => {} }]),
+      'POST, OPTIONS'
+    );
   });
 });
 
@@ -176,24 +192,42 @@ function send(port, { method = 'POST', path = TOKEN_ROUTE, headers = {} } = {}) 
 describe('dispatch, over a socket', () => {
   it('hands each declared route to its own listener', async () => {
     await withRouter(async ({ port, reached }) => {
-      assert.deepEqual((await send(port, { path: TOKEN_ROUTE, headers: { Origin: ALLOWED } })).json, {
-        reached: 'token',
-      });
-      assert.deepEqual((await send(port, { path: FORGOT_PASSWORD_ROUTE, headers: { Origin: ALLOWED } })).json, {
-        reached: 'forgot-password',
-      });
       assert.deepEqual(
-        (await send(port, { method: 'GET', path: '/appid/admin/staff', headers: { Origin: ALLOWED } })).json,
+        (await send(port, { path: TOKEN_ROUTE, headers: { Origin: ALLOWED } })).json,
+        {
+          reached: 'token',
+        }
+      );
+      assert.deepEqual(
+        (await send(port, { path: FORGOT_PASSWORD_ROUTE, headers: { Origin: ALLOWED } })).json,
+        {
+          reached: 'forgot-password',
+        }
+      );
+      assert.deepEqual(
+        (
+          await send(port, {
+            method: 'GET',
+            path: '/appid/admin/staff',
+            headers: { Origin: ALLOWED },
+          })
+        ).json,
         { reached: 'admin' }
       );
-      assert.deepEqual(reached.map(([name]) => name), ['token', 'forgot-password', 'admin']);
+      assert.deepEqual(
+        reached.map(([name]) => name),
+        ['token', 'forgot-password', 'admin']
+      );
     });
   });
 
   it('dispatches on the path only, ignoring a query string', async () => {
     await withRouter(async ({ port, reached }) => {
       await send(port, { path: `${TOKEN_ROUTE}?trace=abc`, headers: { Origin: ALLOWED } });
-      assert.deepEqual(reached.map(([name]) => name), ['token']);
+      assert.deepEqual(
+        reached.map(([name]) => name),
+        ['token']
+      );
     });
   });
 
@@ -224,7 +258,10 @@ describe('the 404, over a socket', () => {
 
   it('404s a path that merely ends with a real route — the regression this replaces', async () => {
     await withRouter(async ({ port, reached }) => {
-      assert.equal((await send(port, { path: '/anything/appid/token', headers: { Origin: ALLOWED } })).status, 404);
+      assert.equal(
+        (await send(port, { path: '/anything/appid/token', headers: { Origin: ALLOWED } })).status,
+        404
+      );
       assert.deepEqual(reached, []);
     });
   });
@@ -232,7 +269,11 @@ describe('the 404, over a socket', () => {
   it('404s every method on an unknown path, not just POST', async () => {
     await withRouter(async ({ port, reached }) => {
       for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']) {
-        assert.equal((await send(port, { method, path: '/nope', headers: { Origin: ALLOWED } })).status, 404, method);
+        assert.equal(
+          (await send(port, { method, path: '/nope', headers: { Origin: ALLOWED } })).status,
+          404,
+          method
+        );
       }
       assert.deepEqual(reached, []);
     });
@@ -243,7 +284,10 @@ describe('the 404, over a socket', () => {
       const response = await send(port, { path: '/nope', headers: { Origin: ALLOWED } });
       assert.equal(response.headers['access-control-allow-origin'], ALLOWED);
       assert.equal(response.headers['vary'], 'Origin');
-      assert.equal(response.headers['access-control-allow-methods'], 'POST, GET, PUT, DELETE, OPTIONS');
+      assert.equal(
+        response.headers['access-control-allow-methods'],
+        'POST, GET, PUT, DELETE, OPTIONS'
+      );
     });
   });
 });
@@ -253,7 +297,10 @@ describe('CORS on an unrouted path, over a socket', () => {
     // Origin before route (`http.ts`'s documented order) — the answer must not
     // depend on whether the path happened to be a real one.
     await withRouter(async ({ port, reached }) => {
-      const response = await send(port, { path: '/nope', headers: { Origin: 'https://evil.example.com' } });
+      const response = await send(port, {
+        path: '/nope',
+        headers: { Origin: 'https://evil.example.com' },
+      });
       assert.equal(response.status, 403);
       assert.deepEqual(response.json, { error: 'Origin is not allowed.' });
       assert.equal(response.headers['access-control-allow-origin'], undefined);
@@ -263,7 +310,11 @@ describe('CORS on an unrouted path, over a socket', () => {
 
   it('answers a preflight on an unknown path 204, the way the default arm used to', async () => {
     await withRouter(async ({ port, reached }) => {
-      const response = await send(port, { method: 'OPTIONS', path: '/nope', headers: { Origin: ALLOWED } });
+      const response = await send(port, {
+        method: 'OPTIONS',
+        path: '/nope',
+        headers: { Origin: ALLOWED },
+      });
       assert.equal(response.status, 204);
       assert.equal(response.headers['access-control-allow-origin'], ALLOWED);
       assert.deepEqual(reached, []);
@@ -274,7 +325,10 @@ describe('CORS on an unrouted path, over a socket', () => {
     await withRouter(async ({ port, reached }) => {
       assert.equal((await send(port, { path: TOKEN_ROUTE })).status, 200);
       assert.equal((await send(port, { path: '/nope' })).status, 404);
-      assert.deepEqual(reached.map(([name]) => name), ['token']);
+      assert.deepEqual(
+        reached.map(([name]) => name),
+        ['token']
+      );
     });
   });
 
@@ -285,7 +339,11 @@ describe('CORS on an unrouted path, over a socket', () => {
         await send(port, { path: '/nope', headers: { Origin: ALLOWED } }),
         await send(port, { path: '/nope', headers: { Origin: 'https://evil.example.com' } }),
         await send(port, { method: 'OPTIONS', path: '/nope', headers: { Origin: ALLOWED } }),
-        await send(port, { method: 'OPTIONS', path: '/nope', headers: { Origin: 'https://evil.example.com' } }),
+        await send(port, {
+          method: 'OPTIONS',
+          path: '/nope',
+          headers: { Origin: 'https://evil.example.com' },
+        }),
       ];
       for (const response of responses) {
         assert.notEqual(

@@ -101,7 +101,9 @@ export class MemoryStore<T extends StoredDocument> implements DocumentStore<T> {
 
   async read(id: string): Promise<Revision<T> | null> {
     const entry = this.documents.get(id);
-    return entry ? { document: structuredClone(entry.document) as T, rev: String(entry.rev) } : null;
+    return entry
+      ? { document: structuredClone(entry.document) as T, rev: String(entry.rev) }
+      : null;
   }
 
   async create(document: T): Promise<CreateOutcome> {
@@ -117,7 +119,10 @@ export class MemoryStore<T extends StoredDocument> implements DocumentStore<T> {
     if (entry === undefined || String(entry.rev) !== rev) {
       return 'conflict';
     }
-    this.documents.set(document.id, { document: structuredClone(document) as T, rev: entry.rev + 1 });
+    this.documents.set(document.id, {
+      document: structuredClone(document) as T,
+      rev: entry.rev + 1,
+    });
     return 'written';
   }
 

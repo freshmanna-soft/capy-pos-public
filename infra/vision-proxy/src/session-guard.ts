@@ -89,7 +89,12 @@
  * nothing, which is a boundary in exactly the sense this epic exists to stop
  * accepting.
  */
-import { createHmac, createPublicKey, timingSafeEqual, verify as verifyRsaSignature } from 'node:crypto';
+import {
+  createHmac,
+  createPublicKey,
+  timingSafeEqual,
+  verify as verifyRsaSignature,
+} from 'node:crypto';
 
 /**
  * The multi-tenant id App ID's own tokens are stamped with, since this pilot is
@@ -430,8 +435,10 @@ const ROLE_PERMISSIONS: Readonly<Record<string, readonly Permission[]>> = {
  */
 const ROLES_CACHE_TTL_MS = 5 * 60 * 1000;
 
-let rolesCache: { readonly data: Readonly<Record<string, readonly string[]>>; readonly fetchedAtMs: number } | null =
-  null;
+let rolesCache: {
+  readonly data: Readonly<Record<string, readonly string[]>>;
+  readonly fetchedAtMs: number;
+} | null = null;
 
 /**
  * Resolve the current role → permission mapping: the shared document when
@@ -713,7 +720,9 @@ function base64UrlToBase64(value: string): string {
 
 /** A claim that should be an array of strings, reduced to exactly that. */
 function stringArray(value: unknown): readonly string[] {
-  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === 'string')
+    : [];
 }
 
 // Made with Bob
