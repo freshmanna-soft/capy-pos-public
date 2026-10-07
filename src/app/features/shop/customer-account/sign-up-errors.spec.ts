@@ -59,6 +59,14 @@ describe('describeSignUpRefusal', () => {
       expect(describeSignUpRefusal(new Error(RELAY_400)).detail).toBeNull();
     });
 
+    it('extracts a very long explanation with a bounded prefix scan', () => {
+      const explanation = `Password must contain ${'x'.repeat(50_000)}`;
+
+      expect(describeSignUpRefusal(new Error(`${RELAY_400} ${explanation}`)).detail).toBe(
+        explanation
+      );
+    });
+
     /**
      * The regression this file exists for after round 2.
      *

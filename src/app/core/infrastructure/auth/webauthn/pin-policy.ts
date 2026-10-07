@@ -55,12 +55,12 @@ function isUniform(pin: string): boolean {
  * and refusing it would reject a PIN nobody would guess.
  */
 function isRun(pin: string): boolean {
-  const step = pin.charCodeAt(1) - pin.charCodeAt(0);
+  const step = (pin.codePointAt(1) ?? 0) - (pin.codePointAt(0) ?? 0);
   if (step !== 1 && step !== -1) {
     return false;
   }
   for (let i = 2; i < pin.length; i++) {
-    if (pin.charCodeAt(i) - pin.charCodeAt(i - 1) !== step) {
+    if ((pin.codePointAt(i) ?? 0) - (pin.codePointAt(i - 1) ?? 0) !== step) {
       return false;
     }
   }

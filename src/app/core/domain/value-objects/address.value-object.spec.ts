@@ -213,18 +213,8 @@ describe('Address Value Object', () => {
 
   describe('Country Checks', () => {
     describe('isUS()', () => {
-      it('should return true for USA', () => {
-        const address = new Address({ ...validUSAddress, country: 'USA' });
-        expect(address.isUS()).toBe(true);
-      });
-
-      it('should return true for US', () => {
-        const address = new Address({ ...validUSAddress, country: 'US' });
-        expect(address.isUS()).toBe(true);
-      });
-
-      it('should return true for United States', () => {
-        const address = new Address({ ...validUSAddress, country: 'United States' });
+      it.each(['USA', 'US', 'United States'])('should return true for %s', (country) => {
+        const address = new Address({ ...validUSAddress, country });
         expect(address.isUS()).toBe(true);
       });
 
@@ -252,18 +242,8 @@ describe('Address Value Object', () => {
     });
 
     describe('isUK()', () => {
-      it('should return true for UK', () => {
-        const address = new Address({ ...validUKAddress, country: 'UK' });
-        expect(address.isUK()).toBe(true);
-      });
-
-      it('should return true for GB', () => {
-        const address = new Address({ ...validUKAddress, country: 'GB' });
-        expect(address.isUK()).toBe(true);
-      });
-
-      it('should return true for United Kingdom', () => {
-        const address = new Address({ ...validUKAddress, country: 'United Kingdom' });
+      it.each(['UK', 'GB', 'United Kingdom'])('should return true for %s', (country) => {
+        const address = new Address({ ...validUKAddress, country });
         expect(address.isUK()).toBe(true);
       });
 

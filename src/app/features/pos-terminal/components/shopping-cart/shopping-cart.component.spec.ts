@@ -72,7 +72,7 @@ describe('ShoppingCartComponent', () => {
     it('should display items after adding products', () => {
       component.addProduct(mockProduct);
       expect(cartService.isEmpty()).toBe(false);
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
       expect(cartService.items()[0].product.name).toBe('Organic Coffee');
     });
   });
@@ -117,10 +117,10 @@ describe('ShoppingCartComponent', () => {
     it('should remove item from cart', () => {
       component.addProduct(mockProduct);
       component.addProduct(mockProduct2);
-      expect(cartService.items().length).toBe(2);
+      expect(cartService.items()).toHaveLength(2);
 
       cartService.removeItem('prod-1');
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
       expect(cartService.items()[0].product.id).toBe('prod-2');
     });
   });
@@ -178,7 +178,7 @@ describe('ShoppingCartComponent', () => {
       component.clearCart();
 
       expect(requested).not.toHaveBeenCalled();
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
     });
   });
 
@@ -192,13 +192,13 @@ describe('ShoppingCartComponent', () => {
   describe('AC7: Add Product (Public API)', () => {
     it('should add product via public method', () => {
       component.addProduct(mockProduct);
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
     });
 
     it('should increment quantity if product already in cart', () => {
       component.addProduct(mockProduct);
       component.addProduct(mockProduct);
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
       expect(cartService.items()[0].quantity).toBe(2);
     });
   });
@@ -269,7 +269,7 @@ describe('ShoppingCartComponent', () => {
 
       // Adding a NEW product should still trigger scroll
       component.addProduct(mockProduct);
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
     });
   });
 

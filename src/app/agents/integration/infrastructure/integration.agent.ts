@@ -24,17 +24,20 @@ export class IntegrationAgent extends BaseAgent implements IIntegrationAgent {
     super('integration-agent', 'IntegrationAgent', 'Handles external system integrations');
   }
 
-  protected async onInitialize(): Promise<void> {
+  protected onInitialize(): Promise<void> {
     console.log('Initializing IntegrationAgent');
+    return Promise.resolve();
   }
 
-  protected async onStart(): Promise<void> {
+  protected onStart(): Promise<void> {
     console.log('Starting IntegrationAgent');
+    return Promise.resolve();
   }
 
-  protected async onStop(): Promise<void> {
+  protected onStop(): Promise<void> {
     console.log('Stopping IntegrationAgent');
     this.integrationEventsSubject.complete();
+    return Promise.resolve();
   }
 
   protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
@@ -55,16 +58,16 @@ export class IntegrationAgent extends BaseAgent implements IIntegrationAgent {
     }
   }
 
-  async syncData(_request: SyncDataRequest): Promise<SyncDataResponse> {
-    return { success: true, recordsProcessed: 0 };
+  syncData(_request: SyncDataRequest): Promise<SyncDataResponse> {
+    return Promise.resolve({ success: true, recordsProcessed: 0 });
   }
 
-  async sendWebhook(_request: WebhookRequest): Promise<WebhookResponse> {
-    return { success: true, statusCode: 200 };
+  sendWebhook(_request: WebhookRequest): Promise<WebhookResponse> {
+    return Promise.resolve({ success: true, statusCode: 200 });
   }
 
-  async getIntegrationStatus(integrationId: string): Promise<IntegrationStatus> {
-    return { integrationId, connected: true };
+  getIntegrationStatus(integrationId: string): Promise<IntegrationStatus> {
+    return Promise.resolve({ integrationId, connected: true });
   }
 }
 

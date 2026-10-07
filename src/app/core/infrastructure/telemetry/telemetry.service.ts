@@ -242,8 +242,8 @@ export class TelemetryService {
       p50: this.percentile(sortedValues, 50),
       p95: this.percentile(sortedValues, 95),
       p99: this.percentile(sortedValues, 99),
-      lastValue: values[values.length - 1],
-      lastUpdated: dataPoints[dataPoints.length - 1].timestamp,
+      lastValue: values.at(-1)!,
+      lastUpdated: dataPoints.at(-1)!.timestamp,
       tags,
     };
   }
@@ -423,7 +423,7 @@ export function Measure(metricName?: string) {
 
     descriptor.value = async function (...args: unknown[]) {
       const telemetry = new TelemetryService();
-      return telemetry.measureAsync(name, () => originalMethod.apply(this, args));
+      return await telemetry.measureAsync(name, () => originalMethod.apply(this, args));
     };
 
     return descriptor;

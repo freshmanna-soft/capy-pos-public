@@ -854,7 +854,7 @@ export class ShopComponent implements OnInit, OnDestroy {
   // ── Product data ──────────────────────────────────────────────────────────────
   private readonly _products = signal<Product[]>([]);
   readonly categories = computed(() =>
-    [...new Set(this._products().map((p) => p.category))].sort()
+    [...new Set(this._products().map((p) => p.category))].sort((a, b) => a.localeCompare(b))
   );
   readonly filteredProducts = computed(() => {
     const cat = this.selectedCategory();
@@ -1187,7 +1187,7 @@ export class ShopComponent implements OnInit, OnDestroy {
   }
 
   productGradient(id: string): string {
-    const hue = (id.charCodeAt(0) * 37 + id.charCodeAt(id.length - 1) * 13) % 360;
+    const hue = ((id.codePointAt(0) ?? 0) * 37 + (id.codePointAt(id.length - 1) ?? 0) * 13) % 360;
     return `linear-gradient(135deg, hsl(${hue},40%,25%), hsl(${(hue + 60) % 360},30%,15%))`;
   }
 

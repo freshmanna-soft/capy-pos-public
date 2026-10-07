@@ -4,6 +4,7 @@ import {
   DexieDatabase,
   IRecognitionLogDB,
 } from '@core/infrastructure/database/dexie-database.service';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 /** Which tier of the cascade produced an answer. */
 export type RecognitionTier = 'barcode' | 'samples' | 'model';
@@ -72,7 +73,7 @@ export class RecognitionLogService {
     outcome: RecognitionOutcome;
     actualProductId?: string;
   }): string {
-    const id = `rec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const id = `rec-${generateUUID()}`;
     const row: IRecognitionLogDB = {
       id,
       tenantId: DEFAULT_TENANT_ID,

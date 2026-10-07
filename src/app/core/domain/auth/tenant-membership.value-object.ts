@@ -29,10 +29,10 @@ export class TenantMembership extends BaseValueObject<TenantMembership> {
   constructor(tenantId: TenantId, role: Role) {
     super();
     if (!(tenantId instanceof TenantId)) {
-      throw new Error('TenantMembership requires a TenantId');
+      throw new TypeError('TenantMembership requires a TenantId');
     }
     if (!(role instanceof Role)) {
-      throw new Error('TenantMembership requires a Role');
+      throw new TypeError('TenantMembership requires a Role');
     }
     this._tenantId = tenantId;
     this._role = role;

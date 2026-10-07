@@ -8,8 +8,6 @@
  * WebCrypto only, so it runs in the browser with no dependency and no WASM.
  */
 
-import { DEFAULT_ADMIN_PASSWORD_HASH } from '@core/infrastructure/database/dexie-database.service';
-
 /**
  * PBKDF2 iterations for newly hashed secrets.
  *
@@ -43,10 +41,6 @@ export async function hashSecret(plaintext: string): Promise<string> {
  * typing.
  */
 export async function compareSecret(plaintext: string, storedHash: string): Promise<boolean> {
-  if (storedHash.startsWith('$2b$') || storedHash.startsWith('$2a$')) {
-    return compareSeededBcrypt(plaintext, storedHash);
-  }
-
   if (!storedHash.startsWith('pbkdf2:')) {
     return false;
   }
@@ -62,25 +56,6 @@ export async function compareSecret(plaintext: string, storedHash: string): Prom
 
   const derived = await pbkdf2(plaintext, fromHex(parts[2]), iterations);
   return timingSafeEqual(toHex(derived), parts[3]);
-}
-
-/**
- * The one bcrypt hash this app can check: the seeded dev/test admin account.
- *
- * bcrypt is not available in WebCrypto, so a real comparison is impossible here
- * without shipping a WASM implementation. `dexie-database.service.ts` gates
- * creating this account on `environment.allowSeededAdmin`, which
- * `environment.prod.ts` — the file that actually ships — sets `false`, so a
- * real pilot install has no such row to compare against in the first place.
- * Its hash and plaintext are both public knowledge in this repo, which is
- * exactly why it must never exist in a real deployment. Every account created
- * through the UI is PBKDF2 and takes the branch above.
- *
- * Any *other* bcrypt hash is rejected outright rather than guessed at.
- */
-function compareSeededBcrypt(plaintext: string, storedHash: string): boolean {
-  const SEED_PLAIN = 'admin1234';
-  return storedHash === DEFAULT_ADMIN_PASSWORD_HASH && plaintext === SEED_PLAIN;
 }
 
 async function pbkdf2(secret: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
@@ -123,7 +98,7 @@ function timingSafeEqual(a: string, b: string): boolean {
   }
   let diff = 0;
   for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    diff |= (a.codePointAt(i) ?? 0) ^ (b.codePointAt(i) ?? 0);
   }
   return diff === 0;
 }

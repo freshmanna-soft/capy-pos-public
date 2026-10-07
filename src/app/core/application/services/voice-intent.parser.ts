@@ -168,7 +168,7 @@ const REMOVE_VERBS = ['remove', 'delete', 'drop', 'scratch'];
  * "take the water bottle off" is as natural as "take off the water bottle", and a
  * contiguous "take off" needle matches only one of them.
  */
-const TAKE_PARTICLES = ['off', 'away', 'out'];
+const TAKE_PARTICLES = new Set(['off', 'away', 'out']);
 
 /** Asking for the whole cart, which is answered rather than acted on. */
 const BULK_WORDS = new Set(['everything', 'all', 'everythings', 'lot']);
@@ -575,7 +575,7 @@ function findTakeVerb(words: string[]): number | null {
   if (take === -1) {
     return null;
   }
-  const hasParticle = words.slice(take + 1).some((word) => TAKE_PARTICLES.includes(word));
+  const hasParticle = words.slice(take + 1).some((word) => TAKE_PARTICLES.has(word));
   return hasParticle ? take + 1 : null;
 }
 
@@ -688,8 +688,8 @@ function matchCandidateByName(words: string[], labels: string[]): number | null 
 function normalize(text: string): string[] {
   return text
     .toLowerCase()
-    .replace(/['’]/g, '')
-    .replace(/[^a-z0-9\s]/g, ' ')
+    .replaceAll(/['’]/g, '')
+    .replaceAll(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
     .filter((word) => word.length > 0);
 }

@@ -552,8 +552,9 @@ describe('ShopComponent — receipt and navigation', () => {
     const { component } = setup();
     component.resolvedStoreId.set(null);
 
-    // Should not throw — the inner await this.ngOnInit() path is exercised.
     await component.retrySession();
+
+    expect(component.resolvedStoreId()).toBe('store-1');
   });
 
   it('the account modal offers no staff login (customers were stranded on /login)', async () => {
@@ -1518,7 +1519,7 @@ describe('ShopComponent — shop session lifetime', () => {
     await TestBed.flushEffects();
     await flushMicrotasks();
 
-    expect(getActiveProducts.mock.calls.length).toBe(readsBefore + 1);
+    expect(getActiveProducts.mock.calls).toHaveLength(readsBefore + 1);
     expect(component.isLoading()).toBe(false);
   });
 

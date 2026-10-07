@@ -530,6 +530,32 @@ describe('AgentMonitorComponent', () => {
     fixture.destroy();
   });
 
+  it('reports rejected asynchronous panel loads without leaving unhandled promises', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    getAllAgents.mockReturnValue([
+      {
+        ...agent('a1', 'Broken'),
+        getHealth: vi.fn().mockRejectedValue(new Error('health unavailable')),
+      },
+    ]);
+    getStatistics.mockRejectedValue(new Error('audit unavailable'));
+
+    const fixture = mount();
+
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[AgentMonitor] Failed to load agent status:',
+        expect.any(Error)
+      );
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[AgentMonitor] Failed to load audit logs:',
+        expect.any(Error)
+      );
+    });
+    fixture.destroy();
+    errorSpy.mockRestore();
+  });
+
   it("reads the dashboard's panels from the services on open", async () => {
     getAllStats.mockReturnValue({
       'payment-gateway': {
@@ -575,14 +601,14 @@ describe('AgentMonitorComponent', () => {
     const initial = getAllStats.mock.calls.length;
 
     await vi.advanceTimersByTimeAsync(5000);
-    expect(getAllStats.mock.calls.length).toBeGreaterThan(initial);
+    expect(getAllStats.mock.calls.slice(initial)).not.toHaveLength(0);
 
     fixture.destroy();
     const afterDestroy = getAllStats.mock.calls.length;
     await vi.advanceTimersByTimeAsync(15_000);
 
     // A dashboard that keeps polling after it is gone is a leak with a heartbeat.
-    expect(getAllStats.mock.calls.length).toBe(afterDestroy);
+    expect(getAllStats.mock.calls).toHaveLength(afterDestroy);
     vi.useRealTimers();
   });
 

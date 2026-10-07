@@ -25,7 +25,7 @@ export class DexieTransactionRepository
   extends BaseDexieRepository<Transaction, ITransactionDB>
   implements ITransactionRepository
 {
-  private db: DexieDatabase;
+  private readonly db: DexieDatabase;
 
   constructor() {
     const db = inject(DexieDatabase);

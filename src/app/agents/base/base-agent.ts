@@ -175,18 +175,18 @@ export abstract class BaseAgent implements IBaseAgent {
   /**
    * Get agent health information
    */
-  async getHealth(): Promise<{
+  getHealth(): Promise<{
     healthy: boolean;
     status: AgentStatus;
     lastActivity?: Date;
     errorCount?: number;
   }> {
-    return {
+    return Promise.resolve({
       healthy: this.status !== AgentStatus.ERROR && this._isInitialized,
       status: this.status,
       lastActivity: this._lastActivity,
       errorCount: this._errorCount,
-    };
+    });
   }
 
   /**

@@ -13,7 +13,7 @@ import { PRODUCT_REPOSITORY } from '@core/infrastructure/factories/repository.fa
   providedIn: 'root',
 })
 export class GetProductsUseCase {
-  private repository = inject<IProductRepository>(PRODUCT_REPOSITORY);
+  private readonly repository = inject<IProductRepository>(PRODUCT_REPOSITORY);
 
   /**
    * Executes the use case to get all products

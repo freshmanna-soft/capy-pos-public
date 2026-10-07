@@ -472,7 +472,7 @@ describe('RetryService', () => {
       await service.execute('op2', fn);
 
       const allStats = service.getStats() as Record<string, RetryStats>;
-      expect(Object.keys(allStats).length).toBe(2);
+      expect(Object.keys(allStats)).toHaveLength(2);
       expect(allStats['op1']).toBeDefined();
       expect(allStats['op2']).toBeDefined();
     });
@@ -510,7 +510,7 @@ describe('RetryService', () => {
       service.clearStats();
 
       const allStats = service.getStats() as Record<string, RetryStats>;
-      expect(Object.keys(allStats).length).toBe(0);
+      expect(Object.keys(allStats)).toHaveLength(0);
     });
   });
 

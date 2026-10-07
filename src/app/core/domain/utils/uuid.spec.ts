@@ -25,14 +25,22 @@ describe('generateUUID', () => {
     expect(spy).toHaveBeenCalled();
   });
 
-  it('should use fallback when crypto.randomUUID is not available', () => {
+  it('uses crypto.getRandomValues when crypto.randomUUID is not available', () => {
     const originalRandomUUID = crypto.randomUUID;
     Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true });
+    const randomValues = vi.spyOn(crypto, 'getRandomValues').mockImplementation((array) => {
+      (array as Uint8Array).fill(0xab);
+      return array;
+    });
 
-    const uuid = generateUUID();
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-    expect(uuid).toMatch(uuidRegex);
-
-    Object.defineProperty(crypto, 'randomUUID', { value: originalRandomUUID, configurable: true });
+    try {
+      expect(generateUUID()).toBe('abababab-abab-4bab-abab-abababababab');
+      expect(randomValues).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(crypto, 'randomUUID', {
+        value: originalRandomUUID,
+        configurable: true,
+      });
+    }
   });
 });

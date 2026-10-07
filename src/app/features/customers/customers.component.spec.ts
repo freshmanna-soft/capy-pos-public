@@ -84,49 +84,41 @@ describe('CustomersComponent', () => {
 
   describe('Filtering', () => {
     it('should display all customers when no filter is applied', () => {
-      expect(component.filteredCustomers().length).toBe(3);
+      expect(component.filteredCustomers()).toHaveLength(3);
     });
 
-    it('should filter customers by name search', () => {
-      component.searchQuery.set('maria');
-      expect(component.filteredCustomers().length).toBe(1);
-      expect(component.filteredCustomers()[0].name).toBe('Maria Garcia');
-    });
-
-    it('should filter customers by email search', () => {
-      component.searchQuery.set('carlos@');
-      expect(component.filteredCustomers().length).toBe(1);
-      expect(component.filteredCustomers()[0].name).toBe('Carlos Lopez');
-    });
-
-    it('should filter customers by phone search', () => {
-      component.searchQuery.set('555-6666');
-      expect(component.filteredCustomers().length).toBe(1);
-      expect(component.filteredCustomers()[0].name).toBe('Ana Martinez');
+    it.each([
+      ['name', 'maria', 'Maria Garcia'],
+      ['email', 'carlos@', 'Carlos Lopez'],
+      ['phone', '555-6666', 'Ana Martinez'],
+    ])('should filter customers by %s search', (_field, query, expectedName) => {
+      component.searchQuery.set(query);
+      expect(component.filteredCustomers()).toHaveLength(1);
+      expect(component.filteredCustomers()[0].name).toBe(expectedName);
     });
 
     it('should filter customers by status', () => {
       component.statusFilter.set(CustomerStatus.ACTIVE);
-      expect(component.filteredCustomers().length).toBe(1);
+      expect(component.filteredCustomers()).toHaveLength(1);
       expect(component.filteredCustomers()[0].name).toBe('Maria Garcia');
     });
 
     it('should filter VIP customers by status', () => {
       component.statusFilter.set(CustomerStatus.VIP);
-      expect(component.filteredCustomers().length).toBe(1);
+      expect(component.filteredCustomers()).toHaveLength(1);
       expect(component.filteredCustomers()[0].name).toBe('Carlos Lopez');
     });
 
     it('should combine search and status filters', () => {
       component.searchQuery.set('a');
       component.statusFilter.set(CustomerStatus.ACTIVE);
-      expect(component.filteredCustomers().length).toBe(1);
+      expect(component.filteredCustomers()).toHaveLength(1);
       expect(component.filteredCustomers()[0].name).toBe('Maria Garcia');
     });
 
     it('should return empty when no match found', () => {
       component.searchQuery.set('nonexistent');
-      expect(component.filteredCustomers().length).toBe(0);
+      expect(component.filteredCustomers()).toHaveLength(0);
     });
   });
 

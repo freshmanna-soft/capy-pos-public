@@ -29,6 +29,7 @@ import {
   type MercadoPagoPaymentResult,
 } from '@core/application/ports/mercadopago.port';
 import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 /**
  * Name of the circuit breaker that fronts the (simulated) card payment gateway.
@@ -1690,7 +1691,7 @@ export class CheckoutComponent implements OnDestroy {
 
   /** True when the entered card number is the deterministic declined test PAN. */
   private isDeclinedCard(): boolean {
-    return this.cardNumber.replace(/\s+/g, '') === DECLINED_TEST_CARD;
+    return this.cardNumber.replaceAll(/\s+/g, '') === DECLINED_TEST_CARD;
   }
 
   /**
@@ -1925,8 +1926,6 @@ export class CheckoutComponent implements OnDestroy {
   }
 
   private generateTransactionId(): string {
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 8);
-    return `TXN-${timestamp}-${random}`.toUpperCase();
+    return `TXN-${generateUUID()}`.toUpperCase();
   }
 }

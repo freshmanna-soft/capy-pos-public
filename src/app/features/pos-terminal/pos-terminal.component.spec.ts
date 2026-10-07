@@ -203,6 +203,14 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     fixture.detectChanges();
   });
 
+  afterEach(() => {
+    // Reset receipt state to prevent NG0950 errors during cleanup
+    component.handleNewTransactionFromReceipt();
+    cartService.clearCart();
+    fixture.destroy();
+    vi.useRealTimers();
+  });
+
   describe('AI clerk handoff', () => {
     it('offers a way into the clerk from the header', () => {
       const link = fixture.nativeElement.querySelector('[data-testid="ask-capy-btn"]');
@@ -236,14 +244,6 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     });
   });
 
-  afterEach(() => {
-    // Reset receipt state to prevent NG0950 errors during cleanup
-    component.handleNewTransactionFromReceipt();
-    cartService.clearCart();
-    fixture.destroy();
-    vi.useRealTimers();
-  });
-
   /** Helper to add product and flush setTimeout */
   function addProduct(product: Product): void {
     component.handleProductSelected(product);
@@ -254,7 +254,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     it('should add a product to the cart when handleProductSelected is called', () => {
       addProduct(mockProducts.coffee);
 
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
       expect(cartService.items()[0].product.id).toBe('1');
       expect(cartService.items()[0].product.name).toBe('Organic Coffee');
       expect(cartService.items()[0].quantity).toBe(1);
@@ -278,7 +278,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       addProduct(mockProducts.coffee);
       addProduct(mockProducts.coffee);
 
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
       expect(cartService.items()[0].quantity).toBe(2);
     });
 
@@ -298,7 +298,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       addProduct(mockProducts.tea);
       addProduct(mockProducts.chocolate);
 
-      expect(cartService.items().length).toBe(3);
+      expect(cartService.items()).toHaveLength(3);
       expect(cartService.totalItems()).toBe(3);
     });
 
@@ -326,7 +326,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     it('should NOT add out-of-stock product to cart', () => {
       addProduct(mockProducts.outOfStock);
 
-      expect(cartService.items().length).toBe(0);
+      expect(cartService.items()).toHaveLength(0);
       expect(cartService.totalItems()).toBe(0);
     });
 
@@ -334,7 +334,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       addProduct(mockProducts.coffee);
       addProduct(mockProducts.outOfStock);
 
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
       expect(cartService.items()[0].product.id).toBe('1');
     });
   });
@@ -363,7 +363,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
   describe('Cart state consistency', () => {
     it('should have empty cart initially', () => {
       expect(cartService.isEmpty()).toBe(true);
-      expect(cartService.items().length).toBe(0);
+      expect(cartService.items()).toHaveLength(0);
       expect(cartService.totalItems()).toBe(0);
       expect(cartService.subtotal()).toBe(0);
     });
@@ -394,12 +394,12 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       addProduct(mockProducts.coffee);
       addProduct(mockProducts.tea);
 
-      expect(cartService.items().length).toBe(2);
+      expect(cartService.items()).toHaveLength(2);
 
       cartService.clearCart();
 
       expect(cartService.isEmpty()).toBe(true);
-      expect(cartService.items().length).toBe(0);
+      expect(cartService.items()).toHaveLength(0);
     });
   });
 
@@ -408,7 +408,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
       addProduct(mockProducts.coffee);
       addProduct(mockProducts.tea);
-      expect(cartService.items().length).toBe(2);
+      expect(cartService.items()).toHaveLength(2);
 
       component.startNewTransaction();
 
@@ -420,11 +420,11 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
     it('should NOT clear the cart when the user cancels confirmation', () => {
       const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
       addProduct(mockProducts.coffee);
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
 
       component.startNewTransaction();
 
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
       confirmSpy.mockRestore();
     });
 
@@ -577,7 +577,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       component.handleProductSelected(mockProducts.coffee);
 
       // No timer advance needed — the add is immediate.
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
     });
 
     it('should not add an out-of-stock product', () => {
@@ -820,7 +820,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
       component.setLeftView('browse');
       await flushMicrotasks();
 
-      expect(mockProductRepository.findActive.mock.calls.length).toBe(callsAfterFirstLoad);
+      expect(mockProductRepository.findActive.mock.calls).toHaveLength(callsAfterFirstLoad);
     });
 
     it('routes a product selected from the browse grid through addToCart', () => {
