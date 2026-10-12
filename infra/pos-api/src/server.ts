@@ -425,11 +425,14 @@ export function createPosRequestHandler(input: {
 
     // Detect multipart image upload routes to apply the raised body limit and
     // pass raw bytes rather than a JSON-parsed body.
-    const reqContentType = (req.headers['content-type'] ?? '').toLowerCase();
+    // Content-Type media types are case-insensitive, but the multipart boundary
+    // parameter is case-sensitive. Keep the original header for the parser and
+    // normalize only the route-detection comparison.
+    const reqContentType = req.headers['content-type'] ?? '';
     const isImageUpload =
       (req.method ?? '').toUpperCase() === 'POST' &&
       /^\/api\/products\/[^/]+\/image$/.test(path) &&
-      reqContentType.startsWith('multipart/');
+      reqContentType.toLowerCase().startsWith('multipart/');
 
     const maxBodyBytes = isImageUpload
       ? MAX_IMAGE_BODY_BYTES
