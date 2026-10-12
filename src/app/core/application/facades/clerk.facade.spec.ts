@@ -1424,7 +1424,7 @@ describe('ClerkFacade', () => {
       tryAddToCart.mockReturnValue({ added: true });
 
       // Without releasing the gate the same code would be ignored as "still held".
-      await vi.waitFor(() => expect(tryAddToCart.mock.calls.length).toBeGreaterThan(1));
+      await vi.waitFor(() => expect(tryAddToCart).toHaveBeenCalledTimes(2));
     });
 
     it('gives a scanned item the same undo window as any other', async () => {
@@ -3301,7 +3301,7 @@ describe('ClerkFacade', () => {
       }
 
       const lines = clerk.exchanges();
-      expect(lines.length).toBe(MAX_EXCHANGES);
+      expect(lines).toHaveLength(MAX_EXCHANGES);
       expect(lines.at(-1)?.text).toBe(`phrase ${MAX_EXCHANGES + 3}`);
     });
 
@@ -3320,7 +3320,7 @@ describe('ClerkFacade', () => {
 
       clerk.repeatLast();
 
-      expect(clerk.exchanges().length).toBe(before);
+      expect(clerk.exchanges()).toHaveLength(before);
       expect(spokenAloud.at(-1)).toBe('2 items, 7.50 dollars.');
     });
 
@@ -3388,7 +3388,7 @@ describe('ClerkFacade', () => {
 
       clerk.setAgentEnabled(true);
 
-      expect(clerk.exchanges().length).toBe(before);
+      expect(clerk.exchanges()).toHaveLength(before);
       expect(localStorage.getItem(AGENT_PREF_KEY)).toBeNull();
     });
 

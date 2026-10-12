@@ -163,13 +163,12 @@ export class BarcodeGate {
     // dwell — swapping items is the common case at a counter, and a swap is exactly
     // when a code belonging to neither item is most likely to cross the frame.
     if (
-      this.pending === null ||
-      this.pending.code !== code ||
+      this.pending?.code !== code ||
       // A gap longer than a flicker restarts the dwell rather than counting toward
       // it. Without this a code left in front of a camera that was switched off for
       // ten seconds would complete its dwell on the first frame after it came back,
       // out of presence nobody was there to see.
-      nowMs - this.pending.lastSeenAt > timing.absenceMs
+      nowMs - (this.pending?.lastSeenAt ?? nowMs) > timing.absenceMs
     ) {
       this.pending = { code, since: nowMs, lastSeenAt: nowMs };
     } else {

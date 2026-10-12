@@ -81,11 +81,12 @@ export class GeofencingService {
     try {
       const position = await this.getCurrentPosition();
       this._position.set(position);
-      const next = hasPoly
-        ? pointInPolygon(position, polygon)
-          ? 'inside'
-          : 'outside'
-        : this.checkLegacyCircle(position);
+      let next: GeoStatus;
+      if (hasPoly) {
+        next = pointInPolygon(position, polygon) ? 'inside' : 'outside';
+      } else {
+        next = this.checkLegacyCircle(position);
+      }
       this._status.set(next);
       return next;
     } catch (err) {

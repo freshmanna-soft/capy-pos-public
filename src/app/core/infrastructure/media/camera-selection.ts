@@ -28,7 +28,7 @@ export type CameraRequest =
  * "FaceTime HD Camera (05ac:8514)". Useless to a cashier and it pushes the
  * distinguishing part of the name out of a narrow control.
  */
-const USB_ID_SUFFIX = /\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i;
+const USB_ID_SUFFIX = /\([0-9a-f]{4}:[0-9a-f]{4}\)$/i;
 
 /**
  * Name one video input.
@@ -38,7 +38,8 @@ const USB_ID_SUFFIX = /\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i;
  * is not a nicety, it is the label for the entire pre-permission case.
  */
 export function cameraLabel(label: string, index: number): string {
-  const cleaned = label.replace(USB_ID_SUFFIX, '').trim();
+  const trimmed = label.trim();
+  const cleaned = trimmed.replace(USB_ID_SUFFIX, '').trimEnd();
   return cleaned.length > 0 ? cleaned : `Camera ${index + 1}`;
 }
 

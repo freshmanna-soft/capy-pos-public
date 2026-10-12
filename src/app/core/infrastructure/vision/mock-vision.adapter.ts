@@ -9,8 +9,7 @@ import {
 import { VisionRecognizer } from '@core/application/ports/vision-recognizer.port';
 
 /** How long a fake look takes, so the UI exercises its real loading states. */
-const MIN_LATENCY_MS = 400;
-const MAX_LATENCY_MS = 900;
+export const MOCK_VISION_LATENCY_MS = 650;
 
 /**
  * MockVisionAdapter
@@ -98,13 +97,13 @@ export class MockVisionAdapter implements VisionRecognizer {
   }
 
   /**
-   * Simulated round-trip. Resolves early on abort so a cancelled scan doesn't
-   * hold a timer open for the better part of a second.
+   * Simulated round-trip. A fixed duration keeps the demo reproducible while
+   * still exercising its loading state. Resolves early on abort so a cancelled
+   * scan does not hold a timer open.
    */
   private pause(signal?: AbortSignal): Promise<void> {
-    const ms = MIN_LATENCY_MS + Math.random() * (MAX_LATENCY_MS - MIN_LATENCY_MS);
     return new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, ms);
+      const timer = setTimeout(resolve, MOCK_VISION_LATENCY_MS);
       signal?.addEventListener(
         'abort',
         () => {

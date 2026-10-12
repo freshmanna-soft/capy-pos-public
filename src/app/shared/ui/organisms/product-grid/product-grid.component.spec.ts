@@ -71,7 +71,7 @@ describe('ProductGridComponent (S1-2: Search Results Display)', () => {
       fixture.detectChanges();
 
       const cards = el.querySelectorAll('[data-testid="product-card"]');
-      expect(cards.length).toBe(4);
+      expect(cards).toHaveLength(4);
     });
 
     it('should show product name on each card', () => {

@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { vi } from 'vitest';
 import { SyncTracerService } from './sync-tracer.service';
 import { OtlpExporterService } from './otlp-exporter.service';
 
@@ -32,16 +33,26 @@ describe('SyncTracerService', () => {
   it('should record retry attempts', () => {
     const productId = 'prod-456';
     const span = service.startProductPush(productId, 'update');
+    const addEvent = vi.spyOn(span, 'addEvent');
 
     service.recordRetry(productId, 1, new Error('Network timeout'));
     service.recordRetry(productId, 2, new Error('Server error'));
 
+    expect(addEvent).toHaveBeenNthCalledWith(1, 'retry', {
+      'sync.retry_attempt': 1,
+      'sync.error': 'Network timeout',
+    });
+    expect(addEvent).toHaveBeenNthCalledWith(2, 'retry', {
+      'sync.retry_attempt': 2,
+      'sync.error': 'Server error',
+    });
     span.end();
   });
 
   it('should record conflict resolution', () => {
     const productId = 'prod-789';
     const span = service.startProductPush(productId, 'update');
+    const addEvent = vi.spyOn(span, 'addEvent');
 
     service.recordConflictResolution(productId, 'version_conflict', {
       local_version: 2,
@@ -49,6 +60,14 @@ describe('SyncTracerService', () => {
       resolution: 'use_remote',
     });
 
+    expect(addEvent).toHaveBeenCalledWith('conflict_resolved', {
+      'sync.conflict_type': 'version_conflict',
+      'sync.resolution': JSON.stringify({
+        local_version: 2,
+        remote_version: 3,
+        resolution: 'use_remote',
+      }),
+    });
     span.end();
   });
 

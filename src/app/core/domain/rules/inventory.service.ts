@@ -7,6 +7,7 @@ import {
   LowStockThreshold,
   StockAdjustment,
 } from '@core/domain/rules/inventory.service.interface';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 const CURRENT_STOCK_LABEL = 'Current stock';
 
@@ -182,9 +183,7 @@ export class InventoryService extends BaseDomainService implements IInventorySer
    * @private
    */
   private generateReservationId(productId: string, timestamp: Date): string {
-    const time = timestamp.getTime();
-    const random = Math.random().toString(36).substring(2, 9);
-    return `RES-${productId}-${time}-${random}`;
+    return `RES-${productId}-${timestamp.getTime()}-${generateUUID()}`;
   }
 }
 

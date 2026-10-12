@@ -230,7 +230,7 @@ export class FenceMapComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly locateError = signal('');
   readonly polygon = signal<LatLng[]>([]);
 
-  private zone = inject(NgZone);
+  private readonly zone = inject(NgZone);
 
   private L!: typeof L;
   private map!: L.Map;

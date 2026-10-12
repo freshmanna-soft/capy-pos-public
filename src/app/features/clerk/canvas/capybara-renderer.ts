@@ -1802,9 +1802,9 @@ function mixHex(from: string, to: string, t: number): string {
 function parseHex(hex: string): [number, number, number] {
   const value = hex.replace('#', '');
   return [
-    parseInt(value.slice(0, 2), 16),
-    parseInt(value.slice(2, 4), 16),
-    parseInt(value.slice(4, 6), 16),
+    Number.parseInt(value.slice(0, 2), 16),
+    Number.parseInt(value.slice(2, 4), 16),
+    Number.parseInt(value.slice(4, 6), 16),
   ];
 }
 

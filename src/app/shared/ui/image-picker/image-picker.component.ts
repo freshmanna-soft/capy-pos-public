@@ -18,7 +18,7 @@ import { ProductServerCopyService } from '@core/infrastructure/sync/product-remo
 import { environment } from '../../../../environments/environment';
 
 const MAX_BYTES = 2_097_152;
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 /**
  * ImagePickerComponent
@@ -265,7 +265,7 @@ export class ImagePickerComponent {
       return;
     }
 
-    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+    if (!ALLOWED_MIME_TYPES.has(file.type)) {
       this.uploadError.set('Only JPEG, PNG, or WebP images are accepted.');
       return;
     }

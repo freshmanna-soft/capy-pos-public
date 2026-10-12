@@ -98,7 +98,7 @@ describe('WxAssistantComponent', () => {
 
     await createComponent();
 
-    expect(document.querySelectorAll(`#${SCRIPT_ID}`).length).toBe(1);
+    expect(document.querySelectorAll(`#${SCRIPT_ID}`)).toHaveLength(1);
     // Guard fires before config is written.
     expect(wxoConfig()).toBeUndefined();
   });

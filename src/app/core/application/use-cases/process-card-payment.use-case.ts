@@ -1,6 +1,7 @@
 import { Injectable, inject, signal, computed, Signal } from '@angular/core';
 import { CartService } from '@core/application/services/cart.service';
 import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 /**
  * Card Payment Request DTO
@@ -107,7 +108,7 @@ export class ProcessCardPaymentUseCase {
 
   /** Last 4 digits of card number */
   readonly last4: Signal<string> = computed(() => {
-    const digits = this._cardNumber().replace(/\D/g, '');
+    const digits = this._cardNumber().replaceAll(/\D/g, '');
     return digits.length >= 4 ? digits.slice(-4) : '';
   });
 
@@ -200,7 +201,7 @@ export class ProcessCardPaymentUseCase {
   // --- Private validation methods ---
 
   private validateCardNumber(value: string): { isValid: boolean; error: string | null } {
-    const digits = value.replace(/\D/g, '');
+    const digits = value.replaceAll(/\D/g, '');
 
     if (digits.length === 0) {
       return { isValid: false, error: null };
@@ -250,7 +251,7 @@ export class ProcessCardPaymentUseCase {
       return { isValid: false, error: null };
     }
 
-    const digits = value.replace(/\D/g, '');
+    const digits = value.replaceAll(/\D/g, '');
 
     if (digits.length < 3 || digits.length > 4) {
       return { isValid: false, error: 'CVV must be 3-4 digits' };
@@ -285,7 +286,7 @@ export class ProcessCardPaymentUseCase {
    * Detects card brand from number prefix
    */
   private detectCardBrand(value: string): CardBrand {
-    const digits = value.replace(/\D/g, '');
+    const digits = value.replaceAll(/\D/g, '');
     if (digits.startsWith('4')) return 'visa';
     if (/^5[1-5]/.test(digits) || /^2[2-7]/.test(digits)) return 'mastercard';
     if (digits.startsWith('34') || digits.startsWith('37')) return 'amex';
@@ -301,8 +302,6 @@ export class ProcessCardPaymentUseCase {
   }
 
   private generateTransactionId(): string {
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 8);
-    return `TXN-CARD-${timestamp}-${random}`.toUpperCase();
+    return `TXN-CARD-${generateUUID()}`.toUpperCase();
   }
 }

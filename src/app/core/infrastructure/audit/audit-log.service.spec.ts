@@ -49,7 +49,7 @@ describe('AuditLogService', () => {
       });
 
       const logs = service.getRecentLogs();
-      expect(logs.length).toBe(1);
+      expect(logs).toHaveLength(1);
       expect(logs[0].agentName).toBe('PaymentAgent');
       expect(logs[0].operation).toBe('processPayment');
       expect(logs[0].action).toBe(AuditAction.CREATE);
@@ -76,7 +76,7 @@ describe('AuditLogService', () => {
       });
 
       const logs = service.getRecentLogs();
-      expect(logs.length).toBe(2);
+      expect(logs).toHaveLength(2);
       expect(logs[0].id).toBeDefined();
       expect(logs[1].id).toBeDefined();
       expect(logs[0].id).not.toBe(logs[1].id);
@@ -163,36 +163,36 @@ describe('AuditLogService', () => {
 
     it('should query all logs', async () => {
       const logs = await service.query({});
-      expect(logs.length).toBe(3);
+      expect(logs).toHaveLength(3);
     });
 
     it('should filter by userId', async () => {
       const logs = await service.query({ userId: 'user-1' });
-      expect(logs.length).toBe(2);
+      expect(logs).toHaveLength(2);
       expect(logs.every((log) => log.userId === 'user-1')).toBe(true);
     });
 
     it('should filter by agentName', async () => {
       const logs = await service.query({ agentName: 'PaymentAgent' });
-      expect(logs.length).toBe(2);
+      expect(logs).toHaveLength(2);
       expect(logs.every((log) => log.agentName === 'PaymentAgent')).toBe(true);
     });
 
     it('should filter by action', async () => {
       const logs = await service.query({ action: AuditAction.REFUND });
-      expect(logs.length).toBe(1);
+      expect(logs).toHaveLength(1);
       expect(logs[0].action).toBe(AuditAction.REFUND);
     });
 
     it('should filter by status', async () => {
       const logs = await service.query({ status: AuditStatus.FAILURE });
-      expect(logs.length).toBe(1);
+      expect(logs).toHaveLength(1);
       expect(logs[0].status).toBe(AuditStatus.FAILURE);
     });
 
     it('should filter by entityType', async () => {
       const logs = await service.query({ entityType: 'Payment' });
-      expect(logs.length).toBe(2);
+      expect(logs).toHaveLength(2);
       expect(logs.every((log) => log.entityType === 'Payment')).toBe(true);
     });
 
@@ -200,8 +200,8 @@ describe('AuditLogService', () => {
       const page1 = await service.query({ limit: 2, offset: 0 });
       const page2 = await service.query({ limit: 2, offset: 2 });
 
-      expect(page1.length).toBe(2);
-      expect(page2.length).toBe(1);
+      expect(page1).toHaveLength(2);
+      expect(page2).toHaveLength(1);
     });
   });
 
@@ -271,7 +271,7 @@ describe('AuditLogService', () => {
 
     it('should retrieve audit trail for specific entity', async () => {
       const trail = await service.getEntityAuditTrail('Payment', 'PAY-123');
-      expect(trail.length).toBe(3);
+      expect(trail).toHaveLength(3);
       expect(trail.every((log) => log.entityId === 'PAY-123')).toBe(true);
     });
 
@@ -300,12 +300,12 @@ describe('AuditLogService', () => {
 
     it('should retrieve user activity with default limit', async () => {
       const activity = await service.getUserActivity('user-123');
-      expect(activity.length).toBe(50); // Default limit
+      expect(activity).toHaveLength(50); // Default limit
     });
 
     it('should retrieve user activity with custom limit', async () => {
       const activity = await service.getUserActivity('user-123', 10);
-      expect(activity.length).toBe(10);
+      expect(activity).toHaveLength(10);
     });
 
     it('should return most recent activities first', async () => {
@@ -343,7 +343,7 @@ describe('AuditLogService', () => {
       const parsed = JSON.parse(exported);
 
       expect(Array.isArray(parsed)).toBe(true);
-      expect(parsed.length).toBe(2);
+      expect(parsed).toHaveLength(2);
       expect(parsed[0].agentName).toBeDefined();
     });
 
@@ -457,7 +457,7 @@ describe('AuditLogService', () => {
       });
 
       const recent = service.getRecentLogs();
-      expect(recent.length).toBe(2);
+      expect(recent).toHaveLength(2);
     });
 
     it('should limit recent logs', async () => {
@@ -473,7 +473,7 @@ describe('AuditLogService', () => {
       }
 
       const recent = service.getRecentLogs(5);
-      expect(recent.length).toBe(5);
+      expect(recent).toHaveLength(5);
     });
   });
 
@@ -491,10 +491,10 @@ describe('AuditLogService', () => {
       await service.clearAll();
 
       const logs = await service.query({});
-      expect(logs.length).toBe(0);
+      expect(logs).toHaveLength(0);
 
       const recent = service.getRecentLogs();
-      expect(recent.length).toBe(0);
+      expect(recent).toHaveLength(0);
     });
   });
 

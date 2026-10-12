@@ -3,18 +3,12 @@ import { Email } from '@core/domain/value-objects/email.value-object';
 
 describe('Email Value Object', () => {
   describe('Constructor and Validation', () => {
-    it('should create a valid email', () => {
-      const email = new Email('user@example.com');
-      expect(email.value).toBe('user@example.com');
-    });
-
-    it('should normalize email to lowercase', () => {
-      const email = new Email('User@Example.COM');
-      expect(email.value).toBe('user@example.com');
-    });
-
-    it('should trim whitespace', () => {
-      const email = new Email('  user@example.com  ');
+    it.each([
+      ['valid email', 'user@example.com'],
+      ['uppercase email', 'User@Example.COM'],
+      ['email with whitespace', '  user@example.com  '],
+    ])('should normalize %s', (_case, input) => {
+      const email = new Email(input);
       expect(email.value).toBe('user@example.com');
     });
 
@@ -111,25 +105,13 @@ describe('Email Value Object', () => {
   });
 
   describe('isFreeEmailProvider()', () => {
-    it('should return true for Gmail', () => {
-      const email = new Email('user@gmail.com');
-      expect(email.isFreeEmailProvider()).toBe(true);
-    });
-
-    it('should return true for Yahoo', () => {
-      const email = new Email('user@yahoo.com');
-      expect(email.isFreeEmailProvider()).toBe(true);
-    });
-
-    it('should return true for Hotmail', () => {
-      const email = new Email('user@hotmail.com');
-      expect(email.isFreeEmailProvider()).toBe(true);
-    });
-
-    it('should return true for Outlook', () => {
-      const email = new Email('user@outlook.com');
-      expect(email.isFreeEmailProvider()).toBe(true);
-    });
+    it.each(['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com'])(
+      'should return true for %s',
+      (domain) => {
+        const email = new Email(`user@${domain}`);
+        expect(email.isFreeEmailProvider()).toBe(true);
+      }
+    );
 
     it('should return false for business domain', () => {
       const email = new Email('user@company.com');

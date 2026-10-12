@@ -58,44 +58,45 @@ export class InMemoryCustomerAuthAdapter implements CustomerAuthGateway {
    * afterwards — the fake stands in for a *confirmed* account being signed in,
    * which is the flow item 18 exercises.
    */
-  async signUp(creds: CredentialsDto): Promise<CustomerRegistrationDto> {
+  signUp(creds: CredentialsDto): Promise<CustomerRegistrationDto> {
     const email = normalizeEmail(creds.email);
     if (this.accounts.has(email)) {
-      throw new CustomerAlreadyExistsError();
+      return Promise.reject(new CustomerAlreadyExistsError());
     }
     this.accounts.set(email, creds.password);
-    return { customerId: `fake-customer-${email}`, email };
+    return Promise.resolve({ customerId: `fake-customer-${email}`, email });
   }
 
-  async authenticate(creds: CredentialsDto): Promise<CustomerSessionDto> {
+  authenticate(creds: CredentialsDto): Promise<CustomerSessionDto> {
     const email = normalizeEmail(creds.email);
     const known = this.accounts.get(email);
     // Unknown email and wrong password fail identically — the same
     // anti-enumeration property the real adapter has to preserve.
     if (known === undefined || known !== creds.password) {
-      throw new InvalidCredentialsError();
+      return Promise.reject(new InvalidCredentialsError());
     }
-    return this.issue(email);
+    return Promise.resolve(this.issue(email));
   }
 
-  async getActiveSession(): Promise<CustomerSessionDto | null> {
+  getActiveSession(): Promise<CustomerSessionDto | null> {
     // An expired session is no session — matches what a real token check does,
     // so `CurrentCustomerService.hydrate()` behaves the same either way.
     if (this.session && new Date(this.session.expiresAt).getTime() <= Date.now()) {
       this.session = null;
     }
-    return this.session;
+    return Promise.resolve(this.session);
   }
 
-  async refresh(): Promise<CustomerSessionDto> {
+  refresh(): Promise<CustomerSessionDto> {
     if (!this.session) {
-      throw new NoActiveCustomerSessionError();
+      return Promise.reject(new NoActiveCustomerSessionError());
     }
-    return this.issue(this.session.email);
+    return Promise.resolve(this.issue(this.session.email));
   }
 
-  async signOut(): Promise<void> {
+  signOut(): Promise<void> {
     this.session = null;
+    return Promise.resolve();
   }
 
   getAccessToken(): string | null {

@@ -169,7 +169,7 @@ describe('ProductSearchComponent — malformed-record contract gate (#109)', () 
     });
 
     const results = host.querySelectorAll('[data-testid="product-result"]');
-    expect(results.length).toBe(2);
+    expect(results).toHaveLength(2);
 
     const text = host.textContent ?? '';
     expect(text).toContain('Coffee');

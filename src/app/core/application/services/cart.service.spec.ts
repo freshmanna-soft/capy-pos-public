@@ -33,7 +33,7 @@ describe('CartService', () => {
   describe('addProduct()', () => {
     it('should add a new product to the cart', () => {
       cartService.addProduct(product1);
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
       expect(cartService.items()[0].product.id).toBe('prod-1');
       expect(cartService.items()[0].quantity).toBe(1);
     });
@@ -41,7 +41,7 @@ describe('CartService', () => {
     it('should increase quantity when adding existing product', () => {
       cartService.addProduct(product1);
       cartService.addProduct(product1);
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
       expect(cartService.items()[0].quantity).toBe(2);
     });
 
@@ -84,7 +84,7 @@ describe('CartService', () => {
       cartService.addProduct(product1); // qty = 1
       cartService.decreaseQuantity('prod-1');
       expect(cartService.hasProduct('prod-1')).toBe(false);
-      expect(cartService.items().length).toBe(0);
+      expect(cartService.items()).toHaveLength(0);
     });
 
     it('should throw error for non-existent product', () => {
@@ -124,7 +124,7 @@ describe('CartService', () => {
       cartService.addProduct(product1);
       cartService.addProduct(product2);
       cartService.removeItem('prod-1');
-      expect(cartService.items().length).toBe(1);
+      expect(cartService.items()).toHaveLength(1);
       expect(cartService.hasProduct('prod-1')).toBe(false);
     });
   });
@@ -134,7 +134,7 @@ describe('CartService', () => {
       cartService.addProduct(product1);
       cartService.addProduct(product2);
       cartService.clearCart();
-      expect(cartService.items().length).toBe(0);
+      expect(cartService.items()).toHaveLength(0);
       expect(cartService.isEmpty()).toBe(true);
     });
   });

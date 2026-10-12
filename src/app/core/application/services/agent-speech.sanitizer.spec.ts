@@ -1,9 +1,32 @@
-import { MAX_SPEECH_WORDS, joinWithinSpeechBudget } from './agent-speech.sanitizer';
+import {
+  MAX_SPEECH_WORDS,
+  joinWithinSpeechBudget,
+  sanitizeAgentSpeech,
+} from './agent-speech.sanitizer';
 
 /** A phrase of exactly `words` words, so a budget boundary can be hit on purpose. */
 function words(count: number, word = 'coffee'): string {
   return Array.from({ length: count }, () => word).join(' ');
 }
+
+describe('sanitizeAgentSpeech', () => {
+  const context = {
+    namesByCode: new Map<string, string>([['sku-8891', 'coffee beans']]),
+    offerOnScreen: false,
+  };
+
+  it('names a hyphenated SKU without consuming ordinary hyphenated words', () => {
+    expect(sanitizeAgentSpeech('Use SKU-8891, not a sugar-free syrup.', context)).toBe(
+      'Use coffee beans, not a sugar-free syrup.'
+    );
+  });
+
+  it('collapses long whitespace and removes spaces before punctuation', () => {
+    const hostileWhitespace = `${' '.repeat(20_000)}, ready`;
+
+    expect(sanitizeAgentSpeech(`Coffee${hostileWhitespace}!`, context)).toBe('Coffee, ready!');
+  });
+});
 
 describe('joinWithinSpeechBudget', () => {
   it('puts the till`s report in front of the model`s answer', () => {

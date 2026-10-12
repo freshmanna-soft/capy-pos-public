@@ -39,7 +39,7 @@ export class WebAuthnDataError extends Error {
  * so it is restored here rather than required from the caller.
  */
 export function base64UrlToBytes(value: string): Uint8Array {
-  const normalised = value.replace(/-/g, '+').replace(/_/g, '/');
+  const normalised = value.replaceAll('-', '+').replaceAll('_', '/');
   const padded = normalised.padEnd(normalised.length + ((4 - (normalised.length % 4)) % 4), '=');
   let binary: string;
   try {
@@ -49,7 +49,7 @@ export function base64UrlToBytes(value: string): Uint8Array {
   }
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+    bytes[i] = binary.codePointAt(i) ?? 0;
   }
   return bytes;
 }
@@ -66,9 +66,14 @@ export function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = '';
   const CHUNK = 0x8000;
   for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    binary += String.fromCodePoint(...bytes.subarray(i, i + CHUNK));
   }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const padded = btoa(binary).replaceAll('+', '-').replaceAll('/', '_');
+  return padded.endsWith('==')
+    ? padded.slice(0, -2)
+    : padded.endsWith('=')
+      ? padded.slice(0, -1)
+      : padded;
 }
 
 // ---------------------------------------------------------------------------

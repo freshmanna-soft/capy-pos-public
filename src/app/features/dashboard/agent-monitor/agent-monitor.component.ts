@@ -621,22 +621,28 @@ export class AgentMonitorComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.loadAgentStatus();
+    this.loadAsyncPanel(this.loadAgentStatus(), 'agent status');
     this.loadCircuitBreakers();
     this.loadMetrics();
-    this.loadAuditLogs();
+    this.loadAsyncPanel(this.loadAuditLogs(), 'audit logs');
     this.loadEventBusStats();
 
     // Refresh data every 5 seconds
     interval(5000)
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => {
-        this.loadAgentStatus();
+        this.loadAsyncPanel(this.loadAgentStatus(), 'agent status');
         this.loadCircuitBreakers();
         this.loadMetrics();
-        this.loadAuditLogs();
+        this.loadAsyncPanel(this.loadAuditLogs(), 'audit logs');
         this.loadEventBusStats();
       });
+  }
+
+  private loadAsyncPanel(task: Promise<void>, panel: string): void {
+    void task.catch((error: unknown) => {
+      console.error(`[AgentMonitor] Failed to load ${panel}:`, error);
+    });
   }
 
   ngOnDestroy(): void {

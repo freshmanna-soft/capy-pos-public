@@ -520,7 +520,7 @@ describe('LoginComponent — PIN sign-in', () => {
     for (let i = 0; i < 12; i++) {
       fixture.componentInstance.pressDigit('7');
     }
-    expect(fixture.componentInstance.pin().length).toBe(8);
+    expect(fixture.componentInstance.pin()).toHaveLength(8);
   });
 
   it('deletes the last digit on backspace', async () => {

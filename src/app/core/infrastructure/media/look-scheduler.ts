@@ -106,9 +106,7 @@ export class LookScheduler {
       this.armedAt = null;
       return 'deferred';
     }
-    if (this.armedAt === null) {
-      this.armedAt = nowMs;
-    }
+    this.armedAt ??= nowMs;
     if (nowMs - this.armedAt < this.config.debounceMs) {
       return 'settling';
     }

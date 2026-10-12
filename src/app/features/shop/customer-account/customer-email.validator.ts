@@ -1,4 +1,5 @@
 import { AbstractControl, ValidationErrors, ValidatorFn } from '@angular/forms';
+import { hasValidEmailShape } from '@core/domain/utils/email';
 
 /**
  * The address rule this form enforces, kept deliberately identical to the one the
@@ -24,9 +25,6 @@ import { AbstractControl, ValidationErrors, ValidatorFn } from '@angular/forms';
  * a silent behaviour change if the relay ever loosened its rule. `customer-email.
  * validator.spec.ts` is what pins the parity, case by case.
  */
-
-/** Mirrors the relay's `EMAIL_PATTERN`. */
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Mirrors the relay's `MAX_EMAIL_LENGTH` — the longest address RFC 5321 allows,
@@ -68,7 +66,7 @@ export const customerEmailValidator: ValidatorFn = (
     return { email: true };
   }
   const value = raw.trim();
-  if (!EMAIL_PATTERN.test(value)) {
+  if (!hasValidEmailShape(value)) {
     return { email: true };
   }
   return value.length > MAX_EMAIL_LENGTH ? { emailTooLong: { max: MAX_EMAIL_LENGTH } } : null;

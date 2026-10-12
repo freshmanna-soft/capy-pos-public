@@ -19,7 +19,7 @@
     muted
     playsinline
     autoplay
-    aria-hidden="true"
+    aria-label="Live camera preview"
     data-testid="clerk-feed"
   ></video>
 
@@ -57,10 +57,9 @@
   @if (needsConsent()) {
     <!-- Frames leave the device on this build, so say so before opening the
          camera rather than in a settings page nobody reads. -->
-    <div
-      class="absolute inset-0 z-10 grid place-items-center bg-onsen-deep/95 px-6 backdrop-blur"
-      role="dialog"
-      aria-modal="true"
+    <dialog
+      open
+      class="absolute inset-0 z-10 m-0 grid h-full max-h-none w-full max-w-none place-items-center border-0 bg-onsen-deep/95 px-6 text-steam backdrop-blur"
       aria-labelledby="clerk-consent-title"
       data-testid="clerk-consent"
     >
@@ -92,7 +91,7 @@
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   }
 
   @if (clerk.phase() === 'blocked') {

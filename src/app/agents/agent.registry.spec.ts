@@ -18,6 +18,7 @@ import {
 import { PRODUCT_REPOSITORY_TOKEN } from '@app/agents/inventory/infrastructure/inventory.agent';
 import { AuditLogService } from '@core/infrastructure/audit/audit-log.service';
 import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
+import { Product } from '@core/domain/entities/product.entity';
 
 // Mock repositories
 const mockProductRepository: Partial<IProductRepository> = {
@@ -51,6 +52,17 @@ describe('AgentRegistry', () => {
   let integrationAgent: IntegrationAgent;
 
   beforeEach(() => {
+    vi.clearAllMocks();
+    mockProductRepository.findAll = vi.fn().mockResolvedValue([]);
+    mockProductRepository.findById = vi.fn().mockResolvedValue(null);
+    mockProductRepository.findLowStock = vi.fn().mockResolvedValue([]);
+    mockProductRepository.updateStock = vi.fn().mockResolvedValue(undefined);
+    mockProductRepository.adjustStock = vi.fn().mockResolvedValue(undefined);
+    mockTransactionRepository.findAll = vi.fn().mockResolvedValue([]);
+    mockTransactionRepository.findById = vi.fn().mockResolvedValue(null);
+    mockTransactionRepository.findByDateRange = vi.fn().mockResolvedValue([]);
+    mockTransactionRepository.count = vi.fn().mockResolvedValue(0);
+
     TestBed.configureTestingModule({
       providers: [
         AuditLogService,
@@ -101,7 +113,7 @@ describe('AgentRegistry', () => {
   describe('Agent Registration', () => {
     it('should register all agents on construction', () => {
       const agents = registry.getAllAgents();
-      expect(agents.length).toBe(6);
+      expect(agents).toHaveLength(6);
     });
 
     it('should get agent by ID', () => {
@@ -159,15 +171,93 @@ describe('AgentRegistry', () => {
     });
   });
 
+  describe('Inventory mutation ordering', () => {
+    it('serializes bulk updates so a later write starts only after the prior write settles', async () => {
+      const product = new Product('p-1', 'Coffee', 4, 'COF-1', 'Drinks', 10);
+      mockProductRepository.findById = vi.fn().mockResolvedValue(product);
+
+      let releaseFirst!: () => void;
+      const firstWrite = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      mockProductRepository.updateStock = vi
+        .fn()
+        .mockImplementationOnce(() => firstWrite)
+        .mockResolvedValue(product);
+
+      const operation = inventoryAgent.bulkUpdateStock({
+        updates: [
+          { productId: 'p-1', quantity: 8 },
+          { productId: 'p-1', quantity: 6 },
+        ],
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mockProductRepository.updateStock).toHaveBeenCalledTimes(1);
+
+      releaseFirst();
+      const response = await operation;
+
+      expect(response.success).toBe(true);
+      expect(mockProductRepository.updateStock).toHaveBeenNthCalledWith(1, 'p-1', 8);
+      expect(mockProductRepository.updateStock).toHaveBeenNthCalledWith(2, 'p-1', 6);
+    });
+  });
+
+  describe('Sales stock mutation ordering', () => {
+    it('serializes stock decrements so duplicate product lines cannot race', async () => {
+      const product = new Product('p-1', 'Coffee', 4, 'COF-1', 'Drinks', 10);
+      mockTransactionRepository.create = vi
+        .fn()
+        .mockImplementation(async (transaction) => transaction);
+      mockTransactionRepository.update = vi
+        .fn()
+        .mockImplementation(async (_id, transaction) => transaction);
+
+      let releaseFirst!: () => void;
+      const firstWrite = new Promise<Product>((resolve) => {
+        releaseFirst = () => resolve(product);
+      });
+      mockProductRepository.adjustStock = vi
+        .fn()
+        .mockImplementationOnce(() => firstWrite)
+        .mockResolvedValue(product);
+
+      const operation = salesAgent.recordSale({
+        transactionId: 'sale-1',
+        items: [
+          { productId: 'p-1', productName: 'Coffee', quantity: 1, unitPrice: 4 },
+          { productId: 'p-1', productName: 'Coffee', quantity: 2, unitPrice: 4 },
+        ],
+        subtotal: 12,
+        taxRate: 0,
+        paymentIds: [],
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mockProductRepository.adjustStock).toHaveBeenCalledTimes(1);
+
+      releaseFirst();
+      const response = await operation;
+
+      expect(response.success).toBe(true);
+      expect(mockProductRepository.adjustStock).toHaveBeenNthCalledWith(1, 'p-1', -1);
+      expect(mockProductRepository.adjustStock).toHaveBeenNthCalledWith(2, 'p-1', -2);
+    });
+  });
+
   describe('Health Monitoring', () => {
     it('should get health status of all agents', async () => {
       await registry.initializeAll();
       const healthMap = await registry.getHealthStatus();
 
       expect(healthMap.size).toBe(6);
-      expect(healthMap.has('inventory-agent')).toBe(true);
-      expect(healthMap.has('sales-agent')).toBe(true);
-      expect(healthMap.has('payment-agent')).toBe(true);
+      expect([...healthMap.keys()]).toContain('inventory-agent');
+      expect([...healthMap.keys()]).toContain('sales-agent');
+      expect([...healthMap.keys()]).toContain('payment-agent');
     });
 
     it('should check if all agents are healthy', async () => {
@@ -203,18 +293,18 @@ describe('AgentRegistry', () => {
   describe('Agent Discovery', () => {
     it('should find agents by name pattern', () => {
       const agents = registry.findAgentsByName('Agent');
-      expect(agents.length).toBe(6);
+      expect(agents).toHaveLength(6);
     });
 
     it('should find specific agent by name', () => {
       const agents = registry.findAgentsByName('Inventory');
-      expect(agents.length).toBe(1);
+      expect(agents).toHaveLength(1);
       expect(agents[0].name).toBe('Inventory Agent');
     });
 
     it('should return empty array for no matches', () => {
       const agents = registry.findAgentsByName('NonExistent');
-      expect(agents.length).toBe(0);
+      expect(agents).toHaveLength(0);
     });
   });
 
@@ -222,7 +312,7 @@ describe('AgentRegistry', () => {
     it('should get agents by status', async () => {
       await registry.initializeAll();
       const idleAgents = registry.getAgentsByStatus(AgentStatus.IDLE);
-      expect(idleAgents.length).toBe(6);
+      expect(idleAgents).toHaveLength(6);
     });
 
     it('should filter processing agents', async () => {
@@ -230,7 +320,7 @@ describe('AgentRegistry', () => {
       await registry.startAll();
 
       const processingAgents = registry.getAgentsByStatus(AgentStatus.PROCESSING);
-      expect(processingAgents.length).toBe(6);
+      expect(processingAgents).toHaveLength(6);
     });
   });
 

@@ -142,8 +142,12 @@ function statusOf(error: unknown, message: string): number | null {
  */
 function policyDetail(message: string): string | null {
   const trimmed = message.trim();
-  const explanation = /password.*?[.:]\s*(.+)$/is.exec(trimmed)?.[1]?.trim();
-  return explanation && explanation.length > 0 ? explanation : null;
+  const lead = 'That password does not meet the password policy for this store.';
+  if (!trimmed.toLowerCase().startsWith(lead.toLowerCase())) {
+    return null;
+  }
+  const explanation = trimmed.slice(lead.length).trim();
+  return explanation.length > 0 ? explanation : null;
 }
 
 /**

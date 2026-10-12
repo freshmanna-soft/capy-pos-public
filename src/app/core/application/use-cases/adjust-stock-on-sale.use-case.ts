@@ -83,7 +83,8 @@ export class AdjustStockOnSaleUseCase {
     // Filter out invalid items (zero or negative quantities)
     const validItems = items.filter((item) => item.quantity > 0);
 
-    for (const item of validItems) {
+    await validItems.reduce<Promise<void>>(async (previous, item) => {
+      await previous;
       try {
         // Get current stock before adjustment for audit trail
         const currentProduct = await this.productRepository.findById(item.productId);
@@ -114,7 +115,7 @@ export class AdjustStockOnSaleUseCase {
           error: errorMessage,
         });
       }
-    }
+    }, Promise.resolve());
 
     const success = failedAdjustments.length === 0;
 

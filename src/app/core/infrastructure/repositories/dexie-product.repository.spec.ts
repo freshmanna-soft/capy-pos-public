@@ -162,7 +162,7 @@ describe('DexieProductRepository (real Dexie + fake-indexeddb)', () => {
     });
 
     it('getTopSelling returns up to the limit', async () => {
-      expect((await repo.getTopSelling(2)).length).toBe(2);
+      expect(await repo.getTopSelling(2)).toHaveLength(2);
     });
 
     it('findById returns the entity or null', async () => {

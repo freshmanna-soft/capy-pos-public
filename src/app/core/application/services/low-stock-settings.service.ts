@@ -45,8 +45,8 @@ export class LowStockSettingsService {
     try {
       const table = this.db.table('settings');
       const record = await table.get(this.SETTINGS_KEY);
-      const value = record ? parseInt(record['value'], 10) : this.DEFAULT_THRESHOLD;
-      this._threshold.set(isNaN(value) ? this.DEFAULT_THRESHOLD : value);
+      const value = record ? Number.parseInt(record['value'], 10) : this.DEFAULT_THRESHOLD;
+      this._threshold.set(Number.isNaN(value) ? this.DEFAULT_THRESHOLD : value);
       return this._threshold();
     } catch {
       this._threshold.set(this.DEFAULT_THRESHOLD);

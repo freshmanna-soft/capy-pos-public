@@ -24,17 +24,20 @@ export class CustomerAgent extends BaseAgent implements ICustomerAgent {
     super('customer-agent', 'CustomerAgent', 'Handles customer management and loyalty programs');
   }
 
-  protected async onInitialize(): Promise<void> {
+  protected onInitialize(): Promise<void> {
     console.log('Initializing CustomerAgent');
+    return Promise.resolve();
   }
 
-  protected async onStart(): Promise<void> {
+  protected onStart(): Promise<void> {
     console.log('Starting CustomerAgent');
+    return Promise.resolve();
   }
 
-  protected async onStop(): Promise<void> {
+  protected onStop(): Promise<void> {
     console.log('Stopping CustomerAgent');
     this.customerEventsSubject.complete();
+    return Promise.resolve();
   }
 
   protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
@@ -69,25 +72,25 @@ export class CustomerAgent extends BaseAgent implements ICustomerAgent {
     }
   }
 
-  async createCustomer(_request: CreateCustomerRequest): Promise<CreateCustomerResponse> {
+  createCustomer(_request: CreateCustomerRequest): Promise<CreateCustomerResponse> {
     // Mock implementation
-    return { success: true };
+    return Promise.resolve({ success: true });
   }
 
-  async updateCustomer(_request: UpdateCustomerRequest): Promise<UpdateCustomerResponse> {
-    return { success: true };
+  updateCustomer(_request: UpdateCustomerRequest): Promise<UpdateCustomerResponse> {
+    return Promise.resolve({ success: true });
   }
 
-  async getCustomer(_customerId: string): Promise<Customer> {
-    throw new Error('Not implemented');
+  getCustomer(_customerId: string): Promise<Customer> {
+    return Promise.reject(new Error('Not implemented'));
   }
 
-  async searchCustomers(_query: string): Promise<Customer[]> {
-    return [];
+  searchCustomers(_query: string): Promise<Customer[]> {
+    return Promise.resolve([]);
   }
 
-  async getLoyaltyPoints(_customerId: string): Promise<number> {
-    return 0;
+  getLoyaltyPoints(_customerId: string): Promise<number> {
+    return Promise.resolve(0);
   }
 }
 

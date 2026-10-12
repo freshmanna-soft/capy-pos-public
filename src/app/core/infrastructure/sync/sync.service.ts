@@ -451,7 +451,8 @@ export class SyncService implements OnDestroy {
         break;
 
       case 'PRODUCTS_SYNCED':
-        this.writeProductsToDexie(event.products);
+        // The write method catches and reports persistence failures internally.
+        void this.writeProductsToDexie(event.products);
         break;
 
       case 'TRANSACTIONS_SYNCED':

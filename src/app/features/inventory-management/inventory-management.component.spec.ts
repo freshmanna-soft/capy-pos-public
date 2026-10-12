@@ -126,48 +126,40 @@ describe('InventoryManagementComponent', () => {
 
   describe('Filtering', () => {
     it('should display all products when no filter is applied', () => {
-      expect(component.filteredProducts().length).toBe(3);
+      expect(component.filteredProducts()).toHaveLength(3);
     });
 
     it('should filter products by search query (name)', () => {
       component.searchQuery.set('coffee');
-      expect(component.filteredProducts().length).toBe(1);
+      expect(component.filteredProducts()).toHaveLength(1);
       expect(component.filteredProducts()[0].name).toBe('Coffee');
     });
 
     it('should filter products by search query (SKU)', () => {
       component.searchQuery.set('SKU-002');
-      expect(component.filteredProducts().length).toBe(1);
+      expect(component.filteredProducts()).toHaveLength(1);
       expect(component.filteredProducts()[0].name).toBe('Muffin');
     });
 
     it('should filter products by category', () => {
       component.categoryFilter.set('Beverages');
-      expect(component.filteredProducts().length).toBe(2);
+      expect(component.filteredProducts()).toHaveLength(2);
     });
 
-    it('should filter products by stock status (critical)', () => {
-      component.stockFilter.set('critical');
-      expect(component.filteredProducts().length).toBe(1);
-      expect(component.filteredProducts()[0].name).toBe('Muffin');
-    });
-
-    it('should filter products by stock status (warning)', () => {
-      component.stockFilter.set('warning');
-      expect(component.filteredProducts().length).toBe(1);
-      expect(component.filteredProducts()[0].name).toBe('Tea');
-    });
-
-    it('should filter products by stock status (healthy)', () => {
-      component.stockFilter.set('healthy');
-      expect(component.filteredProducts().length).toBe(1);
-      expect(component.filteredProducts()[0].name).toBe('Coffee');
+    it.each([
+      ['critical', 'Muffin'],
+      ['warning', 'Tea'],
+      ['healthy', 'Coffee'],
+    ] as const)('should filter products by stock status (%s)', (status, expectedName) => {
+      component.stockFilter.set(status);
+      expect(component.filteredProducts()).toHaveLength(1);
+      expect(component.filteredProducts()[0].name).toBe(expectedName);
     });
 
     it('should combine search and category filters', () => {
       component.searchQuery.set('tea');
       component.categoryFilter.set('Beverages');
-      expect(component.filteredProducts().length).toBe(1);
+      expect(component.filteredProducts()).toHaveLength(1);
       expect(component.filteredProducts()[0].name).toBe('Tea');
     });
   });

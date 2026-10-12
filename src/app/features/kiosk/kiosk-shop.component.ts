@@ -1237,7 +1237,7 @@ export class KioskShopComponent implements OnInit, OnDestroy {
   productGradient(productId: string): string {
     let hash = 0;
     for (let i = 0; i < productId.length; i++) {
-      hash = (hash * 31 + productId.charCodeAt(i)) >>> 0;
+      hash = (hash * 31 + (productId.codePointAt(i) ?? 0)) >>> 0;
     }
     const h1 = hash % 360;
     const h2 = (h1 + 40) % 360;

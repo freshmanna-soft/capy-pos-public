@@ -92,7 +92,7 @@ export class FrameGate {
     // this one across calls.
     this.previous = Uint8Array.from(sample);
 
-    if (previous === null || previous.length !== sample.length) {
+    if (previous?.length !== sample.length) {
       return 'warming';
     }
 

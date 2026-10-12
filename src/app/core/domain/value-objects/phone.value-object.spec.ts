@@ -207,21 +207,13 @@ describe('Phone Value Object', () => {
   });
 
   describe('equals()', () => {
-    it('should return true for identical phone numbers', () => {
-      const phone1 = new Phone('+1-555-123-4567');
-      const phone2 = new Phone('+1-555-123-4567');
-      expect(phone1.equals(phone2)).toBe(true);
-    });
-
-    it('should return true for differently formatted but same phone numbers', () => {
-      const phone1 = new Phone('+1-555-123-4567');
-      const phone2 = new Phone('+1 (555) 123-4567');
-      expect(phone1.equals(phone2)).toBe(true);
-    });
-
-    it('should return true when one has implicit US country code', () => {
-      const phone1 = new Phone('555-123-4567');
-      const phone2 = new Phone('+1-555-123-4567');
+    it.each([
+      ['identical phone numbers', '+1-555-123-4567', '+1-555-123-4567'],
+      ['differently formatted numbers', '+1-555-123-4567', '+1 (555) 123-4567'],
+      ['implicit US country code', '555-123-4567', '+1-555-123-4567'],
+    ])('should return true for %s', (_case, first, second) => {
+      const phone1 = new Phone(first);
+      const phone2 = new Phone(second);
       expect(phone1.equals(phone2)).toBe(true);
     });
 
@@ -359,18 +351,12 @@ describe('Phone Value Object', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should handle phone with dots as separators', () => {
-      const phone = new Phone('555.123.4567');
-      expect(phone.value).toBe('+15551234567');
-    });
-
-    it('should handle phone with mixed separators', () => {
-      const phone = new Phone('+1 (555)-123.4567');
-      expect(phone.value).toBe('+15551234567');
-    });
-
-    it('should handle phone with no separators', () => {
-      const phone = new Phone('5551234567');
+    it.each([
+      ['dots as separators', '555.123.4567'],
+      ['mixed separators', '+1 (555)-123.4567'],
+      ['no separators', '5551234567'],
+    ])('should handle phone with %s', (_case, input) => {
+      const phone = new Phone(input);
       expect(phone.value).toBe('+15551234567');
     });
 

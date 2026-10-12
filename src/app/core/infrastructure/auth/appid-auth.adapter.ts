@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { decodeProtectedHeader, jwtVerify, type JWTPayload } from 'jose';
-import { APPID_CONFIG, type AppIdConfig } from './appid-config';
+import { APPID_CONFIG } from './appid-config';
 import { AuthGateway } from '@core/application/auth/ports/auth-gateway.port';
 import { CredentialsDto } from '@core/application/auth/dtos/credentials.dto';
 import { AuthSessionDto, TenantMembershipDto } from '@core/application/auth/dtos/auth-session.dto';
@@ -12,7 +12,7 @@ import { AppIdAuthError, AppIdJwksKeyResolver } from './appid-jwks';
 // Re-exported: this class declared `AppIdAuthError` before the JWKS logic moved
 // to `appid-jwks.ts` (shared with `AppIdCustomerAuthAdapter`, epic #261 item
 // 11). Callers keep importing it from here.
-export { AppIdAuthError };
+export { AppIdAuthError } from './appid-jwks';
 
 /**
  * AppIdAuthAdapter
@@ -73,7 +73,7 @@ export { AppIdAuthError };
 // `from './appid-auth.adapter'` call site working.
 // ---------------------------------------------------------------------------
 
-export { APPID_CONFIG, type AppIdConfig };
+export { APPID_CONFIG, type AppIdConfig } from './appid-config';
 
 // ---------------------------------------------------------------------------
 // Token storage — same keys/strategy as the other two gateways, so the three
@@ -184,12 +184,13 @@ export class AppIdAuthAdapter implements AuthGateway {
     return session;
   }
 
-  async signOut(): Promise<void> {
+  signOut(): Promise<void> {
     // No server-side revocation call: unlike Cognito's documented GlobalSignOut,
     // an App ID token-revocation endpoint isn't confirmed against real docs, and
     // this adapter doesn't guess API shapes it hasn't verified. Local clear is a
     // real logout (the token stops being presented) even without it.
     this.clear();
+    return Promise.resolve();
   }
 
   getAccessToken(): string | null {
@@ -258,7 +259,7 @@ export class AppIdAuthAdapter implements AuthGateway {
     if (!result.access_token) {
       throw new AppIdAuthError('App ID relay returned no access token');
     }
-    return this.sessionFromToken(result.access_token);
+    return await this.sessionFromToken(result.access_token);
   }
 
   private async sessionFromToken(accessToken: string): Promise<AuthSessionDto> {

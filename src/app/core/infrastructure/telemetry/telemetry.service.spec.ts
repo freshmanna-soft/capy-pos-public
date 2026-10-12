@@ -98,7 +98,7 @@ describe('TelemetryService', () => {
 
     it('trims events beyond the max (500) and clearEvents empties them', () => {
       for (let i = 0; i < 505; i++) svc.trackEvent('e');
-      expect(svc.getRecentEvents().length).toBe(500);
+      expect(svc.getRecentEvents()).toHaveLength(500);
       svc.clearEvents();
       expect(svc.getRecentEvents()).toHaveLength(0);
     });

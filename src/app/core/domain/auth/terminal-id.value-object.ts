@@ -36,7 +36,7 @@ export class TerminalId extends BaseValueObject<TerminalId> {
   constructor(storeId: StoreId, slug: string, mode: TerminalMode = TerminalMode.OPERATOR) {
     super();
     if (!(storeId instanceof StoreId)) {
-      throw new Error('TerminalId requires a StoreId');
+      throw new TypeError('TerminalId requires a StoreId');
     }
     TerminalId.validateSlug(slug);
     if (!Object.values(TerminalMode).includes(mode)) {

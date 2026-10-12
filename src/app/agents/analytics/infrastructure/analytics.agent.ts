@@ -34,17 +34,20 @@ export class AnalyticsAgent extends BaseAgent implements IAnalyticsAgent {
     );
   }
 
-  protected async onInitialize(): Promise<void> {
+  protected onInitialize(): Promise<void> {
     console.log('Initializing AnalyticsAgent');
+    return Promise.resolve();
   }
 
-  protected async onStart(): Promise<void> {
+  protected onStart(): Promise<void> {
     console.log('Starting AnalyticsAgent');
+    return Promise.resolve();
   }
 
-  protected async onStop(): Promise<void> {
+  protected onStop(): Promise<void> {
     console.log('Stopping AnalyticsAgent');
     this.analyticsEventsSubject.complete();
+    return Promise.resolve();
   }
 
   protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
@@ -71,45 +74,45 @@ export class AnalyticsAgent extends BaseAgent implements IAnalyticsAgent {
     }
   }
 
-  async generateSalesAnalytics(_request: SalesAnalyticsRequest): Promise<SalesAnalyticsResponse> {
+  generateSalesAnalytics(_request: SalesAnalyticsRequest): Promise<SalesAnalyticsResponse> {
     // Mock implementation - replace with actual analytics logic
-    return {
+    return Promise.resolve({
       totalSales: 150,
       totalRevenue: 15000,
       averageOrderValue: 100,
       trends: [],
-    };
+    });
   }
 
-  async generateInventoryAnalytics(
+  generateInventoryAnalytics(
     _request: InventoryAnalyticsRequest
   ): Promise<InventoryAnalyticsResponse> {
-    return {
+    return Promise.resolve({
       totalProducts: 100,
       outOfStock: 5,
       lowStock: 10,
       topSellingProducts: [],
-    };
+    });
   }
 
-  async generateCustomerAnalytics(
+  generateCustomerAnalytics(
     _request: CustomerAnalyticsRequest
   ): Promise<CustomerAnalyticsResponse> {
-    return {
+    return Promise.resolve({
       totalCustomers: 500,
       newCustomers: 50,
       returningCustomers: 450,
       topCustomers: [],
-    };
+    });
   }
 
-  async getRealTimeMetrics(): Promise<RealTimeMetricsResponse> {
-    return {
+  getRealTimeMetrics(): Promise<RealTimeMetricsResponse> {
+    return Promise.resolve({
       currentSales: 25,
       todayRevenue: 2500,
       activeTransactions: 3,
       lowStockAlerts: 5,
-    };
+    });
   }
 }
 

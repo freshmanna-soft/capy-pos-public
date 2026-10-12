@@ -36,7 +36,7 @@ import {
  * but it is verification by the same process that would be lying if the bundle
  * were tampered with. It raises the bar at the counter; it is not a substitute
  * for server-side verification. When the Cognito path lands, that is where these
- * checks belong. See the TODO in `webauthn-auth.adapter.ts`.
+ * checks belong. See the documented security boundary in `webauthn-auth.adapter.ts`.
  */
 
 /** Why a ceremony was refused. Distinct values because they mean different things. */

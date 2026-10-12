@@ -10,8 +10,8 @@ import { OtlpExporterService } from './otlp-exporter.service';
  */
 @Injectable()
 export class TraceContextInterceptor implements HttpInterceptor {
-  private tracer = trace.getTracer('http-interceptor', '0.0.0');
-  private otlpExporter = inject(OtlpExporterService);
+  private readonly tracer = trace.getTracer('http-interceptor', '0.0.0');
+  private readonly otlpExporter = inject(OtlpExporterService);
 
   intercept(request: HttpRequest<unknown>, next: HttpHandler): Observable<HttpEvent<unknown>> {
     // Skip non-API requests (e.g., assets)

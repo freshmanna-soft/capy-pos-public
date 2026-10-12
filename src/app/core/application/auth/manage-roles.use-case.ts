@@ -18,15 +18,23 @@ export class ManageRolesUseCase {
   private readonly authz = inject(AngularAuthorizationService);
 
   /** @throws AuthorizationError without MANAGE_ROLES. */
-  async listRoles(): Promise<RoleSummaryDto[]> {
-    this.authz.assert(Permission.MANAGE_ROLES);
-    return this.port.listRoles();
+  listRoles(): Promise<RoleSummaryDto[]> {
+    try {
+      this.authz.assert(Permission.MANAGE_ROLES);
+      return this.port.listRoles();
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   /** @throws AuthorizationError without MANAGE_ROLES. Returns the new role id. */
-  async createRole(input: CreateRoleInput): Promise<string> {
-    this.authz.assert(Permission.MANAGE_ROLES);
-    return this.port.createRole(input);
+  createRole(input: CreateRoleInput): Promise<string> {
+    try {
+      this.authz.assert(Permission.MANAGE_ROLES);
+      return this.port.createRole(input);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   /** @throws AuthorizationError without MANAGE_ROLES; Error for a built-in role. */

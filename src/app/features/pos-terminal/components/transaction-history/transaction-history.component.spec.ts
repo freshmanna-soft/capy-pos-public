@@ -190,7 +190,7 @@ describe('TransactionHistoryComponent', () => {
 
     it('should display correct number of transactions', () => {
       const cards = fixture.nativeElement.querySelectorAll('.transaction-card');
-      expect(cards.length).toBe(3);
+      expect(cards).toHaveLength(3);
     });
 
     it('should display transaction total amount', () => {

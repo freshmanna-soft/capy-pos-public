@@ -18,7 +18,7 @@ export class StoreId extends BaseValueObject<StoreId> {
   constructor(orgId: OrgId, slug: string) {
     super();
     if (!(orgId instanceof OrgId)) {
-      throw new Error('StoreId requires an OrgId');
+      throw new TypeError('StoreId requires an OrgId');
     }
     StoreId.validateSlug(slug);
     this._orgId = orgId;

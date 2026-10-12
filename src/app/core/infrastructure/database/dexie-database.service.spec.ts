@@ -141,6 +141,7 @@ describe('DexieDatabase v4 — fresh-DB seeding', () => {
     expect(op!.email).toBe('admin@capy-pos.local');
     expect(op!.roleId).toBe('role-admin');
     expect(op!.tenantId).toBe(DEFAULT_TENANT_ID);
+    expect(op!.passwordHash).toBe('');
   });
 
   it('seeds a userTenants membership for the default admin', async () => {
@@ -513,11 +514,11 @@ describe('DexieDatabase v4 — rolePermissions re-derivation (R11)', () => {
     for (const role of Role.all()) {
       const roleId = `role-${role.name}`;
       for (const permission of role.permissions) {
-        expect(rowSet.has(`${roleId}:${permission}`)).toBe(true);
+        expect([...rowSet]).toContain(`${roleId}:${permission}`);
         expectedCount++;
       }
     }
-    expect(rows.length).toBe(expectedCount);
+    expect(rows).toHaveLength(expectedCount);
   });
 });
 
@@ -810,7 +811,7 @@ describe('DexieDatabase v4 — products [tenantId+id] secondary index (R1)', () 
     });
 
     const taProducts = await db.products.where('tenantId').equals('tenant-a').toArray();
-    expect(taProducts.length).toBe(1);
+    expect(taProducts).toHaveLength(1);
     expect(taProducts[0].name).toBe('TA Product 1');
   });
 
@@ -849,7 +850,7 @@ describe('DexieDatabase v4 — products [tenantId+id] secondary index (R1)', () 
     });
 
     const all = await db.products.toArray();
-    expect(all.length).toBe(2);
+    expect(all).toHaveLength(2);
   });
 });
 

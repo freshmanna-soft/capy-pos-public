@@ -27,7 +27,8 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const ADMIN_HASH = '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW';
+const ADMIN_HASH =
+  'pbkdf2:100000:00112233445566778899aabbccddeeff:f31abf505e95c8f0d056022838e872a8cd2bc7443b0e92c53a008f667df1aa9f';
 
 const seedOperator: IOperatorDB = {
   id: 'op-001',
@@ -138,7 +139,7 @@ describe('LocalCredentialAuthAdapter', () => {
       });
 
       expect(typeof session.accessToken).toBe('string');
-      expect(session.accessToken.split('.').length).toBe(3); // header.payload.sig
+      expect(session.accessToken.split('.')).toHaveLength(3); // header.payload.sig
     });
 
     it('stores the token so getAccessToken() returns it synchronously', async () => {
@@ -171,6 +172,14 @@ describe('LocalCredentialAuthAdapter', () => {
     it('throws InvalidCredentialsError for wrong password', async () => {
       await expect(
         adapter.authenticate({ email: 'admin@capy-pos.local', password: 'wrongpassword' })
+      ).rejects.toThrow(InvalidCredentialsError);
+    });
+
+    it('rejects a seeded smoke operator with no local credential', async () => {
+      adapter = buildAdapter(makeMockDb({ passwordHash: '' }));
+
+      await expect(
+        adapter.authenticate({ email: 'admin@capy-pos.local', password: 'admin1234' })
       ).rejects.toThrow(InvalidCredentialsError);
     });
 
@@ -303,7 +312,7 @@ describe('LocalCredentialAuthAdapter', () => {
       await adapter.authenticate({ email: 'admin@capy-pos.local', password: 'admin1234' });
       const token = adapter.getAccessToken();
       expect(token).not.toBeNull();
-      expect(token?.split('.').length).toBe(3);
+      expect(token?.split('.')).toHaveLength(3);
     });
   });
 });
@@ -327,7 +336,7 @@ describe('LocalCredentialAuthAdapter — password formats', () => {
     });
 
     expect(session.operatorId).toBe('op-001');
-    expect(session.accessToken.split('.').length).toBe(3);
+    expect(session.accessToken.split('.')).toHaveLength(3);
   });
 
   it('rejects a PBKDF2-hashed operator when the password is wrong', async () => {
@@ -452,7 +461,7 @@ describe('LocalCredentialAuthAdapter — tampered token', () => {
 describe('hashPassword utility', () => {
   it('produces a pbkdf2-prefixed hash', async () => {
     const hash = await hashPassword('mysecret');
-    expect(hash.startsWith('pbkdf2:')).toBe(true);
+    expect(hash).toMatch(/^pbkdf2:/);
   });
 
   it('two hashes of the same password differ (unique salts)', async () => {

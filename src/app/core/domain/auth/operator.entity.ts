@@ -27,7 +27,7 @@ export class Operator extends BaseEntity {
   }
 
   protected validate(): void {
-    if (!this.email || !this.email.includes('@')) {
+    if (!this.email?.includes('@')) {
       throw new Error('Operator email must be a valid email address');
     }
     if (!this.displayName || this.displayName.trim().length === 0) {

@@ -535,7 +535,7 @@ describe('MercadoPagoAdapter', () => {
       // Well past both the poll interval and the 10-minute timeout: nothing more.
       const before = fetchFn.mock.calls.length;
       await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
-      expect(fetchFn.mock.calls.length).toBe(before);
+      expect(fetchFn.mock.calls).toHaveLength(before);
     });
 
     it('settles approved when the gateway reports the buyer already paid', async () => {

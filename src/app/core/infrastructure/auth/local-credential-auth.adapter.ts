@@ -4,7 +4,7 @@ import { AuthGateway } from '@core/application/auth/ports/auth-gateway.port';
 import { CredentialsDto } from '@core/application/auth/dtos/credentials.dto';
 import { AuthSessionDto } from '@core/application/auth/dtos/auth-session.dto';
 import { SessionIssuer, clearToken, readToken } from './session-issuer';
-import { compareSecret, hashSecret } from './secret-hash';
+import { compareSecret } from './secret-hash';
 
 // ---------------------------------------------------------------------------
 // Domain errors
@@ -24,7 +24,7 @@ export class InvalidCredentialsError extends Error {
  * already use it. The implementation lives in `secret-hash.ts`, shared with the
  * till PIN — see the note there on why there is only one of these.
  */
-export const hashPassword = hashSecret;
+export { hashSecret as hashPassword } from './secret-hash';
 
 // ---------------------------------------------------------------------------
 // Adapter
@@ -51,7 +51,7 @@ export class LocalCredentialAuthAdapter implements AuthGateway {
 
     const operator = await this.db.operators.where('email').equals(email).first();
 
-    if (!operator || !operator.isActive) {
+    if (!operator?.isActive) {
       throw new InvalidCredentialsError();
     }
 
@@ -63,8 +63,8 @@ export class LocalCredentialAuthAdapter implements AuthGateway {
     return this.sessions.issueFor(operator);
   }
 
-  async getActiveSession(): Promise<AuthSessionDto | null> {
-    return this.sessions.readActive();
+  getActiveSession(): Promise<AuthSessionDto | null> {
+    return Promise.resolve(this.sessions.readActive());
   }
 
   async refresh(): Promise<AuthSessionDto> {
@@ -78,7 +78,7 @@ export class LocalCredentialAuthAdapter implements AuthGateway {
     // next refresh — this is what makes admin changes reach the current user's
     // guards and gated UI live (AC4, #44).
     const operator = await this.db.operators.get(current.operatorId);
-    if (!operator || !operator.isActive) {
+    if (!operator?.isActive) {
       // The operator was removed or deactivated — treat as signed out.
       clearToken();
       throw new Error('Operator no longer active — session refresh denied');
@@ -86,8 +86,9 @@ export class LocalCredentialAuthAdapter implements AuthGateway {
     return this.sessions.issueFor(operator);
   }
 
-  async signOut(): Promise<void> {
+  signOut(): Promise<void> {
     clearToken();
+    return Promise.resolve();
   }
 
   getAccessToken(): string | null {

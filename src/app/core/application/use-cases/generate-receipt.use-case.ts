@@ -65,23 +65,15 @@ export class GenerateReceiptUseCase {
   fromSnapshot(
     payment: PaymentResult,
     items: CartItem[],
-    subtotal: number,
-    tax: number,
-    taxRate: number,
-    total: number,
-    storeName = '',
-    storeAddress = ''
+    totals: Pick<ReceiptData, 'subtotal' | 'tax' | 'taxRate' | 'total'>,
+    store: Pick<ReceiptData, 'storeName' | 'storeAddress'> = { storeName: '', storeAddress: '' }
   ): ReceiptData {
     return {
       payment,
       items: this.linesFromCart(items),
       currency: environment.mercadopago.currency,
-      subtotal,
-      tax,
-      taxRate,
-      total,
-      storeName,
-      storeAddress,
+      ...totals,
+      ...store,
     };
   }
 

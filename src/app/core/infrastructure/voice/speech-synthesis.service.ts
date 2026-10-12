@@ -43,8 +43,7 @@ export class SpeechSynthesisService {
    * Either way the HUD hides the audio affordances rather than offering controls
    * that silently do nothing.
    */
-  readonly supported =
-    environment.clerkVoice.synthesis && typeof globalThis.speechSynthesis !== 'undefined';
+  readonly supported = environment.clerkVoice.synthesis && globalThis.speechSynthesis !== undefined;
 
   private readonly _speaking = signal(false);
   private readonly _lastBoundaryAt = signal(0);

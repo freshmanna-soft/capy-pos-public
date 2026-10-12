@@ -5,29 +5,6 @@ import type { OutboxStatus } from '@core/domain/events/domain-event';
 import { environment } from '../../../../environments/environment';
 
 /**
- * bcrypt hash (cost 10) of the default admin password "admin1234".
- * Dev/test bootstrap credential only. `seedRbacDefaults()` and the v3
- * upgrade hook below both gate *creating* this account on
- * `environment.allowSeededAdmin` — not just documentation, an enforced guard —
- * so a real pilot install never has this row to sign into.
- * `environment.prod.ts`, the file that actually ships, sets this false; only a
- * build config that is not the real deployment (dev, test, staging, and CI's
- * production-bundle smoke config) may set it true. NEVER store plaintext.
- */
-const DEFAULT_ADMIN_PASSWORD_HASH = '$2b$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW';
-
-/**
- * Re-exported for the auth layer.
- *
- * `compareSecret` in `secret-hash.ts` has to recognise the seeded admin's bcrypt
- * hash, because bcrypt cannot be verified with WebCrypto and that one account has
- * to be signable-into on a fresh install. It reads the value from here rather than
- * carrying its own copy — one definition, so the seeder and the comparison can
- * never disagree about which hash is the seeded one.
- */
-export { DEFAULT_ADMIN_PASSWORD_HASH };
-
-/**
  * Migration sentinel: every pre-v4 row and every single-tenant install
  * is stamped with this tenantId during the v4 upgrade pass.
  *
@@ -595,11 +572,9 @@ export class DexieDatabase extends Dexie {
           );
         }
 
-        // Dev/test bootstrap only — see the same guard, and why it's keyed on
-        // `allowSeededAdmin` rather than `!environment.production`, in
-        // seedRbacDefaults() below. An existing v2 database upgrading in a
-        // real pilot must not gain a publicly-known account any more than a
-        // fresh install should.
+        // Dev/test smoke identity only. It carries no usable password; the row and
+        // membership exist for direct-JWT route smoke. A real pilot still must not
+        // gain even this synthetic operator, so the environment guard remains.
         if (environment.allowSeededAdmin) {
           const operatorCount = await tx.table('operators').count();
           if (operatorCount === 0) {
@@ -609,7 +584,7 @@ export class DexieDatabase extends Dexie {
               displayName: 'Admin',
               roleId: 'role-admin',
               tenantId: 'default-tenant',
-              passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
+              passwordHash: '',
               isActive: true,
               createdAt: now,
               updatedAt: now,
@@ -1040,19 +1015,17 @@ export class DexieDatabase extends Dexie {
   }
 
   /**
-   * Seed default RBAC roles + admin operator + join-table memberships.
+   * Seed default RBAC roles + non-authenticatable smoke operator + memberships.
    * Idempotent: safe to call on every boot.
    *
    * Role permission lists AND rolePermissions rows are re-derived unconditionally
    * from the domain Role value object (permission.constants.ts) so the persisted
    * data can never drift from the authorization rules (R11).
    *
-   * Default credentials (admin@capy-pos.local / admin1234): dev/test only, never
-   * production. Roles themselves seed everywhere — they're structural, not a
-   * credential — but the seeded admin *operator* is gated on `!environment.production`
-   * below, so a real pilot install has no built-in account. Local dev and the test
-   * suite still need something to sign in as before a real IBM App ID tenant is
-   * wired up; that's what this remains for.
+   * The smoke operator has no usable local credential. It exists only so direct-JWT
+   * route smoke can resolve the token subject to a role and tenant membership.
+   * Roles themselves seed everywhere; the operator remains gated by
+   * `allowSeededAdmin` and therefore does not exist in production data.
    */
   async seedRbacDefaults(): Promise<void> {
     const now = new Date();
@@ -1079,20 +1052,16 @@ export class DexieDatabase extends Dexie {
     //    Delete the entire built-in projection and reinsert from the domain so
     //    removed permissions never persist.
     // -----------------------------------------------------------------------
-    await this._rederiveRolePermissions(now);
+    await this._rederiveRolePermissions();
 
     // -----------------------------------------------------------------------
-    // 3 & 4. Default admin operator + membership — dev/test bootstrap ONLY.
+    // 3 & 4. Default smoke operator + membership — dev/test bootstrap ONLY.
     //
-    // A real pilot install must not ship a publicly-known account. Once IBM
-    // App ID auth is wired up, production sign-in never touches this path at
-    // all; until then, local dev and the test suite still need *something*
-    // to sign in as. Gated on `allowSeededAdmin`, not `!environment.production`:
-    // the CI route-smoke suite builds with real production optimizations
-    // (environment.smoke.ts) to catch prod-bundle-only bugs, and needs to sign
-    // in to reach a protected route — `!environment.production` would have
-    // refused that build the account too, which is exactly what
-    // environment.prod.ts, the file that actually ships, must keep doing.
+    // This row deliberately has no usable password. Route smoke signs a JWT
+    // directly, then needs the token subject to resolve to an operator and tenant
+    // membership. Keeping that non-secret identity data preserves the smoke path
+    // without shipping a shared credential. `environment.prod.ts` keeps the row
+    // disabled entirely.
     // -----------------------------------------------------------------------
     if (environment.allowSeededAdmin) {
       const operatorCount = await this.operators.count();
@@ -1103,7 +1072,7 @@ export class DexieDatabase extends Dexie {
           displayName: 'Admin',
           roleId: 'role-admin',
           tenantId: DEFAULT_TENANT_ID,
-          passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
+          passwordHash: '',
           isActive: true,
           createdAt: now,
           updatedAt: now,
@@ -1130,7 +1099,7 @@ export class DexieDatabase extends Dexie {
    * Deletes all existing built-in rows and reinserts the current set so stale
    * or removed permissions never persist (R11).
    */
-  private async _rederiveRolePermissions(now: Date): Promise<void> {
+  private async _rederiveRolePermissions(): Promise<void> {
     const freshRows: IRolePermissionDB[] = [];
 
     for (const role of Role.all()) {
@@ -1149,8 +1118,6 @@ export class DexieDatabase extends Dexie {
       await this.rolePermissions.clear();
       await this.rolePermissions.bulkAdd(freshRows);
     });
-
-    void now; // suppress unused-parameter lint warning
   }
 
   /**

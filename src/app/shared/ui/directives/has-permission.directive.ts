@@ -39,11 +39,10 @@ export class HasPermissionDirective implements OnDestroy {
   private _isVisible = false;
 
   /**
-   * The required permission string.
-   * Accepts the typed Permission union or any string for forward-compatibility.
+   * The required permission.
    */
   @Input()
-  set appHasPermission(permission: Permission | string) {
+  set appHasPermission(permission: Permission) {
     this._permission = permission as Permission;
     this.updateView();
   }

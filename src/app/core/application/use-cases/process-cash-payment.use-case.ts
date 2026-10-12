@@ -1,6 +1,7 @@
 import { Injectable, inject, signal, computed, Signal } from '@angular/core';
 import { CartService } from '@core/application/services/cart.service';
 import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
+import { generateUUID } from '@core/domain/utils/uuid';
 
 /**
  * Cash Payment Request DTO
@@ -141,7 +142,9 @@ export class ProcessCashPaymentUseCase {
       }
     }
 
-    return amounts.sort((a, b) => a - b).slice(0, 6);
+    const sortedAmounts = [...amounts];
+    sortedAmounts.sort((a, b) => a - b);
+    return sortedAmounts.slice(0, 6);
   });
 
   /**
@@ -204,8 +207,6 @@ export class ProcessCashPaymentUseCase {
    * Generates a unique transaction ID
    */
   private generateTransactionId(): string {
-    const timestamp = Date.now().toString(36);
-    const random = Math.random().toString(36).substring(2, 8);
-    return `TXN-CASH-${timestamp}-${random}`.toUpperCase();
+    return `TXN-CASH-${generateUUID()}`.toUpperCase();
   }
 }

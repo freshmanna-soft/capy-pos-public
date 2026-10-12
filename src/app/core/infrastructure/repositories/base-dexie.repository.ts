@@ -63,7 +63,7 @@ export abstract class BaseDexieRepository<
         entities.push(this.mapToEntity(record));
       } catch (error) {
         skipped++;
-        const id = (record as Record<string, unknown>)?.['id'];
+        const id = (record as Record<string, unknown>)['id'];
         const idSuffix = id ? ` (id=${String(id)})` : '';
         console.warn(
           `[${this.constructor.name}] Skipping invalid record${idSuffix}:`,
@@ -183,7 +183,8 @@ export abstract class BaseDexieRepository<
   async bulkUpdate(updates: { id: string; data: Partial<TEntity> }[]): Promise<TEntity[]> {
     const updatedEntities: TEntity[] = [];
 
-    for (const update of updates) {
+    await updates.reduce<Promise<void>>(async (previous, update) => {
+      await previous;
       const existing = await this.findById(update.id);
       if (!existing) {
         throw new Error(`Entity with id ${update.id} not found`);
@@ -195,7 +196,7 @@ export abstract class BaseDexieRepository<
       const dbRecord = this.mapToDatabase(merged);
       await this.table.put(dbRecord);
       updatedEntities.push(merged);
-    }
+    }, Promise.resolve());
 
     return updatedEntities;
   }

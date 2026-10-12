@@ -167,7 +167,7 @@ describe('Product Entity', () => {
       expect(product.id).toBe(data.id);
       expect(product.name).toBe(data.name);
       expect(product.price).toBe(data.price);
-      expect(product instanceof Product).toBe(true);
+      expect(product).toBeInstanceOf(Product);
     });
   });
 });

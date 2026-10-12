@@ -1,16 +1,9 @@
 import { Injectable, inject, signal, computed } from '@angular/core';
 import { AUTH_GATEWAY } from './ports/auth-gateway.port';
 import { AuthSessionDto } from './dtos/auth-session.dto';
-import {
-  Permission,
-  isPermission,
-  TenantMembershipSet,
-  TenantIsolationError,
-  TenantId,
-  Role,
-} from '@core/domain/auth';
+import { Permission, isPermission, TenantMembershipSet, TenantId, Role } from '@core/domain/auth';
 
-export { TenantIsolationError };
+export { TenantIsolationError } from '@core/domain/auth';
 
 /**
  * CurrentUserService (Application layer)

@@ -123,7 +123,7 @@ describe('Cart', () => {
     it('should add a new product to the cart', () => {
       const cart = new Cart('cart-1');
       cart.addItem(product1, 2);
-      expect(cart.getItems().length).toBe(1);
+      expect(cart.getItems()).toHaveLength(1);
       expect(cart.getItem('p1')?.quantity).toBe(2);
     });
 
@@ -131,7 +131,7 @@ describe('Cart', () => {
       const cart = new Cart('cart-1');
       cart.addItem(product1, 2);
       cart.addItem(product1, 3);
-      expect(cart.getItems().length).toBe(1);
+      expect(cart.getItems()).toHaveLength(1);
       expect(cart.getItem('p1')?.quantity).toBe(5);
     });
 
@@ -139,7 +139,7 @@ describe('Cart', () => {
       const cart = new Cart('cart-1');
       cart.addItem(product1, 1);
       cart.addItem(product2, 2);
-      expect(cart.getItems().length).toBe(2);
+      expect(cart.getItems()).toHaveLength(2);
     });
 
     it('should update updatedAt timestamp', () => {
@@ -189,7 +189,7 @@ describe('Cart', () => {
       cart.addItem(product1, 1);
       cart.addItem(product2, 2);
       const items = cart.getItems();
-      expect(items.length).toBe(2);
+      expect(items).toHaveLength(2);
     });
   });
 
@@ -336,7 +336,7 @@ describe('Cart', () => {
       const json = cart.toJSON();
       expect(json['id']).toBe('cart-1');
       expect(json['customerId']).toBe('cust-1');
-      expect((json['items'] as unknown[]).length).toBe(1);
+      expect(json['items'] as unknown[]).toHaveLength(1);
       expect(json['totalItems']).toBe(2);
       expect(json['subtotal']).toBeCloseTo(25.98, 2);
       expect(json['createdAt']).toBeDefined();
@@ -346,7 +346,7 @@ describe('Cart', () => {
     it('should serialize empty cart', () => {
       const cart = new Cart('cart-1');
       const json = cart.toJSON();
-      expect((json['items'] as unknown[]).length).toBe(0);
+      expect(json['items'] as unknown[]).toHaveLength(0);
       expect(json['totalItems']).toBe(0);
       expect(json['subtotal']).toBe(0);
     });

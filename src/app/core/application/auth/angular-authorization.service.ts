@@ -1,8 +1,8 @@
 import { Injectable, inject } from '@angular/core';
-import { AuthorizationService, AuthorizationError, Permission, RoleName } from '@core/domain/auth';
+import { AuthorizationService, Permission, RoleName } from '@core/domain/auth';
 import { CurrentUserService } from './current-user.service';
 
-export { AuthorizationError };
+export { AuthorizationError } from '@core/domain/auth';
 
 /**
  * AngularAuthorizationService (Application layer)

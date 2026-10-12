@@ -105,13 +105,14 @@ export class PayPalAdapter implements PayPalPort {
           return data.id;
         },
 
-        onApprove: async (data: { orderID: string }): Promise<void> => {
+        onApprove: (data: { orderID: string }): Promise<void> => {
           resolve({
             status: 'completed',
             orderId: data.orderID,
             amount,
             timestamp: new Date(),
           });
+          return Promise.resolve();
         },
 
         onError: (err: unknown): void => {

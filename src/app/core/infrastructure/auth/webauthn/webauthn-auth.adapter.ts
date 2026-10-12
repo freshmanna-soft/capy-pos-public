@@ -57,7 +57,7 @@ const CEREMONY_TIMEOUT_MS = 60_000;
  * about how any of them look — which is the whole reason this exists instead of
  * the face recognition originally asked for.
  *
- * ─── TODO: verification belongs on a server ───────────────────────────────────
+ * ─── Security boundary: verification belongs on a server ─────────────────────
  *
  * Every check in `ceremony-verifier.ts` runs in the browser, against a public key
  * in local IndexedDB, and the session it produces is signed with the hardcoded
@@ -372,7 +372,7 @@ export class WebAuthnAuthAdapter implements QuickAuthGateway, QuickAuthAdminPort
    * secret, and indexing it would put it in a second place), and this runs once when
    * the login screen opens against a table with a handful of rows.
    */
-  private async activeOperatorsWithPin(): Promise<IOperatorDB[]> {
+  private activeOperatorsWithPin(): Promise<IOperatorDB[]> {
     return this.db.operators
       .filter((operator) => operator.isActive && !!operator.pinHash)
       .toArray();

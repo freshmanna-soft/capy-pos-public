@@ -148,13 +148,15 @@ export class AgentRegistry {
       }
     >();
 
-    for (const agent of this.getAllAgents()) {
-      const health = await agent.getHealth();
+    const agents = this.getAllAgents();
+    const healthResults = await Promise.all(agents.map((agent) => agent.getHealth()));
+
+    agents.forEach((agent, index) => {
       healthMap.set(agent.id, {
         name: agent.name,
-        ...health,
+        ...healthResults[index],
       });
-    }
+    });
 
     return healthMap;
   }

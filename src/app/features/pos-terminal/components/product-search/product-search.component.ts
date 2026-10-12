@@ -180,7 +180,7 @@ export class ProductSearchComponent implements OnInit {
     } else if (this.searchQuery().length >= 2) {
       this.searchSubject.next(this.searchQuery());
     } else {
-      this.loadProducts(true);
+      void this.loadProducts(true);
     }
   }
 
@@ -207,7 +207,7 @@ export class ProductSearchComponent implements OnInit {
     if (query.length === 0) {
       this.error.set(null);
       // Reload all products when search is cleared
-      this.loadProducts(true);
+      void this.loadProducts(true);
       return;
     }
 
@@ -347,7 +347,7 @@ export class ProductSearchComponent implements OnInit {
         this.searchSubject.next(query);
       } else {
         // Load all products when "All" is selected with no search query
-        this.loadProducts(true);
+        void this.loadProducts(true);
       }
     }
   }

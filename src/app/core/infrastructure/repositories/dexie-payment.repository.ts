@@ -100,12 +100,12 @@ export class DexiePaymentRepository
    * Find payments by customer ID
    * Note: This requires joining with transactions table or storing customerId
    */
-  async findByCustomerId(_customerId: string): Promise<Payment[]> {
+  findByCustomerId(_customerId: string): Promise<Payment[]> {
     // For now, return empty array as we'd need to join with transactions
     // In a real implementation, you'd either:
     // 1. Store customerId in payments table
     // 2. Query transactions first, then filter payments
-    return [];
+    return Promise.resolve([]);
   }
 
   /**

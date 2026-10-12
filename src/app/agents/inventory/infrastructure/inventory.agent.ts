@@ -27,6 +27,19 @@ export const PRODUCT_REPOSITORY_TOKEN = new InjectionToken<IProductRepository>(
  */
 const UNKNOWN_ERROR = 'Unknown error';
 
+function serialMap<T, R>(
+  items: readonly T[],
+  operation: (item: T) => Promise<R>,
+  index = 0,
+  results: R[] = []
+): Promise<R[]> {
+  if (index >= items.length) return Promise.resolve(results);
+  return operation(items[index]).then((result) => {
+    results.push(result);
+    return serialMap(items, operation, index + 1, results);
+  });
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -54,28 +67,30 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
    * Start the inventory agent
    * Begin monitoring stock levels
    */
-  protected async onStart(): Promise<void> {
+  protected onStart(): Promise<void> {
     console.log('Starting Inventory Agent...');
     // Start monitoring stock levels every 5 minutes
     this._monitoringInterval = +setInterval(() => this.monitorStockLevels(), 5 * 60 * 1000);
+    return Promise.resolve();
   }
 
   /**
    * Stop the inventory agent
    * Cleanup monitoring
    */
-  protected async onStop(): Promise<void> {
+  protected onStop(): Promise<void> {
     console.log('Stopping Inventory Agent...');
     if (this._monitoringInterval) {
       clearInterval(this._monitoringInterval);
       this._monitoringInterval = undefined;
     }
+    return Promise.resolve();
   }
 
   /**
    * Handle incoming messages
    */
-  protected async handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
+  protected handleMessage(message: IAgentMessage): Promise<IAgentResponse> {
     switch (message.type) {
       case InventoryMessageType.CHECK_STOCK:
         return this.checkStock(message.payload as IStockCheckRequest);
@@ -102,10 +117,10 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
         return this.transferStock(message.payload as IStockTransferRequest);
 
       default:
-        return {
+        return Promise.resolve({
           success: false,
           error: `Unknown message type: ${message.type}`,
-        };
+        });
     }
   }
 
@@ -383,16 +398,13 @@ export class InventoryAgent extends BaseAgent implements IInventoryAgent {
    */
   async bulkUpdateStock(request: IBulkStockUpdate): Promise<IAgentResponse> {
     try {
-      const results = [];
-
-      for (const update of request.updates) {
-        const result = await this.updateStock({
+      const results = await serialMap(request.updates, (update) =>
+        this.updateStock({
           productId: update.productId,
           quantity: update.quantity,
           reason: update.reason,
-        });
-        results.push(result);
-      }
+        })
+      );
 
       const successCount = results.filter((r) => r.success).length;
       const failureCount = results.length - successCount;

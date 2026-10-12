@@ -27,14 +27,18 @@ export class ListTenantOperatorsUseCase {
   /**
    * @throws AuthorizationError when the current user lacks `MANAGE_OPERATORS`.
    */
-  async execute(): Promise<OperatorSummaryDto[]> {
-    this.authz.assert(Permission.MANAGE_OPERATORS);
+  execute(): Promise<OperatorSummaryDto[]> {
+    try {
+      this.authz.assert(Permission.MANAGE_OPERATORS);
 
-    const tenantId = this.currentUser.activeTenantId();
-    if (!tenantId) {
-      return [];
+      const tenantId = this.currentUser.activeTenantId();
+      if (!tenantId) {
+        return Promise.resolve([]);
+      }
+
+      return this.port.listOperatorsForTenant(tenantId);
+    } catch (error) {
+      return Promise.reject(error);
     }
-
-    return this.port.listOperatorsForTenant(tenantId);
   }
 }

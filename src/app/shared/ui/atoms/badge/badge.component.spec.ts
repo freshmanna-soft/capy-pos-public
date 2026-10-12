@@ -17,18 +17,14 @@ describe('BadgeComponent', () => {
     expect(classes).not.toContain('badge-dot');
   });
 
-  it('adds size class when size is sm', () => {
+  it.each([
+    ['sm', 'badge-sm'],
+    ['lg', 'badge-lg'],
+  ] as const)('adds %s size class', (size, expectedClass) => {
     const fixture = TestBed.createComponent(BadgeComponent);
-    fixture.componentRef.setInput('size', 'sm');
+    fixture.componentRef.setInput('size', size);
     fixture.detectChanges();
-    expect(fixture.componentInstance.badgeClasses()).toContain('badge-sm');
-  });
-
-  it('adds size class when size is lg', () => {
-    const fixture = TestBed.createComponent(BadgeComponent);
-    fixture.componentRef.setInput('size', 'lg');
-    fixture.detectChanges();
-    expect(fixture.componentInstance.badgeClasses()).toContain('badge-lg');
+    expect(fixture.componentInstance.badgeClasses()).toContain(expectedClass);
   });
 
   it('adds badge-dot class when dot is true', () => {

@@ -93,7 +93,7 @@ describe('LowStockWidgetComponent', () => {
 
   it('should show top 3 alerts', async () => {
     await component.ngOnInit();
-    expect(component.topAlerts().length).toBe(2);
+    expect(component.topAlerts()).toHaveLength(2);
     expect(component.topAlerts()[0].productName).toBe('Seasonal Blend');
   });
 
@@ -141,6 +141,6 @@ describe('LowStockWidgetComponent', () => {
     expect(component.totalCount()).toBe(2);
     expect(component.criticalCount()).toBe(1);
     expect(component.warningCount()).toBe(1);
-    expect(component.topAlerts().length).toBe(2);
+    expect(component.topAlerts()).toHaveLength(2);
   });
 });
