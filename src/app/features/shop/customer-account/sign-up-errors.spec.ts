@@ -59,6 +59,15 @@ describe('describeSignUpRefusal', () => {
       expect(describeSignUpRefusal(new Error(RELAY_400)).detail).toBeNull();
     });
 
+    it('does not extract detail from a different password-policy sentence', () => {
+      const refusal = describeSignUpRefusal(
+        Object.assign(new Error('Password policy violation.'), { status: 400 })
+      );
+
+      expect(refusal.message).toContain('password rules');
+      expect(refusal.detail).toBeNull();
+    });
+
     it('extracts a very long explanation with a bounded prefix scan', () => {
       const explanation = `Password must contain ${'x'.repeat(50_000)}`;
 

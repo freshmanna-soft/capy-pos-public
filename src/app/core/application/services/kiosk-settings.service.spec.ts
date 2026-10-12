@@ -192,6 +192,17 @@ describe('KioskSettingsService', () => {
       expect(service.stores().find((s) => s.storeId === STORE.storeId)).toBeUndefined();
       expect(service.terminals().find((t) => t.terminalId === TERMINAL.terminalId)).toBeUndefined();
     });
+
+    it('falls back to the default terminal when deleting the active org leaves no terminals', async () => {
+      await service.saveOrg(ORG);
+      await service.saveStore(STORE);
+      await service.saveTerminal(TERMINAL);
+      await service.setActiveTerminal(TERMINAL.terminalId);
+
+      await service.deleteOrg(ORG.orgId);
+
+      expect(service.activeTerminalId()).toBe('default-org/default-store/default-terminal');
+    });
   });
 
   // ── saveStore / deleteStore ───────────────────────────────────────────────
@@ -216,6 +227,16 @@ describe('KioskSettingsService', () => {
 
       expect(service.stores().find((s) => s.storeId === STORE.storeId)).toBeUndefined();
       expect(service.terminals().find((t) => t.terminalId === TERMINAL.terminalId)).toBeUndefined();
+    });
+
+    it('falls back to the default terminal when deleting the active store leaves no terminals', async () => {
+      await service.saveStore(STORE);
+      await service.saveTerminal(TERMINAL);
+      await service.setActiveTerminal(TERMINAL.terminalId);
+
+      await service.deleteStore(STORE.storeId);
+
+      expect(service.activeTerminalId()).toBe('default-org/default-store/default-terminal');
     });
   });
 

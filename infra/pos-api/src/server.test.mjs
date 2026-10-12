@@ -1,9 +1,44 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { createServer } from 'node:http';
 
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 process.env.NODE_ENV = 'test';
+const IMAGE_SECRET = 'test-secret-at-least-32-characters-long';
+const IMAGE_FUTURE = Math.floor(Date.now() / 1000) + 3600;
+
+function imageStaffToken() {
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const header = encode({ alg: 'HS256', typ: 'JWT' });
+  const payload = encode({
+    sub: 'operator-1',
+    tenantId: 'tenant-1',
+    roles: ['inventory-manager'],
+    permissions: ['inventory:manage'],
+    exp: IMAGE_FUTURE,
+  });
+  const signature = createHmac('sha256', IMAGE_SECRET)
+    .update(`${header}.${payload}`)
+    .digest('base64url');
+  return `${header}.${payload}.${signature}`;
+}
+
+function multipartImageBody(boundary = 'MixedCaseBoundary', bytes = new Uint8Array([0xff, 0xd8])) {
+  const enc = new TextEncoder();
+  const header =
+    `--${boundary}\r\n` +
+    'Content-Disposition: form-data; name="image"; filename="test.jpg"\r\n' +
+    'Content-Type: image/jpeg\r\n\r\n';
+  const footer = `\r\n--${boundary}--\r\n`;
+  const headerBytes = enc.encode(header);
+  const footerBytes = enc.encode(footer);
+  const body = new Uint8Array(headerBytes.length + bytes.length + footerBytes.length);
+  body.set(headerBytes);
+  body.set(bytes, headerBytes.length);
+  body.set(footerBytes, headerBytes.length + bytes.length);
+  return body;
+}
 const {
   clientRateLimitKey,
   createPosRequestHandler,
@@ -22,10 +57,20 @@ class AllowAllRateLimiter {
 function deps() {
   return {
     api: {
-      products: { list: async () => [] },
+      products: {
+        list: async () => [],
+        read: async (id) => ({
+          rev: '1-test-rev',
+          document: { id, name: 'Test image product', price: 1, category: 'test', stock: 1 },
+        }),
+        write: async () => undefined,
+      },
       transactions: { list: async () => [] },
       roles: { read: async () => null },
-      secret: 'unused-test-secret',
+      imageStore: {
+        upload: async (id, mimeType, data) => `memory:${id}:${mimeType}:${data.length}`,
+      },
+      secret: IMAGE_SECRET,
       internalSecret: '',
       nowSeconds: () => 0,
       nowIso: () => '2026-09-18T12:00:00.000Z',
@@ -279,6 +324,26 @@ describe('POS API HTTP adapter', () => {
       });
       assert.equal(response.status, 413);
       assert.equal(response.headers.get('cache-control'), 'no-store');
+    });
+  });
+
+  it('preserves multipart boundary casing while detecting image uploads', async () => {
+    await withServer(async (url) => {
+      const boundary = 'MixedCaseBoundary';
+      const response = await fetch(`${url}/api/products/product-1/image`, {
+        method: 'POST',
+        headers: {
+          Origin: 'https://capy-pos.com',
+          Authorization: `Bearer ${imageStaffToken()}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body: multipartImageBody(boundary),
+      });
+      const payload = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(payload));
+      assert.deepEqual(payload, {
+        imageUrl: 'memory:product-1:image/jpeg:2',
+      });
     });
   });
 });
