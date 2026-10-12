@@ -43,4 +43,10 @@ describe('generateUUID', () => {
       });
     }
   });
+
+  it('refuses to generate an id when crypto is unavailable', () => {
+    vi.stubGlobal('crypto', undefined);
+
+    expect(() => generateUUID()).toThrow('Secure random number generation is unavailable');
+  });
 });
