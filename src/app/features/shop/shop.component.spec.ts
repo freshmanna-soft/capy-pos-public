@@ -1570,6 +1570,7 @@ describe('ShopComponent — customer account', () => {
       '[data-testid="shop-account-btn"]'
     );
     expect(button.textContent).toContain('back@shop.com');
+    expect(button.querySelector('[data-testid="shop-account-avatar"]')?.textContent).toBe('B');
     expect(button.getAttribute('aria-label')).toBe('Your account, signed in as back@shop.com');
   });
 

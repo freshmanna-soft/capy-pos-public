@@ -209,7 +209,16 @@ type ScanState = 'idle' | 'starting' | 'scanning' | 'failed';
               "
               data-testid="shop-account-btn"
             >
-              <span aria-hidden="true">👤</span>
+              @if (customerInitial(); as initial) {
+                <span
+                  class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-yuzu text-onsen-deep text-xs font-bold"
+                  aria-hidden="true"
+                  data-testid="shop-account-avatar"
+                  >{{ initial }}</span
+                >
+              } @else {
+                <span aria-hidden="true">👤</span>
+              }
               <span class="truncate">{{ customerEmail() ?? 'Account' }}</span>
             </button>
 
@@ -850,6 +859,10 @@ export class ShopComponent implements OnInit, OnDestroy {
   }
   /** The signed-in customer's verified email, or null — labels the account button. */
   readonly customerEmail = computed(() => this.currentCustomer.email() || null);
+  readonly customerInitial = computed(() => {
+    const email = this.customerEmail()?.trim();
+    return email ? email.charAt(0).toUpperCase() : null;
+  });
 
   // ── Product data ──────────────────────────────────────────────────────────────
   private readonly _products = signal<Product[]>([]);

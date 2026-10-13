@@ -65,6 +65,12 @@ export interface CustomerAuthGateway {
   /** Invalidate the current customer session and remove stored tokens. */
   signOut(): Promise<void>;
 
+  /** Whether this customer identity provider can send a password-reset email. */
+  readonly supportsPasswordReset: boolean;
+
+  /** Request a password-reset email without revealing whether the email exists. */
+  requestPasswordReset(email: string): Promise<void>;
+
   /**
    * Return the raw JWT string synchronously (no IO).
    * Returns null when not authenticated — safe to call on the hot path

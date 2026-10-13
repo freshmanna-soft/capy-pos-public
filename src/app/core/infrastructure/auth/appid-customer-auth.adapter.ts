@@ -20,7 +20,7 @@ import { AppIdAuthError, AppIdJwksKeyResolver } from './appid-jwks';
  * (`AppIdJwksKeyResolver`, shared rather than copied so the leading-zero fix
  * lives in exactly one place). Four things differ, and each one is the point:
  *
- * 1. **Audience.** `verifyAccessToken` binds `config.customerClientId`, never
+ * 1. **Audience.** `verifyCustomerToken` binds `config.customerClientId`, never
  *    `staffClientId`. Staff and customers share one App ID *tenant* and are
  *    separated only by which App ID *application* the grant was exchanged
  *    under, so `aud` is the entire isolation guarantee: a staff token's `aud`
@@ -56,6 +56,8 @@ import { AppIdAuthError, AppIdJwksKeyResolver } from './appid-jwks';
 
 const CUSTOMER_ACCESS_TOKEN_KEY = 'capy_pos_customer_access_token';
 const CUSTOMER_REFRESH_TOKEN_KEY = 'capy_pos_customer_refresh_token';
+const CUSTOMER_EMAIL_KEY = 'capy_pos_customer_email';
+const CUSTOMER_EMAIL_SUBJECT_KEY = 'capy_pos_customer_email_subject';
 
 function setItem(key: string, value: string): void {
   try {
@@ -88,9 +90,15 @@ function removeItem(key: string): void {
 /** App ID's own token response, passed through by the relay verbatim. */
 interface RelayTokenResponse {
   access_token?: string;
+  id_token?: string;
   refresh_token?: string;
   error?: string;
   error_description?: string;
+}
+
+interface CustomerEmailFallback {
+  email: string;
+  subject?: string;
 }
 
 /** `POST /appid/customer/sign-up` answers `201 { id, email }` — no tokens. */
@@ -108,6 +116,7 @@ interface SignUpResponse {
  * for `customerRelayUrl` itself.
  */
 const CUSTOMER_SIGN_UP_ROUTE = '/appid/customer/sign-up';
+const CUSTOMER_FORGOT_PASSWORD_ROUTE = '/appid/forgot-password';
 
 /** The one scope the customer application grants (`infra/appid-token-relay/src/customer-signup.ts`). */
 const CUSTOMER_SCOPE = 'customer';
@@ -212,14 +221,15 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
   }
 
   async authenticate(creds: CredentialsDto): Promise<CustomerSessionDto> {
+    const email = normalizeEmail(creds.email);
     const result = await this.relayCall({
       grant_type: 'password',
-      username: normalizeEmail(creds.email),
+      username: email,
       password: creds.password,
     });
 
-    const session = await this.buildSession(result);
-    this.persist(result);
+    const session = await this.buildSession(result, { email });
+    this.persist(result, session);
     return session;
   }
 
@@ -228,7 +238,7 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
     if (!accessToken) return null;
 
     try {
-      return await this.sessionFromToken(accessToken);
+      return await this.sessionFromToken(accessToken, undefined, this.storedEmailFallback());
     } catch {
       // Expired, tampered, wrong tenant — or a staff token someone dropped in
       // this slot. Any of those is "no customer session".
@@ -247,8 +257,8 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
     });
-    const session = await this.buildSession(result);
-    this.persist({ ...result, refresh_token: result.refresh_token ?? refreshToken });
+    const session = await this.buildSession(result, this.storedEmailFallback());
+    this.persist({ ...result, refresh_token: result.refresh_token ?? refreshToken }, session);
     return session;
   }
 
@@ -265,6 +275,25 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
     return getItem(CUSTOMER_ACCESS_TOKEN_KEY);
   }
 
+  readonly supportsPasswordReset = true;
+
+  async requestPasswordReset(email: string): Promise<void> {
+    const url = this.customerForgotPasswordUrl();
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+      if (!response.ok) {
+        throw new AppIdAuthError(`Password-reset request failed (${response.status})`);
+      }
+    } catch (err) {
+      if (err instanceof AppIdAuthError) throw err;
+      throw new AppIdAuthError(`Password-reset request failed: ${(err as Error).message}`);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
@@ -278,6 +307,17 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
       // `TypeError`. `relayCall`'s own `fetch` failure already surfaces as an
       // `AppIdAuthError`; this path must match it, since that is the only error
       // type callers handle.
+      if (err instanceof AppIdAuthError) throw err;
+      throw new AppIdAuthError(
+        `Invalid customerRelayUrl (${this.config.customerRelayUrl}): ${(err as Error).message}`
+      );
+    }
+  }
+
+  private customerForgotPasswordUrl(): string {
+    try {
+      return new URL(CUSTOMER_FORGOT_PASSWORD_ROUTE, this.relayUrl).toString();
+    } catch (err) {
       if (err instanceof AppIdAuthError) throw err;
       throw new AppIdAuthError(
         `Invalid customerRelayUrl (${this.config.customerRelayUrl}): ${(err as Error).message}`
@@ -314,20 +354,43 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
     );
   }
 
-  private async buildSession(result: RelayTokenResponse): Promise<CustomerSessionDto> {
+  private async buildSession(
+    result: RelayTokenResponse,
+    emailFallback?: CustomerEmailFallback
+  ): Promise<CustomerSessionDto> {
     if (!result.access_token) {
       throw new AppIdAuthError('App ID customer relay returned no access token');
     }
-    return await this.sessionFromToken(result.access_token);
+    return await this.sessionFromToken(result.access_token, result.id_token, emailFallback);
   }
 
-  private async sessionFromToken(accessToken: string): Promise<CustomerSessionDto> {
-    const payload = await this.verifyAccessToken(accessToken);
+  private async sessionFromToken(
+    accessToken: string,
+    identityToken?: string,
+    emailFallback?: CustomerEmailFallback
+  ): Promise<CustomerSessionDto> {
+    const payload = await this.verifyCustomerToken(accessToken);
+    if (!payload.sub) {
+      throw new AppIdAuthError('App ID customer access token has no subject');
+    }
+    const identityPayload = identityToken ? await this.verifyCustomerToken(identityToken) : null;
+    if (identityPayload && (!identityPayload.sub || identityPayload.sub !== payload.sub)) {
+      throw new AppIdAuthError('App ID customer ID token subject does not match access token');
+    }
     const scopes = this.readScopes(payload);
+    const identityEmail = identityPayload?.['email'];
+    const accessEmail = payload['email'];
+    const email =
+      (typeof identityEmail === 'string' && identityEmail) ||
+      (typeof accessEmail === 'string' && accessEmail) ||
+      (emailFallback &&
+      (emailFallback.subject === undefined || emailFallback.subject === payload.sub)
+        ? emailFallback.email
+        : '');
 
     return {
       customerId: payload.sub ?? '',
-      email: typeof payload['email'] === 'string' ? payload['email'] : '',
+      email,
       // Not App ID's own `tenant` claim — that is the service instance's id,
       // constant for every user. Same reasoning as the staff adapter's.
       tenantId: DEFAULT_TENANT_ID,
@@ -343,10 +406,10 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
 
   /**
    * RS256 signature against the shared tenant JWKS, plus issuer and — the
-   * whole point — `customerClientId` as the audience. `jose` matches `aud`
-   * whether it is a string or an array (App ID's is an array).
+   * whole point — `customerClientId` as the audience. Used for both access and
+   * identity tokens; `jose` matches `aud` whether it is a string or an array.
    */
-  private async verifyAccessToken(token: string): Promise<JWTPayload> {
+  private async verifyCustomerToken(token: string): Promise<JWTPayload> {
     const audience = this.config.customerClientId;
     if (!audience) {
       // Fail closed rather than verify against nothing: an unset audience would
@@ -372,14 +435,29 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
     return typeof raw === 'string' ? raw.split(/\s+/).filter(Boolean) : [];
   }
 
-  private persist(result: RelayTokenResponse): void {
+  private persist(result: RelayTokenResponse, session: CustomerSessionDto): void {
     if (result.access_token) setItem(CUSTOMER_ACCESS_TOKEN_KEY, result.access_token);
     if (result.refresh_token) setItem(CUSTOMER_REFRESH_TOKEN_KEY, result.refresh_token);
+    if (session.email) {
+      setItem(CUSTOMER_EMAIL_KEY, session.email);
+      setItem(CUSTOMER_EMAIL_SUBJECT_KEY, session.customerId);
+    } else {
+      removeItem(CUSTOMER_EMAIL_KEY);
+      removeItem(CUSTOMER_EMAIL_SUBJECT_KEY);
+    }
+  }
+
+  private storedEmailFallback(): CustomerEmailFallback | undefined {
+    const email = getItem(CUSTOMER_EMAIL_KEY);
+    const subject = getItem(CUSTOMER_EMAIL_SUBJECT_KEY);
+    return email && subject ? { email, subject } : undefined;
   }
 
   private clear(): void {
     removeItem(CUSTOMER_ACCESS_TOKEN_KEY);
     removeItem(CUSTOMER_REFRESH_TOKEN_KEY);
+    removeItem(CUSTOMER_EMAIL_KEY);
+    removeItem(CUSTOMER_EMAIL_SUBJECT_KEY);
   }
 }
 
