@@ -746,6 +746,18 @@ describe('triggerForgotPassword', () => {
     await assert.doesNotReject(() => triggerForgotPassword('nobody@capy.test', CONFIG, nowSeconds));
   });
 
+  it('resolves for an unconfirmed account without exposing its pending state', async () => {
+    stubFetch([
+      {
+        match: (url) => url.endsWith('/cloud_directory/forgot_password'),
+        respond: () => json(409, {}),
+      },
+    ]);
+    await assert.doesNotReject(() =>
+      triggerForgotPassword('pending@capy.test', CONFIG, nowSeconds)
+    );
+  });
+
   it('throws ManagementApiError on a genuine failure (not 200, not the "no such user" 404)', async () => {
     stubFetch([
       {

@@ -30,6 +30,7 @@ const CUSTOMER_CLIENT_ID = 'a1f0c2d4-9e88-4c31-b0aa-2f7d5c1e4b6a';
 const RELAY_URL = 'https://relay.test/appid/token';
 const CUSTOMER_RELAY_URL = 'https://relay.test/appid/customer/token';
 const CUSTOMER_SIGN_UP_URL = 'https://relay.test/appid/customer/sign-up';
+const CUSTOMER_FORGOT_PASSWORD_URL = 'https://relay.test/appid/forgot-password';
 
 const ISSUER = `https://${REGION}.appid.cloud.ibm.com/oauth/v4/${TENANT_ID}`;
 const JWKS_URI = `${ISSUER}/publickeys`;
@@ -59,6 +60,8 @@ interface MintOptions {
   issuer?: string;
   /** Space-separated, exactly as App ID's real `scope` claim is shaped. */
   scope?: string;
+  omitEmail?: boolean;
+  omitSub?: boolean;
   sub?: string;
   email?: string;
   expiresInSec?: number;
@@ -73,18 +76,17 @@ interface MintOptions {
  */
 async function mintCustomerToken(opts: MintOptions = {}): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  return new SignJWT({
+  const token = new SignJWT({
     scope: opts.scope ?? 'openid appid_default appid_authenticated customer',
-    email: opts.email ?? 'shopper@capy.test',
+    ...(opts.omitEmail ? {} : { email: opts.email ?? 'shopper@capy.test' }),
     tenant: TENANT_ID, // App ID's own instance id — deliberately NOT Capy-POS's tenantId
   })
     .setProtectedHeader(opts.omitKid ? { alg: 'RS256' } : { alg: 'RS256', kid: KID })
     .setIssuedAt(now)
     .setIssuer(opts.issuer ?? ISSUER)
-    .setAudience(opts.audience ?? [CUSTOMER_CLIENT_ID])
-    .setSubject(opts.sub ?? 'customer-abc')
-    .setExpirationTime(now + (opts.expiresInSec ?? 3600))
-    .sign(privateKey);
+    .setAudience(opts.audience ?? [CUSTOMER_CLIENT_ID]);
+  if (!opts.omitSub) token.setSubject(opts.sub ?? 'customer-abc');
+  return token.setExpirationTime(now + (opts.expiresInSec ?? 3600)).sign(privateKey);
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -120,10 +122,17 @@ interface FetchScenario {
   signUpResult?: Record<string, unknown>;
   signUpStatus?: number;
   signUpThrow?: boolean;
+  forgotPasswordThrow?: boolean;
+  forgotPasswordStatus?: number;
   jwksKeys?: JWK[];
   jwksThrow?: boolean;
   jwksStatus?: number;
   jwksBody?: unknown;
+}
+
+function forgotPasswordResponse(scenario: FetchScenario): Response {
+  if (scenario.forgotPasswordThrow) throw new Error('reset network down');
+  return jsonResponse({}, scenario.forgotPasswordStatus ?? 200);
 }
 
 function installFetch(scenario: FetchScenario): ReturnType<typeof vi.fn> {
@@ -143,6 +152,7 @@ function installFetch(scenario: FetchScenario): ReturnType<typeof vi.fn> {
       if (scenario.signUpThrow) throw new Error('sign-up network down');
       return jsonResponse(scenario.signUpResult ?? {}, scenario.signUpStatus ?? 201);
     }
+    if (target === CUSTOMER_FORGOT_PASSWORD_URL) return forgotPasswordResponse(scenario);
     return jsonResponse({ error: 'unknown_endpoint' }, 404);
   });
 
@@ -174,6 +184,43 @@ describe('AppIdCustomerAuthAdapter', () => {
     TestBed.resetTestingModule();
   });
 
+  describe('requestPasswordReset', () => {
+    it('posts the normalized email to the shared reset route on the customer relay origin', async () => {
+      const fetchMock = installFetch({});
+      const adapter = makeAdapter();
+
+      expect(adapter.supportsPasswordReset).toBe(true);
+      await adapter.requestPasswordReset(' Shopper@Capy.Test ');
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        CUSTOMER_FORGOT_PASSWORD_URL,
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: 'shopper@capy.test' }),
+        })
+      );
+    });
+
+    it('wraps a transport failure in AppIdAuthError', async () => {
+      installFetch({ forgotPasswordThrow: true });
+      const adapter = makeAdapter();
+
+      await expect(adapter.requestPasswordReset('shopper@capy.test')).rejects.toThrow(
+        AppIdAuthError
+      );
+    });
+
+    it('rejects a non-success relay response', async () => {
+      installFetch({ forgotPasswordStatus: 502 });
+      const adapter = makeAdapter();
+
+      await expect(adapter.requestPasswordReset('shopper@capy.test')).rejects.toThrow(
+        'Password-reset request failed (502)'
+      );
+    });
+  });
+
   describe('authenticate', () => {
     it('exchanges credentials on the customer relay for a mapped, verified session', async () => {
       const accessToken = await mintCustomerToken();
@@ -190,6 +237,82 @@ describe('AppIdCustomerAuthAdapter', () => {
       expect(session.permissions).toEqual(['sale:process']);
       expect(session.accessToken).toBe(accessToken);
       expect(adapter.getAccessToken()).toBe(accessToken);
+    });
+
+    it('uses the normalized login email when the verified token has no email claim', async () => {
+      const accessToken = await mintCustomerToken({ omitEmail: true });
+      installFetch({ tokenResult: { access_token: accessToken } });
+      const adapter = makeAdapter();
+
+      const session = await adapter.authenticate({ email: '  Shopper@Capy.Test ', password: 'pw' });
+
+      expect(session.email).toBe('shopper@capy.test');
+    });
+
+    it('uses the verified ID-token email and retains it when restoring the access-token session', async () => {
+      const accessToken = await mintCustomerToken({ omitEmail: true });
+      const idToken = await mintCustomerToken({ email: 'javi-bp@hotmail.com' });
+      installFetch({ tokenResult: { access_token: accessToken, id_token: idToken } });
+      const adapter = makeAdapter();
+
+      const session = await adapter.authenticate({ email: 'other@example.com', password: 'pw' });
+
+      expect(session.email).toBe('javi-bp@hotmail.com');
+      await expect(adapter.getActiveSession()).resolves.toMatchObject({
+        email: 'javi-bp@hotmail.com',
+      });
+    });
+
+    it('rejects an ID token for a different customer subject', async () => {
+      const accessToken = await mintCustomerToken({ omitEmail: true });
+      const idToken = await mintCustomerToken({ sub: 'another-customer' });
+      installFetch({ tokenResult: { access_token: accessToken, id_token: idToken } });
+      const adapter = makeAdapter();
+
+      await expect(
+        adapter.authenticate({ email: 'shopper@capy.test', password: 'pw' })
+      ).rejects.toThrow('subject does not match access token');
+    });
+
+    it('rejects access and ID tokens that both omit the subject', async () => {
+      const accessToken = await mintCustomerToken({ omitEmail: true, omitSub: true });
+      const idToken = await mintCustomerToken({ email: 'javi-bp@hotmail.com', omitSub: true });
+      installFetch({ tokenResult: { access_token: accessToken, id_token: idToken } });
+      const adapter = makeAdapter();
+
+      await expect(
+        adapter.authenticate({ email: 'shopper@capy.test', password: 'pw' })
+      ).rejects.toThrow('access token has no subject');
+    });
+
+    it('rejects an ID token without a subject when the access-token subject is present', async () => {
+      const accessToken = await mintCustomerToken({ omitEmail: true });
+      const idToken = await mintCustomerToken({ email: 'javi-bp@hotmail.com', omitSub: true });
+      installFetch({ tokenResult: { access_token: accessToken, id_token: idToken } });
+      const adapter = makeAdapter();
+
+      await expect(
+        adapter.authenticate({ email: 'shopper@capy.test', password: 'pw' })
+      ).rejects.toThrow('ID token subject does not match access token');
+    });
+
+    it('does not reuse a stored email when the active access-token subject changes', async () => {
+      const accessToken = await mintCustomerToken({ omitEmail: true });
+      const idToken = await mintCustomerToken({ email: 'javi-bp@hotmail.com' });
+      installFetch({ tokenResult: { access_token: accessToken, id_token: idToken } });
+      const adapter = makeAdapter();
+      await adapter.authenticate({ email: 'javi-bp@hotmail.com', password: 'pw' });
+
+      const otherCustomerToken = await mintCustomerToken({
+        omitEmail: true,
+        sub: 'another-customer',
+      });
+      sessionStorage.setItem('capy_pos_customer_access_token', otherCustomerToken);
+
+      const session = await adapter.getActiveSession();
+
+      expect(session?.customerId).toBe('another-customer');
+      expect(session?.email).toBe('');
     });
 
     it('posts to customerRelayUrl — never to the staff relay', async () => {
