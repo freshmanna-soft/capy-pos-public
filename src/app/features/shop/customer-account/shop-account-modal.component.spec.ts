@@ -30,10 +30,13 @@ interface Harness {
 }
 
 async function setup(): Promise<Harness> {
+  const gateway = new InMemoryCustomerAuthAdapter();
+  Object.defineProperty(gateway, 'supportsPasswordReset', { value: true });
+  vi.spyOn(gateway, 'requestPasswordReset').mockResolvedValue(undefined);
   TestBed.configureTestingModule({
     imports: [ShopAccountModalComponent],
     providers: [
-      { provide: CUSTOMER_AUTH_GATEWAY, useClass: InMemoryCustomerAuthAdapter },
+      { provide: CUSTOMER_AUTH_GATEWAY, useValue: gateway },
       CurrentCustomerService,
       { provide: CUSTOMER_REPOSITORY, useValue: dexieCustomers },
     ],
@@ -235,6 +238,36 @@ describe('ShopAccountModalComponent', () => {
       await h.fixture.whenStable();
 
       expect(q(h.host, 'shop-account-notice')?.textContent).toContain('session expired');
+    });
+  });
+
+  describe('forgot password', () => {
+    it('prefills the email, submits a reset request, and shows generic confirmation', async () => {
+      const requestReset = vi
+        .spyOn(h.gateway, 'requestPasswordReset')
+        .mockRejectedValueOnce(new Error('relay unavailable'));
+      type(h.host, 'shop-auth-email', EMAIL);
+
+      q(h.host, 'shop-show-forgot-password')?.click();
+      await h.fixture.whenStable();
+
+      expect(q<HTMLInputElement>(h.host, 'shop-forgot-password-email')?.value).toBe(EMAIL);
+      expect(document.activeElement).toBe(q(h.host, 'shop-forgot-password-email'));
+      type(h.host, 'shop-forgot-password-email', 'Nobody@Example.com');
+      q<HTMLFormElement>(h.host, 'shop-forgot-password-form')?.dispatchEvent(
+        new Event('submit', { cancelable: true })
+      );
+      await h.fixture.whenStable();
+
+      expect(requestReset).toHaveBeenCalledWith('Nobody@Example.com');
+      expect(q(h.host, 'shop-forgot-password-message')?.textContent).toContain(
+        "If that email has an account, we've sent a link to reset the password."
+      );
+
+      q(h.host, 'shop-forgot-password-cancel')?.click();
+      await h.fixture.whenStable();
+      expect(q(h.host, 'shop-account-form')).not.toBeNull();
+      expect(q<HTMLInputElement>(h.host, 'shop-auth-email')?.value).toBe(EMAIL);
     });
   });
 

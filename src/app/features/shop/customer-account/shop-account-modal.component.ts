@@ -147,134 +147,221 @@ type Field = 'email' | 'password';
           </button>
         } @else {
           <!-- ── Sign in / create account ──────────────────────────────── -->
-          <h2
-            id="shop-account-title"
-            class="font-display text-2xl font-bold text-steam text-center"
-          >
-            {{ view() === views.SIGN_UP ? 'Create an account' : 'Sign in' }}
-          </h2>
-
-          @if (notice(); as message) {
-            <p
-              class="text-kelp text-sm text-center"
-              role="status"
-              data-testid="shop-account-notice"
+          @if (forgotPasswordMode()) {
+            <h2
+              id="shop-account-title"
+              class="font-display text-2xl font-bold text-steam text-center"
             >
-              {{ message }}
+              Forgot password?
+            </h2>
+            <p class="text-kelp text-sm text-center">
+              Enter your email and we'll send you a link to set a new password.
+            </p>
+            <form
+              [formGroup]="forgotPasswordForm"
+              (ngSubmit)="submitForgotPassword()"
+              class="flex flex-col gap-4"
+              novalidate
+              data-testid="shop-forgot-password-form"
+            >
+              <div class="flex flex-col gap-2">
+                <label for="shop-forgot-password-email" class="text-steam/80 text-sm font-medium"
+                  >Email address</label
+                >
+                <input
+                  id="shop-forgot-password-email"
+                  type="email"
+                  formControlName="email"
+                  data-autofocus
+                  autocomplete="email"
+                  aria-required="true"
+                  [attr.aria-invalid]="forgotPasswordEmailError() ? 'true' : null"
+                  [attr.aria-describedby]="
+                    forgotPasswordEmailError() ? 'shop-forgot-password-email-error' : null
+                  "
+                  class="min-h-[56px] rounded-xl bg-onsen-deep border border-onsen-surface/60 text-steam placeholder-kelp/60 px-4 text-base focus:outline-none focus:ring-2 focus:ring-yuzu/60"
+                  data-testid="shop-forgot-password-email"
+                />
+                @if (forgotPasswordEmailError(); as problem) {
+                  <p id="shop-forgot-password-email-error" class="text-red-400 text-sm">
+                    {{ problem }}
+                  </p>
+                }
+              </div>
+
+              @if (forgotPasswordMessage(); as message) {
+                <p
+                  class="text-kelp text-sm text-center"
+                  role="status"
+                  aria-live="polite"
+                  data-testid="shop-forgot-password-message"
+                >
+                  {{ message }}
+                </p>
+              }
+
+              <button
+                type="submit"
+                class="w-full min-h-[56px] rounded-xl bg-yuzu text-onsen-deep font-display text-lg font-bold active:scale-95 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-steam/60"
+                [disabled]="forgotPasswordBusy() || forgotPasswordForm.invalid"
+                [attr.aria-busy]="forgotPasswordBusy() ? 'true' : null"
+                data-testid="shop-forgot-password-submit"
+              >
+                {{ forgotPasswordBusy() ? 'Sending…' : 'Send reset link' }}
+              </button>
+              <button
+                type="button"
+                class="text-yuzu text-sm font-semibold underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-yuzu/60"
+                (click)="closeForgotPassword()"
+                data-testid="shop-forgot-password-cancel"
+              >
+                Back to sign in
+              </button>
+            </form>
+          } @else {
+            <h2
+              id="shop-account-title"
+              class="font-display text-2xl font-bold text-steam text-center"
+            >
+              {{ view() === views.SIGN_UP ? 'Create an account' : 'Sign in' }}
+            </h2>
+
+            @if (notice(); as message) {
+              <p
+                class="text-kelp text-sm text-center"
+                role="status"
+                data-testid="shop-account-notice"
+              >
+                {{ message }}
+              </p>
+            }
+
+            <form
+              [formGroup]="form"
+              (ngSubmit)="submit()"
+              class="flex flex-col gap-4"
+              novalidate
+              data-testid="shop-account-form"
+            >
+              <div class="flex flex-col gap-2">
+                <label for="shop-account-email" class="text-steam/80 text-sm font-medium"
+                  >Email address</label
+                >
+                <input
+                  id="shop-account-email"
+                  type="email"
+                  formControlName="email"
+                  data-autofocus
+                  placeholder="you@example.com"
+                  autocomplete="email"
+                  aria-required="true"
+                  [attr.aria-invalid]="fieldInvalid('email') ? 'true' : null"
+                  [attr.aria-describedby]="describedBy('email')"
+                  class="min-h-[56px] rounded-xl bg-onsen-deep border border-onsen-surface/60 text-steam placeholder-kelp/60 px-4 text-base focus:outline-none focus:ring-2 focus:ring-yuzu/60"
+                  [class.border-red-400]="fieldInvalid('email')"
+                  data-testid="shop-auth-email"
+                />
+                @if (emailError(); as problem) {
+                  <p id="shop-account-email-error" class="text-red-400 text-sm">{{ problem }}</p>
+                }
+              </div>
+
+              <div class="flex flex-col gap-2">
+                <label for="shop-account-password" class="text-steam/80 text-sm font-medium"
+                  >Password</label
+                >
+                <input
+                  id="shop-account-password"
+                  type="password"
+                  formControlName="password"
+                  [attr.autocomplete]="
+                    view() === views.SIGN_UP ? 'new-password' : 'current-password'
+                  "
+                  aria-required="true"
+                  [attr.aria-invalid]="fieldInvalid('password') ? 'true' : null"
+                  [attr.aria-describedby]="describedBy('password')"
+                  class="min-h-[56px] rounded-xl bg-onsen-deep border border-onsen-surface/60 text-steam placeholder-kelp/60 px-4 text-base focus:outline-none focus:ring-2 focus:ring-yuzu/60"
+                  [class.border-red-400]="fieldInvalid('password')"
+                  data-testid="shop-auth-password"
+                />
+                @if (passwordError(); as problem) {
+                  <p id="shop-account-password-error" class="text-red-400 text-sm">
+                    {{ problem }}
+                  </p>
+                } @else if (view() === views.SIGN_UP) {
+                  <p class="text-kelp/70 text-xs">At least {{ minPasswordLength }} characters.</p>
+                }
+              </div>
+
+              <!-- Always in the DOM so screen readers announce changes to it. -->
+              <div id="shop-account-refusal" aria-live="assertive" aria-atomic="true">
+                @if (refusalMessage(); as message) {
+                  <div
+                    class="rounded-xl border border-red-400/50 bg-red-400/10 px-4 py-3 text-sm text-steam"
+                    data-testid="shop-auth-error"
+                  >
+                    <p>{{ message }}</p>
+                    @if (refusalDetail(); as detail) {
+                      <p class="mt-1 text-kelp" data-testid="shop-auth-error-detail">
+                        {{ detail }}
+                      </p>
+                    }
+                  </div>
+                }
+              </div>
+
+              <button
+                type="submit"
+                class="w-full min-h-[56px] rounded-xl bg-yuzu text-onsen-deep font-display text-lg font-bold active:scale-95 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-steam/60"
+                [disabled]="submitting()"
+                [attr.aria-busy]="submitting() ? 'true' : null"
+                data-testid="shop-account-submit"
+              >
+                @if (view() === views.SIGN_UP) {
+                  {{ submitting() ? 'Creating account…' : 'Create account' }}
+                } @else {
+                  {{ submitting() ? 'Signing in…' : 'Sign in' }}
+                }
+              </button>
+              @if (showForgotPassword() && view() === views.SIGN_IN) {
+                <button
+                  type="button"
+                  class="text-yuzu text-sm font-semibold underline underline-offset-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-yuzu/60"
+                  (click)="openForgotPassword()"
+                  data-testid="shop-show-forgot-password"
+                >
+                  Forgot password?
+                </button>
+              }
+            </form>
+
+            <div class="border-t border-onsen-surface/40 pt-4 text-center">
+              @if (view() === views.SIGN_UP) {
+                <button
+                  type="button"
+                  class="text-yuzu text-sm font-semibold underline underline-offset-4 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-yuzu/60"
+                  [disabled]="submitting()"
+                  (click)="showView(views.SIGN_IN)"
+                  data-testid="shop-show-sign-in"
+                >
+                  Already have an account? Sign in
+                </button>
+              } @else {
+                <button
+                  type="button"
+                  class="text-yuzu text-sm font-semibold underline underline-offset-4 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-yuzu/60"
+                  [disabled]="submitting()"
+                  (click)="showView(views.SIGN_UP)"
+                  data-testid="shop-show-sign-up"
+                >
+                  New here? Create an account
+                </button>
+              }
+            </div>
+            <p class="text-kelp/70 text-xs text-center">
+              An account is optional — you can shop and pay without one.
             </p>
           }
-
-          <form
-            [formGroup]="form"
-            (ngSubmit)="submit()"
-            class="flex flex-col gap-4"
-            novalidate
-            data-testid="shop-account-form"
-          >
-            <div class="flex flex-col gap-2">
-              <label for="shop-account-email" class="text-steam/80 text-sm font-medium"
-                >Email address</label
-              >
-              <input
-                id="shop-account-email"
-                type="email"
-                formControlName="email"
-                data-autofocus
-                placeholder="you@example.com"
-                autocomplete="email"
-                aria-required="true"
-                [attr.aria-invalid]="fieldInvalid('email') ? 'true' : null"
-                [attr.aria-describedby]="describedBy('email')"
-                class="min-h-[56px] rounded-xl bg-onsen-deep border border-onsen-surface/60 text-steam placeholder-kelp/60 px-4 text-base focus:outline-none focus:ring-2 focus:ring-yuzu/60"
-                [class.border-red-400]="fieldInvalid('email')"
-                data-testid="shop-auth-email"
-              />
-              @if (emailError(); as problem) {
-                <p id="shop-account-email-error" class="text-red-400 text-sm">{{ problem }}</p>
-              }
-            </div>
-
-            <div class="flex flex-col gap-2">
-              <label for="shop-account-password" class="text-steam/80 text-sm font-medium"
-                >Password</label
-              >
-              <input
-                id="shop-account-password"
-                type="password"
-                formControlName="password"
-                [attr.autocomplete]="view() === views.SIGN_UP ? 'new-password' : 'current-password'"
-                aria-required="true"
-                [attr.aria-invalid]="fieldInvalid('password') ? 'true' : null"
-                [attr.aria-describedby]="describedBy('password')"
-                class="min-h-[56px] rounded-xl bg-onsen-deep border border-onsen-surface/60 text-steam placeholder-kelp/60 px-4 text-base focus:outline-none focus:ring-2 focus:ring-yuzu/60"
-                [class.border-red-400]="fieldInvalid('password')"
-                data-testid="shop-auth-password"
-              />
-              @if (passwordError(); as problem) {
-                <p id="shop-account-password-error" class="text-red-400 text-sm">
-                  {{ problem }}
-                </p>
-              } @else if (view() === views.SIGN_UP) {
-                <p class="text-kelp/70 text-xs">At least {{ minPasswordLength }} characters.</p>
-              }
-            </div>
-
-            <!-- Always in the DOM so screen readers announce changes to it. -->
-            <div id="shop-account-refusal" aria-live="assertive" aria-atomic="true">
-              @if (refusalMessage(); as message) {
-                <div
-                  class="rounded-xl border border-red-400/50 bg-red-400/10 px-4 py-3 text-sm text-steam"
-                  data-testid="shop-auth-error"
-                >
-                  <p>{{ message }}</p>
-                  @if (refusalDetail(); as detail) {
-                    <p class="mt-1 text-kelp" data-testid="shop-auth-error-detail">{{ detail }}</p>
-                  }
-                </div>
-              }
-            </div>
-
-            <button
-              type="submit"
-              class="w-full min-h-[56px] rounded-xl bg-yuzu text-onsen-deep font-display text-lg font-bold active:scale-95 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-steam/60"
-              [disabled]="submitting()"
-              [attr.aria-busy]="submitting() ? 'true' : null"
-              data-testid="shop-account-submit"
-            >
-              @if (view() === views.SIGN_UP) {
-                {{ submitting() ? 'Creating account…' : 'Create account' }}
-              } @else {
-                {{ submitting() ? 'Signing in…' : 'Sign in' }}
-              }
-            </button>
-          </form>
-
-          <div class="border-t border-onsen-surface/40 pt-4 text-center">
-            @if (view() === views.SIGN_UP) {
-              <button
-                type="button"
-                class="text-yuzu text-sm font-semibold underline underline-offset-4 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-yuzu/60"
-                [disabled]="submitting()"
-                (click)="showView(views.SIGN_IN)"
-                data-testid="shop-show-sign-in"
-              >
-                Already have an account? Sign in
-              </button>
-            } @else {
-              <button
-                type="button"
-                class="text-yuzu text-sm font-semibold underline underline-offset-4 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-yuzu/60"
-                [disabled]="submitting()"
-                (click)="showView(views.SIGN_UP)"
-                data-testid="shop-show-sign-up"
-              >
-                New here? Create an account
-              </button>
-            }
-          </div>
-          <p class="text-kelp/70 text-xs text-center">
-            An account is optional — you can shop and pay without one.
-          </p>
         }
       </div>
     </div>
@@ -298,11 +385,15 @@ export class ShopAccountModalComponent {
 
   readonly view = signal<AccountView>(ACCOUNT_VIEW.SIGN_IN);
   readonly submitting = signal(false);
+  readonly forgotPasswordMode = signal(false);
+  readonly forgotPasswordBusy = signal(false);
+  readonly forgotPasswordMessage = signal<string | null>(null);
   readonly signInRefusal = signal<SignInRefusalCopy | null>(null);
   readonly signUpRefusal = signal<SignUpRefusalCopy | null>(null);
   /** The address the relay registered — the normalized one, so it names the right inbox. */
   readonly registeredEmail = signal<string | null>(null);
   private readonly _notice = signal<string | null>(null);
+  readonly showForgotPassword = computed(() => this.gateway.supportsPasswordReset);
 
   /**
    * An informational line above the form. An expiry is reported here rather
@@ -321,6 +412,10 @@ export class ShopAccountModalComponent {
     password: ['', [Validators.required]],
   });
 
+  readonly forgotPasswordForm = this.fb.nonNullable.group({
+    email: ['', [Validators.required, customerEmailValidator]],
+  });
+
   readonly refusalMessage = computed(
     () => this.signInRefusal()?.message ?? this.signUpRefusal()?.message ?? null
   );
@@ -334,6 +429,39 @@ export class ShopAccountModalComponent {
 
   close(): void {
     this.closed.emit();
+  }
+
+  openForgotPassword(): void {
+    this.forgotPasswordMessage.set(null);
+    this.forgotPasswordForm.patchValue({ email: this.form.controls.email.value });
+    this.forgotPasswordMode.set(true);
+    this.focusFirst();
+  }
+
+  closeForgotPassword(): void {
+    this.forgotPasswordMode.set(false);
+    this.forgotPasswordMessage.set(null);
+    this.focusFirst();
+  }
+
+  async submitForgotPassword(): Promise<void> {
+    if (!this.showForgotPassword() || this.forgotPasswordBusy()) return;
+    if (this.forgotPasswordForm.invalid) {
+      this.forgotPasswordForm.markAllAsTouched();
+      return;
+    }
+    const { email } = this.forgotPasswordForm.getRawValue();
+    this.forgotPasswordBusy.set(true);
+    try {
+      await this.gateway.requestPasswordReset(email);
+    } catch {
+      // Keep the response indistinguishable for unknown accounts and transport failures.
+    } finally {
+      this.forgotPasswordBusy.set(false);
+      this.forgotPasswordMessage.set(
+        "If that email has an account, we've sent a link to reset the password."
+      );
+    }
   }
 
   showView(view: AccountView): void {
@@ -422,6 +550,15 @@ export class ShopAccountModalComponent {
     return password.hasError('maxlength')
       ? `Use ${MAX_PASSWORD_LENGTH} characters or fewer.`
       : `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
+  }
+
+  forgotPasswordEmailError(): string | null {
+    const email = this.forgotPasswordForm.controls.email;
+    if (!this.shouldReport(email)) return null;
+    if (email.hasError('required')) return 'Enter your email address.';
+    return email.hasError('emailTooLong')
+      ? `Use an address of ${MAX_EMAIL_LENGTH} characters or fewer.`
+      : 'That does not look like an email address — check for a typo.';
   }
 
   fieldInvalid(field: Field): boolean {

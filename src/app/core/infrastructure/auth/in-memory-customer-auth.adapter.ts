@@ -103,6 +103,12 @@ export class InMemoryCustomerAuthAdapter implements CustomerAuthGateway {
     return this.session?.accessToken ?? null;
   }
 
+  readonly supportsPasswordReset = false;
+
+  requestPasswordReset(): Promise<void> {
+    return Promise.reject(new Error('Password reset is not supported for in-memory credentials.'));
+  }
+
   private issue(email: string): CustomerSessionDto {
     this.session = {
       customerId: `fake-customer-${email}`,

@@ -30,6 +30,7 @@ const CUSTOMER_CLIENT_ID = 'a1f0c2d4-9e88-4c31-b0aa-2f7d5c1e4b6a';
 const RELAY_URL = 'https://relay.test/appid/token';
 const CUSTOMER_RELAY_URL = 'https://relay.test/appid/customer/token';
 const CUSTOMER_SIGN_UP_URL = 'https://relay.test/appid/customer/sign-up';
+const CUSTOMER_FORGOT_PASSWORD_URL = 'https://relay.test/appid/forgot-password';
 
 const ISSUER = `https://${REGION}.appid.cloud.ibm.com/oauth/v4/${TENANT_ID}`;
 const JWKS_URI = `${ISSUER}/publickeys`;
@@ -121,10 +122,16 @@ interface FetchScenario {
   signUpResult?: Record<string, unknown>;
   signUpStatus?: number;
   signUpThrow?: boolean;
+  forgotPasswordThrow?: boolean;
   jwksKeys?: JWK[];
   jwksThrow?: boolean;
   jwksStatus?: number;
   jwksBody?: unknown;
+}
+
+function forgotPasswordResponse(scenario: FetchScenario): Response {
+  if (scenario.forgotPasswordThrow) throw new Error('reset network down');
+  return jsonResponse({}, 200);
 }
 
 function installFetch(scenario: FetchScenario): ReturnType<typeof vi.fn> {
@@ -144,6 +151,7 @@ function installFetch(scenario: FetchScenario): ReturnType<typeof vi.fn> {
       if (scenario.signUpThrow) throw new Error('sign-up network down');
       return jsonResponse(scenario.signUpResult ?? {}, scenario.signUpStatus ?? 201);
     }
+    if (target === CUSTOMER_FORGOT_PASSWORD_URL) return forgotPasswordResponse(scenario);
     return jsonResponse({ error: 'unknown_endpoint' }, 404);
   });
 
@@ -173,6 +181,34 @@ describe('AppIdCustomerAuthAdapter', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     TestBed.resetTestingModule();
+  });
+
+  describe('requestPasswordReset', () => {
+    it('posts the normalized email to the shared reset route on the customer relay origin', async () => {
+      const fetchMock = installFetch({});
+      const adapter = makeAdapter();
+
+      expect(adapter.supportsPasswordReset).toBe(true);
+      await adapter.requestPasswordReset(' Shopper@Capy.Test ');
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        CUSTOMER_FORGOT_PASSWORD_URL,
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: 'shopper@capy.test' }),
+        })
+      );
+    });
+
+    it('wraps a transport failure in AppIdAuthError', async () => {
+      installFetch({ forgotPasswordThrow: true });
+      const adapter = makeAdapter();
+
+      await expect(adapter.requestPasswordReset('shopper@capy.test')).rejects.toThrow(
+        AppIdAuthError
+      );
+    });
   });
 
   describe('authenticate', () => {
