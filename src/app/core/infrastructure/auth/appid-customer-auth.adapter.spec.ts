@@ -123,6 +123,7 @@ interface FetchScenario {
   signUpStatus?: number;
   signUpThrow?: boolean;
   forgotPasswordThrow?: boolean;
+  forgotPasswordStatus?: number;
   jwksKeys?: JWK[];
   jwksThrow?: boolean;
   jwksStatus?: number;
@@ -131,7 +132,7 @@ interface FetchScenario {
 
 function forgotPasswordResponse(scenario: FetchScenario): Response {
   if (scenario.forgotPasswordThrow) throw new Error('reset network down');
-  return jsonResponse({}, 200);
+  return jsonResponse({}, scenario.forgotPasswordStatus ?? 200);
 }
 
 function installFetch(scenario: FetchScenario): ReturnType<typeof vi.fn> {
@@ -207,6 +208,15 @@ describe('AppIdCustomerAuthAdapter', () => {
 
       await expect(adapter.requestPasswordReset('shopper@capy.test')).rejects.toThrow(
         AppIdAuthError
+      );
+    });
+
+    it('rejects a non-success relay response', async () => {
+      installFetch({ forgotPasswordStatus: 502 });
+      const adapter = makeAdapter();
+
+      await expect(adapter.requestPasswordReset('shopper@capy.test')).rejects.toThrow(
+        'Password-reset request failed (502)'
       );
     });
   });

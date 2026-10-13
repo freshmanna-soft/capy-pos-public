@@ -245,7 +245,7 @@ describe('ShopAccountModalComponent', () => {
     it('prefills the email, submits a reset request, and shows generic confirmation', async () => {
       const requestReset = vi
         .spyOn(h.gateway, 'requestPasswordReset')
-        .mockRejectedValueOnce(new Error('relay unavailable'));
+        .mockResolvedValueOnce(undefined);
       type(h.host, 'shop-auth-email', EMAIL);
 
       q(h.host, 'shop-show-forgot-password')?.click();
@@ -268,6 +268,24 @@ describe('ShopAccountModalComponent', () => {
       await h.fixture.whenStable();
       expect(q(h.host, 'shop-account-form')).not.toBeNull();
       expect(q<HTMLInputElement>(h.host, 'shop-auth-email')?.value).toBe(EMAIL);
+    });
+
+    it('shows a generic retry message when the reset service is unavailable', async () => {
+      vi.spyOn(h.gateway, 'requestPasswordReset').mockRejectedValueOnce(
+        new Error('relay unavailable')
+      );
+      type(h.host, 'shop-auth-email', EMAIL);
+      q(h.host, 'shop-show-forgot-password')?.click();
+      await h.fixture.whenStable();
+      q<HTMLFormElement>(h.host, 'shop-forgot-password-form')?.dispatchEvent(
+        new Event('submit', { cancelable: true })
+      );
+      await h.fixture.whenStable();
+
+      const message = q(h.host, 'shop-forgot-password-message')?.textContent ?? '';
+      expect(message).toContain("We couldn't send a reset link right now.");
+      expect(message).not.toContain('relay unavailable');
+      expect(message).not.toContain(EMAIL);
     });
   });
 

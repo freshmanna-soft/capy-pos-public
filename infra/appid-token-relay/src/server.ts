@@ -247,11 +247,10 @@ const customerSignupListener = createRequestListener({
 /**
  * Public, unauthenticated — a person asking to reset their own password does
  * not have a session yet either, same reasoning as `tokenListener`. Never
- * reveals whether the email has an account: `triggerForgotPassword` itself
- * swallows App ID's 404 (no such user) and this always answers `200 {}`
- * either way, so the response can't be used to enumerate real accounts. A
- * genuine failure (management API down, bad key) still surfaces as this
- * boundary's own generic 502 — see `http.ts`'s own contract.
+ * reveals whether the email has an account: `triggerForgotPassword` normalizes
+ * App ID's 404 (no user) and 409 (unconfirmed user), and this always answers
+ * `200 {}` for either. A genuine failure (management API down, bad key) still
+ * surfaces as this boundary's own generic 502 — see `http.ts`'s own contract.
  */
 const forgotPasswordListener = createRequestListener({
   logPrefix: '[appid-relay]',

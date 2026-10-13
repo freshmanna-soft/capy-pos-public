@@ -452,14 +452,18 @@ export class ShopAccountModalComponent {
     }
     const { email } = this.forgotPasswordForm.getRawValue();
     this.forgotPasswordBusy.set(true);
+    let sent = false;
     try {
       await this.gateway.requestPasswordReset(email);
+      sent = true;
     } catch {
-      // Keep the response indistinguishable for unknown accounts and transport failures.
+      // The generic failure does not reveal whether the account exists.
     } finally {
       this.forgotPasswordBusy.set(false);
       this.forgotPasswordMessage.set(
-        "If that email has an account, we've sent a link to reset the password."
+        sent
+          ? "If that email has an account, we've sent a link to reset the password."
+          : "We couldn't send a reset link right now. Please try again."
       );
     }
   }

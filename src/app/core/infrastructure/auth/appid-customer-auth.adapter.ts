@@ -280,12 +280,16 @@ export class AppIdCustomerAuthAdapter implements CustomerAuthGateway {
   async requestPasswordReset(email: string): Promise<void> {
     const url = this.customerForgotPasswordUrl();
     try {
-      await fetch(url, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
+      if (!response.ok) {
+        throw new AppIdAuthError(`Password-reset request failed (${response.status})`);
+      }
     } catch (err) {
+      if (err instanceof AppIdAuthError) throw err;
       throw new AppIdAuthError(`Password-reset request failed: ${(err as Error).message}`);
     }
   }

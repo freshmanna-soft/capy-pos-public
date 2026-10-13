@@ -581,10 +581,9 @@ export async function revokeRoles(
  * confirmation, and App ID refuses a password reset against one. Removed
  * there for that reason — see #249 — reintroduced here for an
  * already-confirmed account asking for itself, where the same call actually
- * succeeds.) Always resolves, even for an email with no account: App ID's
- * own endpoint does not distinguish the two in its response, and neither
- * does this relay's public route — see `forgot-password-validate.ts`'s
- * caller for why that matters (account enumeration).
+ * succeeds.) Always resolves for an unknown email or an unconfirmed account:
+ * App ID answers those with 404 and 409 respectively, but the relay normalizes
+ * both so its public route cannot be used for account enumeration.
  */
 export async function triggerForgotPassword(
   email: string,
@@ -595,9 +594,9 @@ export async function triggerForgotPassword(
     method: 'POST',
     body: { user: email },
   });
-  if (result.status !== 200 && result.status !== 404) {
-    // 404 is App ID answering "no such user" — not this relay's failure, and
-    // not something the caller should learn either (see the doc above).
+  if (result.status !== 200 && result.status !== 404 && result.status !== 409) {
+    // App ID answers 404 for no user and 409 for an unconfirmed user. Neither
+    // account state should be observable through the public reset endpoint.
     throw new ManagementApiError(`Triggering the reset-password email returned ${result.status}.`);
   }
 }
