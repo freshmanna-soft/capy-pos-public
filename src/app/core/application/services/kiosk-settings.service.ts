@@ -77,6 +77,12 @@ export interface TerminalRecord {
    * Absent on terminals that have not yet been provisioned.
    */
   deviceToken?: string;
+  /**
+   * Mercado Pago Point card machine linked to this terminal. When set on an
+   * operator terminal, picking MercadoPago at checkout sends the cart total
+   * straight to that device. The server re-checks it against its allow-list.
+   */
+  mpPointTerminalId?: string;
 }
 
 // ── Settings-table key helpers ───────────────────────────────────────────────
@@ -242,6 +248,15 @@ export class KioskSettingsService {
    * Used by `KioskShopComponent` as the Bearer token for `POST /api/transactions`.
    */
   readonly deviceToken = computed<string | null>(() => this.activeTerminal().deviceToken ?? null);
+
+  // ── Mercado Pago Point (linked card machine, operator /pos only) ──────────
+
+  /** The linked Point device id, or `null` for kiosk terminals and unlinked tills. */
+  readonly mpPointTerminalId = computed<string | null>(() => {
+    const terminal = this.activeTerminal();
+    if (terminal.mode !== TerminalMode.OPERATOR) return null;
+    return terminal.mpPointTerminalId?.trim() || null;
+  });
 
   readonly loading = this._loading.asReadonly();
 

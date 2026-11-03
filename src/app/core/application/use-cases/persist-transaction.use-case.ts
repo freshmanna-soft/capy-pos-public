@@ -11,6 +11,7 @@ import { TransactionBuilder } from '@core/domain/entities/transaction.builder';
 import { EmptyCartException, TransactionPersistenceException } from '@core/application/exceptions';
 import { PaymentMethod } from '@core/application/dtos/payment.dto';
 import { SALE_OUTBOX, SaleRecordOutcome } from '@core/application/ports/sale-outbox.port';
+import type { SaleCompletedPayload } from '@core/domain/events/domain-event';
 
 /**
  * Request DTO for persisting a transaction
@@ -28,6 +29,8 @@ export interface PersistTransactionRequest {
   customerId?: string;
   /** The attached customer's tier at the moment of sale; priced on retry (#355). */
   customerTier?: string;
+  /** The payment gateway's id for the charge, carried onto the `SaleCompleted` event. */
+  gatewayRef?: string;
   /**
    * Record a `SaleCompleted` event in the same local transaction (#352). Omit it and
    * the row is written alone, as before.
@@ -94,6 +97,30 @@ export class PersistTransactionUseCase {
   );
   private readonly saleOutbox = inject(SALE_OUTBOX, { optional: true });
 
+  /** The `SaleCompleted` payload for the outbox: only fields that have a value are present. */
+  private buildSalePayload(
+    request: PersistTransactionRequest,
+    amount: number,
+    items: readonly { productId: string; quantity: number; unitPrice: number }[],
+    occurredAt: Date
+  ): SaleCompletedPayload {
+    const { paymentMethod, transactionId, customerId, customerTier, gatewayRef } = request;
+    return {
+      transactionId,
+      items: items.map(({ productId, quantity, unitPrice }) => ({
+        productId,
+        quantity,
+        unitPrice,
+      })),
+      amount,
+      method: paymentMethod,
+      ...(customerId ? { customerId } : {}),
+      ...(customerId && customerTier ? { customerTier } : {}),
+      ...(gatewayRef ? { gatewayRef } : {}),
+      occurredAt: occurredAt.toISOString(),
+    };
+  }
+
   /**
    * Executes the persist transaction use case.
    * Builds a Transaction entity from cart state and saves it to the repository.
@@ -155,19 +182,7 @@ export class PersistTransactionUseCase {
           {
             transactionId,
             correlationId: request.sale.correlationId,
-            payload: {
-              transactionId,
-              items: items.map(({ productId, quantity, unitPrice }) => ({
-                productId,
-                quantity,
-                unitPrice,
-              })),
-              amount: request.sale.amount,
-              method: paymentMethod,
-              ...(customerId ? { customerId } : {}),
-              ...(customerId && request.customerTier ? { customerTier: request.customerTier } : {}),
-              occurredAt: now.toISOString(),
-            },
+            payload: this.buildSalePayload(request, request.sale.amount, items, now),
             appliedInline: request.sale.appliedInline ?? [],
             ...(request.sale.fallbackInline ? { fallbackInline: request.sale.fallbackInline } : {}),
           },

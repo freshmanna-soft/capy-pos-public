@@ -214,6 +214,18 @@ function readMpAccessToken(): string {
 }
 
 /**
+ * Mercado Pago Point devices this deployment may charge, comma-separated
+ * (MP_POINT_TERMINAL_IDS, e.g. `NEWLAND_N950__N950NCB801293324`). Empty means the
+ * Point routes 503, the same opt-in posture as MP_ACCESS_TOKEN.
+ */
+function readMpPointTerminalIds(): readonly string[] {
+  return (process.env['MP_POINT_TERMINAL_IDS'] ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+}
+
+/**
  * Base URL of the Angular app — used as the origin for MercadoPago back_urls.
  * Defaults to http://localhost:4200 so local dev works without any extra config.
  * In production / Code Engine set APP_BASE_URL to the public HTTPS origin.
@@ -316,6 +328,9 @@ function buildRuntimeDeps(): {
         internalSecret: readInternalSecret(),
         mpAccessToken: readMpAccessToken(),
         mpCurrencyId: readMpCurrencyId(),
+        mpPointTerminalIds: readMpPointTerminalIds(),
+        mpWebhookSecret: process.env['MP_WEBHOOK_SECRET'] ?? '',
+        mpPointOrderCache: new Map(),
         appBaseUrl: readAppBaseUrl(),
         // Off unless explicitly 'true': POST /api/events then answers 404 (#358).
         eventsIngestEnabled: process.env['EVENTS_INGEST_ENABLED'] === 'true',
@@ -383,7 +398,9 @@ export function createPosRequestHandler(input: {
 
     // Path only: a query string is not part of any route here, and leaving it on
     // would make `/api/health?x=1` a 404.
-    const path = (req.url ?? '/').split('?')[0] ?? '/';
+    const [pathPart, ...queryParts] = (req.url ?? '/').split('?');
+    const path = pathPart ?? '/';
+    const query = queryParts.join('?');
 
     const checkoutRoute = path.startsWith('/api/self-checkout/checkouts');
     const customerLoyaltyRoute = path === CUSTOMER_LOYALTY_PATH;
@@ -540,6 +557,9 @@ export function createPosRequestHandler(input: {
               rawBody,
               contentType: reqContentType,
               clientKey: clientRateLimitKey(req),
+              query,
+              mpSignature: singleHeader(req.headers['x-signature']),
+              mpRequestId: singleHeader(req.headers['x-request-id']),
             },
             input.api
           );

@@ -358,7 +358,16 @@ export class PosFacade {
           amount: paymentResult.amount,
           method: paymentResult.method,
         },
-        { priority: 'high', correlationId }
+        {
+          priority: 'high',
+          correlationId,
+          // The same ids the outbox event and the gateway order carry, so one sale can
+          // be followed across all three.
+          metadata: {
+            transactionId: paymentResult.transactionId,
+            ...(paymentResult.gatewayRef ? { gatewayRef: paymentResult.gatewayRef } : {}),
+          },
+        }
       )
     );
 
@@ -398,6 +407,7 @@ export class PosFacade {
         paymentMethod: paymentResult.method,
         transactionId: paymentResult.transactionId,
         ...(customer ? { customerId: customer.id, customerTier: customer.tier } : {}),
+        ...(paymentResult.gatewayRef ? { gatewayRef: paymentResult.gatewayRef } : {}),
         sale: {
           correlationId,
           amount: paymentResult.amount,

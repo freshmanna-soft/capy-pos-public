@@ -389,6 +389,34 @@ describe('KioskSettingsService', () => {
       expect(service.mercadopagoActive()).toBe(false);
     });
 
+    describe('mpPointTerminalId', () => {
+      const OPERATOR = {
+        ...TERMINAL,
+        terminalId: 'org1/store1/op',
+        mode: TerminalMode.OPERATOR,
+      };
+
+      it('is the trimmed linked device id on an operator terminal', async () => {
+        const linked = { ...OPERATOR, mpPointTerminalId: '  PAX_A910__SMARTPOS1  ' };
+        await service.saveTerminal(linked);
+        await service.setActiveTerminal(linked.terminalId);
+        expect(service.mpPointTerminalId()).toBe('PAX_A910__SMARTPOS1');
+      });
+
+      it('is null when no device is linked or the value is blank', async () => {
+        await service.saveTerminal({ ...OPERATOR, mpPointTerminalId: '   ' });
+        await service.setActiveTerminal(OPERATOR.terminalId);
+        expect(service.mpPointTerminalId()).toBeNull();
+      });
+
+      it('is null on a kiosk terminal even if a device id is stored', async () => {
+        const kiosk = { ...TERMINAL, mpPointTerminalId: 'PAX_A910__SMARTPOS1' };
+        await service.saveTerminal(kiosk);
+        await service.setActiveTerminal(kiosk.terminalId);
+        expect(service.mpPointTerminalId()).toBeNull();
+      });
+    });
+
     it('paypalActive uses terminal override when set', async () => {
       const ppTerminal = { ...TERMINAL, terminalId: 'org1/store1/pp', paypalEnabled: true };
       await service.saveTerminal(ppTerminal);
