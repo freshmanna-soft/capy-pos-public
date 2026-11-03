@@ -525,6 +525,20 @@ import { environment } from '../../../environments/environment';
                           </select>
                         </label>
                       </div>
+                      <!-- Linked Mercado Pago Point card machine (operator mode only) -->
+                      @if (terminal.mode === 'operator') {
+                        <label class="override-label"
+                          >Card machine
+                          <input
+                            class="override-select"
+                            type="text"
+                            placeholder="NEWLAND_N950__…"
+                            [value]="terminal.mpPointTerminalId ?? ''"
+                            (change)="setMpPointTerminalId(terminal, $any($event.target).value)"
+                            [attr.data-testid]="'mp-point-terminal-' + terminal.terminalId"
+                          />
+                        </label>
+                      }
                       <!-- Device token section (kiosk mode only) -->
                       @if (terminal.mode === 'kiosk') {
                         <div class="device-token-row">
@@ -1768,6 +1782,13 @@ export class SettingsComponent implements OnInit {
   async setMpOverride(terminal: TerminalRecord, value: string): Promise<void> {
     const override = value === 'auto' ? null : value === 'on';
     await this.kioskSettings.saveTerminal({ ...terminal, mercadopagoEnabled: override });
+    this._flash();
+  }
+
+  /** Links (or, when blank, unlinks) the Mercado Pago Point card machine for this terminal. */
+  async setMpPointTerminalId(terminal: TerminalRecord, value: string): Promise<void> {
+    const id = value.trim();
+    await this.kioskSettings.saveTerminal({ ...terminal, mpPointTerminalId: id || undefined });
     this._flash();
   }
 

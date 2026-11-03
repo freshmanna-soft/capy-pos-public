@@ -41,6 +41,8 @@ export interface SaleCompletedPayload {
    * same as the first attempt and matches the receipt (Epic #349, decision 4).
    */
   customerTier?: string;
+  /** The payment gateway's own id for the charge (e.g. a Mercado Pago payment id), when it has one. */
+  gatewayRef?: string;
   occurredAt: string;
 }
 

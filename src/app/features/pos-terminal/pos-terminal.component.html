@@ -254,6 +254,7 @@
   <!-- Checkout Overlay -->
   @if (showCheckout()) {
     <app-checkout
+      [mpPointTerminalId]="kioskSettings.mpPointTerminalId()"
       (paymentComplete)="handlePaymentComplete($event)"
       (checkoutCancelled)="closeCheckout()"
     />

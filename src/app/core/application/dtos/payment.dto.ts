@@ -10,4 +10,9 @@ export interface PaymentResult {
   readonly change?: number;
   readonly transactionId: string;
   readonly timestamp: Date;
+  /**
+   * The gateway's own id for the charge (Mercado Pago payment or order id), when
+   * the method has one. Lets support match a sale to the gateway record.
+   */
+  readonly gatewayRef?: string;
 }

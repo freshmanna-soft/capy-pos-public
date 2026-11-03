@@ -28,7 +28,15 @@ import {
   MERCADOPAGO_PAYMENT_PORT,
   type MercadoPagoPaymentResult,
 } from '@core/application/ports/mercadopago.port';
+import {
+  MERCADOPAGO_POINT_PORT,
+  POINT_MIN_AMOUNT,
+  type PointChargeResult,
+  type PointOrderStatus,
+} from '@core/application/ports/mercadopago-point.port';
 import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
+import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
+import { EventSource, EventType, busEvent } from '@core/infrastructure/messaging/event-bus.events';
 import { generateUUID } from '@core/domain/utils/uuid';
 
 /**
@@ -488,6 +496,91 @@ const DECLINED_TEST_CARD = '4000000000000002';
           </div>
         }
 
+        <!-- ── MP Point — customer pays on the linked card machine ─────── -->
+        @if (step() === 'mercadopago-point') {
+          <div class="co-body" data-testid="mercadopago-point-payment">
+            <div class="co-mp-header">
+              <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+                <circle cx="24" cy="24" r="24" fill="#009EE3" />
+                <path
+                  d="M18.5 27.5l3.5-7 3.5 5 2.5-3.5 2.5 5.5"
+                  stroke="#fff"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span class="co-mp-brand">Card machine</span>
+              <span class="co-mp-amount">{{ cartService.total() | currency }}</span>
+            </div>
+            @if (pointNeedsConfirmation()) {
+              <div class="co-waiting" data-testid="mp-point-needs-confirmation" role="alert">
+                <p class="co-waiting-title">Check the card machine</p>
+                <p class="co-waiting-hint" data-testid="mp-point-confirm-hint">
+                  @if (pointCancelTimedOut()) {
+                    The machine did not confirm the cancellation in time. Look at its screen or
+                    receipt: if it shows an approved payment, choose "Payment went through".
+                  } @else {
+                    Mercado Pago could not tell us how this payment ended. Look at the machine's
+                    receipt or screen before choosing.
+                  }
+                </p>
+              </div>
+              <div class="co-actions">
+                <button
+                  class="co-btn-back"
+                  (click)="goBack()"
+                  data-testid="btn-mp-point-not-charged"
+                >
+                  Not charged
+                </button>
+                <button
+                  class="co-btn-confirm"
+                  (click)="confirmPointOnDevice()"
+                  data-testid="btn-mp-point-confirm"
+                >
+                  Payment went through
+                </button>
+              </div>
+            } @else {
+              <div
+                class="co-waiting"
+                data-testid="mp-point-waiting"
+                role="status"
+                aria-live="polite"
+              >
+                <div class="co-spinner" aria-hidden="true"></div>
+                <p class="co-waiting-title">
+                  @if (pointStatus() === 'at_terminal') {
+                    Customer is paying on the card machine…
+                  } @else {
+                    Sending {{ cartService.total() | currency }} to the card machine…
+                  }
+                </p>
+                <p class="co-waiting-hint">The sale completes by itself once the payment lands.</p>
+              </div>
+              <div class="co-actions co-actions--single">
+                <button
+                  class="co-btn-back"
+                  (click)="cancelMercadopagoPayment()"
+                  data-testid="btn-mp-cancel"
+                >
+                  Cancel payment
+                </button>
+              </div>
+              @if (pointStatus() === 'at_terminal') {
+                <p
+                  class="co-waiting-hint co-waiting-hint--center"
+                  data-testid="mp-cancel-needs-device"
+                >
+                  Once the charge is on the machine, cancelling also needs a tap on the machine
+                  itself.
+                </p>
+              }
+            }
+          </div>
+        }
+
         <!-- ── MP — cancelling at the gateway ─────────────────────────── -->
         @if (step() === 'mercadopago-cancelling') {
           <div
@@ -497,7 +590,20 @@ const DECLINED_TEST_CARD = '4000000000000002';
             aria-live="polite"
           >
             <div class="co-spinner co-spinner--lg" aria-hidden="true"></div>
-            <p class="co-state-text">Cancelling payment…</p>
+            @if (mpCancellingOnDevice()) {
+              <div class="co-device-action" data-testid="mp-cancelling-hint">
+                <p class="co-device-action-title">Now cancel on the card machine</p>
+                <p class="co-device-step">
+                  Tap the <strong>left arrow (←)</strong> at the top left of the machine screen.
+                </p>
+                <p class="co-waiting-hint">
+                  This screen updates by itself once the machine confirms. If it doesn't react, tap
+                  <strong>Update</strong> on the machine.
+                </p>
+              </div>
+            } @else {
+              <p class="co-state-text">Cancelling payment…</p>
+            }
             <div class="co-actions">
               <button class="co-btn-back" disabled>Try again</button>
               <button class="co-btn-back" disabled>Back to cart</button>
@@ -516,12 +622,16 @@ const DECLINED_TEST_CARD = '4000000000000002';
             </div>
             <h3 #mpCancelledHeading class="co-cancelled-title" tabindex="-1">Payment cancelled</h3>
             <p class="co-cancelled-body" role="status">
-              You weren't charged. Your cart is still here.
+              @if (mpCancelUnconfirmed()) {
+                Your cart is still here.
+              } @else {
+                You weren't charged. Your cart is still here.
+              }
             </p>
             @if (mpCancelUnconfirmed()) {
               <p class="co-notice" role="alert" data-testid="mp-cancel-unconfirmed">
-                We couldn't confirm the cancellation with Mercado Pago. If you were charged, ask a
-                cashier.
+                We couldn't confirm the cancellation with Mercado Pago. Check the card machine
+                screen. If you were charged, ask a cashier.
               </p>
             }
             <div class="co-actions">
@@ -1222,6 +1332,33 @@ const DECLINED_TEST_CARD = '4000000000000002';
         max-width: 34ch;
         line-height: 1.45;
       }
+      .co-waiting-hint--center {
+        text-align: center;
+        margin-top: 0.75rem;
+      }
+      .co-device-action {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        max-width: 36ch;
+        padding: 1rem 1.125rem;
+        text-align: left;
+        background: rgba(240, 180, 41, 0.1);
+        border: 1px solid rgba(240, 180, 41, 0.4);
+        border-radius: 12px;
+      }
+      .co-device-action-title {
+        font-size: 1.0625rem;
+        font-weight: 700;
+        color: #f0b429;
+        margin: 0;
+      }
+      .co-device-step {
+        margin: 0;
+        font-size: 0.9375rem;
+        line-height: 1.6;
+        color: #e8dccb;
+      }
       .co-btn-back:disabled {
         opacity: 0.35;
         cursor: not-allowed;
@@ -1336,6 +1473,8 @@ export class CheckoutComponent implements OnDestroy {
   readonly cashPayment = inject(ProcessCashPaymentUseCase);
   readonly cardPayment = inject(ProcessCardPaymentUseCase);
   readonly mercadopago = inject(MERCADOPAGO_PAYMENT_PORT);
+  private readonly mercadopagoPoint = inject(MERCADOPAGO_POINT_PORT);
+  private readonly eventBus = inject(EventBusService);
   readonly paypal = inject(PAYPAL_PAYMENT_PORT);
   private readonly circuitBreaker = inject(CircuitBreakerService);
   private readonly retry = inject(RetryService);
@@ -1357,8 +1496,15 @@ export class CheckoutComponent implements OnDestroy {
   readonly mercadopagoEnabled = input<boolean | undefined>(undefined);
   readonly paypalEnabled = input<boolean | undefined>(undefined);
 
+  /**
+   * Mercado Pago Point card machine linked to this till (operator `/pos` only).
+   * When set, the MercadoPago button charges the machine instead of opening a Brick.
+   */
+  readonly mpPointTerminalId = input<string | null>(null);
+  private readonly mpPointActive = computed(() => !this.kioskMode() && !!this.mpPointTerminalId());
+
   readonly mercadopagoAvailable = computed(
-    () => this.mercadopagoEnabled() ?? this.mercadopago.isEnabled()
+    () => this.mpPointActive() || (this.mercadopagoEnabled() ?? this.mercadopago.isEnabled())
   );
   readonly paypalAvailable = computed(() => this.paypalEnabled() ?? this.paypal.isEnabled());
 
@@ -1379,6 +1525,7 @@ export class CheckoutComponent implements OnDestroy {
     | 'mobile'
     | 'mercadopago'
     | 'mercadopago-wallet'
+    | 'mercadopago-point'
     | 'mercadopago-cancelling'
     | 'mercadopago-cancelled'
     | 'paypal'
@@ -1402,6 +1549,20 @@ export class CheckoutComponent implements OnDestroy {
    * customer who to ask if money did leave their account.
    */
   readonly mpCancelUnconfirmed = signal<boolean>(false);
+  /** True while a cancel is pending on the Point card machine (shows the device hint). */
+  readonly mpCancellingOnDevice = signal<boolean>(false);
+  /** True when a cancel ran out of time on the card machine and the clerk must decide. */
+  readonly pointCancelTimedOut = signal<boolean>(false);
+
+  /** Where the open Point order is: sent to the machine, or the buyer is paying on it. */
+  readonly pointStatus = signal<PointOrderStatus>('created');
+
+  /**
+   * True when Mercado Pago ended the Point order as `action_required`: the
+   * outcome is unknown and final, so the clerk must check the machine and
+   * choose — the till never decides a sale from it.
+   */
+  readonly pointNeedsConfirmation = signal<boolean>(false);
 
   private readonly mpCancelledHeading = viewChild<ElementRef<HTMLElement>>('mpCancelledHeading');
 
@@ -1415,6 +1576,8 @@ export class CheckoutComponent implements OnDestroy {
   private mpGeneration = 0;
   /** Transaction id of the in-flight MP attempt, for a cancel that turns out approved. */
   private mpTransactionId = '';
+  /** Order/payment id of a Point order that ended `action_required`, kept for the clerk's confirm. */
+  private pointGatewayRef = '';
 
   /** User-facing message shown in the 'error' step after a failed payment. */
   readonly errorMessage = signal<string>('');
@@ -1475,6 +1638,8 @@ export class CheckoutComponent implements OnDestroy {
   goBack(): void {
     this.mpGeneration++;
     this.mercadopago.destroy();
+    this.mercadopagoPoint.destroy();
+    this.pointNeedsConfirmation.set(false);
     this.paypal.destroy();
     this.mpWalletPolling.set(false);
     this.step.set('select');
@@ -1485,6 +1650,7 @@ export class CheckoutComponent implements OnDestroy {
   ngOnDestroy(): void {
     this.mpGeneration++;
     this.mercadopago.destroy();
+    this.mercadopagoPoint.destroy();
     this.paypal.destroy();
   }
 
@@ -1500,6 +1666,8 @@ export class CheckoutComponent implements OnDestroy {
     if (this.step() === 'mercadopago-cancelling') return;
     this.mpGeneration++;
     this.mercadopago.destroy();
+    this.mercadopagoPoint.destroy();
+    this.pointNeedsConfirmation.set(false);
     this.paypal.destroy();
     this.cashPayment.reset();
     this.checkoutCancelled.emit();
@@ -1584,7 +1752,9 @@ export class CheckoutComponent implements OnDestroy {
     // MercadoPago / PayPal: the SDK drives its own UI — do NOT set step to
     // 'processing' here because that hides the container div the widget renders into.
     if (method === 'mercadopago') {
-      if (this.mpMode() === 'wallet') {
+      if (this.mpPointActive()) {
+        void this.processMercadopagoPointPayment(transactionId);
+      } else if (this.mpMode() === 'wallet') {
         void this.processMercadopagoWalletPayment(transactionId);
       } else {
         void this.processMercadopagoPayment(transactionId);
@@ -1744,8 +1914,19 @@ export class CheckoutComponent implements OnDestroy {
   async cancelMercadopagoPayment(): Promise<void> {
     if (!this.isMercadopagoInFlight()) return;
     const generation = this.mpGeneration;
+    const isPoint = this.step() === 'mercadopago-point';
     this.mpWalletPolling.set(false);
     this.step.set('mercadopago-cancelling');
+    if (isPoint) {
+      // May answer `approved`: MP cancels an order already on the machine
+      // asynchronously, and the buyer can still pay inside that window.
+      this.mpCancellingOnDevice.set(true);
+      const result = await this.mercadopagoPoint.cancel();
+      this.mpCancellingOnDevice.set(false);
+      this.pointCancelTimedOut.set(result.status === 'needs-confirmation');
+      this.settlePoint(generation, result);
+      return;
+    }
     const result = await this.mercadopago.cancelPayment();
     // The attempt's own promise settles with this same result; whichever
     // arrives first wins and the other is dropped by the generation check.
@@ -1766,12 +1947,122 @@ export class CheckoutComponent implements OnDestroy {
 
   private isMercadopagoInFlight(): boolean {
     const step = this.step();
+    // Once Point ended as `action_required` nothing is open at the gateway;
+    // the clerk is choosing, and closing just leaves the cart intact.
+    if (step === 'mercadopago-point') return !this.pointNeedsConfirmation();
     return step === 'mercadopago-wallet' || step === 'mercadopago';
+  }
+
+  /**
+   * Sends the cart total to the linked card machine and finalizes the sale only
+   * when Mercado Pago reports the order `processed`. `transactionId` is the
+   * order's external reference, which is what ties the MP order to the sale.
+   */
+  private async processMercadopagoPointPayment(transactionId: string): Promise<void> {
+    const terminalId = this.mpPointTerminalId();
+    if (!terminalId) return;
+
+    const amount = this.cartService.total();
+    // Mercado Pago refuses Point orders below its minimum. Say so here, before the
+    // device is involved, rather than surfacing a generic gateway failure.
+    if (amount < POINT_MIN_AMOUNT) {
+      this.isSubmitting = false;
+      this.step.set('error');
+      this.errorMessage.set(
+        `The card machine can only charge $${POINT_MIN_AMOUNT.toFixed(2)} or more. ` +
+          'Add items, or choose another payment method.'
+      );
+      return;
+    }
+
+    const generation = this.beginMercadopagoAttempt(transactionId);
+    this.pointStatus.set('created');
+    this.pointNeedsConfirmation.set(false);
+    this.step.set('mercadopago-point');
+    // isSubmitting stays true until the charge settles: no second charge can start.
+
+    this.eventBus.publish(
+      busEvent(
+        EventType.PAYMENT_ATTEMPT_STARTED,
+        EventSource.CHECKOUT,
+        { transactionId, method: 'mercadopago', amount, terminalId },
+        { correlationId: transactionId }
+      )
+    );
+
+    const result = await this.mercadopagoPoint.charge(
+      { amount, externalReference: transactionId, terminalId },
+      (status) => {
+        if (generation === this.mpGeneration) this.pointStatus.set(status);
+      }
+    );
+    this.settlePoint(generation, result);
+  }
+
+  /** One place every Point outcome lands, so charge, cancel and close agree. */
+  private settlePoint(generation: number, result: PointChargeResult): void {
+    if (!this.consumeMercadopagoGeneration(generation)) return;
+
+    const gatewayRef = result.paymentId || result.orderId;
+    this.eventBus.publish(
+      busEvent(
+        EventType.PAYMENT_ATTEMPT_SETTLED,
+        EventSource.CHECKOUT,
+        {
+          transactionId: this.mpTransactionId,
+          method: 'mercadopago',
+          amount: result.amount,
+          outcome: result.status,
+          ...(gatewayRef ? { gatewayRef } : {}),
+        },
+        { correlationId: this.mpTransactionId }
+      )
+    );
+
+    if (result.status === 'approved') {
+      this.isSubmitting = true;
+      this.step.set('processing');
+      this.finalizePayment('mercadopago', this.mpTransactionId, result.paymentId || result.orderId);
+      return;
+    }
+
+    if (result.status === 'needs-confirmation') {
+      this.pointGatewayRef = result.paymentId || result.orderId;
+      // Nothing is open at the gateway any more; the clerk's choice below either
+      // finalizes (confirmPointOnDevice) or returns to method selection.
+      this.isSubmitting = false;
+      this.pointNeedsConfirmation.set(true);
+      this.step.set('mercadopago-point');
+      return;
+    }
+
+    this.isSubmitting = false;
+    if (result.status === 'cancelled') {
+      this.mpCancelUnconfirmed.set(result.cancellationConfirmed === false);
+      this.step.set('mercadopago-cancelled');
+      afterNextRender(() => this.mpCancelledHeading()?.nativeElement.focus(), {
+        injector: this.injector,
+      });
+      return;
+    }
+
+    this.step.set('error');
+    this.errorMessage.set('The card machine did not complete the payment. Please try again.');
+  }
+
+  /** Clerk checked the machine after `action_required` and the payment did go through. */
+  confirmPointOnDevice(): void {
+    if (!this.pointNeedsConfirmation()) return;
+    this.pointNeedsConfirmation.set(false);
+    this.isSubmitting = true;
+    this.step.set('processing');
+    this.finalizePayment('mercadopago', this.mpTransactionId, this.pointGatewayRef);
   }
 
   private beginMercadopagoAttempt(transactionId: string): number {
     this.mpTransactionId = transactionId;
     this.mpCancelUnconfirmed.set(false);
+    this.pointCancelTimedOut.set(false);
     return ++this.mpGeneration;
   }
 
@@ -1891,7 +2182,9 @@ export class CheckoutComponent implements OnDestroy {
     this.errorMessage.set('');
     const method = this.selectedMethod();
     if (method === 'mercadopago') {
-      if (this.mpMode() === 'wallet') {
+      if (this.mpPointActive()) {
+        void this.processMercadopagoPointPayment(this.generateTransactionId());
+      } else if (this.mpMode() === 'wallet') {
         void this.processMercadopagoWalletPayment(this.generateTransactionId());
       } else {
         this.step.set('mercadopago');
@@ -1910,13 +2203,14 @@ export class CheckoutComponent implements OnDestroy {
    * recorded by `PosFacade.checkout()`, once any remote write has succeeded (#352). Shared by the cash/mobile timeout path and the card
    * gateway path so completion behaviour stays identical across methods.
    */
-  private finalizePayment(method: PaymentMethod, transactionId: string): void {
+  private finalizePayment(method: PaymentMethod, transactionId: string, gatewayRef?: string): void {
     const result: PaymentResult = {
       method,
       amount: this.cartService.total(),
       change: method === 'cash' ? this.cashPayment.changeAmount() : undefined,
       transactionId,
       timestamp: new Date(),
+      ...(gatewayRef ? { gatewayRef } : {}),
     };
 
     this.cashPayment.completeProcessing();

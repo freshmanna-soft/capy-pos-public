@@ -16,6 +16,7 @@ import type { SyncResult, WorkerCircuitState } from '@core/infrastructure/sync/s
 export const EventSource = {
   POS_FACADE: 'PosFacade',
   CLERK_FACADE: 'ClerkFacade',
+  CHECKOUT: 'Checkout',
   SYNC_SERVICE: 'SyncService',
   INVENTORY: 'InventoryManagement',
 } as const;
@@ -27,6 +28,14 @@ export const EventType = {
   CART_ITEM_ADDED: 'cart.item.added',
   CART_ITEM_REMOVED: 'cart.item.removed',
   TRANSACTION_COMPLETED: 'transaction.completed',
+  /**
+   * A charge was sent to a payment device (Mercado Pago Point). Carries the
+   * `transactionId` the sale will later be recorded under, so an attempt that
+   * never ends in a sale can still be found.
+   */
+  PAYMENT_ATTEMPT_STARTED: 'payment.attempt.started',
+  /** The charge reached a final outcome; `transactionId` joins it to the sale and the gateway order. */
+  PAYMENT_ATTEMPT_SETTLED: 'payment.attempt.settled',
   // AI clerk (camera recognition)
   CLERK_ITEM_RECOGNIZED: 'clerk.item.recognized',
   CLERK_ITEM_REJECTED: 'clerk.item.rejected',
@@ -88,6 +97,19 @@ export interface EventPayloadMap {
   [EventType.CART_ITEM_ADDED]: { productId: string; name: string; price: number };
   [EventType.CART_ITEM_REMOVED]: { productId: string };
   [EventType.TRANSACTION_COMPLETED]: { itemCount: number; amount: number; method: PaymentMethod };
+  [EventType.PAYMENT_ATTEMPT_STARTED]: {
+    transactionId: string;
+    method: PaymentMethod;
+    amount: number;
+    terminalId: string;
+  };
+  [EventType.PAYMENT_ATTEMPT_SETTLED]: {
+    transactionId: string;
+    method: PaymentMethod;
+    amount: number;
+    outcome: 'approved' | 'rejected' | 'cancelled' | 'needs-confirmation';
+    gatewayRef?: string;
+  };
   [EventType.CLERK_ITEM_RECOGNIZED]: ClerkRecognitionMeta & {
     productId: string;
     name: string;

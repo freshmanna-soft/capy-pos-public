@@ -34,12 +34,15 @@ import {
 } from '@core/infrastructure/messaging/outbox-dispatcher.service';
 import { AUTH_PROVIDERS } from '@core/infrastructure/auth/auth.providers';
 import { SessionExpiryNavigatorService } from '@core/infrastructure/auth/session-expiry-navigator.service';
+import { SessionIssuer } from '@core/infrastructure/auth/session-issuer';
+import { issueDevSession, shouldDevAutoLogin } from '@core/infrastructure/auth/dev-auto-login';
 import { CurrentUserService } from '@core/application/auth/current-user.service';
 import { ThemeService } from '@core/application/services/theme.service';
 import { OtlpExporterService } from '@core/infrastructure/telemetry/otlp-exporter.service';
 import { TraceContextInterceptor } from '@core/infrastructure/telemetry/trace-context.interceptor';
 import { environment } from '../environments/environment';
 import { MERCADOPAGO_PROVIDER } from '@core/infrastructure/payment/mercadopago.provider';
+import { MERCADOPAGO_POINT_PROVIDER } from '@core/infrastructure/payment/mercadopago-point.provider';
 import { PAYPAL_PROVIDER } from '@core/infrastructure/payment/paypal.provider';
 import { SALE_OUTBOX } from '@core/application/ports/sale-outbox.port';
 import { DexieSaleOutboxAdapter } from '@core/infrastructure/messaging/dexie-sale-outbox.adapter';
@@ -102,9 +105,29 @@ export const appConfig: ApplicationConfig = {
     // can resolve the operator record if needed. Runs before routing resolves.
     provideAppInitializer(async () => {
       const currentUser = inject(CurrentUserService);
+      const db = inject(DexieDatabase);
+      const issuer = inject(SessionIssuer);
       try {
         await currentUser.hydrate();
         console.log('Session hydrated:', currentUser.isAuthenticated());
+
+        // Local development only: skip the login screen by signing in the seeded
+        // admin. See shouldDevAutoLogin for the conditions that gate this.
+        if (
+          !currentUser.isAuthenticated() &&
+          shouldDevAutoLogin({
+            production: environment.production,
+            allowSeededAdmin: environment.allowSeededAdmin,
+            hostname: globalThis.location?.hostname ?? '',
+            automated: globalThis.navigator?.webdriver === true,
+          })
+        ) {
+          const devSession = await issueDevSession(db, issuer);
+          if (devSession) {
+            currentUser.setSession(devSession);
+            console.log('Dev auto-login as seeded admin (localhost only)');
+          }
+        }
       } catch (error) {
         // Non-fatal — user will be redirected to /login by authGuard
         console.warn('Session hydration failed (will require login):', error);
@@ -147,6 +170,7 @@ export const appConfig: ApplicationConfig = {
     PAYMENT_AGENT_PROVIDER,
     // MercadoPago payment adapter — no-op stub when the feature flag is off
     MERCADOPAGO_PROVIDER,
+    MERCADOPAGO_POINT_PROVIDER,
     // PayPal payment adapter — no-op stub when the feature flag is off
     PAYPAL_PROVIDER,
     // Auth providers (local credential adapter — swap for Cognito in Story #42)

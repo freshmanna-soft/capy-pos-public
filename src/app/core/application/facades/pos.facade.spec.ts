@@ -842,6 +842,29 @@ describe('PosFacade', () => {
       expect(completed.correlationId).toBe(correlationId);
     });
 
+    it('puts transactionId and gatewayRef on the transaction.completed metadata and the outbox request', async () => {
+      await facade.checkout({ ...payment, gatewayRef: 'PAY-MP-1' } as never);
+
+      const completed = mockEventBus.publish.mock.calls
+        .map(([message]) => message)
+        .find((message) => message.type === EventType.TRANSACTION_COMPLETED);
+      expect(completed.metadata).toEqual({ transactionId: 'TXN-352', gatewayRef: 'PAY-MP-1' });
+      expect(mockPersistTransaction.execute.mock.calls[0][0]).toMatchObject({
+        transactionId: 'TXN-352',
+        gatewayRef: 'PAY-MP-1',
+      });
+    });
+
+    it('omits gatewayRef for methods that have none', async () => {
+      await facade.checkout(payment as never);
+
+      const completed = mockEventBus.publish.mock.calls
+        .map(([message]) => message)
+        .find((message) => message.type === EventType.TRANSACTION_COMPLETED);
+      expect(completed.metadata).toEqual({ transactionId: 'TXN-352' });
+      expect(mockPersistTransaction.execute.mock.calls[0][0]).not.toHaveProperty('gatewayRef');
+    });
+
     it('gives each sale its own correlation id', async () => {
       await facade.checkout(payment as never);
       await facade.checkout({ ...payment, transactionId: 'TXN-353' } as never);

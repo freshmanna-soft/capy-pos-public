@@ -415,6 +415,18 @@ describe('PersistTransactionUseCase with a sale event (#352)', () => {
     expect(create).toHaveBeenCalledTimes(1);
     expect((create.mock.calls[0][0] as Transaction).id).toBe('TXN-9');
   });
+  it('carries the gateway reference on the SaleCompleted payload so the sale can be matched to the gateway', async () => {
+    await useCase.execute({
+      paymentMethod: 'mercadopago',
+      transactionId: 'TXN-12',
+      gatewayRef: 'PAY-MP-1',
+      sale: { correlationId: 'corr-12', amount: 5.43 },
+    });
+
+    const [event] = record.mock.calls[0];
+    expect(event.transactionId).toBe('TXN-12');
+    expect(event.payload).toMatchObject({ transactionId: 'TXN-12', gatewayRef: 'PAY-MP-1' });
+  });
 
   it('reports a deferred record as unsuccessful without throwing', async () => {
     record.mockResolvedValueOnce('deferred');

@@ -8,12 +8,17 @@ import { PersistTransactionUseCase } from '@core/application/use-cases/persist-t
 import { CalculateCartTotalsUseCase } from '@core/application/use-cases/calculate-cart-totals.use-case';
 import { CircuitBreakerService } from '@core/infrastructure/resilience/circuit-breaker.service';
 import { RetryService } from '@core/infrastructure/resilience/retry.service';
-import { signal } from '@angular/core';
+import { signal, type WritableSignal } from '@angular/core';
 import {
   MERCADOPAGO_PAYMENT_PORT,
   type MercadoPagoPaymentResult,
 } from '@core/application/ports/mercadopago.port';
+import {
+  MERCADOPAGO_POINT_PORT,
+  type PointChargeResult,
+} from '@core/application/ports/mercadopago-point.port';
 import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
+import { EventBusService } from '@core/infrastructure/messaging/event-bus.service';
 
 /**
  * Unit Tests for CheckoutComponent
@@ -46,6 +51,20 @@ function mpResult(
   };
 }
 
+function pointResult(
+  status: PointChargeResult['status'],
+  extra: Partial<PointChargeResult> = {}
+): PointChargeResult {
+  return {
+    status,
+    orderId: 'ORD1',
+    paymentId: 'PAY1',
+    amount: 108.5,
+    timestamp: new Date(),
+    ...extra,
+  };
+}
+
 describe('CheckoutComponent', () => {
   let component: CheckoutComponent;
   let fixture: ComponentFixture<CheckoutComponent>;
@@ -69,6 +88,13 @@ describe('CheckoutComponent', () => {
     createAndRender: ReturnType<typeof vi.fn>;
     createWalletBrick: ReturnType<typeof vi.fn>;
     cancelPayment: ReturnType<typeof vi.fn>;
+    destroy: ReturnType<typeof vi.fn>;
+  };
+
+  /** Mercado Pago Point port double; tests drive `charge` / `cancel` like the adapter would. */
+  let mockPoint: {
+    charge: ReturnType<typeof vi.fn>;
+    cancel: ReturnType<typeof vi.fn>;
     destroy: ReturnType<typeof vi.fn>;
   };
 
@@ -294,9 +320,18 @@ describe('CheckoutComponent', () => {
       destroy: vi.fn(),
     };
 
+    mockPoint = {
+      charge: vi.fn(() => Promise.reject(new Error('not tested'))),
+      cancel: vi.fn(() =>
+        Promise.resolve(pointResult('cancelled', { cancellationConfirmed: true }))
+      ),
+      destroy: vi.fn(),
+    };
+
     await TestBed.configureTestingModule({
       imports: [CheckoutComponent],
       providers: [
+        { provide: MERCADOPAGO_POINT_PORT, useValue: mockPoint },
         { provide: CartService, useValue: mockCartService },
         { provide: ProcessCashPaymentUseCase, useValue: mockCashPaymentUseCase },
         { provide: ProcessCardPaymentUseCase, useValue: mockCardPaymentUseCase },
@@ -770,6 +805,326 @@ describe('CheckoutComponent', () => {
     it('should include rounded-up amount', () => {
       const amounts = component.quickAmounts();
       expect(amounts[0]).toBe(109); // Math.ceil(108.5)
+    });
+  });
+
+  describe('Mercado Pago Point (linked card machine)', () => {
+    let settleCharge: (result: PointChargeResult) => void;
+    let onStatus: ((status: 'created' | 'at_terminal') => void) | undefined;
+
+    const el = () => fixture.nativeElement as HTMLElement;
+    const q = (testId: string) => el().querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+    const flush = async () => {
+      await fixture.whenStable();
+      fixture.detectChanges();
+    };
+
+    beforeEach(() => {
+      mockPoint.charge.mockImplementation(
+        (_request: unknown, status?: (s: 'created' | 'at_terminal') => void) => {
+          onStatus = status;
+          return new Promise<PointChargeResult>((resolve) => (settleCharge = resolve));
+        }
+      );
+      fixture.componentRef.setInput('mpPointTerminalId', 'PAX_A910__SMARTPOS1');
+      fixture.detectChanges();
+    });
+
+    async function startCharge(): Promise<void> {
+      component.selectAndProceed('mercadopago');
+      await flush();
+    }
+
+    it('offers MercadoPago on a linked till even when the web flag is off', () => {
+      expect(q('method-mercadopago')).toBeTruthy();
+    });
+
+    it('sends the cart total and the sale id to the linked device with no further tap', async () => {
+      await startCharge();
+
+      expect(component.step()).toBe('mercadopago-point');
+      expect(mockPoint.charge).toHaveBeenCalledOnce();
+      const request = mockPoint.charge.mock.calls[0][0];
+      expect(request).toMatchObject({ amount: 108.5, terminalId: 'PAX_A910__SMARTPOS1' });
+      expect(request.externalReference).toMatch(/^TXN-/);
+      expect(mockMp.createWalletBrick).not.toHaveBeenCalled();
+      expect(q('mp-point-waiting')).toBeTruthy();
+    });
+
+    it('refuses a total under the Point minimum before touching the device', async () => {
+      (mockCartService.total as unknown as WritableSignal<number>).set(4.5);
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+
+      await startCharge();
+
+      expect(mockPoint.charge).not.toHaveBeenCalled();
+      expect(component.step()).toBe('error');
+      expect(q('payment-error')?.textContent).toContain('$5.00 or more');
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('charges a total exactly at the Point minimum', async () => {
+      (mockCartService.total as unknown as WritableSignal<number>).set(5);
+
+      await startCharge();
+
+      expect(mockPoint.charge).toHaveBeenCalledOnce();
+      expect(component.step()).toBe('mercadopago-point');
+    });
+
+    it('shows when the customer is paying on the machine', async () => {
+      await startCharge();
+      onStatus?.('at_terminal');
+      await flush();
+
+      expect(q('mp-point-waiting')?.textContent).toContain('paying on the card machine');
+    });
+
+    it('warns up front that cancelling needs a tap on the machine once the charge is there', async () => {
+      await startCharge();
+      expect(q('mp-cancel-needs-device')).toBeNull();
+
+      onStatus?.('at_terminal');
+      await flush();
+
+      expect(q('mp-cancel-needs-device')?.textContent).toContain('tap on the machine');
+    });
+
+    it('finalizes with the same transactionId and the gateway ref once the order is processed', async () => {
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+      await startCharge();
+      const externalReference = mockPoint.charge.mock.calls[0][0].externalReference;
+
+      settleCharge(pointResult('approved'));
+      await flush();
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(spy.mock.calls[0][0]).toMatchObject({
+        method: 'mercadopago',
+        amount: 108.5,
+        transactionId: externalReference,
+        gatewayRef: 'PAY1',
+      });
+    });
+
+    it('publishes payment.attempt events keyed by the same transactionId as the order', async () => {
+      const published: { type: string; payload: Record<string, unknown> }[] = [];
+      const bus = TestBed.inject(EventBusService);
+      vi.spyOn(bus, 'publish').mockImplementation(((message: never) => {
+        published.push(message);
+      }) as never);
+
+      await startCharge();
+      const externalReference = mockPoint.charge.mock.calls[0][0].externalReference;
+      settleCharge(pointResult('approved'));
+      await flush();
+
+      const attempts = published.filter((m) => m.type.startsWith('payment.attempt.'));
+      expect(attempts.map((m) => m.type)).toEqual([
+        'payment.attempt.started',
+        'payment.attempt.settled',
+      ]);
+      expect(attempts[0].payload).toMatchObject({
+        transactionId: externalReference,
+        terminalId: 'PAX_A910__SMARTPOS1',
+        amount: 108.5,
+      });
+      expect(attempts[1].payload).toMatchObject({
+        transactionId: externalReference,
+        outcome: 'approved',
+        gatewayRef: 'PAY1',
+      });
+    });
+
+    it('does not start a second charge on a repeat tap while one is open', async () => {
+      await startCharge();
+      component.confirmPayment();
+      await flush();
+
+      expect(mockPoint.charge).toHaveBeenCalledOnce();
+    });
+
+    it('cancel asks the gateway and lands on Payment cancelled without finalizing', async () => {
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+      await startCharge();
+      mockPoint.cancel.mockImplementation(async () => {
+        const result = pointResult('cancelled', { cancellationConfirmed: true });
+        settleCharge(result);
+        return result;
+      });
+
+      q('btn-mp-cancel')!.click();
+      await flush();
+
+      expect(mockPoint.cancel).toHaveBeenCalledOnce();
+      expect(q('mp-cancelled')).toBeTruthy();
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('asks the clerk to decide when the cancel times out, and finalizes only on their word', async () => {
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+      await startCharge();
+      mockPoint.cancel.mockImplementation(async () => {
+        const result = pointResult('needs-confirmation');
+        settleCharge(result);
+        return result;
+      });
+
+      q('btn-mp-cancel')!.click();
+      await flush();
+
+      expect(q('mp-point-needs-confirmation')).toBeTruthy();
+      expect(q('mp-point-confirm-hint')?.textContent).toContain('did not confirm the cancellation');
+      expect(spy).not.toHaveBeenCalled();
+
+      q('btn-mp-point-confirm')!.click();
+      await flush();
+
+      expect(spy).toHaveBeenCalledOnce();
+    });
+
+    it('lets the clerk say it was not charged after a cancel timeout', async () => {
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+      await startCharge();
+      mockPoint.cancel.mockImplementation(async () => {
+        const result = pointResult('needs-confirmation');
+        settleCharge(result);
+        return result;
+      });
+      q('btn-mp-cancel')!.click();
+      await flush();
+
+      q('btn-mp-point-not-charged')!.click();
+      await flush();
+
+      expect(component.step()).toBe('select');
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('tells the clerk how to cancel on the card machine while the cancel is pending', async () => {
+      await startCharge();
+      let finish!: (r: PointChargeResult) => void;
+      mockPoint.cancel.mockImplementation(
+        () => new Promise<PointChargeResult>((resolve) => (finish = resolve))
+      );
+
+      q('btn-mp-cancel')!.click();
+      await flush();
+
+      expect(q('mp-cancelling')).toBeTruthy();
+      expect(q('mp-cancelling-hint')?.textContent).toContain('Now cancel on the card machine');
+      expect(q('mp-cancelling-hint')?.textContent).toContain('left arrow');
+
+      const result = pointResult('cancelled', { cancellationConfirmed: true });
+      finish(result);
+      settleCharge(result);
+      await flush();
+
+      expect(q('mp-cancelling-hint')).toBeNull();
+    });
+
+    it('finalizes when the buyer pays during the cancel window', async () => {
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+      await startCharge();
+      mockPoint.cancel.mockImplementation(async () => {
+        const result = pointResult('approved');
+        settleCharge(result);
+        return result;
+      });
+
+      q('btn-mp-cancel')!.click();
+      await flush();
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(spy.mock.calls[0][0]).toMatchObject({ gatewayRef: 'PAY1' });
+    });
+
+    it('closing checkout mid-charge cancels at the gateway instead of dropping the sale', async () => {
+      await startCharge();
+      const closed = vi.fn();
+      component.checkoutCancelled.subscribe(closed);
+
+      component.cancel();
+      await flush();
+
+      expect(mockPoint.cancel).toHaveBeenCalledOnce();
+      expect(closed).not.toHaveBeenCalled();
+    });
+
+    it('shows an error and no sale when the order fails or expires', async () => {
+      const spy = vi.fn();
+      component.paymentComplete.subscribe(spy);
+      await startCharge();
+
+      settleCharge(pointResult('rejected'));
+      await flush();
+
+      expect(component.step()).toBe('error');
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    describe('action_required', () => {
+      it('never auto-finalizes: asks the clerk to confirm on the device', async () => {
+        const spy = vi.fn();
+        component.paymentComplete.subscribe(spy);
+        await startCharge();
+
+        settleCharge(pointResult('needs-confirmation'));
+        await flush();
+
+        expect(q('mp-point-needs-confirmation')).toBeTruthy();
+        expect(spy).not.toHaveBeenCalled();
+      });
+
+      it('"Payment went through" finalizes with the gateway ref', async () => {
+        const spy = vi.fn();
+        component.paymentComplete.subscribe(spy);
+        await startCharge();
+        settleCharge(pointResult('needs-confirmation'));
+        await flush();
+
+        q('btn-mp-point-confirm')!.click();
+        await flush();
+
+        expect(spy).toHaveBeenCalledOnce();
+        expect(spy.mock.calls[0][0]).toMatchObject({ method: 'mercadopago', gatewayRef: 'PAY1' });
+      });
+
+      it('"Not charged" returns to method selection and allows a fresh charge', async () => {
+        const spy = vi.fn();
+        component.paymentComplete.subscribe(spy);
+        await startCharge();
+        settleCharge(pointResult('needs-confirmation'));
+        await flush();
+
+        q('btn-mp-point-not-charged')!.click();
+        await flush();
+        expect(component.step()).toBe('select');
+        expect(spy).not.toHaveBeenCalled();
+
+        component.selectAndProceed('mercadopago');
+        await flush();
+        expect(mockPoint.charge).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    it('is not used on a kiosk, which keeps the Brick flow', async () => {
+      fixture.componentRef.setInput('kioskMode', true);
+      fixture.componentRef.setInput('mercadopagoEnabled', true);
+      mockMp.createWalletBrick.mockImplementation(() => new Promise(() => undefined));
+      fixture.detectChanges();
+
+      component.selectAndProceed('mercadopago');
+      await flush();
+
+      expect(mockPoint.charge).not.toHaveBeenCalled();
+      expect(mockMp.createWalletBrick).toHaveBeenCalled();
     });
   });
 

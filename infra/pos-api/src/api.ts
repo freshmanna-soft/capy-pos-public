@@ -43,6 +43,12 @@ import type { CheckoutInventoryMarkers } from './checkout-inventory.ts';
 import type { SaleEventMarkers } from './sale-events.ts';
 import { ingestEvents } from './events-ingest.ts';
 import {
+  cancelPointOrder,
+  createPointOrder,
+  getPointOrder,
+  receivePointWebhook,
+} from './mp-point.ts';
+import {
   productAvailableStock,
   productHasActiveReservations,
   publicCheckoutSaleTransaction,
@@ -189,6 +195,11 @@ export interface ApiRequest {
    * shared bucket and the 21st shopper of the hour got a 429.
    */
   readonly clientKey?: string;
+  /** Raw query string (no `?`). Only the Mercado Pago webhook reads it (`data.id`). */
+  readonly query?: string;
+  /** `x-signature` and `x-request-id` headers — only the Mercado Pago webhook reads them. */
+  readonly mpSignature?: string;
+  readonly mpRequestId?: string;
 }
 
 export interface ApiResponse {
@@ -220,6 +231,19 @@ export interface ApiDeps {
    * Defaults to 'MXN' when unset and the site cannot be inferred from the token.
    */
   readonly mpCurrencyId: string;
+  /**
+   * Mercado Pago Point devices this deployment may charge (MP_POINT_TERMINAL_IDS,
+   * comma-separated). Empty or absent means the Point routes always 503 — the
+   * browser's idea of which device a lane owns is never trusted on its own.
+   */
+  readonly mpPointTerminalIds?: readonly string[];
+  /**
+   * Secret Mercado Pago generates for the webhook (MP_WEBHOOK_SECRET). Empty or
+   * absent means `POST /api/mercadopago/webhook` always 503s.
+   */
+  readonly mpWebhookSecret?: string;
+  /** Latest webhook-confirmed order summaries, by order id. Bounded, in memory. */
+  readonly mpPointOrderCache?: Map<string, Record<string, unknown>>;
   /**
    * Base URL of the Angular app, used for MercadoPago back_urls.
    * Set via APP_BASE_URL env var; defaults to http://localhost:4200 for local dev.
@@ -297,6 +321,12 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
     return cancelMercadoPagoPreference(route.externalReference, request, deps);
   }
 
+  // Called by Mercado Pago, not a browser: no bearer token, gated by the HMAC
+  // signature check inside `receivePointWebhook` instead.
+  if (route.kind === 'mercadoPagoWebhook') {
+    return receivePointWebhook(request, deps);
+  }
+
   // Kiosk transaction — has its own token verification (kiosk-device or shop-session),
   // not a staff JWT, so it bypasses the staff `authorize()` boundary entirely.
   if (route.kind === 'createKioskTransaction') {
@@ -349,6 +379,12 @@ export async function handle(request: ApiRequest, deps: ApiDeps): Promise<ApiRes
       );
     case 'listTransactions':
       return { status: 200, body: await listTransactions(deps) };
+    case 'createPointOrder':
+      return createPointOrder(request.body, deps);
+    case 'getPointOrder':
+      return getPointOrder(route.orderId, deps);
+    case 'cancelPointOrder':
+      return cancelPointOrder(route.orderId, deps);
     case 'createKioskDeviceToken':
       return createKioskDeviceToken(request.body, outcome.claims.tenantId, deps);
     case 'uploadProductImage':
@@ -365,6 +401,10 @@ type Route =
   | { readonly kind: 'createMercadoPagoPreference' }
   | { readonly kind: 'getMercadoPagoPreferenceStatus'; readonly preferenceId: string }
   | { readonly kind: 'cancelMercadoPagoPreference'; readonly externalReference: string }
+  | { readonly kind: 'mercadoPagoWebhook' }
+  | { readonly kind: 'createPointOrder'; readonly permission: Permission }
+  | { readonly kind: 'getPointOrder'; readonly permission: Permission; readonly orderId: string }
+  | { readonly kind: 'cancelPointOrder'; readonly permission: Permission; readonly orderId: string }
   | { readonly kind: 'listProducts'; readonly permission: Permission }
   | { readonly kind: 'createProduct'; readonly permission: Permission }
   | { readonly kind: 'listTransactions'; readonly permission: Permission }
@@ -441,6 +481,39 @@ export function matchRoute(method: string, path: string): Route | null {
     const externalReference = safeDecode(rawId);
     if (externalReference === null || externalReference.length === 0) return null;
     return upper === 'POST' ? { kind: 'cancelMercadoPagoPreference', externalReference } : null;
+  }
+
+  if (segments.length === 3 && segments[1] === 'mercadopago' && segments[2] === 'webhook') {
+    return upper === 'POST' ? { kind: 'mercadoPagoWebhook' } : null;
+  }
+
+  // Card-machine charges: staff only (PROCESS_SALE). Deliberately NOT open like
+  // the wallet routes above — see `mp-point.ts`.
+  if (
+    segments.length >= 4 &&
+    segments.length <= 6 &&
+    segments[1] === 'mercadopago' &&
+    segments[2] === 'point' &&
+    segments[3] === 'orders'
+  ) {
+    if (segments.length === 4) {
+      return upper === 'POST'
+        ? { kind: 'createPointOrder', permission: Permission.PROCESS_SALE }
+        : null;
+    }
+    const rawOrderId = segments[4];
+    if (rawOrderId === undefined) return null;
+    const orderId = safeDecode(rawOrderId);
+    if (orderId === null || orderId.length === 0) return null;
+    if (segments.length === 5) {
+      return upper === 'GET'
+        ? { kind: 'getPointOrder', permission: Permission.PROCESS_SALE, orderId }
+        : null;
+    }
+    if (segments[5] === 'cancel' && upper === 'POST') {
+      return { kind: 'cancelPointOrder', permission: Permission.PROCESS_SALE, orderId };
+    }
+    return null;
   }
 
   if (segments.length === 2 && segments[1] === 'kiosk-device-token') {

@@ -1,6 +1,7 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { MERCADOPAGO_PAYMENT_PORT } from '@core/application/ports/mercadopago.port';
+import { MERCADOPAGO_POINT_PORT } from '@core/application/ports/mercadopago-point.port';
 import { PAYPAL_PAYMENT_PORT } from '@core/application/ports/paypal.port';
 import { PosTerminalComponent } from '@features/pos-terminal/pos-terminal.component';
 import { ReceiptComponent } from '@features/pos-terminal/components/receipt/receipt.component';
@@ -171,6 +172,10 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
           useValue: { isEnabled: () => false, createAndRender: vi.fn(), destroy: vi.fn() },
         },
         {
+          provide: MERCADOPAGO_POINT_PORT,
+          useValue: { charge: vi.fn(), cancel: vi.fn(), destroy: vi.fn() },
+        },
+        {
           provide: KioskSettingsService,
           useValue: {
             storeName: () => '',
@@ -178,6 +183,7 @@ describe('PosTerminalComponent (S1-4: Add to Cart Interaction)', () => {
             storePhone: () => '',
             orgName: () => '',
             load: vi.fn().mockResolvedValue(undefined),
+            mpPointTerminalId: () => null,
             fenceEnabled: () => false,
             fenceLat: () => null,
             fenceLng: () => null,
